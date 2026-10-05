@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError};
+use std::task::Waker;
+
+use arty_io_core::{
+    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+};
 use thread_aware_core::{Thread, ThreadAware};
 
 #[derive(Clone)]
@@ -27,25 +31,24 @@ impl ThreadAware for SampleProvider {
 }
 
 impl DriverProvider for SampleProvider {
-    const CAN_BE_PRIMARY: bool = true;
-
     type Context = SampleContext;
     type Driver = SampleDriver;
 
-    fn create(self, options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
-        println!("initializing sample driver as {:?}", options.role());
-        Ok((SampleDriver { role: options.role() }, SampleContext))
+    fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+        println!("initializing sample driver with {:?} permission", options.role());
+        Ok(DriverInstance::new(SampleDriver, SampleContext, DriverRole::Primary))
     }
 }
 
-pub(super) struct SampleDriver {
-    role: DriverRole,
-}
+pub(super) struct SampleDriver;
 
 impl Driver for SampleDriver {
-    fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
-        let _ = self.role;
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
         Ok(())
+    }
+
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
     }
 
     fn shutdown(self) -> Result<(), ShutdownError> {
@@ -77,25 +80,24 @@ impl ThreadAware for EchoProvider {
 }
 
 impl DriverProvider for EchoProvider {
-    const CAN_BE_PRIMARY: bool = false;
-
     type Context = EchoContext;
     type Driver = EchoDriver;
 
-    fn create(self, options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
-        println!("initializing echo driver as {:?}", options.role());
-        Ok((EchoDriver { role: options.role() }, EchoContext))
+    fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+        println!("initializing echo driver with {:?} permission", options.role());
+        Ok(DriverInstance::new(EchoDriver, EchoContext, DriverRole::Secondary))
     }
 }
 
-pub(super) struct EchoDriver {
-    role: DriverRole,
-}
+pub(super) struct EchoDriver;
 
 impl Driver for EchoDriver {
-    fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
-        let _ = self.role;
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
         Ok(())
+    }
+
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
     }
 
     fn shutdown(self) -> Result<(), ShutdownError> {

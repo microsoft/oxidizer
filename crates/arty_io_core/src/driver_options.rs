@@ -33,9 +33,12 @@ impl DriverOptions {
         &self.spawner
     }
 
-    /// Returns this driver's runtime-assigned waiting role.
+    /// Returns the most permissive waiting role the runtime grants this driver.
     ///
-    /// The role is fixed for the driver's lifetime. See [`DriverRole`] for waiting rules.
+    /// The driver selects its actual role in the [`DriverInstance`](crate::DriverInstance)
+    /// returned by [`DriverProvider::create`](crate::DriverProvider::create). A secondary role
+    /// always remains permitted; a primary role is permitted only when this returns
+    /// [`DriverRole::Primary`].
     #[must_use]
     pub const fn role(&self) -> DriverRole {
         self.role

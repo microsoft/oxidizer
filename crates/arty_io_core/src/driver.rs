@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::task::Waker;
+
 use crate::{Cycle, DriverError, ShutdownError};
 
 /// A worker-local I/O driver.
@@ -13,30 +15,36 @@ use crate::{Cycle, DriverError, ShutdownError};
 pub trait Driver: 'static {
     /// Processes submissions and completions, optionally waiting for I/O.
     ///
-    /// The runtime invokes secondaries before the primary, sharing [`Cycle::started_at`] and
-    /// [`Cycle::max_wait`]. Only the primary may wait on the worker, for up to that duration;
-    /// a zero wait bound means no waiting. Secondaries may arm background waits within the same
-    /// bound but must not wait for them to finish.
+    /// The runtime invokes secondaries before the primary. Only the primary may wait on the
+    /// worker, for up to [`Cycle::max_wait`]; a zero wait bound means no waiting. A secondary
+    /// must return promptly and may coordinate with other drivers or process completions on a
+    /// driver-owned background thread.
     ///
     /// Before publishing a context, the runtime runs a zero-wait cycle. In this initial call,
     /// the driver must establish native notification and recheck work queued during construction.
     ///
-    /// Register each native wait with [`Cycle::start_work`] before entering or scheduling it.
-    /// Keep its [`PendingWork`](crate::PendingWork) alive until the work ends. The runtime
-    /// interrupts remaining waits after the primary returns and waits for every handle to
-    /// complete or drop before starting the next cycle. An interrupted wait still requires
-    /// completion processing.
-    ///
-    /// The driver must process a bounded batch. If serviceable work remains, it must complete
-    /// a pending-work handle before returning. In-flight operations alone do not indicate
-    /// serviceable work.
+    /// The driver must process a bounded batch. If serviceable work remains, it must arrange for
+    /// another cycle before returning. In-flight operations alone do not indicate serviceable
+    /// work.
     ///
     /// # Errors
     ///
     /// Returns an error if driver infrastructure fails, not if an individual I/O operation
     /// fails. The runtime rolls back an unpublished driver/context pair on initialization
     /// failure; during normal operation it reports the error and shuts down the worker's drivers.
-    fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError>;
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
+
+    /// Returns a waker that interrupts a pending completion wait.
+    ///
+    /// Wake-ups must be latched: a wake raised before a wait makes the next blocking wait return
+    /// promptly, including when the wake originates on the driver's owning worker. Waking ends
+    /// only the wait; pending completions still require processing.
+    ///
+    /// The returned waker may be called from any thread and remains safe to invoke after the
+    /// driver is dropped. It must return promptly without joining work or waiting for a lock held
+    /// by the completion path.
+    #[must_use]
+    fn waker(&self) -> Waker;
 
     /// Closes admission and blocks for a bounded time while draining driver resources.
     ///

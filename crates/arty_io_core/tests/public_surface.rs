@@ -5,9 +5,6 @@
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
-#[path = "support/coordinator.rs"]
-mod coordinator;
-
 use std::cell::Cell;
 use std::error::Error;
 use std::rc::Rc;
@@ -18,15 +15,15 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, PendingWork, PendingWorkTracker, ProviderOptions,
-    ShutdownError, SystemTaskSpawner,
+    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+    SystemTaskSpawner,
 };
-use coordinator::Coordinator;
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
 assert_impl_all!(DriverOptions: Send, Sync, fmt::Debug);
-assert_not_impl_any!(Cycle<'static>: Send, Sync);
+assert_not_impl_any!(Cycle: Copy, Send, Sync);
+assert_impl_all!(Cycle: fmt::Debug);
 assert_impl_all!(DriverRole: Copy, Send, Sync, fmt::Debug, Eq);
 assert_impl_all!(ProviderOptions: Send, Sync, fmt::Debug);
 assert_impl_all!(DriverError: Send, Sync, fmt::Debug, fmt::Display, Error);
@@ -40,19 +37,6 @@ impl Wake for WakeCounter {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
-}
-
-#[test]
-fn example_tracker_does_not_signal_interrupts() {
-    let mut tracker = Coordinator;
-    let count = Arc::new(WakeCounter::default());
-    let interrupt = Waker::from(Arc::clone(&count));
-    let mut cycle = Cycle::new(Instant::now(), Duration::ZERO, &mut tracker);
-
-    cycle.start_work(interrupt.clone()).complete();
-    drop(cycle.start_work(interrupt));
-
-    assert_eq!(count.0.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -94,11 +78,8 @@ fn driver_can_remain_thread_local() {
 fn driver_is_boxable() {
     let state = Rc::new(ShutdownState::default());
     let mut driver: Box<dyn Driver> = Box::new(LocalDriver::new(Rc::clone(&state)));
-    let mut coordinator = Coordinator;
 
-    driver
-        .execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, &mut coordinator))
-        .unwrap();
+    driver.execute_cycle(&mut Cycle::new(Duration::ZERO)).unwrap();
 
     assert_eq!(state.drop_calls.get(), 0);
     drop(driver);
@@ -106,27 +87,33 @@ fn driver_is_boxable() {
 }
 
 #[test]
-fn cycle_passes_the_native_waker_to_its_tracker() {
-    struct RecordingTracker {
-        interrupt: Option<Waker>,
-    }
+fn cycle_contains_only_the_wait_budget() {
+    let cycle = Cycle::new(Duration::from_millis(17));
 
-    impl PendingWorkTracker for RecordingTracker {
-        fn start_work(&mut self, interrupt: Waker) -> PendingWork {
-            self.interrupt = Some(interrupt);
-            PendingWork::new(Waker::noop().clone())
-        }
-    }
+    assert_eq!(cycle.max_wait(), Duration::from_millis(17));
+    assert_eq!(format!("{cycle:?}"), "Cycle { max_wait: 17ms }");
+}
 
-    let mut tracker = RecordingTracker { interrupt: None };
-    let mut cycle = Cycle::new(Instant::now(), Duration::from_millis(17), &mut tracker);
+#[test]
+fn driver_exposes_its_native_waker() {
     let mut driver = LocalDriver::new(Rc::default());
     driver.interrupt = Waker::from(Arc::new(WakeCounter::default()));
     let expected = driver.interrupt.clone();
 
-    driver.execute_cycle(&mut cycle).unwrap();
+    assert!(driver.waker().will_wake(&expected));
+}
 
-    assert!(tracker.interrupt.unwrap().will_wake(&expected));
+#[test]
+fn driver_waker_remains_valid_after_drop() {
+    let count = Arc::new(WakeCounter::default());
+    let mut driver = LocalDriver::new(Rc::default());
+    driver.interrupt = Waker::from(Arc::clone(&count));
+    let waker = driver.waker();
+
+    drop(driver);
+    waker.wake_by_ref();
+
+    assert_eq!(count.0.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -136,9 +123,13 @@ fn provider_creation_uses_both_options() {
     }
 
     let provider: TestProvider = provider_for::<TestContext>(ProviderOptions::new());
-    let (driver, context): (LocalDriver, TestContext) = provider.create(driver_options()).unwrap();
+    let creation = provider.create(driver_options()).unwrap();
+    let role = creation.role;
+    let driver = creation.driver;
+    let context = creation.context;
 
     assert_eq!(context, TestContext(7));
+    assert_eq!(role, DriverRole::Secondary);
     driver.shutdown().unwrap();
 }
 
@@ -155,7 +146,9 @@ fn shutdown_consumes_the_driver() {
 
 #[test]
 fn shutdown_waits_for_active_operations_not_contexts() {
-    let (driver, context) = LeaseProvider.create(driver_options()).unwrap();
+    let creation = LeaseProvider.create(driver_options()).unwrap();
+    let driver = creation.driver;
+    let context = creation.context;
     let operation = context.begin_operation().expect("admission is open before shutdown");
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
@@ -181,7 +174,9 @@ fn shutdown_waits_for_active_operations_not_contexts() {
 
 #[test]
 fn dropping_driver_closes_context_admission() {
-    let (driver, context) = LeaseProvider.create(driver_options()).unwrap();
+    let creation = LeaseProvider.create(driver_options()).unwrap();
+    let driver = creation.driver;
+    let context = creation.context;
 
     drop(driver);
 
@@ -223,21 +218,16 @@ fn different_driver_types_have_distinct_identity() {
 }
 
 #[test]
-fn completion_cycle_uses_one_time_snapshot() {
+fn completion_cycle_shares_wait_budget() {
     let mut first_driver = LocalDriver::new(Rc::default());
     let mut second_driver = LocalDriver::new(Rc::default());
-    let cycle_start = Instant::now();
-    let mut coordinator = Coordinator;
+    let mut cycle = Cycle::new(Duration::from_millis(17));
 
-    first_driver
-        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, &mut coordinator))
-        .unwrap();
-    second_driver
-        .execute_cycle(&mut Cycle::new(cycle_start, Duration::ZERO, &mut coordinator))
-        .unwrap();
+    first_driver.execute_cycle(&mut cycle).unwrap();
+    second_driver.execute_cycle(&mut cycle).unwrap();
 
-    assert_eq!(first_driver.cycle_start, Some(cycle_start));
-    assert_eq!(second_driver.cycle_start, Some(cycle_start));
+    assert_eq!(first_driver.cycle_wait, Some(Duration::from_millis(17)));
+    assert_eq!(second_driver.cycle_wait, Some(Duration::from_millis(17)));
 }
 
 #[derive(Debug, Default)]
@@ -249,7 +239,7 @@ struct ShutdownState {
 #[derive(Debug)]
 struct LocalDriver {
     state: Rc<ShutdownState>,
-    cycle_start: Option<Instant>,
+    cycle_wait: Option<Duration>,
     interrupt: Waker,
     owned_resource: Option<Box<()>>,
 }
@@ -258,7 +248,7 @@ impl LocalDriver {
     fn new(state: Rc<ShutdownState>) -> Self {
         Self {
             state,
-            cycle_start: None,
+            cycle_wait: None,
             interrupt: Waker::noop().clone(),
             owned_resource: Some(Box::new(())),
         }
@@ -273,10 +263,13 @@ impl Drop for LocalDriver {
 }
 
 impl Driver for LocalDriver {
-    fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
-        let _work = cycle.start_work(self.interrupt.clone());
-        self.cycle_start = Some(cycle.started_at());
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
+        self.cycle_wait = Some(cycle.max_wait());
         Ok(())
+    }
+
+    fn waker(&self) -> Waker {
+        self.interrupt.clone()
     }
 
     fn shutdown(mut self) -> Result<(), ShutdownError> {
@@ -309,13 +302,15 @@ impl ThreadAware for TestProvider {
 }
 
 impl DriverProvider for TestProvider {
-    const CAN_BE_PRIMARY: bool = true;
-
     type Context = TestContext;
     type Driver = LocalDriver;
 
-    fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
-        Ok((LocalDriver::new(Rc::default()), TestContext(7)))
+    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+        Ok(DriverInstance::new(
+            LocalDriver::new(Rc::default()),
+            TestContext(7),
+            DriverRole::Secondary,
+        ))
     }
 }
 
@@ -359,14 +354,16 @@ impl ThreadAware for LeaseProvider {
 }
 
 impl DriverProvider for LeaseProvider {
-    const CAN_BE_PRIMARY: bool = false;
-
     type Context = LeaseContext;
     type Driver = LeaseDriver;
 
-    fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
+    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
         let state = Arc::default();
-        Ok((LeaseDriver::new(Arc::clone(&state)), LeaseContext { state }))
+        Ok(DriverInstance::new(
+            LeaseDriver::new(Arc::clone(&state)),
+            LeaseContext { state },
+            DriverRole::Secondary,
+        ))
     }
 }
 
@@ -420,8 +417,12 @@ impl Drop for LeaseDriver {
 }
 
 impl Driver for LeaseDriver {
-    fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
         Ok(())
+    }
+
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
     }
 
     fn shutdown(self) -> Result<(), ShutdownError> {

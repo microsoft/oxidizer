@@ -7,8 +7,6 @@
 //! Cycle failures stop the worker after shutting down its drivers. Shutdown joins the
 //! worker and returns the original cycle error, reporting any cleanup error separately.
 
-#[path = "../../tests/support/coordinator.rs"]
-mod coordinator;
 mod drivers;
 mod runtime;
 

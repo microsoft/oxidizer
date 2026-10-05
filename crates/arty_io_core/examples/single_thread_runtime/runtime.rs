@@ -6,25 +6,23 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use arty_io_core::{
     Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
-use super::coordinator::Coordinator;
-
 type ContextBox = Box<dyn Any + Send>;
 type ContextEntry = Arc<Mutex<Option<ContextBox>>>;
 type DriverStore = Vec<Box<dyn ErasedDriver>>;
-type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send>;
+type Operation = Box<dyn FnOnce(&Thread, &SystemTaskSpawner, &mut DriverStore) + Send>;
 type ShutdownResult = Result<(), ShutdownError>;
 type RuntimeResult = Result<(), Box<dyn Error + Send + Sync>>;
 
 trait ErasedDriver {
     fn role(&self) -> DriverRole;
-    fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError>;
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
@@ -38,7 +36,7 @@ impl<D: Driver> ErasedDriver for RegisteredDriver<D> {
         self.role
     }
 
-    fn execute_cycle(&mut self, cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
         self.driver.execute_cycle(cycle)
     }
 
@@ -110,13 +108,20 @@ impl Runtime {
         C: IoContext,
     {
         let (reply_tx, reply_rx) = mpsc::channel();
-        self.run(move |worker, spawner, coordinator, drivers| {
+        self.run(move |worker, spawner, drivers| {
             let mut provider = C::provider(ProviderOptions::new());
-            let options = driver_options(worker, spawner, drivers, <C::Provider as DriverProvider>::CAN_BE_PRIMARY);
-            let role = options.role();
+            let options = driver_options(worker, spawner, drivers);
+            let permitted_role = options.role();
             provider.relocate(None, options.thread());
-            let result = provider.create(options).and_then(|(mut driver, context)| {
-                driver.execute_cycle(&mut Cycle::new(Instant::now(), Duration::ZERO, coordinator))?;
+            let result = provider.create(options).and_then(|creation| {
+                let role = creation.role;
+                let driver = creation.driver;
+                let context = creation.context;
+                if role == DriverRole::Primary && permitted_role != DriverRole::Primary {
+                    return Err(DriverError::from_message("driver selected primary without permission"));
+                }
+                let mut driver = driver;
+                driver.execute_cycle(&mut Cycle::new(Duration::ZERO))?;
                 register_driver(drivers, driver, role);
                 Ok(context)
             });
@@ -127,10 +132,7 @@ impl Runtime {
             .map_err(|error| DriverError::from_message(format!("runtime worker stopped before completing context registration: {error}")))?
     }
 
-    fn run(
-        &self,
-        operation: impl FnOnce(&Thread, &SystemTaskSpawner, &mut Coordinator, &mut DriverStore) + Send + 'static,
-    ) -> Result<(), DriverError> {
+    fn run(&self, operation: impl FnOnce(&Thread, &SystemTaskSpawner, &mut DriverStore) + Send + 'static) -> Result<(), DriverError> {
         self.commands
             .send(Box::new(operation))
             .map_err(|error| DriverError::from_message(format!("runtime worker has stopped: {error}")))
@@ -144,14 +146,13 @@ impl Runtime {
 
 fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Receiver<Operation>) -> RuntimeResult {
     let mut drivers = DriverStore::new();
-    let mut coordinator = Coordinator;
 
     let cycle_result = loop {
         let Ok(operation) = commands.recv() else {
             break Ok(());
         };
-        operation(worker, spawner, &mut coordinator, &mut drivers);
-        if let Err(error) = execute_driver_cycle(&mut drivers, &mut coordinator) {
+        operation(worker, spawner, &mut drivers);
+        if let Err(error) = execute_driver_cycle(&mut drivers) {
             eprintln!("driver cycle failed: {error}");
             break Err(error);
         }
@@ -166,11 +167,11 @@ fn run_worker(worker: &Thread, spawner: &SystemTaskSpawner, commands: &mpsc::Rec
     Ok(())
 }
 
-fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &DriverStore, can_be_primary: bool) -> DriverOptions {
-    let role = if can_be_primary && !drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
-        DriverRole::Primary
-    } else {
+fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &DriverStore) -> DriverOptions {
+    let role = if drivers.iter().any(|driver| driver.role() == DriverRole::Primary) {
         DriverRole::Secondary
+    } else {
+        DriverRole::Primary
     };
     DriverOptions::new(worker.clone(), spawner.clone(), role)
 }
@@ -179,13 +180,13 @@ fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: Driver
     drivers.push(Box::new(RegisteredDriver { driver, role }));
 }
 
-fn execute_driver_cycle(drivers: &mut DriverStore, coordinator: &mut Coordinator) -> Result<(), DriverError> {
-    let started_at = Instant::now();
+fn execute_driver_cycle(drivers: &mut DriverStore) -> Result<(), DriverError> {
+    let mut cycle = Cycle::new(Duration::ZERO);
     for driver in drivers.iter_mut().filter(|driver| driver.role() == DriverRole::Secondary) {
-        driver.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, coordinator))?;
+        driver.execute_cycle(&mut cycle)?;
     }
     if let Some(primary) = drivers.iter_mut().find(|driver| driver.role() == DriverRole::Primary) {
-        primary.execute_cycle(&mut Cycle::new(started_at, Duration::ZERO, coordinator))?;
+        primary.execute_cycle(&mut cycle)?;
     }
     Ok(())
 }
@@ -221,7 +222,11 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError};
+    use std::task::Waker;
+
+    use arty_io_core::{
+        Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+    };
     use thread_aware_core::{Thread, ThreadAware};
 
     use super::{Runtime, register_driver};
@@ -263,12 +268,10 @@ mod tests {
     }
 
     impl DriverProvider for BlockingCloneProvider {
-        const CAN_BE_PRIMARY: bool = false;
-
         type Context = BlockingCloneContext;
         type Driver = SampleDriver;
 
-        fn create(self, _options: DriverOptions) -> Result<(Self::Driver, Self::Context), DriverError> {
+        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
             panic!("the fixture context is inserted directly into the cache");
         }
     }
@@ -281,12 +284,16 @@ mod tests {
     }
 
     impl Driver for ShutdownProbe {
-        fn execute_cycle(&mut self, _cycle: &mut Cycle<'_>) -> Result<(), DriverError> {
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
             if self.fail_cycle {
                 Err(DriverError::from_message(format!("{} cycle failed", self.name)))
             } else {
                 Ok(())
             }
+        }
+
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
         }
 
         fn shutdown(self) -> Result<(), ShutdownError> {
@@ -305,7 +312,7 @@ mod tests {
         let shutdowns = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&shutdowns);
         runtime
-            .run(move |_, _, _, drivers| {
+            .run(move |_, _, drivers| {
                 for (name, role) in [("primary", DriverRole::Primary), ("secondary", DriverRole::Secondary)] {
                     register_driver(
                         drivers,
@@ -337,7 +344,7 @@ mod tests {
                 let shutdowns = Arc::new(Mutex::new(Vec::new()));
                 let recorded = Arc::clone(&shutdowns);
                 runtime
-                    .run(move |_, _, _, drivers| {
+                    .run(move |_, _, drivers| {
                         for (name, role) in [
                             ("primary", DriverRole::Primary),
                             ("secondary", DriverRole::Secondary),
@@ -377,7 +384,7 @@ mod tests {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         runtime
-            .run(move |_, _, _, drivers| {
+            .run(move |_, _, drivers| {
                 register_driver(
                     drivers,
                     ShutdownProbe {
@@ -395,7 +402,7 @@ mod tests {
         ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
 
         let (queued_tx, queued_rx) = mpsc::channel();
-        runtime.run(move |_, _, _, _| queued_tx.send(()).unwrap()).unwrap();
+        runtime.run(move |_, _, _| queued_tx.send(()).unwrap()).unwrap();
         release_tx.send(()).unwrap();
         assert_eq!(
             queued_rx.recv_timeout(Duration::from_secs(10)),
@@ -462,7 +469,7 @@ mod tests {
         let (blocked_tx, blocked_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         runtime
-            .run(move |_, _, _, _| {
+            .run(move |_, _, _| {
                 blocked_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
             })
@@ -502,7 +509,7 @@ mod tests {
 
         let (count_tx, count_rx) = mpsc::channel();
         runtime
-            .run(move |_, _, _, drivers| {
+            .run(move |_, _, drivers| {
                 count_tx.send(drivers.len()).unwrap();
             })
             .unwrap();
