@@ -88,7 +88,7 @@ struct ArtyCase {
 
 impl ArtyCase {
     fn new(workers: usize) -> Self {
-        let mut case = Self {
+        let case = Self {
             runtime: Runtime::builder()
                 .processor_count(ProcessorCount::exactly(workers))
                 .build()
@@ -101,7 +101,7 @@ impl ArtyCase {
         case
     }
 
-    fn run(&mut self, concurrency: usize) -> Duration {
+    fn run(&self, concurrency: usize) -> Duration {
         assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
         let start = Instant::now();
         let scheduler = self.runtime.scheduler();
@@ -121,23 +121,21 @@ impl ArtyCase {
     }
 }
 
-fn arty_outer(cx: Builtins, cache: Cache) -> impl Future<Output = Cache> {
-    async move {
-        let scheduler = cx.scheduler().clone();
-        let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
-        for operation in 0..INNER_OPERATIONS {
-            let cache = cache.clone();
-            handles[operation] = Some(scheduler.spawn(move |_| async move { cache.touch(operation) }));
-        }
-
-        for handle in handles {
-            let Some(handle) = handle else {
-                unreachable!("all benchmark inner task slots are filled");
-            };
-            handle.await.expect("benchmark inner task finishes before shutdown");
-        }
-        cache
+async fn arty_outer(cx: Builtins, cache: Cache) -> Cache {
+    let scheduler = cx.scheduler().clone();
+    let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
+    for (operation, handle) in handles.iter_mut().enumerate() {
+        let cache = cache.clone();
+        *handle = Some(scheduler.spawn(move |_| async move { cache.touch(operation) }));
     }
+
+    for handle in handles {
+        let Some(handle) = handle else {
+            unreachable!("all benchmark inner task slots are filled");
+        };
+        handle.await.expect("benchmark inner task finishes before shutdown");
+    }
+    cache
 }
 
 #[derive(Debug)]
@@ -148,7 +146,7 @@ struct TokioCase {
 
 impl TokioCase {
     fn new(workers: usize) -> Self {
-        let mut case = Self {
+        let case = Self {
             runtime: tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(workers)
                 .build()
@@ -161,7 +159,7 @@ impl TokioCase {
         case
     }
 
-    fn run(&mut self, concurrency: usize) -> Duration {
+    fn run(&self, concurrency: usize) -> Duration {
         assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
         let start = Instant::now();
         let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
@@ -180,22 +178,20 @@ impl TokioCase {
     }
 }
 
-fn tokio_outer(cache: Cache) -> impl Future<Output = Cache> {
-    async move {
-        let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
-        for operation in 0..INNER_OPERATIONS {
-            let cache = cache.clone();
-            handles[operation] = Some(tokio::spawn(async move { cache.touch(operation) }));
-        }
-
-        for handle in handles {
-            let Some(handle) = handle else {
-                unreachable!("all benchmark inner task slots are filled");
-            };
-            handle.await.expect("benchmark inner task finishes before shutdown");
-        }
-        cache
+async fn tokio_outer(cache: Cache) -> Cache {
+    let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
+    for (operation, handle) in handles.iter_mut().enumerate() {
+        let cache = cache.clone();
+        *handle = Some(tokio::spawn(async move { cache.touch(operation) }));
     }
+
+    for handle in handles {
+        let Some(handle) = handle else {
+            unreachable!("all benchmark inner task slots are filled");
+        };
+        handle.await.expect("benchmark inner task finishes before shutdown");
+    }
+    cache
 }
 
 fn configured_criterion() -> Criterion {
@@ -213,7 +209,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     for workers in WORKERS {
         let name = format!("concurrency_w{workers}");
         group.bench_function(BenchmarkId::new(ARTY.benchmark_name(), &name), |bencher| {
-            let mut case = ArtyCase::new(workers);
+            let case = ArtyCase::new(workers);
             bencher.iter_custom(|iterations| {
                 let mut elapsed = Duration::ZERO;
                 for _ in 0..iterations {
@@ -223,7 +219,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             });
         });
         group.bench_function(BenchmarkId::new(TOKIO.benchmark_name(), &name), |bencher| {
-            let mut case = TokioCase::new(workers);
+            let case = TokioCase::new(workers);
             bencher.iter_custom(|iterations| {
                 let mut elapsed = Duration::ZERO;
                 for _ in 0..iterations {
