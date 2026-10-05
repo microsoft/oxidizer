@@ -266,10 +266,9 @@ fn shutdown_drivers(drivers: DriverStore) -> ShutdownResult {
 mod tests {
     use std::any::TypeId;
     use std::sync::{Arc, Barrier, Mutex, mpsc};
+    use std::task::Waker;
     use std::thread;
     use std::time::Duration;
-
-    use std::task::Waker;
 
     use arty_io_core::{
         Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, PrimaryDriver, ProviderOptions,

@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 use std::fmt;
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::time::Duration;
-use std::{marker::PhantomData, rc::Rc};
 
 /// The wait budget for one driver invocation.
 pub struct Cycle {
