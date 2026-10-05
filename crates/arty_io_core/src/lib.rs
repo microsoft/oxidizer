@@ -15,32 +15,33 @@
 //! # How drivers work
 //!
 //! Applications access a driver's I/O operations through an [`IoContext`]. Its [`DriverProvider`]
-//! creates a context and a worker-local [`Driver`] for each runtime worker. The driver processes
-//! submissions and completions in bounded calls to [`Driver::execute_cycle`].
+//! creates a [`DriverInstance`] containing a context, a worker-local [`Driver`], and the driver's
+//! selected role for each runtime worker. The driver processes submissions and completions in
+//! bounded calls to [`Driver::execute_cycle`].
 //!
-//! Drivers expose a [`Driver::waker`] for interrupting pending completion waits. Wakes are
-//! latched until the wait observes them, and the waker remains safe after the driver is dropped.
+//! The runtime supplies a role permission through [`DriverOptions::role`]. The provider records
+//! the driver's selected role in [`DriverInstance::role`]. A driver also supplies its notification
+//! path through [`Driver::waker`].
 //!
 //! ## Primary and secondary drivers
 //!
-//! A worker has at most one [`Primary`](DriverRole::Primary) driver. The runtime grants the
-//! primary permission through [`DriverOptions::role`], and the provider returns the role selected
-//! by the driver in [`DriverInstance`]. A primary may wait on the worker for up to
-//! [`Cycle::max_wait`]; a zero wait bound means no waiting.
+//! A worker has at most one [`Primary`](DriverRole::Primary) driver. It may wait on the worker for
+//! up to [`Cycle::max_wait`]; a zero wait bound means no waiting.
 //!
-//! [`Secondary`](DriverRole::Secondary) drivers must not block the worker. They may coordinate
-//! with other drivers or continuously process completions on a driver-owned background thread.
+//! [`Secondary`](DriverRole::Secondary) drivers must return promptly. They coordinate completion
+//! processing with another driver and its wait/notification path, or continuously process
+//! completions on independent driver-owned background execution.
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime clones and relocates providers to their workers, grants role permission through
-//! [`DriverOptions`], and receives a [`DriverInstance`] containing the selected role. It
-//! completes a non-blocking, zero-wait initialization cycle before publishing a context.
+//! The runtime clones and relocates providers to their workers, supplies [`DriverOptions`], and
+//! validates each returned [`DriverInstance`]. It completes a non-blocking, zero-wait
+//! initialization cycle before publishing a context.
 //! It also supplies a [`SystemTaskSpawner`] for blocking system work.
 //!
-//! Each logical cycle supplies a wait bound. The runtime invokes secondaries before the primary.
-//! Drivers own coordination for work that continues beyond their worker-local call. If there is
-//! no primary, the runtime retains responsibility for parking the worker.
+//! Each logical cycle passes a mutable [`Cycle`] containing only its wait bound. `Cycle` is not
+//! `Send` or `Sync`, and the runtime invokes secondaries before the primary. If there is no
+//! primary, the runtime retains responsibility for parking the worker.
 //!
 //! # Shutdown
 //!
@@ -52,8 +53,8 @@
 //! # Example and reference
 //!
 //! The [single-thread runtime example] demonstrates registration and driver roles. Its sample
-//! drivers perform no I/O and use no-op wakers; a runtime serving native I/O must implement the
-//! coordination described above.
+//! drivers perform no I/O; a runtime serving native I/O must implement the coordination described
+//! above.
 //!
 //! - [Requirements](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md)
 //! - [Design](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md)

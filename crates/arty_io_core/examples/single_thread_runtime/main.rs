@@ -3,7 +3,7 @@
 
 //! Demonstrates lazy driver registration and waiting roles on one runtime worker.
 //!
-//! The sample drivers do not perform I/O; their work tracker is a no-op.
+//! The sample drivers do not perform I/O and return no-op wakers.
 //! Cycle failures stop the worker after shutting down its drivers. Shutdown joins the
 //! worker and returns the original cycle error, reporting any cleanup error separately.
 

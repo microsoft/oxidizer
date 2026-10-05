@@ -2,11 +2,13 @@
 
 These contracts govern independently versioned I/O drivers and thread-aware
 runtimes. `arty_io_core` provides neither implementation. [Design](DESIGN.md)
-describes the lifecycle; the sample drivers do not implement native I/O.
+describes the lifecycle; the no-op example wakers do not implement coordination.
 
 ## R1: Stable shared vocabulary
 
 - Runtimes and drivers use compatible `arty_io_core` types.
+- Providers return a non-exhaustive `DriverInstance` containing the public
+  `driver`, `context`, and selected `role` fields.
 - Public signatures prefer standard-library types. Placement uses
   `thread_aware_core` directly, without re-exports.
 - Registries, scheduling policy, and native coordination stay outside core.
@@ -16,19 +18,19 @@ describes the lifecycle; the sample drivers do not implement native I/O.
 - The runtime keys registration by concrete `IoContext` type, which selects its
   provider, and supplies `ProviderOptions`.
 - The first request returns only after every active worker has an initialized
-  driver/context/role result. Later requests clone existing contexts.
+  driver/context pair. Later requests clone existing contexts.
 - Different driver versions can coexist through distinct context types.
 - Registration coordination, cancellation, and rollback belong to the runtime.
 
 ## R3: Per-worker initialization
 
 - The runtime clones and relocates each provider before consuming it on the
-  owning worker. `DriverOptions` supplies that worker, the most permissive
-  role, and the system task spawner.
-- The provider returns a `DriverInstance` containing the context, driver, and
-  role selected by that driver. A driver may select secondary when primary is
-  permitted, but may not select primary without permission. Each worker has
-  at most one primary; without one, the runtime owns worker parking.
+  owning worker. `DriverOptions` supplies that worker, a role permission, and
+  the system task spawner.
+- `DriverOptions::role()` is the runtime's permission, not the final role.
+  The provider returns the driver's selected role in
+  `DriverInstance::role`. A worker has at most one primary, and the runtime
+  enforces the permission and primary-capacity rules for that selection.
 - Before publishing a context, the runtime completes a separate cycle with
   `max_wait = Duration::ZERO`.
 - Providers choose whether instances share queues, memory, or threads.
@@ -39,31 +41,38 @@ describes the lifecycle; the sample drivers do not implement native I/O.
   `&mut self`; drivers need not be `Send` or `Sync`.
 - `Driver` remains dyn-compatible; consuming `shutdown` is not callable through
   `dyn Driver`. A private owning shim may adapt it for erased storage.
-- Secondaries run before the primary. Every invocation receives a mutable
-  `Cycle` carrying the same `max_wait`.
-- Only the primary may wait on the worker, for up to `max_wait`. A zero wait
-  bound means no waiting. Secondary drivers may coordinate with other drivers
-  or continuously process completions on a driver-owned background thread.
-- `Cycle` is worker-local and does not implement `Send` or `Sync`.
-- `Driver::waker` interrupts a driver's pending native wait. Wakes are latched
-  and remain safe after the driver is dropped.
+- Secondaries run before the primary. Only the primary may wait on the worker,
+  for up to `max_wait`; a zero wait bound means no waiting.
+- `Cycle` exposes only `max_wait` through `Cycle::new(max_wait)` and
+  `max_wait()`. It is passed as `&mut Cycle`, is not `Copy` or `Clone`, and is
+  deliberately neither `Send` nor `Sync`.
+- `Driver::waker()` supplies the driver's notification path to the runtime.
+  Completion processing uses it to wake a worker that may be waiting.
+- Secondary drivers return promptly. They either coordinate completion
+  processing with another driver and its wait/notification path, or continuously
+  process completions on independent driver-owned background execution.
 - Bounded batches with serviceable work remaining request another cycle.
   In-flight operations alone do not indicate serviceable work.
 - Drivers may use `SystemTaskSpawner` or provider-owned threads.
 
 ## R5: Reliable wake-ups
 
-- Interruption is latched, including signals raised before a wait or by its
-  own thread. Redundant signals may coalesce but cannot be lost.
-- Wakers remain memory-safe independently of the driver, signaling promptly
-  without panicking, joining work, or waiting on locks held by the completion
-  path.
-- A wake interrupts only the wait; the driver still processes pending
-  completions.
-- Drivers own coordination for work that continues beyond their worker-local
-  call. The runtime does not track or join pending driver work.
-- A retained waker may continue to interrupt the driver's wait after the driver
-  is dropped or shut down, without accessing driver-owned storage.
+- A driver's waker remains usable while its driver-owned completion machinery
+  can notify the runtime. It signals promptly without panicking, joining work,
+  or waiting on locks held by completing work.
+- A completion notification racing the start or final check of a wait must
+  remain observable by the driver's coordination mechanism or wake the runtime.
+  Redundant signals may coalesce, but a notification cannot be lost.
+- Waking the runtime is not completion processing. A driver must retain
+  ownership of the state needed to drain completions until that processing is
+  complete.
+- The runtime invokes each driver at most once per logical cycle in its role
+  order and does not insert a new cycle between driver calls. A secondary
+  therefore cannot rely on a later invocation to process completions while the
+  primary is waiting; it must use coordination or independent background
+  processing as specified in R4.
+- After a driver is dropped or shut down, its retained notification state must
+  not access released driver resources.
 
 ## R6: Safe and blocking shutdown
 
