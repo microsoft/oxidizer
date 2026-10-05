@@ -21,8 +21,9 @@
 //!     let cloned = cx.scheduler().clone();
 //!     let executed_on = cx
 //!         .scheduler()
-//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()).wait())
-//!         .await??;
+//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()))
+//!         .await?
+//!         .await?;
 //!     assert_eq!(executed_on, home);
 //!     Ok(())
 //! }

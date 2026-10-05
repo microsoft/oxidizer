@@ -11,3 +11,4 @@ pub(crate) mod events;
 /// retain these fields. Runtime telemetry includes thread identifiers, names,
 /// resource counts, and panic diagnostics. Metric values themselves remain numeric.
 pub(super) static SYSTEM_METADATA: data_privacy::DataClass = data_privacy::DataClass::new("arty", "SystemMetadata");
+pub(super) static PANIC_MESSAGE: data_privacy::DataClass = data_privacy::DataClass::new("arty", "PanicMessage");

@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "arty_executor"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "criterion",
  "derive_more",

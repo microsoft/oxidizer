@@ -29,9 +29,8 @@ fn move_and_spawn() {
         .expect("Failed to create runtime")
         .scheduler()
         .block_on(async move |ctx| {
-            let res = vec.len() + 10;
-            ctx.scheduler().spawn(async move |_ctx| vec.len() + 10);
-            res
+            let child = ctx.scheduler().spawn(async move |_ctx| vec.len() + 10);
+            child.await.unwrap()
         })
         .unwrap();
     assert_eq!(result, 12);

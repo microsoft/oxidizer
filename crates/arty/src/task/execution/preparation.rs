@@ -5,12 +5,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicBool;
 
 use arty_executor::TaskSet;
-use events_once::{Event, LocalEvent};
+use events_once::{BoxedSender, Event, LocalEvent};
 use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
 
 use crate::task::Builtins;
+use crate::task::execution::discard_panic;
 use crate::task::execution::local::LocalTaskFuture;
 use crate::task::execution::remote::RemoteTaskFuture;
 use crate::task::execution::result::TaskResult;
@@ -100,7 +101,26 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let task = move || {
+    let task = BlockingTask {
+        body: Some(body),
+        result_tx: Some(result_tx),
+    };
+    (move || task.run(), JoinHandle::new(result_rx))
+}
+
+struct BlockingTask<F, R: Send + 'static> {
+    body: Option<F>,
+    result_tx: Option<BoxedSender<TaskResult<R>>>,
+}
+
+impl<F, R> BlockingTask<F, R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    fn run(mut self) {
+        let body = self.body.take().expect("blocking task body is consumed exactly once");
+        let result_tx = self.result_tx.take().expect("blocking task sender is consumed exactly once");
         // We AssertUnwindSafe here because we consider the task completed on panic.
         // Whatever it did to its internal state is now irrelevant and if it corrupted
         // some shared state, that is not really something we can do anything about
@@ -110,17 +130,31 @@ where
         match body_result {
             Ok(result) => {
                 if let Err(panic) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Completed(result)))) {
-                    crate::task::execution::discard_panic(panic);
+                    discard_panic(panic);
                 }
             }
             Err(panic) => {
                 if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Panicked(panic)))) {
-                    crate::task::execution::discard_panic(disposal);
+                    discard_panic(disposal);
                 }
             }
         }
-    };
-    (task, JoinHandle::new(result_rx))
+    }
+}
+
+impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
+    fn drop(&mut self) {
+        if let Some(body) = self.body.take()
+            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(body)))
+        {
+            discard_panic(panic);
+        }
+        if let Some(sender) = self.result_tx.take()
+            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
+        {
+            discard_panic(panic);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ use std::thread::ThreadId as StdThreadId;
 use data_privacy::classified;
 use observed::event;
 
-use super::SYSTEM_METADATA;
+use super::{PANIC_MESSAGE, SYSTEM_METADATA};
 
 /// A system-level metric count (processors, threads, bytes) recorded in telemetry.
 #[classified(SYSTEM_METADATA)]
@@ -77,7 +77,7 @@ impl From<StdThreadId> for ThreadId {
 }
 
 /// The message extracted from a caught panic payload.
-#[classified(SYSTEM_METADATA)]
+#[classified(PANIC_MESSAGE)]
 #[derive(Clone)]
 pub(crate) struct PanicMessage(pub String);
 
@@ -239,6 +239,7 @@ pub(crate) struct BlockingWorkerPoolSaturated {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use data_privacy::RedactionEngine;
     use observed::{Severity, emit};
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
 
@@ -482,6 +483,18 @@ mod tests {
                 .dimension("arty.thread.id", "ThreadId(7)")
                 .dimension("panic.message", "something broke")
         );
+    }
+
+    #[test]
+    fn panic_message_is_not_suppressed_with_system_metadata() {
+        let engine = RedactionEngine::builder().suppress_redaction(SYSTEM_METADATA).build();
+        let mut output = String::new();
+
+        engine
+            .redacted_display(&PanicMessage("secret panic".to_owned()), &mut output)
+            .unwrap();
+
+        assert!(!output.contains("secret panic"));
     }
 
     #[test]
