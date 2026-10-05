@@ -430,6 +430,24 @@ fn second_event_sampler_attachment_replaces_first() {
 }
 
 #[test]
+fn boxed_sampler_decides_for_sink() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
+    let sink = sink.with_event_sampler(Box::new(sampler) as Box<dyn EventSampler>);
+
+    emit!(
+        sink,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(processor.is_empty());
+}
+
+#[test]
 fn composite_attachment_applies_one_sampler_to_every_interested_leaf() {
     let first_id = SinkId::new("first");
     let second_id = SinkId::new("second");
