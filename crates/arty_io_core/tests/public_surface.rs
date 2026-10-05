@@ -133,6 +133,18 @@ fn provider_creation_uses_both_options() {
 }
 
 #[test]
+fn primary_driver_instance_uses_primary_driver() {
+    let DriverInstance::Primary { driver, context } =
+        DriverInstance::<LocalDriver, LocalDriver, TestContext>::primary(LocalDriver::new(Rc::default()), TestContext(7))
+    else {
+        panic!("primary constructor must create a primary instance");
+    };
+
+    assert_eq!(context, TestContext(7));
+    driver.shutdown().unwrap();
+}
+
+#[test]
 fn shutdown_consumes_the_driver() {
     let state = Rc::new(ShutdownState::default());
     let driver = LocalDriver::new(Rc::clone(&state));

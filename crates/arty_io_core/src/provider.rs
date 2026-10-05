@@ -5,7 +5,7 @@ use thread_aware_core::ThreadAware;
 
 use crate::{DriverError, DriverInstance, DriverOptions, IoContext, PrimaryDriver, SecondaryDriver};
 
-/// A factory for a [`Driver`] and [`IoContext`] pair on each runtime worker.
+/// A factory for a [`crate::Driver`] and [`IoContext`] pair on each runtime worker.
 ///
 /// The runtime clones and relocates the provider to each worker, then consumes the clone to
 /// create its pair. Shared driver state remains private to the provider.

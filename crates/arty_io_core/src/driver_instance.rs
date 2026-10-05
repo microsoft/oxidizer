@@ -7,7 +7,7 @@ use crate::{PrimaryDriver, SecondaryDriver};
 ///
 /// The driver chooses its role from the permission supplied by
 /// [`DriverOptions::allowed_roles`](crate::DriverOptions::allowed_roles). A driver may choose
-/// [`DriverRole::Secondary`] when the runtime permits [`DriverRole::Primary`].
+/// [`crate::DriverRole::Secondary`] when the runtime permits [`crate::DriverRole::Primary`].
 #[derive(Debug)]
 #[non_exhaustive]
 #[must_use = "the runtime must initialize and register the driver"]
