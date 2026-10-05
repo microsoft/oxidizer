@@ -109,6 +109,13 @@ impl BlockingWorker {
     }
 }
 
+pub(crate) fn assert_not_current_blocking_task() {
+    assert!(
+        CURRENT_POOL.with_borrow(|current| current.is_none()),
+        "blocking JoinHandle::wait cannot be called from a blocking callback"
+    );
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::runtime) struct BlockingPool {
     pool: Arc<Mutex<Option<ThreadPool>>>,

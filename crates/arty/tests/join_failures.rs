@@ -51,6 +51,20 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
 }
 
 #[test]
+fn blocking_callback_cannot_wait_for_blocking_work() {
+    let runtime = runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let nested_scheduler = scheduler.clone();
+    let outer = scheduler.spawn_blocking(move || {
+        let inner = nested_scheduler.spawn_blocking(|| 7);
+        catch_unwind(AssertUnwindSafe(|| inner.wait())).is_err()
+    });
+
+    assert!(outer.wait().unwrap());
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
     let runtime = runtime();
     let invoked = Arc::new(AtomicBool::new(false));

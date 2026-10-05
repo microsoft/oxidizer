@@ -8,6 +8,7 @@ use events_once::{BoxedReceiver, Event};
 use pin_project::pin_project;
 
 use super::JoinError;
+use crate::runtime::blocking_worker::assert_not_current_blocking_task;
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
@@ -77,8 +78,9 @@ where
     /// # Panics
     ///
     /// Panics if the result has already been received by polling the handle.
-    /// Also panics if called from an async Arty worker, even if the
-    /// result is already ready.
+    /// Also panics if called from an async Arty worker or a blocking callback,
+    /// even if the result is already ready. Blocking callbacks cannot wait
+    /// for work through a blocking pool without risking pool starvation.
     ///
     /// # Examples
     ///
@@ -92,6 +94,7 @@ where
     /// ```
     pub fn wait(self) -> Result<R, JoinError> {
         assert_not_flagged();
+        assert_not_current_blocking_task();
 
         futures::executor::block_on(self)
     }
