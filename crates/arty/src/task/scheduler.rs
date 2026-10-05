@@ -198,6 +198,7 @@ impl TaskScheduler {
                 current.builtins.clone(),
                 parent_task_enrichment,
                 sink.clone(),
+                self.dispatcher.shutdown_signal(),
                 &current.tasks,
             );
             observed::emit!(

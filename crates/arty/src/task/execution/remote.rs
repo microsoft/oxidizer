@@ -3,11 +3,13 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{self, Poll};
 
 use events_once::BoxedSender;
 use observed::context::Transfer;
 use observed::{Sink, emit};
+use performables::arc::Arc;
 use pin_project::{pin_project, pinned_drop};
 
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
@@ -33,6 +35,9 @@ where
 
     /// Becomes `None` once a result has been sent.
     result_tx: Option<BoxedSender<TaskResult<R>>>,
+
+    /// Direct worker registration checks shutdown again before invoking its factory.
+    shutdown_signal: Option<Arc<AtomicBool>>,
 }
 
 impl<F, R> RemoteTaskFuture<F, R>
@@ -41,11 +46,22 @@ where
     R: Send + 'static,
 {
     pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
+        Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None)
+    }
+
+    pub(super) fn new_with_shutdown(
+        inner: F,
+        result_tx: BoxedSender<TaskResult<R>>,
+        parent_task_enrichment: Transfer,
+        sink: Sink,
+        shutdown_signal: Option<Arc<AtomicBool>>,
+    ) -> Self {
         Self {
             inner: TaskStorage::new(inner),
             parent_task_enrichment,
             sink,
             result_tx: Some(result_tx),
+            shutdown_signal,
         }
     }
 }
@@ -84,6 +100,15 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let _guard = this.parent_task_enrichment.apply_current_thread();
+
+        if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
+            if let Some(sender) = this.result_tx.take()
+                && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
+            {
+                discard_panic(panic);
+            }
+            return Poll::Ready(());
+        }
 
         // We AssertUnwindSafe here because we consider the task completed on panic, which means
         // it will never be polled again - whatever it did to its internal state is now

@@ -51,6 +51,28 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
 }
 
 #[test]
+fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
+    let runtime = runtime();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let factory_invoked = Arc::clone(&invoked);
+
+    runtime
+        .scheduler()
+        .block_on(move |cx| async move {
+            let operations = RuntimeOperations::from(&cx);
+            drop(cx.scheduler().spawn(move |_| {
+                factory_invoked.store(true, Ordering::Release);
+                async {}
+            }));
+            operations.request_stop();
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
 fn local_factory_and_poll_panics_are_join_errors() {
     runtime()
         .scheduler()

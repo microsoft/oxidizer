@@ -2,11 +2,13 @@
 // Licensed under the MIT License.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::AtomicBool;
 
 use arty_executor::TaskSet;
 use events_once::{Event, LocalEvent};
 use observed::Sink;
 use observed::context::Transfer;
+use performables::arc::Arc;
 
 use crate::task::Builtins;
 use crate::task::execution::local::LocalTaskFuture;
@@ -72,6 +74,7 @@ pub(crate) fn prepare_remote_on_worker<FF, F, R>(
     builtins: Builtins,
     parent_task_enrichment: Transfer,
     sink: Sink,
+    shutdown_signal: Arc<AtomicBool>,
     tasks: &TaskSet,
 ) -> JoinHandle<R>
 where
@@ -81,7 +84,13 @@ where
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let inner = async move { future_factory(builtins).await };
-    drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
+    drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
+        inner,
+        result_tx,
+        parent_task_enrichment,
+        sink,
+        Some(shutdown_signal),
+    )));
     JoinHandle::new(result_rx)
 }
 
@@ -123,7 +132,7 @@ mod tests {
     use std::pin::pin;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::Ordering;
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::testing::new_guarded_executor;
