@@ -20,7 +20,6 @@
 //! Callgrind is intentionally omitted because it cannot model the scheduling
 //! and mutex contention this workload is intended to expose.
 
-use std::future::Future;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -33,6 +32,7 @@ use performables::sync::mutex::Mutex;
 use thread_aware::{Thread, ThreadAware};
 
 const INNER_OPERATIONS: usize = 10;
+const CONCURRENCY: usize = 10;
 const CACHE_ENTRIES: usize = 8;
 const WORKERS: [usize; 2] = [1, 8];
 
@@ -96,17 +96,24 @@ impl ArtyCase {
             cache: Cache::new(),
         };
         for _ in 0..workers {
-            black_box(case.run(1));
+            black_box(case.run(CONCURRENCY));
         }
         case
     }
 
-    fn run(&mut self, iterations: u64) -> Duration {
+    fn run(&mut self, concurrency: usize) -> Duration {
+        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
         let start = Instant::now();
-        for _ in 0..iterations {
-            let cache = std::mem::take(&mut self.cache);
-            let handle = self.runtime.scheduler().spawn_anywhere(cache, arty_outer);
-            self.cache = handle.wait().expect("benchmark outer task finishes before shutdown");
+        let scheduler = self.runtime.scheduler();
+        let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
+        for handle in &mut handles {
+            *handle = Some(scheduler.spawn_anywhere(self.cache.clone(), arty_outer));
+        }
+        for handle in handles {
+            let Some(handle) = handle else {
+                unreachable!("all benchmark outer task slots are filled");
+            };
+            black_box(handle.wait().expect("benchmark outer task finishes before shutdown"));
         }
         let elapsed = start.elapsed();
         black_box(self.cache.checksum());
@@ -149,17 +156,23 @@ impl TokioCase {
             cache: Cache::new(),
         };
         for _ in 0..workers {
-            black_box(case.run(1));
+            black_box(case.run(CONCURRENCY));
         }
         case
     }
 
-    fn run(&mut self, iterations: u64) -> Duration {
+    fn run(&mut self, concurrency: usize) -> Duration {
+        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
         let start = Instant::now();
-        for _ in 0..iterations {
-            let cache = std::mem::take(&mut self.cache);
-            let handle = self.runtime.spawn(tokio_outer(cache));
-            self.cache = futures::executor::block_on(black_box(handle)).expect("benchmark outer task finishes before shutdown");
+        let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
+        for handle in &mut handles {
+            *handle = Some(self.runtime.spawn(tokio_outer(self.cache.clone())));
+        }
+        for handle in handles {
+            let Some(handle) = handle else {
+                unreachable!("all benchmark outer task slots are filled");
+            };
+            black_box(futures::executor::block_on(black_box(handle)).expect("benchmark outer task finishes before shutdown"));
         }
         let elapsed = start.elapsed();
         black_box(self.cache.checksum());
@@ -195,34 +208,46 @@ fn configured_criterion() -> Criterion {
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ARTY.group_name());
     group.throughput(Throughput::Elements(
-        u64::try_from(INNER_OPERATIONS).expect("benchmark operation count fits in u64"),
+        u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
     ));
     for workers in WORKERS {
-        let name = format!("inner_ten_w{workers}");
+        let name = format!("concurrency_w{workers}");
         group.bench_function(BenchmarkId::new(ARTY.benchmark_name(), &name), |bencher| {
             let mut case = ArtyCase::new(workers);
-            bencher.iter_custom(|iterations| case.run(iterations));
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run(CONCURRENCY);
+                }
+                elapsed
+            });
         });
         group.bench_function(BenchmarkId::new(TOKIO.benchmark_name(), &name), |bencher| {
             let mut case = TokioCase::new(workers);
-            bencher.iter_custom(|iterations| case.run(iterations));
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run(CONCURRENCY);
+                }
+                elapsed
+            });
         });
     }
     group.finish();
 }
 
 #[benchmark(ARTY, "arty_contention/relocated_cache", "Arty")]
-#[bench::inner_ten_w1(&mut ArtyCase::new(1), 1)]
-#[bench::inner_ten_w8(&mut ArtyCase::new(8), 1)]
-fn arty_workload(case: &mut ArtyCase, iterations: u64) -> Duration {
-    case.run(iterations)
+#[bench::concurrency_w1(&mut ArtyCase::new(1), 10)]
+#[bench::concurrency_w8(&mut ArtyCase::new(8), 10)]
+fn arty_workload(case: &mut ArtyCase, concurrency: u64) -> Duration {
+    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 
 #[benchmark(TOKIO, "arty_contention/relocated_cache", "Tokio")]
-#[bench::inner_ten_w1(&mut TokioCase::new(1), 1)]
-#[bench::inner_ten_w8(&mut TokioCase::new(8), 1)]
-fn tokio_workload(case: &mut TokioCase, iterations: u64) -> Duration {
-    case.run(iterations)
+#[bench::concurrency_w1(&mut TokioCase::new(1), 10)]
+#[bench::concurrency_w8(&mut TokioCase::new(8), 10)]
+fn tokio_workload(case: &mut TokioCase, concurrency: u64) -> Duration {
+    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 
 metabench::main!(
