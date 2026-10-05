@@ -15,22 +15,23 @@
 //! # How drivers work
 //!
 //! Applications access a driver's I/O operations through an [`IoContext`]. Its [`DriverProvider`]
-//! creates a [`DriverInstance`] containing a context, a worker-local [`Driver`], and the driver's
-//! selected role for each runtime worker. The driver processes submissions and completions in
-//! bounded calls to [`Driver::execute_cycle`].
+//! creates a [`DriverInstance`] containing a context and either a worker-local
+//! [`PrimaryDriver`] or [`SecondaryDriver`] for each runtime worker. The runtime polls only the
+//! primary driver.
 //!
-//! The runtime supplies role permissions through [`DriverOptions::allowed_roles`]. The provider records
-//! the driver's selected role in [`DriverInstance::role`]. A driver also supplies its notification
-//! path through [`Driver::waker`].
+//! The runtime supplies role permissions through [`DriverOptions::allowed_roles`], and the
+//! provider selects the enum variant returned by [`DriverProvider::create`]. Primary drivers
+//! supply the notification path used to interrupt their waits through [`PrimaryDriver::waker`].
 //!
 //! ## Primary and secondary drivers
 //!
-//! A worker has at most one [`Primary`](DriverRole::Primary) driver. It may wait on the worker for
-//! up to [`Cycle::max_wait`]; a zero wait bound means no waiting.
+//! A worker has at most one [`Primary`](DriverRole::Primary) driver. The runtime polls it with a
+//! mutable [`Cycle`] and it may wait on the worker for up to [`Cycle::max_wait`]; a zero wait
+//! bound means no waiting.
 //!
-//! [`Secondary`](DriverRole::Secondary) drivers must return promptly. They coordinate completion
-//! processing with another driver and its wait/notification path, or continuously process
-//! completions on independent driver-owned background execution.
+//! [`Secondary`](DriverRole::Secondary) drivers do not receive runtime cycle callbacks. They
+//! coordinate completion processing with the primary or continuously process completions on
+//! independent driver-owned background execution.
 //!
 //! # Runtime responsibilities
 //!
@@ -39,9 +40,9 @@
 //! initialization cycle before publishing a context.
 //! It also supplies a [`SystemTaskSpawner`] for blocking system work.
 //!
-//! Each logical cycle passes a mutable [`Cycle`] containing only its wait bound. `Cycle` is not
-//! `Send` or `Sync`, and the runtime invokes secondaries before the primary. If there is no
-//! primary, the runtime retains responsibility for parking the worker.
+//! Each logical cycle passes a mutable [`Cycle`] containing only its wait bound to the primary.
+//! `Cycle` is not `Send` or `Sync`. If there is no primary, the runtime retains responsibility
+//! for parking the worker.
 //!
 //! # Shutdown
 //!
@@ -74,7 +75,7 @@ mod shutdown_error;
 mod system_task_spawner;
 
 pub use cycle::Cycle;
-pub use driver::Driver;
+pub use driver::{Driver, PrimaryDriver, SecondaryDriver};
 pub use driver_error::DriverError;
 pub use driver_instance::DriverInstance;
 pub use driver_options::DriverOptions;

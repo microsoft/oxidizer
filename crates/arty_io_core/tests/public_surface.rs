@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
-    SystemTaskSpawner,
+    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, PrimaryDriver, ProviderOptions,
+    SecondaryDriver, ShutdownError, SystemTaskSpawner,
 };
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
@@ -77,7 +77,7 @@ fn driver_can_remain_thread_local() {
 #[test]
 fn driver_is_boxable() {
     let state = Rc::new(ShutdownState::default());
-    let mut driver: Box<dyn Driver> = Box::new(LocalDriver::new(Rc::clone(&state)));
+    let mut driver: Box<dyn PrimaryDriver> = Box::new(LocalDriver::new(Rc::clone(&state)));
 
     driver.execute_cycle(&mut Cycle::new(Duration::ZERO)).unwrap();
 
@@ -124,12 +124,11 @@ fn provider_creation_uses_both_options() {
 
     let provider: TestProvider = provider_for::<TestContext>(ProviderOptions::new());
     let creation = provider.create(driver_options()).unwrap();
-    let role = creation.role;
-    let driver = creation.driver;
-    let context = creation.context;
+    let DriverInstance::Secondary { driver, context } = creation else {
+        panic!("test provider must create a secondary instance");
+    };
 
     assert_eq!(context, TestContext(7));
-    assert_eq!(role, DriverRole::Secondary);
     driver.shutdown().unwrap();
 }
 
@@ -146,9 +145,9 @@ fn shutdown_consumes_the_driver() {
 
 #[test]
 fn shutdown_waits_for_active_operations_not_contexts() {
-    let creation = LeaseProvider.create(driver_options()).unwrap();
-    let driver = creation.driver;
-    let context = creation.context;
+    let DriverInstance::Secondary { driver, context } = LeaseProvider.create(driver_options()).unwrap() else {
+        panic!("lease provider must create a secondary instance");
+    };
     let operation = context.begin_operation().expect("admission is open before shutdown");
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
@@ -174,9 +173,9 @@ fn shutdown_waits_for_active_operations_not_contexts() {
 
 #[test]
 fn dropping_driver_closes_context_admission() {
-    let creation = LeaseProvider.create(driver_options()).unwrap();
-    let driver = creation.driver;
-    let context = creation.context;
+    let DriverInstance::Secondary { driver, context } = LeaseProvider.create(driver_options()).unwrap() else {
+        panic!("lease provider must create a secondary instance");
+    };
 
     drop(driver);
 
@@ -263,21 +262,25 @@ impl Drop for LocalDriver {
 }
 
 impl Driver for LocalDriver {
-    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
-        self.cycle_wait = Some(cycle.max_wait());
-        Ok(())
-    }
-
-    fn waker(&self) -> Waker {
-        self.interrupt.clone()
-    }
-
     fn shutdown(mut self) -> Result<(), ShutdownError> {
         let _ = self.owned_resource.take();
         self.state.shutdown_calls.update(|calls| calls + 1);
         Ok(())
     }
 }
+
+impl PrimaryDriver for LocalDriver {
+    fn waker(&self) -> Waker {
+        self.interrupt.clone()
+    }
+
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
+        self.cycle_wait = Some(cycle.max_wait());
+        Ok(())
+    }
+}
+
+impl SecondaryDriver for LocalDriver {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TestContext(u8);
@@ -303,14 +306,11 @@ impl ThreadAware for TestProvider {
 
 impl DriverProvider for TestProvider {
     type Context = TestContext;
-    type Driver = LocalDriver;
+    type Primary = LocalDriver;
+    type Secondary = LocalDriver;
 
-    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
-        Ok(DriverInstance::new(
-            LocalDriver::new(Rc::default()),
-            TestContext(7),
-            DriverRole::Secondary,
-        ))
+    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Primary, Self::Secondary, Self::Context>, DriverError> {
+        Ok(DriverInstance::secondary(LocalDriver::new(Rc::default()), TestContext(7)))
     }
 }
 
@@ -355,14 +355,14 @@ impl ThreadAware for LeaseProvider {
 
 impl DriverProvider for LeaseProvider {
     type Context = LeaseContext;
-    type Driver = LeaseDriver;
+    type Primary = LeaseDriver;
+    type Secondary = LeaseDriver;
 
-    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+    fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Primary, Self::Secondary, Self::Context>, DriverError> {
         let state = Arc::default();
-        Ok(DriverInstance::new(
+        Ok(DriverInstance::secondary(
             LeaseDriver::new(Arc::clone(&state)),
             LeaseContext { state },
-            DriverRole::Secondary,
         ))
     }
 }
@@ -417,14 +417,6 @@ impl Drop for LeaseDriver {
 }
 
 impl Driver for LeaseDriver {
-    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
-        Ok(())
-    }
-
-    fn waker(&self) -> Waker {
-        Waker::noop().clone()
-    }
-
     fn shutdown(self) -> Result<(), ShutdownError> {
         const TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -458,6 +450,18 @@ impl Driver for LeaseDriver {
         Ok(())
     }
 }
+
+impl PrimaryDriver for LeaseDriver {
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
+    }
+
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+impl SecondaryDriver for LeaseDriver {}
 
 fn driver_options() -> DriverOptions {
     DriverOptions::new(

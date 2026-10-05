@@ -24,9 +24,8 @@ impl Cycle {
     /// Returns the maximum wait duration.
     ///
     /// A [primary driver](crate::DriverRole::Primary) may wait on its worker for up to this
-    /// duration. A [secondary driver](crate::DriverRole::Secondary) must return promptly from its
-    /// worker-local cycle and may use this value for work processed independently of the worker.
-    /// [`Duration::ZERO`] means no waiting.
+    /// duration. Secondary drivers do not receive a cycle callback. [`Duration::ZERO`] means no
+    /// waiting.
     #[must_use]
     pub const fn max_wait(&self) -> Duration {
         self.max_wait

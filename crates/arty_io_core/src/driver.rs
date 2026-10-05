@@ -13,39 +13,6 @@ use crate::{Cycle, DriverError, ShutdownError};
 /// Dropping a driver must always be memory-safe. State reachable through contexts, callbacks,
 /// observers, or wakers must remain valid independently of the driver.
 pub trait Driver: 'static {
-    /// Processes submissions and completions, optionally waiting for I/O.
-    ///
-    /// The runtime invokes secondaries before the primary. Only the primary may wait on the
-    /// worker, for up to [`Cycle::max_wait`]; a zero wait bound means no waiting. A secondary
-    /// must return promptly and may coordinate with other drivers or process completions on a
-    /// driver-owned background thread.
-    ///
-    /// Before publishing a context, the runtime runs a zero-wait cycle. In this initial call,
-    /// the driver must establish native notification and recheck work queued during construction.
-    ///
-    /// The driver must process a bounded batch. If serviceable work remains, it must arrange for
-    /// another cycle before returning. In-flight operations alone do not indicate serviceable
-    /// work.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if driver infrastructure fails, not if an individual I/O operation
-    /// fails. The runtime rolls back an unpublished driver/context pair on initialization
-    /// failure; during normal operation it reports the error and shuts down the worker's drivers.
-    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
-
-    /// Returns a waker that interrupts a pending completion wait.
-    ///
-    /// Wake-ups must be latched: a wake raised before a wait makes the next blocking wait return
-    /// promptly, including when the wake originates on the driver's owning worker. Waking ends
-    /// only the wait; pending completions still require processing.
-    ///
-    /// The returned waker may be called from any thread and remains safe to invoke after the
-    /// driver is dropped. It must return promptly without joining work or waiting for a lock held
-    /// by the completion path.
-    #[must_use]
-    fn waker(&self) -> Waker;
-
     /// Closes admission and blocks for a bounded time while draining driver resources.
     ///
     /// Drain active operations, callbacks, and observers, or return an error. Context handles
@@ -68,3 +35,43 @@ pub trait Driver: 'static {
     where
         Self: Sized;
 }
+
+/// A driver whose completions are polled by the runtime worker.
+pub trait PrimaryDriver: Driver {
+    /// Returns a waker that interrupts a pending completion wait.
+    ///
+    /// Wake-ups must be latched: a wake raised before a wait makes the next blocking wait return
+    /// promptly, including when the wake originates on the driver's owning worker. Waking ends
+    /// only the wait; pending completions still require processing.
+    ///
+    /// The returned waker may be called from any thread and remains safe to invoke after the
+    /// driver is dropped. It must return promptly without joining work or waiting for a lock held
+    /// by the completion path.
+    #[must_use]
+    fn waker(&self) -> Waker;
+
+    /// Processes submissions and completions, optionally waiting for I/O.
+    ///
+    /// The runtime polls the primary after registration and may wait on the worker for up to
+    /// [`Cycle::max_wait`]; a zero wait bound means no waiting.
+    ///
+    /// Before publishing a context, the runtime runs a zero-wait cycle. In this initial call,
+    /// the driver must establish native notification and recheck work queued during construction.
+    ///
+    /// The driver must process a bounded batch. If serviceable work remains, it must arrange for
+    /// another cycle before returning. In-flight operations alone do not indicate serviceable
+    /// work.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if driver infrastructure fails, not if an individual I/O operation
+    /// fails. The runtime rolls back an unpublished driver/context pair on initialization
+    /// failure; during normal operation it reports the error and shuts down the worker's drivers.
+    fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
+}
+
+/// A driver whose completions are serviced independently of the runtime polling loop.
+///
+/// Secondary drivers do not currently receive runtime cycle callbacks. They must coordinate with
+/// other drivers or process completions continuously on a driver-owned background thread.
+pub trait SecondaryDriver: Driver {}

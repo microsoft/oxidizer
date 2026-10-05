@@ -29,11 +29,12 @@ describes the lifecycle; the no-op example wakers do not implement coordination.
   the system task spawner.
 - `DriverOptions::allowed_roles()` is the runtime's permission set, not the
   final role.
-  The provider returns the driver's selected role in
-  `DriverInstance::role`. A worker has at most one primary, and the runtime
-  enforces the permission and primary-capacity rules for that selection.
-- Before publishing a context, the runtime completes a separate cycle with
-  `max_wait = Duration::ZERO`.
+  The provider returns either the `Primary` or `Secondary` variant of
+  `DriverInstance`. A worker has at most one primary, and the runtime enforces
+  the permission and primary-capacity rules for that selection.
+- Before publishing a primary context, the runtime completes a separate cycle
+  with `max_wait = Duration::ZERO`. Secondary drivers do not receive cycle
+  callbacks.
 - Providers choose whether instances share queues, memory, or threads.
 
 ## R4: Driver-owned execution strategy
@@ -42,13 +43,14 @@ describes the lifecycle; the no-op example wakers do not implement coordination.
   `&mut self`; drivers need not be `Send` or `Sync`.
 - `Driver` remains dyn-compatible; consuming `shutdown` is not callable through
   `dyn Driver`. A private owning shim may adapt it for erased storage.
-- Secondaries run before the primary. Only the primary may wait on the worker,
-  for up to `max_wait`; a zero wait bound means no waiting.
+- Only primary drivers are polled. A primary may wait on the worker, for up to
+  `max_wait`; a zero wait bound means no waiting.
 - `Cycle` exposes only `max_wait` through `Cycle::new(max_wait)` and
   `max_wait()`. It is passed as `&mut Cycle`, is not `Copy` or `Clone`, and is
   deliberately neither `Send` nor `Sync`.
-- `Driver::waker()` supplies the driver's notification path to the runtime.
-  Completion processing uses it to wake a worker that may be waiting.
+- `PrimaryDriver::waker()` supplies the primary driver's notification path to
+  the runtime. Completion processing uses it to wake a worker that may be
+  waiting.
 - Secondary drivers return promptly. They either coordinate completion
   processing with another driver and its wait/notification path, or continuously
   process completions on independent driver-owned background execution.
@@ -67,11 +69,10 @@ describes the lifecycle; the no-op example wakers do not implement coordination.
 - Waking the runtime is not completion processing. A driver must retain
   ownership of the state needed to drain completions until that processing is
   complete.
-- The runtime invokes each driver at most once per logical cycle in its role
-  order and does not insert a new cycle between driver calls. A secondary
-  therefore cannot rely on a later invocation to process completions while the
-  primary is waiting; it must use coordination or independent background
-  processing as specified in R4.
+- The runtime invokes the primary at most once per logical cycle. A secondary
+  cannot rely on a later invocation to process completions while the primary is
+  waiting; it must use coordination or independent background processing as
+  specified in R4.
 - After a driver is dropped or shut down, its retained notification state must
   not access released driver resources.
 

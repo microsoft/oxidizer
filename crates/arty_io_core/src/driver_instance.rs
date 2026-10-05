@@ -1,29 +1,49 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::DriverRole;
+use crate::{PrimaryDriver, SecondaryDriver};
 
 /// One worker-local driver, its consumer context, and the role selected by the driver.
 ///
 /// The driver chooses its role from the permission supplied by
 /// [`DriverOptions::allowed_roles`](crate::DriverOptions::allowed_roles). A driver may choose
-/// [`DriverRole::Secondary`] when the runtime permits [`DriverRole::Primary`], but the runtime
-/// rejects a primary driver when primary execution was not permitted.
+/// [`DriverRole::Secondary`] when the runtime permits [`DriverRole::Primary`].
 #[derive(Debug)]
 #[non_exhaustive]
 #[must_use = "the runtime must initialize and register the driver"]
-pub struct DriverInstance<D, C> {
-    /// The worker-local driver.
-    pub driver: D,
-    /// The consumer-facing context associated with the driver.
-    pub context: C,
-    /// The role selected by the driver.
-    pub role: DriverRole,
+pub enum DriverInstance<P, S, C>
+where
+    P: PrimaryDriver,
+    S: SecondaryDriver,
+{
+    /// A driver polled by the runtime worker.
+    Primary {
+        /// The worker-local primary driver.
+        driver: P,
+        /// The consumer-facing context associated with the driver.
+        context: C,
+    },
+    /// A driver serviced independently of the runtime polling loop.
+    Secondary {
+        /// The worker-local secondary driver.
+        driver: S,
+        /// The consumer-facing context associated with the driver.
+        context: C,
+    },
 }
 
-impl<D, C> DriverInstance<D, C> {
-    /// Creates a driver instance with the selected `role`.
-    pub const fn new(driver: D, context: C, role: DriverRole) -> Self {
-        Self { driver, context, role }
+impl<P, S, C> DriverInstance<P, S, C>
+where
+    P: PrimaryDriver,
+    S: SecondaryDriver,
+{
+    /// Creates a primary driver instance.
+    pub const fn primary(driver: P, context: C) -> Self {
+        Self::Primary { driver, context }
+    }
+
+    /// Creates a secondary driver instance.
+    pub const fn secondary(driver: S, context: C) -> Self {
+        Self::Secondary { driver, context }
     }
 }

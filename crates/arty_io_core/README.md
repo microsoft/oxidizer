@@ -21,49 +21,50 @@ the interfaces between them, but provides neither a runtime nor an I/O implement
 ## How drivers work
 
 Applications access a driver’s I/O operations through an [`IoContext`][__link0]. Its [`DriverProvider`][__link1]
-creates a [`DriverInstance`][__link2] containing a context, a worker-local [`Driver`][__link3], and the driver’s
-selected role for each runtime worker. The driver processes submissions and completions in
-bounded calls to [`Driver::execute_cycle`][__link4].
+creates a [`DriverInstance`][__link2] containing a context and either a worker-local
+[`PrimaryDriver`][__link3] or [`SecondaryDriver`][__link4] for each runtime worker. The runtime polls only the
+primary driver.
 
-The runtime supplies role permissions through [`DriverOptions::allowed_roles`][__link5]. The provider records
-the driver’s selected role in [`DriverInstance::role`][__link6]. A driver also supplies its notification
-path through [`Driver::waker`][__link7].
+The runtime supplies role permissions through [`DriverOptions::allowed_roles`][__link5], and the
+provider selects the enum variant returned by [`DriverProvider::create`][__link6]. Primary drivers
+supply the notification path used to interrupt their waits through [`PrimaryDriver::waker`][__link7].
 
 ### Primary and secondary drivers
 
-A worker has at most one [`Primary`][__link8] driver. It may wait on the worker for
-up to [`Cycle::max_wait`][__link9]; a zero wait bound means no waiting.
+A worker has at most one [`Primary`][__link8] driver. The runtime polls it with a
+mutable [`Cycle`][__link9] and it may wait on the worker for up to [`Cycle::max_wait`][__link10]; a zero wait
+bound means no waiting.
 
-[`Secondary`][__link10] drivers must return promptly. They coordinate completion
-processing with another driver and its wait/notification path, or continuously process
-completions on independent driver-owned background execution.
+[`Secondary`][__link11] drivers do not receive runtime cycle callbacks. They
+coordinate completion processing with the primary or continuously process completions on
+independent driver-owned background execution.
 
 ## Runtime responsibilities
 
-The runtime clones and relocates providers to their workers, supplies [`DriverOptions`][__link11], and
-validates each returned [`DriverInstance`][__link12]. It completes a non-blocking, zero-wait
+The runtime clones and relocates providers to their workers, supplies [`DriverOptions`][__link12], and
+validates each returned [`DriverInstance`][__link13]. It completes a non-blocking, zero-wait
 initialization cycle before publishing a context.
-It also supplies a [`SystemTaskSpawner`][__link13] for blocking system work.
+It also supplies a [`SystemTaskSpawner`][__link14] for blocking system work.
 
-Each logical cycle passes a mutable [`Cycle`][__link14] containing only its wait bound. `Cycle` is not
-`Send` or `Sync`, and the runtime invokes secondaries before the primary. If there is no
-primary, the runtime retains responsibility for parking the worker.
+Each logical cycle passes a mutable [`Cycle`][__link15] containing only its wait bound to the primary.
+`Cycle` is not `Send` or `Sync`. If there is no primary, the runtime retains responsibility
+for parking the worker.
 
 ## Shutdown
 
-The runtime stops normal cycles and calls [`Driver::shutdown`][__link15] for every driver, continuing
-after a [`ShutdownError`][__link16]. Each driver closes admission and drains its resources within a
+The runtime stops normal cycles and calls [`Driver::shutdown`][__link16] for every driver, continuing
+after a [`ShutdownError`][__link17]. Each driver closes admission and drains its resources within a
 bounded wait, independently of other drivers on the same worker. Contexts remain valid as
 closed handles.
 
 ## Example and reference
 
-The [single-thread runtime example][__link17] demonstrates registration and driver roles. Its sample
+The [single-thread runtime example][__link18] demonstrates registration and driver roles. Its sample
 drivers perform no I/O; a runtime serving native I/O must implement the coordination described
 above.
 
-* [Requirements][__link18]
-* [Design][__link19]
+* [Requirements][__link19]
+* [Design][__link20]
 
 
 <hr/>
@@ -71,24 +72,25 @@ above.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbMuG80Str6V0b1BYECLELUJ4bkM9NXozntwAb5Q5G3z_CzgxhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbWO6B_-SmNH8bsTdZTEXE340baih8L_fVlDYbCW-mVJKfYOJhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider
- [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary
- [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
- [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
- [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle
- [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
- [__link17]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
- [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
- [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
+ [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary
+ [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
+ [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
+ [__link14]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SystemTaskSpawner
+ [__link15]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle
+ [__link16]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
+ [__link17]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=ShutdownError
+ [__link18]: https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core/examples/single_thread_runtime
+ [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
- [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
- [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
+ [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+ [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PrimaryDriver
+ [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=SecondaryDriver
  [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions::allowed_roles
- [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance::role
- [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
+ [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverProvider::create
+ [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=PrimaryDriver::waker
  [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
- [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
+ [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle

@@ -3,7 +3,7 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverError, DriverInstance, DriverOptions, IoContext};
+use crate::{DriverError, DriverInstance, DriverOptions, IoContext, PrimaryDriver, SecondaryDriver};
 
 /// A factory for a [`Driver`] and [`IoContext`] pair on each runtime worker.
 ///
@@ -13,8 +13,11 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// The context type associated with this provider.
     type Context: IoContext<Provider = Self>;
 
-    /// The driver type created by this provider.
-    type Driver: Driver;
+    /// The primary driver type created by this provider.
+    type Primary: PrimaryDriver;
+
+    /// The secondary driver type created by this provider.
+    type Secondary: SecondaryDriver;
 
     /// Creates a driver and context for the worker described by `options`.
     ///
@@ -22,16 +25,16 @@ pub trait DriverProvider: Clone + ThreadAware + Sized + 'static {
     /// without waiting for another runtime worker. The context may outlive the driver and must
     /// reject operations after admission closes.
     ///
-    /// Returns a [`DriverInstance`] whose role must be
-    /// [`DriverRole::Secondary`](crate::DriverRole::Secondary), or
-    /// [`DriverRole::Primary`](crate::DriverRole::Primary) when
-    /// `options.allowed_roles()` permits it.
-    /// The provider must not publish the context. The runtime first completes a zero-wait
-    /// [`Driver::execute_cycle`] to establish notification and finish initialization.
+    /// Returns a [`DriverInstance::Secondary`](crate::DriverInstance::Secondary), or a
+    /// [`DriverInstance::Primary`](crate::DriverInstance::Primary) when
+    /// `options.allowed_roles()` permits it. The provider must not publish the context. The
+    /// runtime first completes a zero-wait [`PrimaryDriver::execute_cycle`](crate::PrimaryDriver::execute_cycle)
+    /// to establish notification and finish primary initialization.
     ///
     /// # Errors
     ///
     /// Returns an error if initialization fails. Partial state must be safe to drop, with no context
     /// published; the runtime rolls back the pair.
-    fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError>;
+    #[expect(clippy::type_complexity, reason = "the result keeps the role-specific driver types strongly typed")]
+    fn create(self, options: DriverOptions) -> Result<DriverInstance<Self::Primary, Self::Secondary, Self::Context>, DriverError>;
 }

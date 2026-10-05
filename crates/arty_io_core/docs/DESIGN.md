@@ -22,8 +22,8 @@ Application code uses a handle rather than calling the worker's driver directly.
 | --- | --- |
 | `IoContext` | The application's handle to the I/O library's operations. |
 | `DriverProvider` | Creates a `DriverInstance` on each worker. |
-| `DriverInstance` | Packages the worker-local driver, context, and driver's selected role. |
-| `Driver` | The worker-local part that processes submissions and completions. |
+| `DriverInstance` | Selects a primary or secondary worker-local driver and its context. |
+| `Driver` | The shared lifecycle base for both driver kinds. |
 | Runtime | Gives drivers turns and coordinates when the worker may wait or continue. |
 
 Contexts can outlive drivers. The runtime calls each driver with exclusive
@@ -43,21 +43,21 @@ see a half-initialized driver.
 
 The runtime passes `DriverOptions::allowed_roles()` as a role permission set to
 the provider.
-The returned `DriverInstance::role` is the driver's selected role; it is not a
-second runtime assignment. The runtime accepts only a selection permitted by
+The returned `DriverInstance` variant is the driver's selected role; it is not
+a second runtime assignment. The runtime accepts only a selection permitted by
 the worker's capacity and the provider's permission. Later requests reuse the
 registration. Concrete context types distinguish registrations, allowing
 different driver versions to coexist.
 
 ### Give every driver a turn before sleeping
 
-A logical cycle is one coordinated pass across the drivers. The runtime passes
-each driver a mutable `Cycle` containing its wait bound. At registration, the
-runtime permits at most one driver to select **primary**. **Secondaries** run
-first and return promptly; the primary runs last and may wait up to the
-runtime's wait bound. A zero bound means no waiting. Without a primary,
-parking remains the runtime's responsibility. `Cycle` is deliberately
-non-`Send` and non-`Sync` so the mutable cycle stays on the owning worker.
+A logical cycle polls the primary driver with a mutable `Cycle` containing its
+wait bound. At registration, the runtime permits at most one driver to select
+**primary**. Secondary drivers do not receive cycle callbacks; they coordinate
+with the primary or use independent background execution. A zero bound means
+no waiting. Without a primary, parking remains the runtime's responsibility.
+`Cycle` is deliberately non-`Send` and non-`Sync` so it stays on the owning
+worker.
 
 Bounded batches keep one driver from monopolizing the worker. Immediately
 serviceable work requests another cycle; unfinished I/O alone does not, avoiding
@@ -69,13 +69,11 @@ Suppose the file driver has a completion while the primary network driver
 waits on the worker. The file driver must make that completion visible without
 depending on an unrelated network event.
 
-The runtime obtains the driver's notification path from `Driver::waker()`.
-A secondary can coordinate its completion source with the primary's native wait
-and use that path to wake the worker. Alternatively, it can continuously drain
-completions on independent driver-owned background execution and use its waker
-to notify the runtime. A secondary must return promptly from its worker-local
-`execute_cycle`; merely leaving a completion for the next cycle is not enough
-when the primary can block.
+The runtime obtains the primary driver's notification path from
+`PrimaryDriver::waker()`. A secondary can coordinate its completion source with
+the primary's native wait and use that path to wake the worker. Alternatively,
+it can continuously drain completions on independent driver-owned background
+execution. Secondary drivers do not participate in the runtime polling loop.
 
 Waking the worker does not itself drain a native completion queue. The driver
 retains ownership of the state needed to process completions, and its next

@@ -9,7 +9,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use arty_io_core::{
-    Cycle, Driver, DriverError, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError, SystemTaskSpawner,
+    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, PrimaryDriver, ProviderOptions,
+    SecondaryDriver, ShutdownError, SystemTaskSpawner,
 };
 use thread_aware_core::{Thread, ThreadAware};
 
@@ -26,18 +27,35 @@ trait ErasedDriver {
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError>;
 }
 
-struct RegisteredDriver<D> {
+struct RegisteredPrimary<D> {
     driver: D,
-    role: DriverRole,
 }
 
-impl<D: Driver> ErasedDriver for RegisteredDriver<D> {
+impl<D: PrimaryDriver> ErasedDriver for RegisteredPrimary<D> {
     fn role(&self) -> DriverRole {
-        self.role
+        DriverRole::Primary
     }
 
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
         self.driver.execute_cycle(cycle)
+    }
+
+    fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
+        Driver::shutdown(self.driver)
+    }
+}
+
+struct RegisteredSecondary<D> {
+    driver: D,
+}
+
+impl<D: SecondaryDriver> ErasedDriver for RegisteredSecondary<D> {
+    fn role(&self) -> DriverRole {
+        DriverRole::Secondary
+    }
+
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+        Ok(())
     }
 
     fn shutdown(self: Box<Self>) -> Result<(), ShutdownError> {
@@ -113,18 +131,9 @@ impl Runtime {
             let options = driver_options(worker, spawner, drivers);
             let primary_permitted = options.allowed_roles().contains(&DriverRole::Primary);
             provider.relocate(None, options.thread());
-            let result = provider.create(options).and_then(|creation| {
-                let role = creation.role;
-                let driver = creation.driver;
-                let context = creation.context;
-                if role == DriverRole::Primary && !primary_permitted {
-                    return Err(DriverError::from_message("driver selected primary without permission"));
-                }
-                let mut driver = driver;
-                driver.execute_cycle(&mut Cycle::new(Duration::ZERO))?;
-                register_driver(drivers, driver, role);
-                Ok(context)
-            });
+            let result = provider
+                .create(options)
+                .and_then(|creation| register_instance(drivers, creation, primary_permitted));
             let _ = reply_tx.send(result);
         })?;
         reply_rx
@@ -176,15 +185,53 @@ fn driver_options(worker: &Thread, spawner: &SystemTaskSpawner, drivers: &Driver
     DriverOptions::new(worker.clone(), spawner.clone(), allowed_roles)
 }
 
-fn register_driver<D: Driver>(drivers: &mut DriverStore, driver: D, role: DriverRole) {
-    drivers.push(Box::new(RegisteredDriver { driver, role }));
+fn register_instance<P, S, C>(
+    drivers: &mut DriverStore,
+    creation: DriverInstance<P, S, C>,
+    primary_permitted: bool,
+) -> Result<C, DriverError>
+where
+    P: PrimaryDriver,
+    S: SecondaryDriver,
+{
+    match creation {
+        DriverInstance::Primary { mut driver, context } => {
+            if !primary_permitted {
+                return Err(DriverError::from_message("driver selected primary without permission"));
+            }
+            driver.execute_cycle(&mut Cycle::new(Duration::ZERO))?;
+            register_primary_driver(drivers, driver);
+            Ok(context)
+        }
+        DriverInstance::Secondary { driver, context } => {
+            register_secondary_driver(drivers, driver);
+            Ok(context)
+        }
+        _ => Err(DriverError::from_message("driver returned an unsupported instance variant")),
+    }
+}
+
+fn register_primary_driver<D: PrimaryDriver>(drivers: &mut DriverStore, driver: D) {
+    drivers.push(Box::new(RegisteredPrimary { driver }));
+}
+
+fn register_secondary_driver<D: SecondaryDriver>(drivers: &mut DriverStore, driver: D) {
+    drivers.push(Box::new(RegisteredSecondary { driver }));
+}
+
+#[cfg(test)]
+fn register_driver<D>(drivers: &mut DriverStore, driver: D, role: DriverRole)
+where
+    D: PrimaryDriver + SecondaryDriver,
+{
+    match role {
+        DriverRole::Primary => register_primary_driver(drivers, driver),
+        DriverRole::Secondary => register_secondary_driver(drivers, driver),
+    }
 }
 
 fn execute_driver_cycle(drivers: &mut DriverStore) -> Result<(), DriverError> {
     let mut cycle = Cycle::new(Duration::ZERO);
-    for driver in drivers.iter_mut().filter(|driver| driver.role() == DriverRole::Secondary) {
-        driver.execute_cycle(&mut cycle)?;
-    }
     if let Some(primary) = drivers.iter_mut().find(|driver| driver.role() == DriverRole::Primary) {
         primary.execute_cycle(&mut cycle)?;
     }
@@ -225,7 +272,8 @@ mod tests {
     use std::task::Waker;
 
     use arty_io_core::{
-        Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, ProviderOptions, ShutdownError,
+        Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverProvider, DriverRole, IoContext, PrimaryDriver, ProviderOptions,
+        SecondaryDriver, ShutdownError,
     };
     use thread_aware_core::{Thread, ThreadAware};
 
@@ -269,9 +317,10 @@ mod tests {
 
     impl DriverProvider for BlockingCloneProvider {
         type Context = BlockingCloneContext;
-        type Driver = SampleDriver;
+        type Primary = SampleDriver;
+        type Secondary = crate::drivers::EchoDriver;
 
-        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Primary, Self::Secondary, Self::Context>, DriverError> {
             panic!("the fixture context is inserted directly into the cache");
         }
     }
@@ -300,10 +349,11 @@ mod tests {
 
     impl DriverProvider for PrimaryOnlyProvider {
         type Context = PrimaryOnlyContext;
-        type Driver = SampleDriver;
+        type Primary = SampleDriver;
+        type Secondary = crate::drivers::EchoDriver;
 
-        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
-            Ok(DriverInstance::new(SampleDriver, PrimaryOnlyContext, DriverRole::Primary))
+        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Primary, Self::Secondary, Self::Context>, DriverError> {
+            Ok(DriverInstance::primary(SampleDriver, PrimaryOnlyContext))
         }
     }
 
@@ -315,18 +365,6 @@ mod tests {
     }
 
     impl Driver for ShutdownProbe {
-        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
-            if self.fail_cycle {
-                Err(DriverError::from_message(format!("{} cycle failed", self.name)))
-            } else {
-                Ok(())
-            }
-        }
-
-        fn waker(&self) -> Waker {
-            Waker::noop().clone()
-        }
-
         fn shutdown(self) -> Result<(), ShutdownError> {
             self.shutdowns.lock().unwrap().push(self.name);
             if self.fail_shutdown {
@@ -336,6 +374,22 @@ mod tests {
             }
         }
     }
+
+    impl PrimaryDriver for ShutdownProbe {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            if self.fail_cycle {
+                Err(DriverError::from_message(format!("{} cycle failed", self.name)))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl SecondaryDriver for ShutdownProbe {}
 
     #[test]
     fn primary_permission_rejects_a_second_primary_registration() {
@@ -386,41 +440,35 @@ mod tests {
 
     #[test]
     fn cycle_errors_shut_down_all_drivers_and_preserve_the_cause() {
-        for failing_role in [DriverRole::Primary, DriverRole::Secondary] {
-            for fail_shutdown in [false, true] {
-                let runtime = Runtime::start();
-                let shutdowns = Arc::new(Mutex::new(Vec::new()));
-                let recorded = Arc::clone(&shutdowns);
-                runtime
-                    .run(move |_, _, drivers| {
-                        for (name, role) in [
-                            ("primary", DriverRole::Primary),
-                            ("secondary", DriverRole::Secondary),
-                            ("remaining", DriverRole::Secondary),
-                        ] {
-                            register_driver(
-                                drivers,
-                                ShutdownProbe {
-                                    name,
-                                    shutdowns: Arc::clone(&recorded),
-                                    fail_cycle: role == failing_role && name != "remaining",
-                                    fail_shutdown,
-                                },
-                                role,
-                            );
-                        }
-                    })
-                    .unwrap();
+        for fail_shutdown in [false, true] {
+            let runtime = Runtime::start();
+            let shutdowns = Arc::new(Mutex::new(Vec::new()));
+            let recorded = Arc::clone(&shutdowns);
+            runtime
+                .run(move |_, _, drivers| {
+                    for (name, role) in [
+                        ("primary", DriverRole::Primary),
+                        ("secondary", DriverRole::Secondary),
+                        ("remaining", DriverRole::Secondary),
+                    ] {
+                        register_driver(
+                            drivers,
+                            ShutdownProbe {
+                                name,
+                                shutdowns: Arc::clone(&recorded),
+                                fail_cycle: role == DriverRole::Primary,
+                                fail_shutdown,
+                            },
+                            role,
+                        );
+                    }
+                })
+                .unwrap();
 
-                let error = runtime.shutdown().unwrap_err();
-                let expected_error = match failing_role {
-                    DriverRole::Primary => "primary cycle failed",
-                    DriverRole::Secondary => "secondary cycle failed",
-                };
+            let error = runtime.shutdown().unwrap_err();
 
-                assert_eq!(error.downcast_ref::<DriverError>().unwrap().to_string(), expected_error);
-                assert_eq!(*shutdowns.lock().unwrap(), ["secondary", "remaining", "primary"]);
-            }
+            assert_eq!(error.downcast_ref::<DriverError>().unwrap().to_string(), "primary cycle failed");
+            assert_eq!(*shutdowns.lock().unwrap(), ["secondary", "remaining", "primary"]);
         }
     }
 

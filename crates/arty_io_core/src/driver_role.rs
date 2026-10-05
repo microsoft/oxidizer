@@ -11,10 +11,9 @@ pub enum DriverRole {
     /// after all secondaries and may wait for up to [`Cycle::max_wait`](crate::Cycle::max_wait).
     /// A zero wait bound means no waiting.
     Primary,
-    /// A driver whose worker-local cycle must not block.
+    /// A driver that is not polled by the runtime.
     ///
-    /// The runtime invokes this driver before the primary.
-    /// The driver must not block its worker. It may coordinate with another driver or process
-    /// completions continuously on a driver-owned background thread.
+    /// It must coordinate with the primary or process completions continuously on a driver-owned
+    /// background thread.
     Secondary,
 }
