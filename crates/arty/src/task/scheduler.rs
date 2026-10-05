@@ -392,11 +392,64 @@ impl AsRef<Self> for TaskScheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
     fn assert_send_sync() {
         static_assertions::assert_impl_all!(TaskScheduler: Send, Sync);
+    }
+
+    #[test]
+    fn worker_execution_registers_the_current_scheduler() {
+        let runtime = crate::runtime::Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let registered = runtime
+            .scheduler()
+            .block_on(async |_| CURRENT_WORKER.with_borrow(Option::is_some))
+            .unwrap();
+
+        assert!(registered);
+        runtime.stop().unwrap();
+    }
+
+    #[test]
+    fn current_scheduler_is_cleared_before_cancelled_futures_drop() {
+        struct DropProbe(mpsc::Sender<bool>);
+
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                let cleared = CURRENT_WORKER.with_borrow(Option::is_none);
+                self.0.send(cleared).unwrap();
+            }
+        }
+
+        let runtime = crate::runtime::Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (cleared_tx, cleared_rx) = mpsc::channel();
+
+        runtime
+            .scheduler()
+            .block_on(async move |cx| {
+                let task = cx.scheduler().spawn(move |_| async move {
+                    started_tx.send(()).unwrap();
+                    let _probe = DropProbe(cleared_tx);
+                    std::future::pending::<()>().await;
+                });
+                drop(task);
+            })
+            .unwrap();
+
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.stop().unwrap();
+        assert!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap());
     }
 
     #[cfg(not(miri))]

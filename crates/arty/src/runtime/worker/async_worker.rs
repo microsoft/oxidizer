@@ -690,4 +690,24 @@ mod tests {
         assert!(!initialized.load(Ordering::Relaxed));
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
     }
+
+    #[test]
+    fn queued_factory_drop_panics_are_contained() {
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("queued factory drop");
+            }
+        }
+
+        let panic_on_drop = PanicOnDrop;
+        let command = AsyncWorkerCommand::<()>::EnqueueTask {
+            future_factory: Some(Box::new(move |(), _: &TaskSet| {
+                let _panic_on_drop = panic_on_drop;
+            })),
+        };
+
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(command))).unwrap();
+    }
 }
