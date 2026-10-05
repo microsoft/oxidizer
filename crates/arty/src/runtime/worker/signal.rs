@@ -16,6 +16,10 @@ pub(in crate::runtime) struct WorkerSignal {
     ready: Condvar,
 }
 
+fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
+    timed_out && elapsed >= timeout
+}
+
 impl WorkerSignal {
     pub(in crate::runtime) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
@@ -27,7 +31,7 @@ impl WorkerSignal {
             }
             let (guard, elapsed) = self.ready.wait_timeout(notified, remaining);
             notified = guard;
-            if elapsed.timed_out() && start.elapsed() >= timeout {
+            if should_finish_wait(elapsed.timed_out(), start.elapsed(), timeout) {
                 break;
             }
         }
@@ -99,6 +103,14 @@ mod tests {
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
         assert!(!*signal.notified.lock());
+    }
+
+    #[test]
+    fn wait_timeout_decision_requires_both_expiration_and_deadline() {
+        let timeout = Duration::from_millis(20);
+        assert!(!should_finish_wait(false, timeout, timeout));
+        assert!(!should_finish_wait(true, timeout.saturating_sub(Duration::from_millis(1)), timeout));
+        assert!(should_finish_wait(true, timeout, timeout));
     }
 
     #[test]
