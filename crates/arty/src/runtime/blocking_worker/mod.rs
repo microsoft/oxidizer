@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -14,6 +15,7 @@ use performables::sync::mutex::Mutex;
 use threadpool::ThreadPool;
 
 use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
+use crate::task::execution::discard_panic;
 use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
 
@@ -75,7 +77,9 @@ impl BlockingWorker {
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
             if shutdown.load(Ordering::Acquire) {
-                drop(task);
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(task))) {
+                    discard_panic(panic);
+                }
                 return;
             }
             task();

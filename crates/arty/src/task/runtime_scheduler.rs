@@ -126,6 +126,9 @@ impl RuntimeScheduler {
         if is_flagged() {
             return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
+        if self.dispatcher.is_current_blocking_task() {
+            return Err(Error::new("block_on cannot be called from an Arty blocking callback"));
+        }
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
         let (completion, destroyed) = channel::unbounded();
