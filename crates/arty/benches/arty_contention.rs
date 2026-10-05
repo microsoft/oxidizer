@@ -106,12 +106,14 @@ impl ArtyCase {
         for handle in &mut handles {
             *handle = Some(scheduler.spawn_anywhere(self.cache.clone(), arty_outer));
         }
-        for handle in handles {
-            let Some(handle) = handle else {
-                unreachable!("all benchmark outer task slots are filled");
-            };
-            black_box(handle.wait().expect("benchmark outer task finishes before shutdown"));
-        }
+        futures::executor::block_on(async move {
+            for handle in handles {
+                let Some(handle) = handle else {
+                    unreachable!("all benchmark outer task slots are filled");
+                };
+                black_box(handle.await.expect("benchmark outer task finishes before shutdown"));
+            }
+        });
         let elapsed = start.elapsed();
         elapsed
     }
@@ -161,12 +163,14 @@ impl TokioCase {
         for handle in &mut handles {
             *handle = Some(self.runtime.spawn(tokio_outer(self.cache.clone())));
         }
-        for handle in handles {
-            let Some(handle) = handle else {
-                unreachable!("all benchmark outer task slots are filled");
-            };
-            black_box(futures::executor::block_on(black_box(handle)).expect("benchmark outer task finishes before shutdown"));
-        }
+        futures::executor::block_on(async move {
+            for handle in handles {
+                let Some(handle) = handle else {
+                    unreachable!("all benchmark outer task slots are filled");
+                };
+                black_box(handle.await.expect("benchmark outer task finishes before shutdown"));
+            }
+        });
         let elapsed = start.elapsed();
         elapsed
     }
