@@ -41,6 +41,10 @@ exclude_re = [
     "impl data_privacy::RedactedToString",
 
     # Windows host only.
+    # File identity has only a constant fallback on Windows.
+    "^crates/metabench/src/arguments\\.rs:.*\\bmetadata_identifies_same_file\\b",
+    # The == comparison checks the Linux-only poll; the != acknowledgement check remains covered.
+    "^crates/metabench/src/perf\\.rs:.*replace == with != in Control::command$",
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
     "\\brun_perf\\b",

@@ -145,6 +145,7 @@ pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
 }
 
 #[cfg(miri)]
+#[cfg_attr(test, mutants::skip)] // Miri-only path is compiled out of native mutation runs.
 pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
     address.align_offset(alignment)
 }

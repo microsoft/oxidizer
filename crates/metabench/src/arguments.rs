@@ -350,6 +350,7 @@ fn metadata_identifies_same_file(left: &std::fs::Metadata, right: &std::fs::Meta
 }
 
 #[cfg(not(unix))]
+#[cfg_attr(test, mutants::skip)] // Constant fallback; file identity is checked only on Unix.
 fn metadata_identifies_same_file(_left: &std::fs::Metadata, _right: &std::fs::Metadata) -> bool {
     false
 }
@@ -767,6 +768,10 @@ mod tests {
             assert!(paths_alias(&report, &link));
         }
         assert!(!paths_alias(&report, &root.path().join("other.json")));
+
+        let distinct = root.path().join("distinct.json");
+        std::fs::write(&distinct, "{}").unwrap();
+        assert!(!paths_alias(&report, &distinct));
     }
 
     #[test]

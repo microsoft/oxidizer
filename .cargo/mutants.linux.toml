@@ -44,4 +44,8 @@ exclude_re = [
     "impl data_privacy::RedactedDebug",
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
+
+    # Linux host only.
+    # Command probes are Windows/macOS-only.
+    "^crates/metabench/src/report\\.rs:.*\\bcommand_value\\b",
 ]

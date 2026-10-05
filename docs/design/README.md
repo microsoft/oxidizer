@@ -68,6 +68,15 @@ their platform gates are applied across many implementation modules. This
 temporarily also skips their small non-Windows coverage anchors rather than
 maintaining a brittle list of every Windows-only file.
 
+In `metabench`, Linux skips Windows/macOS command probes; Windows skips the
+file-identity helper and only the Linux perf poll's equality mutation, retaining
+the generic command candidates. The constant non-Unix file-identity fallback
+and the Miri-only allocator alignment helper are annotated to skip mutation
+testing without renaming or moving their implementations. The native Unix
+file-identity and allocator alignment implementations remain mutation
+candidates. Helpers enabled by `cfg(any(test, ...))` remain mutation candidates
+on every test host.
+
 The `http_headers` and `http_headers_simd` crates are excluded from mutation
 testing through all three configurations. Their ordinary tests, coverage
 checks, and Miri checks remain enabled.
