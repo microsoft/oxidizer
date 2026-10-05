@@ -154,14 +154,12 @@ pub(crate) fn discard_panic(mut panic: Panic) {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Intentional process termination is covered by child-process contracts.
-fn abort_after_storage_drop_panic(panic: Panic) -> ! {
-    drop(panic);
+fn abort_after_storage_drop_panic(_panic: Panic) -> ! {
     std::process::abort();
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Intentional process termination is covered by child-process contracts.
-fn abort_after_repeated_payload_panic(panic: Panic) -> ! {
-    drop(panic);
+fn abort_after_repeated_payload_panic(_panic: Panic) -> ! {
     std::process::abort();
 }
 
