@@ -58,12 +58,17 @@ where
 {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
-        if !this.inner.is_live() {
-            return;
+        let result_tx = this.result_tx.take();
+        if this.inner.is_live() {
+            let _guard = this.parent_task_enrichment.apply_current_thread();
+            if let Err(panic) = this.inner.destroy_pinned() {
+                emit!(this.sink, TaskPanicked);
+                discard_panic(panic);
+            }
         }
-        let _guard = this.parent_task_enrichment.apply_current_thread();
-        if let Err(panic) = this.inner.destroy_pinned() {
-            emit!(this.sink, TaskPanicked);
+        if let Some(sender) = result_tx
+            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
+        {
             discard_panic(panic);
         }
     }

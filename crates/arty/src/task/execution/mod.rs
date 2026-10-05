@@ -15,3 +15,4 @@ mod storage;
 pub(super) use preparation::prepare_local;
 pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_blocking, prepare_remote, prepare_remote_on_worker};
 pub(super) use result::TaskResult;
+pub(crate) use storage::discard_panic;

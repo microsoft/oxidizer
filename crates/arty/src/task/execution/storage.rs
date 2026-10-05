@@ -13,7 +13,7 @@ use observed::{Sink, emit};
 
 use crate::runtime::telemetry::events::TaskPanicked;
 
-type Panic = Box<dyn Any + Send + 'static>;
+pub(crate) type Panic = Box<dyn Any + Send + 'static>;
 
 // An ordinary field cannot catch its own destructor panic. Pin<Box<T>> would
 // add an allocation to every task. ManuallyDrop keeps storage inline and lets
@@ -139,7 +139,7 @@ impl<F> Drop for TaskFactory<F> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
-pub(super) fn discard_panic(mut panic: Panic) {
+pub(crate) fn discard_panic(mut panic: Panic) {
     // Keep finite secondary-payload chains recoverable without allowing an
     // endlessly self-replacing destructor to monopolize a runtime worker.
     const MAX_DISPOSAL_ATTEMPTS: usize = 32;

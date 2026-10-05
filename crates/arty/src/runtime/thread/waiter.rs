@@ -10,6 +10,7 @@ use performables::sync::condition::Condvar;
 use performables::sync::mutex::{Mutex, MutexGuard};
 
 use crate::runtime::Error;
+use crate::task::execution::discard_panic;
 
 #[cfg_attr(test, mockall::automock)]
 pub(in crate::runtime) trait WaitForShutdown {
@@ -63,8 +64,11 @@ impl ThreadWaiter {
                     for worker in threads {
                         let worker_id = worker.thread().id();
                         // Worker panic diagnostics are emitted by the thread entry wrapper.
-                        if worker.join().is_err() && failed_worker.is_none() {
-                            failed_worker = Some(worker_id);
+                        if let Err(panic) = worker.join() {
+                            if failed_worker.is_none() {
+                                failed_worker = Some(worker_id);
+                            }
+                            discard_panic(panic);
                         }
                     }
                     *state.lock() = State::Completed(failed_worker);

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
+use arty::runtime::RuntimeOperations;
 use panic_support::{isolated, runtime};
 use thread_aware::Unaware;
 
@@ -98,6 +99,64 @@ fn local_panicking_join_waker_preserves_published_result() {
                 assert_eq!(*cx.local_scheduler().unwrap().spawn(async || std::rc::Rc::new(7)).await.unwrap(), 7);
             })
             .unwrap();
+        runtime.stop().unwrap();
+    });
+}
+
+#[test]
+fn remote_panicking_join_waker_on_cancellation_is_contained() {
+    isolated("remote_panicking_join_waker_on_cancellation_is_contained", || {
+        let runtime = runtime();
+        let join = runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { std::future::pending::<()>().await });
+        let mut join = pin!(join);
+        let notified = Arc::new(AtomicBool::new(false));
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(PanicWake {
+            notified: Arc::clone(&notified),
+            notifications: Arc::clone(&notifications),
+        }));
+        assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+        RuntimeOperations::from(&runtime).request_stop();
+        runtime.stop().unwrap();
+
+        assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_ready());
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+        assert!(notified.load(Ordering::SeqCst));
+    });
+}
+
+#[test]
+fn blocking_panicking_join_waker_is_contained() {
+    isolated("blocking_panicking_join_waker_is_contained", || {
+        let runtime = runtime();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let join = runtime.scheduler().spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            42
+        });
+        let mut join = pin!(join);
+        let notified = Arc::new(AtomicBool::new(false));
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(PanicWake {
+            notified: Arc::clone(&notified),
+            notifications: Arc::clone(&notifications),
+        }));
+        assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+        started_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+
+        let deadline = std::time::Instant::now() + testing_aids::TEST_TIMEOUT;
+        while !notified.load(Ordering::SeqCst) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(futures::executor::block_on(join).unwrap(), 42);
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
         runtime.stop().unwrap();
     });
 }

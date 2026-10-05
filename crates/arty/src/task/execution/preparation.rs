@@ -100,10 +100,14 @@ where
 
         match body_result {
             Ok(result) => {
-                result_tx.send(TaskResult::Completed(result));
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Completed(result)))) {
+                    crate::task::execution::discard_panic(panic);
+                }
             }
             Err(panic) => {
-                result_tx.send(TaskResult::Panicked(panic));
+                if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Panicked(panic)))) {
+                    crate::task::execution::discard_panic(disposal);
+                }
             }
         }
     };
@@ -120,7 +124,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::task::{Context, Poll, Waker};
+    use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::testing::new_guarded_executor;
     use arty_executor::{CycleOutcome, Executor};
@@ -199,6 +203,26 @@ mod tests {
             panic!("discarded local work must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    struct PanicWake;
+
+    impl Wake for PanicWake {
+        fn wake(self: Arc<Self>) {
+            panic!("join receiver notification");
+        }
+    }
+
+    #[test]
+    fn local_cancellation_contains_join_waker_panics() {
+        let sink = Sink::noop();
+        let (task, handle) = prepare_local(pending::<()>(), sink.transfer_context(), sink);
+        let mut handle = pin!(handle);
+        let waker = Waker::from(Arc::new(PanicWake));
+        let mut context = Context::from_waker(&waker);
+        assert!(handle.as_mut().poll(&mut context).is_pending());
+
+        catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     }
 
     #[test]
