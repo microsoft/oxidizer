@@ -238,9 +238,7 @@ where
                                 self.begin_shutdown();
                                 return false;
                             }
-                            future_factory
-                                .take()
-                                .expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
+                            future_factory.take().expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
                         }
                         AsyncWorkerCommand::Shutdown => {
                             self.begin_shutdown();
