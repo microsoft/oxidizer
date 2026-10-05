@@ -67,12 +67,12 @@ impl ThreadWaiter {
                             failed_worker = Some(worker_id);
                         }
                     }
-                    *state.lock_sync() = State::Completed(failed_worker);
+                    *state.lock() = State::Completed(failed_worker);
                     completed.notify_all();
                     return completion_result(failed_worker);
                 }
                 State::Joining => {
-                    state_guard = completed.wait_sync(state_guard);
+                    state_guard = completed.wait(state_guard);
                 }
                 State::Completed(failed_worker) => return completion_result(*failed_worker),
             }
@@ -83,7 +83,7 @@ impl ThreadWaiter {
 impl WaitForShutdown for ThreadWaiter {
     fn wait(&self) -> Result<(), Error> {
         let (state, _) = &*self.shared;
-        let state_guard = state.lock_sync();
+        let state_guard = state.lock();
         self.wait_locked(state_guard)
     }
 }
@@ -108,13 +108,13 @@ mod tests {
     fn joining_waits_for_completion_notification() {
         let waiter = ThreadWaiter::new(Vec::new());
         let (state, _) = &*waiter.shared;
-        let mut state_guard = state.lock_sync();
+        let mut state_guard = state.lock();
         *state_guard = State::Joining;
 
         let shared = Arc::clone(&waiter.shared);
         let completing = thread::spawn(move || {
             let (state, completed) = &*shared;
-            let mut state_guard = state.lock_sync();
+            let mut state_guard = state.lock();
             assert!(matches!(*state_guard, State::Joining));
             *state_guard = State::Completed(None);
             completed.notify_all();
@@ -123,7 +123,7 @@ mod tests {
         // Completion cannot acquire the mutex until the condition-variable wait releases it.
         waiter.wait_locked(state_guard).unwrap();
         completing.join().unwrap();
-        assert!(matches!(*state.lock_sync(), State::Completed(None)));
+        assert!(matches!(*state.lock(), State::Completed(None)));
         waiter.wait().unwrap();
     }
 

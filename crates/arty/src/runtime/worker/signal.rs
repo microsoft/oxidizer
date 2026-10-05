@@ -19,13 +19,13 @@ pub(in crate::runtime) struct WorkerSignal {
 impl WorkerSignal {
     pub(in crate::runtime) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
-        let mut notified = self.notified.lock_sync();
+        let mut notified = self.notified.lock();
         while !*notified {
             let remaining = timeout.saturating_sub(start.elapsed());
             if remaining.is_zero() {
                 break;
             }
-            let (guard, elapsed) = self.ready.wait_timeout_sync(notified, remaining);
+            let (guard, elapsed) = self.ready.wait_timeout(notified, remaining);
             notified = guard;
             if elapsed.timed_out() {
                 break;
@@ -40,7 +40,7 @@ impl WorkerSignal {
     }
 
     fn notify(&self) {
-        *self.notified.lock_sync() = true;
+        *self.notified.lock() = true;
         self.ready.notify_one();
     }
 }
@@ -69,9 +69,9 @@ mod tests {
     fn notification_before_wait_is_retained_and_consumed() {
         let signal = Arc::new(WorkerSignal::default());
         WorkerSignal::waker(&signal).wake();
-        assert!(*signal.notified.lock_sync());
+        assert!(*signal.notified.lock());
         signal.wait(Duration::ZERO);
-        assert!(!*signal.notified.lock_sync());
+        assert!(!*signal.notified.lock());
     }
 
     #[test]
@@ -98,7 +98,7 @@ mod tests {
         let start = std::time::Instant::now();
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
-        assert!(!*signal.notified.lock_sync());
+        assert!(!*signal.notified.lock());
     }
 
     #[test]

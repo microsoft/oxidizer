@@ -144,7 +144,7 @@ where
                     .set(ts)
                     .map_err(|__ts| ())
                     .expect("thread state initialized multiple times");
-                _ = thread_state_constructed_tx.send_sync(());
+                _ = thread_state_constructed_tx.send(());
             }
         });
 
@@ -324,9 +324,7 @@ mod tests {
         AsyncWorkerCommand::EnqueueTask {
             future_factory: Box::new(move |(), _| {
                 processed.fetch_add(1, Ordering::Relaxed);
-                sender
-                    .send_sync(replenishing_command(sender.clone(), Arc::clone(&processed)))
-                    .unwrap();
+                sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
             }),
         }
     }
@@ -357,7 +355,7 @@ mod tests {
                         drop(tasks.add(async move {
                             clock.delay(Duration::from_secs(1)).await;
                             timer_observer.store(true, Ordering::Relaxed);
-                            shutdown.send_sync(AsyncWorkerCommand::Shutdown).unwrap();
+                            shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
                         }));
                     },
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
@@ -368,13 +366,13 @@ mod tests {
             };
             let executor = worker.executor.as_ref().unwrap();
             let _ = executor.execute_cycle();
-            ready_rx.recv_sync().unwrap();
+            ready_rx.recv().unwrap();
             let _ = executor.execute_cycle();
             assert!(!task_done.load(Ordering::Relaxed));
             assert!(!timer_done.load(Ordering::Relaxed));
 
             command_tx
-                .send_sync(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
+                .send(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
                 .unwrap();
             proceed.send(());
             control.advance(Duration::from_secs(1));
@@ -404,7 +402,7 @@ mod tests {
         let worker = unsafe {
             AsyncWorker::new(
                 command_rx,
-                async move |_, clock| clock_tx.send_sync(clock).unwrap(),
+                async move |_, clock| clock_tx.send(clock).unwrap(),
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 InactiveClock::default(),
                 Arc::new(WorkerSignal::default()),
@@ -412,16 +410,16 @@ mod tests {
             )
         };
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
-        ready_rx.recv_sync().unwrap();
+        ready_rx.recv().unwrap();
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
-        let clock = clock_rx.recv_sync().unwrap();
+        let clock = clock_rx.recv().unwrap();
         let mut timer = clock.delay(Duration::from_millis(1));
         let waker = Waker::from(Arc::into_std_arc(Arc::new(PanicWake)));
         assert!(Pin::new(&mut timer).poll(&mut std::task::Context::from_waker(&waker)).is_pending());
         // Forgetting a timer is legal and avoids a second panic from the poisoned timer lock.
         std::mem::forget(timer);
         thread::sleep(Duration::from_millis(2));
-        command_tx.send_sync(AsyncWorkerCommand::Shutdown).unwrap();
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
 
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
         assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "final timer callback");
@@ -464,7 +462,7 @@ mod tests {
             let (inner_completed_tx, inner_completed_rx) = Event::boxed();
 
             command_tx
-                .send_sync(AsyncWorkerCommand::EnqueueTask {
+                .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Box::new({
                         move |cx: TestTaskContext, tasks: &TaskSet| {
                             drop(tasks.add(async move {
@@ -487,7 +485,7 @@ mod tests {
             inner_completed_rx.into_value().unwrap();
 
             // Test body completed. Now let's shut it down.
-            command_tx.send_sync(AsyncWorkerCommand::Shutdown).unwrap();
+            command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
 
             // Wait for the worker to finish. It is harmless to continue immediately but we wait
             // just in case some errors occurred during shutdown - in which case we want to panic here.
@@ -530,7 +528,7 @@ mod tests {
             });
 
             command_tx
-                .send_sync(AsyncWorkerCommand::EnqueueTask {
+                .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Box::new({
                         move |_: TestTaskContext, tasks: &TaskSet| {
                             drop(tasks.add(async move {
@@ -541,12 +539,12 @@ mod tests {
                 })
                 .unwrap();
 
-            constructed_rx.recv_sync().unwrap();
+            constructed_rx.recv().unwrap();
             spawned_completed_rx.await.unwrap();
             initial_completed_rx.into_value().unwrap();
 
             // Tasks worked fine. Now let's shut it down.
-            command_tx.send_sync(AsyncWorkerCommand::Shutdown).unwrap();
+            command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
 
             // Wait for the worker to finish. It is harmless to continue immediately but we wait
             // just in case some errors occurred during shutdown - in which case we want to panic here.
@@ -584,12 +582,12 @@ mod tests {
             execute_or_terminate_process(move || worker.run());
         });
 
-        command_tx.send_sync(AsyncWorkerCommand::Shutdown).unwrap();
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
 
         let (completed_tx, completed_rx) = Event::boxed();
 
         // We ignore the result because the worker is shutting down and the channel might be closed already.
-        let _ = command_tx.send_sync(AsyncWorkerCommand::EnqueueTask {
+        let _ = command_tx.send(AsyncWorkerCommand::EnqueueTask {
             future_factory: Box::new({
                 move |_: TestTaskContext, tasks: &TaskSet| {
                     drop(tasks.add(async move {

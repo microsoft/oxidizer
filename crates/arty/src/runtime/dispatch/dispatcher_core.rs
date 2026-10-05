@@ -115,7 +115,7 @@ impl<WFS> DispatcherCore<WFS> {
             endpoint.blocking_worker.shutdown();
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
-            _ = endpoint.command_tx.send_sync(AsyncWorkerCommand::Shutdown);
+            _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
     }
@@ -211,7 +211,7 @@ impl<WFS> DispatcherCore<WFS> {
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        let send_result = endpoint.command_tx.send_sync(AsyncWorkerCommand::EnqueueTask { future_factory });
+        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask { future_factory });
 
         if send_result.is_ok() {
             emit!(
@@ -427,7 +427,7 @@ mod tests {
         dispatcher.stop();
 
         // Drain the shutdown command.
-        _ = worker_rx.recv_timeout_sync(TEST_TIMEOUT).unwrap();
+        _ = worker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
 
         // Close the command channel.
         drop(worker_rx);

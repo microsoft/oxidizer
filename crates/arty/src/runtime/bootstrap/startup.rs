@@ -95,7 +95,7 @@ pub(in crate::runtime) fn build(
         );
 
         let (waker, thread, blocking_worker) = worker_endpoint_rx
-            .recv_sync()
+            .recv()
             .expect("failed to receive the worker endpoint from the starting worker");
         async_worker_command_txs.push(WorkerEndpoint {
             command_tx,
@@ -125,7 +125,7 @@ pub(in crate::runtime) fn build(
     }
 
     for success_rx in async_worker_success_rxs {
-        success_rx.recv_sync().expect("failed to receive worker startup signal");
+        success_rx.recv().expect("failed to receive worker startup signal");
     }
 
     emit!(
@@ -204,7 +204,7 @@ impl AsyncWorkerStartInfo {
         let signal = Arc::new(WorkerSignal::default());
 
         worker_endpoint_tx
-            .send_sync((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
+            .send((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have

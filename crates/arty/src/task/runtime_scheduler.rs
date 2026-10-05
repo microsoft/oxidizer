@@ -20,7 +20,7 @@ struct ScopedJoin(channel::Receiver<()>);
 
 impl Drop for ScopedJoin {
     fn drop(&mut self) {
-        self.0.recv_sync().expect_err("scoped storage signals destruction by disconnecting");
+        self.0.recv().expect_err("scoped storage signals destruction by disconnecting");
     }
 }
 
@@ -259,7 +259,7 @@ mod tests {
     #[should_panic(expected = "scoped storage signals destruction by disconnecting")]
     fn scoped_join_rejects_a_completion_message() {
         let (completion, destroyed) = channel::unbounded();
-        completion.send_sync(()).unwrap();
+        completion.send(()).unwrap();
         drop(ScopedJoin(destroyed));
     }
 
@@ -394,13 +394,13 @@ mod tests {
                     completion,
                 };
                 let worker = scope.spawn(move || {
-                    unwind_started.recv_timeout_sync(TEST_TIMEOUT).unwrap();
+                    unwind_started.recv_timeout(TEST_TIMEOUT).unwrap();
                     drop(storage);
                 });
                 let worker_id = worker.thread().id();
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
                     let _join = ScopedJoin(destroyed);
-                    let _unwind = DropAction(|| unwinding.send_sync(()).unwrap());
+                    let _unwind = DropAction(|| unwinding.send(()).unwrap());
                     panic_any(payload);
                 }));
                 let actual = outcome.unwrap_err().downcast::<Arc<()>>().unwrap();

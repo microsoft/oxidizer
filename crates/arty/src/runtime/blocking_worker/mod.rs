@@ -148,7 +148,7 @@ impl BlockingPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        let pool = self.pool.lock_sync_result().expect(ERR_POISONED_LOCK);
+        let pool = self.pool.lock_result().expect(ERR_POISONED_LOCK);
         let Some(pool) = pool.as_ref() else {
             // Shutdown closed the shared pool before this racing submission arrived.
             return false;
@@ -161,7 +161,7 @@ impl BlockingPool {
     fn join(&self) {
         // Do not keep the pool alive through retained scheduler handles, and do not
         // hold its submission lock while waiting for user work to finish.
-        let pool = self.pool.lock_sync_result().expect(ERR_POISONED_LOCK).take();
+        let pool = self.pool.lock_result().expect(ERR_POISONED_LOCK).take();
         if let Some(pool) = pool {
             pool.join();
         }
@@ -171,7 +171,7 @@ impl BlockingPool {
     ///
     /// Returns `false` when the pool is already at its maximum permitted size.
     fn grow(&self) -> bool {
-        let mut pool = self.pool.lock_sync_result().expect(ERR_POISONED_LOCK);
+        let mut pool = self.pool.lock_result().expect(ERR_POISONED_LOCK);
         let Some(pool) = pool.as_mut() else {
             return false;
         };
@@ -189,7 +189,7 @@ impl BlockingPool {
     }
 
     fn is_overloaded(&self) -> bool {
-        let pool = self.pool.lock_sync_result().expect(ERR_POISONED_LOCK);
+        let pool = self.pool.lock_result().expect(ERR_POISONED_LOCK);
         pool.as_ref().is_some_and(|pool| {
             pool.active_count().saturating_add(pool.queued_count()) > pool.max_count().saturating_mul(Self::MAX_TASKS_PER_THREAD)
         })
@@ -242,7 +242,7 @@ pub(super) mod blocking_worker_tests {
 
     #[test]
     fn blocking_worker_join_waits_for_tasks_to_complete() {
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::<Vec<&str>>::new(Vec::new()));
         let (task_start_tx, task_start_rx) = channel();
 
         let events_clone = Arc::clone(&events);
@@ -251,9 +251,9 @@ pub(super) mod blocking_worker_tests {
 
             let events_clone2 = Arc::clone(&events_clone);
             drop(worker.spawn_blocking(move || {
-                events_clone2.lock_sync_result().unwrap().push("task started");
+                events_clone2.lock_result().unwrap().push("task started");
                 task_start_tx.send(()).unwrap();
-                events_clone2.lock_sync_result().unwrap().push("task finished");
+                events_clone2.lock_result().unwrap().push("task finished");
             }));
 
             // The sender lives only inside the blocking task. A worker that never runs
@@ -264,7 +264,7 @@ pub(super) mod blocking_worker_tests {
 
             worker.shutdown();
             worker.join();
-            events_clone.lock_sync_result().unwrap().push("worker joined");
+            events_clone.lock_result().unwrap().push("worker joined");
         });
 
         execute_or_abandon(|| {
@@ -273,7 +273,7 @@ pub(super) mod blocking_worker_tests {
         .unwrap();
 
         assert_eq!(
-            events.lock_sync_result().unwrap().as_slice(),
+            events.lock_result().unwrap().as_slice(),
             &["task started", "task finished", "worker joined"]
         );
     }
@@ -323,7 +323,7 @@ pub(super) mod blocking_worker_tests {
         let blocking_pool = BlockingPool::new(None);
         assert!(blocking_pool.grow());
         assert_eq!(
-            blocking_pool.pool.lock_sync_result().unwrap().as_ref().unwrap().max_count(),
+            blocking_pool.pool.lock_result().unwrap().as_ref().unwrap().max_count(),
             BlockingPool::INITIAL_THREAD_COUNT + 1,
             "Number of worker threads should be increased by 1"
         );
@@ -334,7 +334,7 @@ pub(super) mod blocking_worker_tests {
         let blocking_pool = BlockingPool::new(Some(5));
 
         // It says "max" but it is effectively the "current" count because growth is async.
-        assert_eq!(blocking_pool.pool.lock_sync_result().unwrap().as_ref().unwrap().max_count(), 1);
+        assert_eq!(blocking_pool.pool.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
         assert!(blocking_pool.grow()); // 2
         assert!(blocking_pool.grow()); // 3
         assert!(blocking_pool.grow()); // 4
@@ -342,7 +342,7 @@ pub(super) mod blocking_worker_tests {
         assert!(!blocking_pool.grow()); // 5 - should not grow further
 
         // It says "max" but it is effectively the "current" count because growth is async.
-        assert_eq!(blocking_pool.pool.lock_sync_result().unwrap().as_ref().unwrap().max_count(), 5);
+        assert_eq!(blocking_pool.pool.lock_result().unwrap().as_ref().unwrap().max_count(), 5);
     }
 
     #[test]
@@ -381,7 +381,7 @@ pub(super) mod blocking_worker_tests {
                 .unwrap();
             let worker = Arc::clone(scheduler.blocking_worker());
             drop(runtime);
-            assert!(worker.pool.pool.lock_sync_result().unwrap().is_none());
+            assert!(worker.pool.pool.lock_result().unwrap().is_none());
         })
         .unwrap();
     }
@@ -411,7 +411,7 @@ pub(super) mod blocking_worker_tests {
 
             // These are only used by the first thread but the compiler does not know that, so we
             // wrap them in Arc + Mutex + Option to make it safe.
-            let worker_thread_finished_rx = Arc::new(Mutex::new(Some(worker_thread_finished_rx)));
+            let worker_thread_finished_rx = Arc::new(Mutex::<Option<_>>::new(Some(worker_thread_finished_rx)));
 
             for i in 0..BlockingPool::MAX_TASKS_PER_THREAD {
                 blocking_pool.execute({
@@ -425,7 +425,7 @@ pub(super) mod blocking_worker_tests {
                             worker_thread_started_tx.send(()).unwrap();
 
                             futures::executor::block_on(async {
-                                let rx = worker_thread_finished_rx.lock_sync_result().unwrap().take().unwrap();
+                                let rx = worker_thread_finished_rx.lock_result().unwrap().take().unwrap();
                                 rx.await.unwrap();
                             });
                         }
@@ -478,14 +478,14 @@ pub(super) mod blocking_worker_tests {
         // threshold instead of completing and disappearing.
         let (blocker_started_tx, blocker_started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
-        let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+        let release_rx = Arc::new(Mutex::<Option<_>>::new(Some(release_rx)));
 
         drop(worker.spawn_blocking({
             let release_rx = Arc::clone(&release_rx);
             move || {
                 blocker_started_tx.send(()).unwrap();
                 futures::executor::block_on(async {
-                    let release_rx = release_rx.lock_sync_result().unwrap().take().unwrap();
+                    let release_rx = release_rx.lock_result().unwrap().take().unwrap();
                     release_rx.await.unwrap();
                 });
             }

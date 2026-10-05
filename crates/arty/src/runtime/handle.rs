@@ -330,11 +330,11 @@ mod tests {
         let (started, ready) = channel::unbounded();
         let (release, released) = channel::unbounded();
         let blocking = runtime.scheduler().spawn_blocking(move || {
-            started.send_sync(()).unwrap();
-            released.recv_timeout_sync(TEST_TIMEOUT).unwrap();
+            started.send(()).unwrap();
+            released.recv_timeout(TEST_TIMEOUT).unwrap();
             42
         });
-        ready.recv_timeout_sync(TEST_TIMEOUT).unwrap();
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
         assert!(
             caller
                 .scheduler()
@@ -350,7 +350,7 @@ mod tests {
             .unwrap();
 
         assert!(dispatcher.is_shutting_down());
-        release.send_sync(()).unwrap();
+        release.send(()).unwrap();
         assert_eq!(blocking.wait().unwrap(), 42);
         dispatcher.wait().unwrap();
         caller.stop().unwrap();
