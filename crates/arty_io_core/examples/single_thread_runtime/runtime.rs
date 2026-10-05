@@ -276,6 +276,37 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct PrimaryOnlyContext;
+
+    impl ThreadAware for PrimaryOnlyContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for PrimaryOnlyContext {
+        type Provider = PrimaryOnlyProvider;
+
+        fn provider(_options: ProviderOptions) -> Self::Provider {
+            PrimaryOnlyProvider
+        }
+    }
+
+    #[derive(Clone)]
+    struct PrimaryOnlyProvider;
+
+    impl ThreadAware for PrimaryOnlyProvider {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl DriverProvider for PrimaryOnlyProvider {
+        type Context = PrimaryOnlyContext;
+        type Driver = SampleDriver;
+
+        fn create(self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver, Self::Context>, DriverError> {
+            Ok(DriverInstance::new(SampleDriver, PrimaryOnlyContext, DriverRole::Primary))
+        }
+    }
+
     struct ShutdownProbe {
         name: &'static str,
         shutdowns: Arc<Mutex<Vec<&'static str>>>,
@@ -304,6 +335,23 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn primary_permission_rejects_a_second_primary_registration() {
+        let runtime = Runtime::start();
+        runtime.get_context::<SampleContext>().unwrap();
+
+        let error = runtime.get_context::<PrimaryOnlyContext>().unwrap_err();
+
+        assert_eq!(error.to_string(), "driver selected primary without permission");
+        assert!(
+            runtime.contexts.lock().unwrap()[&TypeId::of::<PrimaryOnlyContext>()]
+                .lock()
+                .unwrap()
+                .is_none()
+        );
+        runtime.shutdown().unwrap();
     }
 
     #[test]
