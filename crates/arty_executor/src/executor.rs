@@ -739,6 +739,25 @@ mod tests {
     }
 
     #[test]
+    fn independent_completed_task_waker_does_not_delay_shutdown() {
+        // SAFETY: the retained waker metadata is independently owned and the
+        // test keeps the executor alive until its shutdown cycle completes.
+        let executor = unsafe { Executor::builder().independent_wakers().build() };
+        let waker = Rc::new(RefCell::new(None));
+        executor.tasks().add(poll_fn({
+            let waker = Rc::clone(&waker);
+            move |cx| {
+                *waker.borrow_mut() = Some(cx.waker().clone());
+                Poll::Ready(())
+            }
+        }));
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        executor.begin_shutdown();
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(waker.borrow().is_some());
+    }
+
+    #[test]
     fn duplicate_wakes_keep_first_notification_order() {
         let executor = new_guarded_executor(Waker::noop().clone());
         let polls = Rc::new(RefCell::new(Vec::new()));

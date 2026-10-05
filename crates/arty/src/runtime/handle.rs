@@ -198,10 +198,9 @@ impl Drop for Runtime {
         }
 
         self.scheduler.dispatcher.stop();
-        if !is_flagged() && !self.scheduler.dispatcher.is_current_blocking_task() {
-            // Worker entry wrappers report panic diagnostics; only explicit stop can return errors.
-            let _ = self.wait();
-        }
+        // `wait` rejects self-waits from async workers and blocking callbacks;
+        // worker entry wrappers report any resulting failure.
+        let _ = self.wait();
     }
 }
 
@@ -298,6 +297,23 @@ mod tests {
         assert!(dispatcher.is_shutting_down());
         dispatcher.wait().unwrap();
         assert!(scheduler.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+    }
+
+    #[test]
+    fn dropping_the_owner_on_an_async_worker_does_not_wait_for_shutdown() {
+        let runtime = Runtime::builder()
+            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .build()
+            .unwrap();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+        let scheduler = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+            .wait()
+            .unwrap();
+        scheduler.spawn(async move |_| drop(runtime)).wait().unwrap();
+        assert!(dispatcher.is_shutting_down());
+        dispatcher.wait().unwrap();
     }
 
     #[test]

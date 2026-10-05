@@ -78,6 +78,7 @@ impl<F: Future> Future for TaskStorage<F> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
 impl<T> Drop for TaskStorage<T> {
     fn drop(&mut self) {
         if !self.live {
@@ -86,8 +87,7 @@ impl<T> Drop for TaskStorage<T> {
         if let Err(panic) = Self::destroy(&mut self.inner, &mut self.live) {
             // The execution wrapper owns diagnostics and must retire storage first.
             // Reaching this fallback with a panic is a wrapper invariant violation.
-            drop(panic);
-            std::process::abort();
+            abort_after_storage_drop_panic(panic);
         }
     }
 }
@@ -138,6 +138,7 @@ impl<F> Drop for TaskFactory<F> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
 pub(super) fn discard_panic(mut panic: Panic) {
     // Keep finite secondary-payload chains recoverable without allowing an
     // endlessly self-replacing destructor to monopolize a runtime worker.
@@ -149,5 +150,69 @@ pub(super) fn discard_panic(mut panic: Panic) {
         }
     }
     // Do not leak task-owned resources or unwind through executor teardown.
+    abort_after_repeated_payload_panic(panic);
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Intentional process termination is covered by child-process contracts.
+fn abort_after_storage_drop_panic(panic: Panic) -> ! {
+    drop(panic);
     std::process::abort();
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Intentional process termination is covered by child-process contracts.
+fn abort_after_repeated_payload_panic(panic: Panic) -> ! {
+    drop(panic);
+    std::process::abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+    use std::pin::pin;
+
+    use super::*;
+
+    #[test]
+    fn pinned_storage_destroy_is_idempotent_and_drop_is_quiet_after_retirement() {
+        let mut storage = pin!(TaskStorage::new(pending::<()>()));
+        assert!(storage.as_ref().is_live());
+        storage.as_mut().destroy_pinned().unwrap();
+        assert!(!storage.as_ref().is_live());
+        storage.as_mut().destroy_pinned().unwrap();
+    }
+
+    #[test]
+    fn live_storage_drop_runs_the_normal_cleanup_path() {
+        struct DropMarker(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+        impl Drop for DropMarker {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+
+        let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        drop(TaskStorage::new(DropMarker(std::sync::Arc::clone(&dropped))));
+        assert!(dropped.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn queued_factory_disposes_a_panicking_factory_without_unwinding() {
+        let dropped = std::sync::atomic::AtomicBool::new(false);
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            struct PanicOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+            impl Drop for PanicOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, std::sync::atomic::Ordering::Release);
+                    panic!("factory drop");
+                }
+            }
+
+            let sink = Sink::noop();
+            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context(), sink));
+        }));
+        result.unwrap();
+        assert!(dropped.load(std::sync::atomic::Ordering::Acquire));
+    }
 }

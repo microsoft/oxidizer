@@ -278,20 +278,29 @@ impl WakeSignal {
         if self.retired.load(atomic::Ordering::Acquire) {
             return;
         }
-        if let Ok(mut queue) = self.awakened_queue.try_lock() {
-            if self.retired.load(atomic::Ordering::Acquire) {
-                return;
-            }
-            if queue.len() < queue.capacity() {
-                queue.push_back(WakeNotification::Inline(self.task_ref));
-                drop(queue);
-                self.parent_waker.wake_by_ref();
-                return;
-            }
+        if self.enqueue_inline_wake() {
+            return;
         }
         self.awakened.store(true, atomic::Ordering::Release);
         self.probe_embedded_wake_signals.store(true, atomic::Ordering::Release);
         self.parent_waker.wake_by_ref();
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))] // The second retirement check is an inherently concurrent race guard.
+    fn enqueue_inline_wake(&self) -> bool {
+        let Ok(mut queue) = self.awakened_queue.try_lock() else {
+            return false;
+        };
+        if self.retired.load(atomic::Ordering::Acquire) {
+            return true;
+        }
+        if queue.len() >= queue.capacity() {
+            return false;
+        }
+        queue.push_back(WakeNotification::Inline(self.task_ref));
+        drop(queue);
+        self.parent_waker.wake_by_ref();
+        true
     }
 }
 
@@ -368,10 +377,12 @@ fn borrowed_wake_by_ref(ptr: *const ()) {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Unreachable through safe public Waker APIs.
 fn borrowed_consume(_: *const ()) {
     unreachable!("a borrowed polling waker cannot be consumed");
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Unreachable through safe public Waker APIs.
 fn borrowed_drop(_: *const ()) {
     unreachable!("a borrowed polling waker cannot be dropped");
 }
@@ -531,6 +542,129 @@ mod tests {
 
         assert_eq!(signal.owned_waker_count(), 0);
         assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn independent_wakers_retire_without_retaining_task_state() {
+        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let signal = pin!(WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            // SAFETY: the fake task reference is only used as an opaque wake identity.
+            unsafe { TaskRef::fake() },
+        )
+        .independent_wakers(true));
+        let signal = signal.as_ref();
+        signal.retire();
+        let state = signal.state();
+        assert!(format!("{state:?}").contains("WakeState"));
+
+        // SAFETY: the pinned signal remains alive until the owned clone is dropped.
+        let borrowed = unsafe { signal.waker_ref() };
+        borrowed.wake_by_ref();
+        let waker = borrowed.clone();
+        assert_eq!(signal.owned_waker_count(), 1);
+        signal.retire();
+        waker.wake_by_ref();
+        assert!(queue.lock().unwrap().is_empty());
+        assert!(!signal.consume_awakened());
+        assert!(signal.is_inert());
+        let consuming = waker.clone();
+        consuming.wake();
+        drop(waker);
+        assert_eq!(signal.owned_waker_count(), 0);
+    }
+
+    #[test]
+    fn inline_retirement_removes_queued_task_notifications() {
+        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let signal = pin!(WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            // SAFETY: the fake task reference is only used as an opaque wake identity.
+            unsafe { TaskRef::fake() },
+        ));
+        let signal = signal.as_ref();
+        // SAFETY: the signal remains pinned until the owned waker is dropped.
+        let waker = unsafe { signal.waker() };
+        waker.wake_by_ref();
+        assert_eq!(queue.lock().unwrap().len(), 1);
+        signal.retire();
+        assert!(queue.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn independent_wake_uses_queue_and_probe_paths() {
+        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let signal = pin!(WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            // SAFETY: the fake task reference is only used as an opaque wake identity.
+            unsafe { TaskRef::fake() },
+        )
+        .independent_wakers(true));
+        let signal = signal.as_ref();
+        // SAFETY: the signal remains pinned until the owned waker is dropped.
+        let waker = unsafe { signal.as_ref().waker() };
+        waker.wake_by_ref();
+        assert!(!queue.lock().unwrap().is_empty());
+        queue.lock().unwrap().clear();
+
+        let full_queue = Arc::new(Mutex::new(VecDeque::with_capacity(0)));
+        let signal = pin!(WakeSignal::new(
+            full_queue,
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            // SAFETY: the fake task reference is only used as an opaque wake identity.
+            unsafe { TaskRef::fake() },
+        )
+        .independent_wakers(true));
+        let signal = signal.as_ref();
+        // SAFETY: the signal remains pinned until the owned waker is dropped.
+        let waker = unsafe { signal.as_ref().waker() };
+        waker.wake_by_ref();
+        assert!(signal.consume_awakened());
+    }
+
+    #[test]
+    fn independent_wake_falls_back_when_the_queue_is_locked() {
+        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let lock = queue.lock().unwrap();
+        let signal = pin!(WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            // SAFETY: the fake task reference is only used as an opaque wake identity.
+            unsafe { TaskRef::fake() },
+        )
+        .independent_wakers(true));
+        let signal = signal.as_ref();
+        // SAFETY: the signal remains pinned until the owned waker is dropped.
+        let waker = unsafe { signal.waker() };
+        waker.wake_by_ref();
+        drop(lock);
+        assert!(signal.consume_awakened());
+    }
+
+    #[test]
+    fn inline_retirement_race_does_not_publish_stale_notifications() {
+        let signal = pin!(WakeSignal::fake());
+        // SAFETY: the signal remains pinned until the worker has stopped using the waker.
+        let waker = unsafe { signal.as_ref().waker() };
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let started = Arc::clone(&barrier);
+        let worker = std::thread::spawn(move || {
+            started.wait();
+            for _ in 0..10_000 {
+                waker.wake_by_ref();
+            }
+        });
+        barrier.wait();
+        signal.retire();
+        worker.join().unwrap();
     }
 
     #[test]
