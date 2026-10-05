@@ -114,7 +114,7 @@ impl BlockingWorker {
 
 pub(crate) fn assert_not_current_blocking_task() {
     assert!(
-        CURRENT_POOL.with_borrow(|current| current.is_none()),
+        CURRENT_POOL.with_borrow(Option::is_none),
         "blocking JoinHandle::wait cannot be called from a blocking callback"
     );
 }
