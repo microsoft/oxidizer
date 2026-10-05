@@ -74,6 +74,14 @@ guarantees, and a way to refuse a move — none of which this crate has.
 Call frequency is runtime-dependent, so implementations keep unchanged-coordinate
 calls cheap and do not assume a workload-level cadence.
 
+**Current-thread execution.** Relocation is not a request to another thread. The
+runtime moves or schedules the value to its destination and then invokes
+`relocate` on that destination thread. The `destination` coordinate must describe
+the thread executing the callback; a coordinator must not invoke it on the
+destination's behalf. This ordering is required because an implementation may
+release, allocate, or initialize thread- and NUMA-local state, and ordinary
+allocators take locality from the thread that performs the operation.
+
 **Say only what interoperability requires.** Every item here is a permanent
 commitment, so the bar for adding one is whether two independent crates must
 agree on it. A helper that merely makes implementation pleasant does not

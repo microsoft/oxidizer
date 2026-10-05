@@ -35,6 +35,11 @@
 //! The primary goal is performance, so types should aim to minimize contention on synchronization primitives
 //! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
 //! to users.
+//! Relocation is always a callback on the current thread: the runtime must move or schedule the value
+//! to the destination first, then invoke [`ThreadAware::relocate`] on that destination thread.
+//! The destination argument describes the thread executing the callback; it does not identify a
+//! remote thread for the callback to run on. This is important for implementations that release,
+//! allocate, or initialize thread- and NUMA-local state.
 //!
 //! ## Implementing [`ThreadAware`]
 //!
@@ -45,15 +50,15 @@
 //!
 //! ## Relation to [`Send`]
 //!
-//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to another thread,
-//! then the [`ThreadAware`] relocation notification is invoked.
+//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to the destination
+//! thread, then the [`ThreadAware`] relocation notification is invoked on that same thread.
 //!
 //!
 //! ## Thread vs. Core Semantics
 //!
 //! As this library is primarily intended for use in thread-per-core runtimes,
 //! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
+//! primarily arrive on different threads, where each thread is pinned to a different CPU core.
 //! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
 //! be able to observe this fact.
 //!
