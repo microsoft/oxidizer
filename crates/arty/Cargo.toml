@@ -3,7 +3,7 @@
 
 [package]
 name = "arty"
-description = "Thread-aware, thread-per-core application runtime."
+description = "Single-threaded, thread-aware application runtime."
 version = "0.3.1"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
@@ -40,7 +40,7 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = []
+default = ["rt", "macros"]
 macros = ["rt", "dep:arty_macros"]
 rt = [
     "time",
@@ -73,7 +73,7 @@ futures = { workspace = true, features = ["executor"], optional = true }
 many_cpus = { workspace = true, optional = true }
 nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
-performables = { path = "../performables", optional = true }
+performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }

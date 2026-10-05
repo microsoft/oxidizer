@@ -29,10 +29,10 @@ It does not provide async I/O drivers or move running tasks between workers.
 
 ## Quickstart
 
-Add Arty with `rt` and `macros` enabled (`macros` also implies `rt`):
+Add Arty with its default runtime and macro features:
 
 ```sh
-cargo add arty --features rt,macros
+cargo add arty
 ```
 
 ```rust
@@ -91,12 +91,13 @@ The [guides][__link14] explain Arty’s capabilities in more detail:
 * [Telemetry][__link20] explains runtime events
   and links to [`observed`][__link21] for further details.
 
-The `documentation` module is only included in docs.rs documentation builds;
-it is not part of the public API available to applications.
+The `documentation` module is only included in docs.rs builds with all
+documentation features, including `test-util`; it is not part of the
+public API available to applications.
 
 ## Features
 
-No features are enabled by default.
+The default feature set enables `rt` and `macros`.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
 * **`macros`** - Enables [`main`][__link22] and [`test`][__link23], and implies `rt`.
@@ -110,7 +111,7 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbASLahuHx2AEbWzNzOrnur4cbERzGqXJQg8kbxQRqfcwvouVhZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL3dlJ8_gJ_wbIox8dyCryUUbovXv6Vg8YYkbyfXYboSKCyxhZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.3.1/arty/?search=time::Clock

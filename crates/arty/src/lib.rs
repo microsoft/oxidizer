@@ -27,10 +27,10 @@
 //!
 //! # Quickstart
 //!
-//! Add Arty with `rt` and `macros` enabled (`macros` also implies `rt`):
+//! Add Arty with its default runtime and macro features:
 //!
 //! ```sh
-//! cargo add arty --features rt,macros
+//! cargo add arty
 //! ```
 //!
 //! ```rust
@@ -93,12 +93,13 @@
 //! - [Telemetry](crate::documentation::telemetry) explains runtime events
 //!   and links to [`observed`] for further details.
 //!
-//! The `documentation` module is only included in docs.rs documentation builds;
-//! it is not part of the public API available to applications.
+//! The `documentation` module is only included in docs.rs builds with all
+//! documentation features, including `test-util`; it is not part of the
+//! public API available to applications.
 //!
 //! # Features
 //!
-//! No features are enabled by default.
+//! The default feature set enables `rt` and `macros`.
 //!
 //! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
