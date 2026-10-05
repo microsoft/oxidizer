@@ -43,9 +43,11 @@ pub(crate) type AwakenedQueue = Arc<Mutex<VecDeque<WakeNotification>>>;
 /// shared references.
 ///
 /// The borrowed polling waker is scoped to a shared borrow of the pinned signal and does not
-/// contribute to `waker_count`. Cloning it creates an independently owned, counted waker that may
-/// outlive the poll. Owned wakers retain only shared wake metadata, not the future or task.
-/// Retiring the signal makes those wakers inert before task storage is released.
+/// contribute to `waker_count`. In `independent_wakers` mode, cloning it creates an independently
+/// owned waker that may outlive the poll; those wakers retain only shared wake metadata, not the
+/// future or task, and retiring the signal makes them inert before task storage is released.
+/// In the default inline mode, cloned wakers retain a count on the signal and must be released
+/// before the signal's task storage can be dropped.
 ///
 /// # Thread safety
 ///

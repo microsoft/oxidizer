@@ -93,9 +93,9 @@
 //! - [Telemetry](crate::documentation::telemetry) explains runtime events
 //!   and links to [`observed`] for further details.
 //!
-//! The `documentation` module is only included in docs.rs builds with all
-//! documentation features, including `test-util`; it is not part of the
-//! public API available to applications.
+//! The `documentation` module is included only for docs.rs builds and
+//! documentation tests with all documentation features, including `test-util`;
+//! it is not part of the public API available to applications.
 //!
 //! # Features
 //!
@@ -278,7 +278,14 @@ pub use arty_macros::main;
 #[doc(inline)]
 pub use arty_macros::test;
 
-#[cfg(all(doc, docsrs, feature = "rt", feature = "macros", feature = "time", feature = "test-util"))]
+#[cfg(all(
+    doc,
+    any(docsrs, test),
+    feature = "rt",
+    feature = "macros",
+    feature = "time",
+    feature = "test-util"
+))]
 pub mod documentation;
 
 #[cfg(any(test, feature = "rt"))]

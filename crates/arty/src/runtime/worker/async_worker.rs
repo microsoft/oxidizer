@@ -109,7 +109,8 @@ where
     ///
     /// You must call `run()` before dropping the instance to ensure that the proper shutdown
     /// process is executed. Dropping the worker without first going through `run()` and the proper
-    /// shutdown process will panic.
+    /// shutdown process aborts the process rather than releasing executor storage that may still
+    /// be referenced by an escaped task waker.
     pub(in crate::runtime) unsafe fn new<TSFF, TSF>(
         command_rx: channel::Receiver<AsyncWorkerCommand<TS>>,
         thread_state_constructor: TSFF,
