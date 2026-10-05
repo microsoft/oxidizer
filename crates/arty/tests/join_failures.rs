@@ -52,7 +52,11 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
 
 #[test]
 fn blocking_callback_cannot_wait_for_blocking_work() {
-    let runtime = runtime();
+    let runtime = Runtime::builder()
+        .processor_count(ProcessorCount::exactly(1))
+        .blocking_pool_policy(BlockingPoolPolicy::shared(2))
+        .build()
+        .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let nested_scheduler = scheduler.clone();
     let outer = scheduler.spawn_blocking(move || {
