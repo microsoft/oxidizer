@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_rallocator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Rallocator snapshot source for seismograph."
 readme = "README.md"
 keywords = ["allocator", "memory", "telemetry", "diagnostics"]

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.11.0` of `bytesbuf`
+  - Now requires `0.11.0` of `bytesbuf_io`
+  - Now requires `0.18.0` of `fetch`
+  - Now requires `0.12.0` of `http_extensions`
+  - Now requires `0.27.0` of `observed`
+  - Now requires `0.7.1` of `tick`
+
+- 🐛 Bug Fixes
+
+  - exclude inactive platform mutants ([#777](https://github.com/microsoft/oxidizer/pull/777))
+
+- ⚡ Performance
+
+  - reduce runtime analysis duration ([#767](https://github.com/microsoft/oxidizer/pull/767))
+
 ## [0.2.1] - 2026-09-16
 
 - 🔧 Maintenance

@@ -99,13 +99,13 @@ worker.attach_current_thread();
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbzxsp_ugqZ1EbMoZJ-qfjPcMbNYlF4Li19U8bnB1ozm4LohZhZIKCa3NlaXNtb2dyYXBoZTAuMS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuMS4w
- [__link0]: https://crates.io/crates/seismograph/0.1.0
- [__link1]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::source::ID
- [__link2]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::decode
- [__link3]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=task::TaskHandle
- [__link4]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::Configuration::runtime_tasks
- [__link5]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=task::TaskHandle::woken
- [__link6]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::event::EventKind::TaskReady
- [__link7]: https://docs.rs/seismograph_runtime/0.1.0/seismograph_runtime/?search=snapshot::TaskActivity
- [__link8]: https://docs.rs/seismograph/0.1.0/seismograph/?search=recorder::event::EventKind::TaskPollStarted
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbzxsp_ugqZ1EbMoZJ-qfjPcMbNYlF4Li19U8bnB1ozm4LohZhZIKCa3NlaXNtb2dyYXBoZTAuMi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuMi4w
+ [__link0]: https://crates.io/crates/seismograph/0.2.0
+ [__link1]: https://docs.rs/seismograph_runtime/0.2.0/seismograph_runtime/?search=snapshot::source::ID
+ [__link2]: https://docs.rs/seismograph_runtime/0.2.0/seismograph_runtime/?search=snapshot::decode
+ [__link3]: https://docs.rs/seismograph_runtime/0.2.0/seismograph_runtime/?search=task::TaskHandle
+ [__link4]: https://docs.rs/seismograph/0.2.0/seismograph/?search=recorder::Configuration::runtime_tasks
+ [__link5]: https://docs.rs/seismograph_runtime/0.2.0/seismograph_runtime/?search=task::TaskHandle::woken
+ [__link6]: https://docs.rs/seismograph/0.2.0/seismograph/?search=recorder::event::EventKind::TaskReady
+ [__link7]: https://docs.rs/seismograph_runtime/0.2.0/seismograph_runtime/?search=snapshot::TaskActivity
+ [__link8]: https://docs.rs/seismograph/0.2.0/seismograph/?search=recorder::event::EventKind::TaskPollStarted

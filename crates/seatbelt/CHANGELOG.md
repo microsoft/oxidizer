@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.0] - 2026-10-05
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `tick`
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.9.0] - 2026-09-10
 
 ### Breaking

@@ -1,11 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.27.0] - 2026-10-05
 
 ### Changed
 
@@ -15,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sampler itself: `with_event_sampler(MySampler)` instead of
   `with_event_sampler(Arc::new(MySampler))`. To share state between Sinks,
   keep it behind an `Arc` in the sampler and attach a clone to each Sink.
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.0` of `performables`
+  - Now requires `0.7.1` of `tick`
+
+- 🐛 Bug Fixes
+
+  - give the observed and metabench `basic` examples unique names ([#773](https://github.com/microsoft/oxidizer/pull/773))
+
+- ⚡ Performance
+
+  - consolidate v1 and Seismograph improvements ([#764](https://github.com/microsoft/oxidizer/pull/764))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.26.0] - 2026-09-10
 
