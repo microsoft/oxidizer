@@ -45,6 +45,7 @@ impl LocalTaskScope {
     }
 
     pub(crate) fn close() {
+        super::scheduler::TaskScheduler::clear_current();
         let tasks =
             LOCAL_TASKS.with_borrow_mut(|registered| registered.as_mut().expect("local task scope is installed until drop").tasks.take());
         drop(tasks);

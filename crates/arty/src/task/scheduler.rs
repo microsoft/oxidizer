@@ -1,13 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::RefCell;
+
+use arty_executor::TaskSet;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
+use crate::task::execution::prepare_remote_on_worker;
 use crate::task::join::JoinHandle;
+
+thread_local! {
+    // A worker-bound spawn from its owning worker can register directly with the executor.
+    // The channel path remains the fallback for callers on other threads.
+    static CURRENT_WORKER: RefCell<Option<CurrentWorker>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug)]
+struct CurrentWorker {
+    thread: Thread,
+    builtins: Builtins,
+    tasks: TaskSet,
+}
 
 /// A worker-bound handle for submitting async and blocking tasks.
 ///
@@ -57,6 +74,21 @@ struct Binding {
 }
 
 impl TaskScheduler {
+    pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
+        CURRENT_WORKER.with_borrow_mut(|current| {
+            assert!(current.is_none(), "a worker already owns this scheduler context");
+            *current = Some(CurrentWorker {
+                thread: builtins.thread().clone(),
+                builtins,
+                tasks,
+            });
+        });
+    }
+
+    pub(crate) fn clear_current() {
+        drop(CURRENT_WORKER.with_borrow_mut(Option::take));
+    }
+
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
         let worker_index = dispatcher
             .worker_index(current.id())
@@ -136,7 +168,46 @@ impl TaskScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        if self.dispatcher.is_shutting_down() {
+            return JoinHandle::shutdown();
+        }
+        let future_factory = match self.spawn_on_current_worker(future_factory) {
+            Ok(join_handle) => return join_handle,
+            Err(future_factory) => future_factory,
+        };
         self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory)
+    }
+
+    fn spawn_on_current_worker<FF, F, R>(&self, future_factory: FF) -> Result<JoinHandle<R>, FF>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        CURRENT_WORKER.with_borrow(|current| {
+            let Some(current) = current.as_ref() else {
+                return Err(future_factory);
+            };
+            if current.thread != self.binding.thread {
+                return Err(future_factory);
+            }
+            let sink = current.builtins.sink().clone();
+            let parent_task_enrichment = sink.transfer_context();
+            let join_handle = prepare_remote_on_worker(
+                future_factory,
+                current.builtins.clone(),
+                parent_task_enrichment,
+                sink.clone(),
+                &current.tasks,
+            );
+            observed::emit!(
+                &sink,
+                crate::runtime::telemetry::events::TaskSpawned {
+                    placement: crate::runtime::telemetry::events::PlacementLabel("same_thread"),
+                }
+            );
+            Ok(join_handle)
+        })
     }
 
     /// Submits a task to a worker chosen by the runtime and relocates its payload.

@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::task::Waker;
 use std::thread;
 
+use arty_executor::TaskSet;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -31,6 +32,7 @@ use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::Builtins;
+use crate::task::scheduler::TaskScheduler;
 
 pub(in crate::runtime) fn build(
     processor_config: RuntimeConfig,
@@ -221,10 +223,12 @@ impl AsyncWorkerStartInfo {
         let shutdown_signal = dispatcher.shutdown_signal();
 
         let thread_state_constructor = {
-            async move |tasks, clock| {
-                let core_builtins = CoreRuntimeBuiltins::new(tasks, dispatcher.as_ref(), current.clone(), processor, sink);
+            async move |tasks: TaskSet, clock| {
+                let core_builtins = CoreRuntimeBuiltins::new(tasks.clone(), dispatcher.as_ref(), current.clone(), processor, sink);
 
-                Builtins::sync_init(&shared_state, RuntimeBuiltins::new(&dispatcher, core_builtins, clock, current))
+                let builtins = Builtins::sync_init(&shared_state, RuntimeBuiltins::new(&dispatcher, core_builtins, clock, current));
+                TaskScheduler::register_current(builtins.clone(), tasks);
+                builtins
             }
         };
 

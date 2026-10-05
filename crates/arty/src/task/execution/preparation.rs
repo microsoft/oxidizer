@@ -8,6 +8,7 @@ use events_once::{Event, LocalEvent};
 use observed::Sink;
 use observed::context::Transfer;
 
+use crate::task::Builtins;
 use crate::task::execution::local::LocalTaskFuture;
 use crate::task::execution::remote::RemoteTaskFuture;
 use crate::task::execution::result::TaskResult;
@@ -64,6 +65,24 @@ where
         drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
     });
     (future_factory, JoinHandle::new(result_rx))
+}
+
+pub(crate) fn prepare_remote_on_worker<FF, F, R>(
+    future_factory: FF,
+    builtins: Builtins,
+    parent_task_enrichment: Transfer,
+    sink: Sink,
+    tasks: &TaskSet,
+) -> JoinHandle<R>
+where
+    FF: FnOnce(Builtins) -> F + Send + 'static,
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
+    let inner = async move { future_factory(builtins).await };
+    drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
+    JoinHandle::new(result_rx)
 }
 
 pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
