@@ -209,7 +209,9 @@ impl Sink {
     /// already attached.
     ///
     /// Takes the sampler itself or a `Box<dyn EventSampler>`, for example a
-    /// sampler chosen at runtime.
+    /// sampler chosen at runtime. A boxed sampler must already have the type
+    /// `Box<dyn EventSampler>`; a `Box<MySampler>` is not accepted, so pass
+    /// `MySampler` itself instead.
     ///
     /// For a composite, the new sampler replaces every sampler previously
     /// attached to its leaves. Only the new sampler runs. A [`Sink::noop`]
@@ -223,6 +225,36 @@ impl Sink {
     /// Clones made from the returned sink share its sampler configuration.
     /// Existing clones keep their prior configuration and remain subject to
     /// [`Sink::composite`]'s normal duplicate-sink restriction.
+    ///
+    /// # Examples
+    ///
+    /// A sampler chosen at runtime:
+    ///
+    /// ```
+    /// # use observed::{EventSamplingContext, EventSamplingDecision};
+    /// use observed::{EventSampler, Sink};
+    /// # struct DropAll;
+    /// # impl EventSampler for DropAll {
+    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #         EventSamplingDecision::Drop
+    /// #     }
+    /// # }
+    /// # struct KeepAll;
+    /// # impl EventSampler for KeepAll {
+    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #         EventSamplingDecision::Continue
+    /// #     }
+    /// # }
+    ///
+    /// let drop_all = false; // for example, read from configuration
+    /// let sampler: Box<dyn EventSampler> = if drop_all {
+    ///     Box::new(DropAll)
+    /// } else {
+    ///     Box::new(KeepAll)
+    /// };
+    /// let sink = Sink::new("service", Vec::new(), tick::SimpleClock::new_system())
+    ///     .with_event_sampler(sampler);
+    /// ```
     #[must_use]
     pub fn with_event_sampler(self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
         let inner = match &*self.inner {
