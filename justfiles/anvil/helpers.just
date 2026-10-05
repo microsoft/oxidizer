@@ -99,6 +99,15 @@
 # mod.just does NOT redeclare it, to avoid conflicting with adopters
 # who already have it.
 
+# Platform configs replace, rather than overlay, cargo-mutants' default config.
+# Selection is native Just evaluation, independent of the recipe's interpreter.
+_anvil_mutants_platform_config := ".cargo/mutants." + os() + ".toml"
+_anvil_mutants_config_arg := if path_exists(justfile_directory() / _anvil_mutants_platform_config) == "true" {
+    "--config=" + _anvil_mutants_platform_config
+} else {
+    ""
+}
+
 # _anvil-base-ref: single source of truth for "which git ref does a PR
 # diff against". Shared by the impact step (github/impact-action.yml,
 # ado/steps/impact.yml) and anvil-mutants-diff so the resolution lives in

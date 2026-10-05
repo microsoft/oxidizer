@@ -226,8 +226,10 @@ re-exports, and the implementation is configured out entirely off Windows. A
 library with no instrumented code is indistinguishable from a failed
 measurement to the coverage tooling, so each package keeps one trivially
 exercised placeholder per platform it would otherwise be empty on. The files
-are named for the platform they are gated to, which is also how the mutation
-tooling recognizes platform-gated code it cannot build.
+are named for the platform they are gated to. Platform mutation exclusions are
+explicit: complete host configurations use file/crate globs and function patterns
+rather than relying on cargo-mutants to evaluate Rust `cfg` expressions. See
+[`docs/design/README.md`](../../../docs/design/README.md) for the current policy.
 
 The integration tests are split by concern rather than by protocol version, so
 one binary owns one contract area:

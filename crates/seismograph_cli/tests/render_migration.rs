@@ -169,7 +169,7 @@ fn callers_render_live_and_empty_stack_summaries() {
 
     snapshot.callers = Some(Callers::default());
     let empty_html = support::render_html(&snapshot, "callers-empty");
-    assert!(empty_html.contains("No retained allocation stacks."));
+    assert!(empty_html.contains("No retained unmatched allocation stacks."));
 }
 
 #[test]

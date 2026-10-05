@@ -44,11 +44,17 @@ loom = { workspace = true }
 
 [dev-dependencies]
 criterion.workspace = true
+metabench.workspace = true
+mutants.workspace = true
 serde = { workspace = true, features = ["std"] }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 [[bench]]
 name = "performables_uncontended"
+harness = false
+
+[[bench]]
+name = "performables_arc_clone"
 harness = false
 
 [[bench]]

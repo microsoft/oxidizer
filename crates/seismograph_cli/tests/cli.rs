@@ -31,6 +31,38 @@ fn directory(name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "terminal detection and subprocess behavior are exercised by native tests")]
+fn monitor_rejects_redirected_output() {
+    let result = Command::new(env!("CARGO_BIN_EXE_seismograph")).arg("monitor").output().unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8(result.stderr).unwrap().contains("interactive terminal"));
+    assert!(result.stdout.is_empty());
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "filesystem and subprocess behavior is exercised by native tests")]
+fn view_requires_a_path_and_reports_file_errors_without_html_output() {
+    let binary = env!("CARGO_BIN_EXE_seismograph");
+    let missing_argument = Command::new(binary).arg("view").output().unwrap();
+    assert_eq!(missing_argument.status.code(), Some(2));
+    assert!(String::from_utf8(missing_argument.stderr).unwrap().contains("<SNAPSHOT-FILE>"));
+
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(directory("offline errors"));
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("missing capture.seismograph");
+    let result = Command::new(binary).arg("view").arg(&path).output().unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8(result.stderr).unwrap().contains(&path.display().to_string()));
+    assert!(!path.with_extension("html").exists());
+
+    fs::write(&path, b"invalid native snapshot").unwrap();
+    let result = Command::new(binary).arg("view").arg(&path).output().unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(!path.with_extension("html").exists());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 #[cfg_attr(miri, ignore = "filesystem and subprocess behavior is exercised by native tests")]
 fn snapshot_html_writes_default_output_beside_input() {
     let directory = directory("default");
@@ -65,10 +97,10 @@ fn snapshot_html_reads_native_seismograph_capture() {
         ..Default::default()
     });
     seismograph::record(seismograph::recorder::event::EventClass::ArcDereference, || {
-        seismograph::recorder::event::Record::object(
+        Some(seismograph::recorder::event::Record::object(
             seismograph::recorder::event::EventKind::ArcDeref,
             seismograph::recorder::event::ObjectId::new(42),
-        )
+        ))
     });
     seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
         .unwrap()

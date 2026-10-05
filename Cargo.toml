@@ -68,6 +68,9 @@ alloc_tracker = { version = "0.7.1", default-features = false }
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.1.0" }
 allocator-api2 = { version = "0.4.0", default-features = false }
+# hashbrown 0.17 uses this allocator trait version for system-backed tables.
+allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
+anyhow = { version = "1.0.100", default-features = false }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.9.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.4.0" }
 argh = { version = "0.1.13", default-features = false }
@@ -204,10 +207,10 @@ ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.2" }
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.2" }
 once_cell = { version = "1.21.3", default-features = false }
-opentelemetry = { version = "0.32.0", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
-opentelemetry-stdout = { version = "0.32.0", default-features = false }
-opentelemetry_sdk = { version = "0.32.0", default-features = false }
+opentelemetry = { version = "0.33.0", default-features = false }
+opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
+opentelemetry-stdout = { version = "0.33.0", default-features = false }
+opentelemetry_sdk = { version = "0.33.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 paste = { package = "pastey", version = "0.2.3", default-features = false }
