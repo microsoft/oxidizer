@@ -49,6 +49,7 @@ impl Drop for BlockingTaskScope {
 pub(crate) struct BlockingWorker {
     pool: BlockingPool,
     is_shutting_down: Arc<AtomicBool>,
+    saturation_reported: AtomicBool,
     sink: Sink,
 }
 
@@ -57,6 +58,7 @@ impl BlockingWorker {
         Arc::new(Self {
             pool,
             is_shutting_down: Arc::new(AtomicBool::new(false)),
+            saturation_reported: AtomicBool::new(false),
             sink,
         })
     }
@@ -84,13 +86,19 @@ impl BlockingWorker {
             task();
         };
 
-        if !self.is_shutting_down.load(Ordering::Acquire) && self.pool.execute(task) && self.pool.is_overloaded() && !self.pool.grow() {
-            emit!(
-                &self.sink,
-                BlockingWorkerPoolSaturated {
-                    max_threads: SystemMetricCount::from(self.pool.max_thread_count()),
+        if !self.is_shutting_down.load(Ordering::Acquire) && self.pool.execute(task) {
+            if self.pool.is_overloaded() {
+                if !self.pool.grow() && !self.saturation_reported.swap(true, Ordering::AcqRel) {
+                    emit!(
+                        &self.sink,
+                        BlockingWorkerPoolSaturated {
+                            max_threads: SystemMetricCount::from(self.pool.max_thread_count()),
+                        }
+                    );
                 }
-            );
+            } else {
+                self.saturation_reported.store(false, Ordering::Release);
+            }
         }
 
         join_handle
@@ -532,6 +540,7 @@ pub(super) mod blocking_worker_tests {
             .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
             .collect();
         assert!(!saturated.is_empty(), "an overloaded pool that cannot grow must report saturation");
+        assert_eq!(saturated.len(), 1, "one saturation episode emits one warning");
         assert_eq!(
             dimension(saturated[0], "blocking_worker_pool.max_threads"),
             Some("1".into()),

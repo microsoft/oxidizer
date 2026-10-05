@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn panic_message_is_not_suppressed_with_system_metadata() {
-        let engine = RedactionEngine::builder().suppress_redaction(SYSTEM_METADATA).build();
+        let engine = RedactionEngine::builder().suppress_redaction(SYSTEM_METADATA.clone()).build();
         let mut output = String::new();
 
         engine
