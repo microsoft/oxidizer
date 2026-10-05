@@ -15,8 +15,7 @@ use performables::sync::mutex::Mutex;
 use threadpool::ThreadPool;
 
 use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
-use crate::task::execution::discard_panic;
-use crate::task::execution::prepare_blocking;
+use crate::task::execution::{discard_panic, prepare_blocking};
 use crate::task::join::JoinHandle;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";

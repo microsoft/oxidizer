@@ -126,9 +126,6 @@ impl RuntimeScheduler {
         if is_flagged() {
             return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
-        if self.dispatcher.is_current_blocking_task() {
-            return Err(Error::new("block_on cannot be called from an Arty blocking callback"));
-        }
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
         let (completion, destroyed) = channel::unbounded();
@@ -142,7 +139,7 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        self.dispatcher.spawn(factory).wait().map_err(Error::new)
+        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
     }
 
     /// Lets the runtime place an async task and relocates its payload.
