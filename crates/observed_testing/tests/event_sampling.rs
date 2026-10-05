@@ -61,21 +61,21 @@ where
     }
 }
 
-fn probe_sampler<F>(decide: F) -> (Arc<dyn EventSampler>, Arc<AtomicUsize>)
+fn probe_sampler<F>(decide: F) -> (impl EventSampler, Arc<AtomicUsize>)
 where
     F: for<'a> Fn(&EventSamplingContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
 {
     let calls = Arc::new(AtomicUsize::new(0));
     (
-        Arc::new(ProbeSampler {
+        ProbeSampler {
             calls: Arc::clone(&calls),
             decide,
-        }),
+        },
         calls,
     )
 }
 
-fn constant_sampler(decision: EventSamplingDecision) -> (Arc<dyn EventSampler>, Arc<AtomicUsize>) {
+fn constant_sampler(decision: EventSamplingDecision) -> (impl EventSampler, Arc<AtomicUsize>) {
     probe_sampler(move |_| decision)
 }
 
@@ -426,6 +426,24 @@ fn second_event_sampler_attachment_replaces_first() {
 
     assert_eq!(first_calls.load(Ordering::Relaxed), 0);
     assert_eq!(second_calls.load(Ordering::Relaxed), 1);
+    assert!(processor.is_empty());
+}
+
+#[test]
+fn boxed_sampler_decides_for_sink() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
+    let sink = sink.with_event_sampler(Box::new(sampler) as Box<dyn EventSampler>);
+
+    emit!(
+        sink,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert!(processor.is_empty());
 }
 
