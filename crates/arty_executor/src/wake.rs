@@ -547,14 +547,16 @@ mod tests {
     #[test]
     fn independent_wakers_retire_without_retaining_task_state() {
         let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
-        let signal = pin!(WakeSignal::new(
-            Arc::clone(&queue),
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            // SAFETY: the fake task reference is only used as an opaque wake identity.
-            unsafe { TaskRef::fake() },
-        )
-        .independent_wakers(true));
+        let signal = pin!(
+            WakeSignal::new(
+                Arc::clone(&queue),
+                Arc::new(AtomicBool::new(false)),
+                Waker::noop().clone(),
+                // SAFETY: the fake task reference is only used as an opaque wake identity.
+                unsafe { TaskRef::fake() },
+            )
+            .independent_wakers(true)
+        );
         let signal = signal.as_ref();
         signal.retire();
         let state = signal.state();
@@ -598,14 +600,16 @@ mod tests {
     #[test]
     fn independent_wake_uses_queue_and_probe_paths() {
         let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
-        let signal = pin!(WakeSignal::new(
-            Arc::clone(&queue),
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            // SAFETY: the fake task reference is only used as an opaque wake identity.
-            unsafe { TaskRef::fake() },
-        )
-        .independent_wakers(true));
+        let signal = pin!(
+            WakeSignal::new(
+                Arc::clone(&queue),
+                Arc::new(AtomicBool::new(false)),
+                Waker::noop().clone(),
+                // SAFETY: the fake task reference is only used as an opaque wake identity.
+                unsafe { TaskRef::fake() },
+            )
+            .independent_wakers(true)
+        );
         let signal = signal.as_ref();
         // SAFETY: the signal remains pinned until the owned waker is dropped.
         let waker = unsafe { signal.as_ref().waker() };
@@ -614,14 +618,16 @@ mod tests {
         queue.lock().unwrap().clear();
 
         let full_queue = Arc::new(Mutex::new(VecDeque::with_capacity(0)));
-        let signal = pin!(WakeSignal::new(
-            full_queue,
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            // SAFETY: the fake task reference is only used as an opaque wake identity.
-            unsafe { TaskRef::fake() },
-        )
-        .independent_wakers(true));
+        let signal = pin!(
+            WakeSignal::new(
+                full_queue,
+                Arc::new(AtomicBool::new(false)),
+                Waker::noop().clone(),
+                // SAFETY: the fake task reference is only used as an opaque wake identity.
+                unsafe { TaskRef::fake() },
+            )
+            .independent_wakers(true)
+        );
         let signal = signal.as_ref();
         // SAFETY: the signal remains pinned until the owned waker is dropped.
         let waker = unsafe { signal.as_ref().waker() };
@@ -633,14 +639,16 @@ mod tests {
     fn independent_wake_falls_back_when_the_queue_is_locked() {
         let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
         let lock = queue.lock().unwrap();
-        let signal = pin!(WakeSignal::new(
-            Arc::clone(&queue),
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            // SAFETY: the fake task reference is only used as an opaque wake identity.
-            unsafe { TaskRef::fake() },
-        )
-        .independent_wakers(true));
+        let signal = pin!(
+            WakeSignal::new(
+                Arc::clone(&queue),
+                Arc::new(AtomicBool::new(false)),
+                Waker::noop().clone(),
+                // SAFETY: the fake task reference is only used as an opaque wake identity.
+                unsafe { TaskRef::fake() },
+            )
+            .independent_wakers(true)
+        );
         let signal = signal.as_ref();
         // SAFETY: the signal remains pinned until the owned waker is dropped.
         let waker = unsafe { signal.waker() };
