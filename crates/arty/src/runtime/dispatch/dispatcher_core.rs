@@ -211,7 +211,9 @@ impl<WFS> DispatcherCore<WFS> {
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask { future_factory });
+        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
+            future_factory: Some(future_factory),
+        });
 
         if send_result.is_ok() {
             emit!(

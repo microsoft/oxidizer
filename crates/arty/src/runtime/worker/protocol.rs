@@ -2,9 +2,10 @@
 // Licensed under the MIT License.
 
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::task::Builtins;
-use crate::task::execution::BoxedRemoteFutureFactory;
+use crate::task::execution::{BoxedRemoteFutureFactory, discard_panic};
 
 pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     /// Schedules a new task for execution on this worker, providing the factory function that will
@@ -18,7 +19,9 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     /// delivering the output, and an inner layer with the actual user code to execute.
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
-    EnqueueTask { future_factory: BoxedRemoteFutureFactory<TS> },
+    EnqueueTask {
+        future_factory: Option<BoxedRemoteFutureFactory<TS>>,
+    },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
@@ -26,6 +29,20 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     ///
     /// It is fine to send this command multiple times - duplicates will be ignored.
     Shutdown,
+}
+
+impl<TS> Drop for AsyncWorkerCommand<TS> {
+    fn drop(&mut self) {
+        let Self::EnqueueTask { future_factory } = self else {
+            return;
+        };
+        let Some(future_factory) = future_factory.take() else {
+            return;
+        };
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(future_factory))) {
+            discard_panic(panic);
+        }
+    }
 }
 
 impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {

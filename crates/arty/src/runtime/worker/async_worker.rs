@@ -231,18 +231,24 @@ where
 
         for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
-                Ok(AsyncWorkerCommand::EnqueueTask { future_factory }) => {
-                    if self.shutdown_signal.load(Ordering::Acquire) {
-                        self.begin_shutdown();
-                        return false;
-                    }
-                    future_factory(thread_state.clone(), &self.tasks);
-                }
-                Ok(AsyncWorkerCommand::Shutdown) => {
-                    self.begin_shutdown();
+                Ok(mut command) => {
+                    match &mut command {
+                        AsyncWorkerCommand::EnqueueTask { future_factory } => {
+                            if self.shutdown_signal.load(Ordering::Acquire) {
+                                self.begin_shutdown();
+                                return false;
+                            }
+                            future_factory
+                                .take()
+                                .expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
+                        }
+                        AsyncWorkerCommand::Shutdown => {
+                            self.begin_shutdown();
 
-                    // Shutdown closes the command channel - no more commands can be received.
-                    return false;
+                            // Shutdown closes the command channel - no more commands can be received.
+                            return false;
+                        }
+                    }
                 }
                 Err(error) => {
                     // Every initialized worker retains its own dispatcher until shutdown.
@@ -332,10 +338,10 @@ mod tests {
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand<()>>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand<()> {
         AsyncWorkerCommand::EnqueueTask {
-            future_factory: Box::new(move |(), _| {
+            future_factory: Some(Box::new(move |(), _| {
                 processed.fetch_add(1, Ordering::Relaxed);
                 sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
-            }),
+            })),
         }
     }
 
@@ -476,7 +482,7 @@ mod tests {
 
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
-                    future_factory: Box::new({
+                    future_factory: Some(Box::new({
                         move |cx: TestTaskContext, tasks: &TaskSet| {
                             drop(tasks.add(async move {
                                 cx.local_task_scheduler
@@ -489,7 +495,7 @@ mod tests {
                                 outer_completed_tx.send(());
                             }));
                         }
-                    }),
+                    })),
                 })
                 .unwrap();
 
@@ -543,13 +549,13 @@ mod tests {
 
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
-                    future_factory: Box::new({
+                    future_factory: Some(Box::new({
                         move |_: TestTaskContext, tasks: &TaskSet| {
                             drop(tasks.add(async move {
                                 spawned_completed_tx.send(());
                             }));
                         }
-                    }),
+                    })),
                 })
                 .unwrap();
 
@@ -603,13 +609,13 @@ mod tests {
 
         // We ignore the result because the worker is shutting down and the channel might be closed already.
         let _ = command_tx.send(AsyncWorkerCommand::EnqueueTask {
-            future_factory: Box::new({
+            future_factory: Some(Box::new({
                 move |_: TestTaskContext, tasks: &TaskSet| {
                     drop(tasks.add(async move {
                         completed_tx.send(14);
                     }));
                 }
-            }),
+            })),
         });
 
         // This waits for the worker to shut down.
@@ -644,9 +650,9 @@ mod tests {
 
         command_tx
             .send(AsyncWorkerCommand::EnqueueTask {
-                future_factory: Box::new(move |(), _| {
+                future_factory: Some(Box::new(move |(), _| {
                     invoked_by_factory.store(true, Ordering::Relaxed);
-                }),
+                })),
             })
             .unwrap();
         shutdown_signal.store(true, Ordering::Release);
