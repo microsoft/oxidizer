@@ -111,11 +111,10 @@ impl ArtyCase {
                 let Some(handle) = handle else {
                     unreachable!("all benchmark outer task slots are filled");
                 };
-                black_box(handle.await.expect("benchmark outer task finishes before shutdown"));
+                handle.await.expect("benchmark outer task finishes before shutdown");
             }
         });
-        let elapsed = start.elapsed();
-        elapsed
+        start.elapsed()
     }
 }
 
@@ -168,11 +167,10 @@ impl TokioCase {
                 let Some(handle) = handle else {
                     unreachable!("all benchmark outer task slots are filled");
                 };
-                black_box(handle.await.expect("benchmark outer task finishes before shutdown"));
+                handle.await.expect("benchmark outer task finishes before shutdown");
             }
         });
-        let elapsed = start.elapsed();
-        elapsed
+        start.elapsed()
     }
 }
 
