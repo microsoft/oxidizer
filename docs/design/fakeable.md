@@ -100,7 +100,8 @@ the generated fake incompatible with the wrapper. Generic impl blocks are also
 rejected because the generated Mockall type cannot preserve their generic
 parameters and bounds. Trait impl blocks are rejected because their inherited
 method visibility would otherwise produce an incomplete mock API. Async methods
-are represented as methods returning `Future` so tests can provide asynchronous
+are represented as methods returning `Future` without adding a `Send` bound, so
+the original future sendability is preserved and tests can provide asynchronous
 expectations. Signatures with nested elided references beneath higher-ranked lifetime binders,
 multiple nested elided references, and methods returning `Self` are rejected
 rather than rewritten with changed lifetime or fake-type semantics. Consuming

@@ -1,6 +1,6 @@
 ---
 source: crates/fakeable_impl/src/../tests/output_verification.rs
-expression: "prettyplease::unparse(&result_file)"
+expression: "testing_aids :: render_expansion(&result)"
 ---
 impl __fakeable__MyService::MyService {
     pub async fn new(value: String) -> Self {
@@ -8,6 +8,10 @@ impl __fakeable__MyService::MyService {
     }
 }
 impl MyService {
+    #[allow(
+        clippy::future_not_send,
+        reason = "fake delegation preserves the future sendability of both real and fake implementations"
+    )]
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub async fn new(value: String) -> Self {

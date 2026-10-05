@@ -11,6 +11,10 @@ impl __fakeable__MyService::MyService {
     }
 }
 impl MyService {
+    #[allow(
+        clippy::future_not_send,
+        reason = "fake delegation preserves the future sendability of both real and fake implementations"
+    )]
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub async fn process<T>(&self, value: T) -> T
@@ -36,6 +40,6 @@ pub mod fakes {
     use super::*;
     ::mockall::mock! {
         #[derive(Debug)] pub MyService { pub fn process < T > (& self, value : T) -> impl
-        ::std::future::Future < Output = T > + Send where T : Send + 'static,; }
+        ::std::future::Future < Output = T > where T : Send + 'static,; }
     }
 }

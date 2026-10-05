@@ -1168,7 +1168,31 @@ fn fakeable_rejects_self_dependent_trait_associated_items() {
         )
         .to_string();
 
-        assert!(result.contains("trait associated items containing Self are not supported"));
+        assert!(result.contains("trait associated items containing Self or the concrete service type are not supported"));
+    }
+}
+
+#[test]
+fn fakeable_rejects_service_dependent_trait_associated_items() {
+    for item in [
+        quote! { type Output = MyService; },
+        quote! { type Output = Option<MyService>; },
+        quote! { const DEFAULT: Option<MyService> = None; },
+        quote! { const VALUE: usize = value!(MyService); },
+    ] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! {},
+            quote! {
+                impl Service for MyService {
+                    #item
+
+                    fn value(&self) {}
+                }
+            },
+        )
+        .to_string();
+
+        assert!(result.contains("trait associated items containing Self or the concrete service type are not supported"));
     }
 }
 
