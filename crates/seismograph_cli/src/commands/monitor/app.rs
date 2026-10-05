@@ -2,22 +2,57 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::event::KeyCode;
 use performables::sync::channel::{Receiver, Sender, unbounded};
-use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, RecordingConfiguration, SnapshotOptions};
-use seismograph_protocol::monitor::MonitorDescriptor;
+use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, SnapshotOptions};
+use seismograph_protocol::monitor::{InstanceId, MonitorDescriptor};
 
-use super::client::{capture_snapshot, discover, recorder_statistics, save_snapshot, set_recording};
-use super::data::{
-    AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier, MemoryTierData, PrimitiveSort,
-    RuntimeSnapshot, RuntimeTaskSort,
+use super::client::{
+    capture_snapshot, capture_snapshot_and_stop, clear_event_buffers, discover, handshake, recorder_activity, save_snapshot, set_recording,
 };
+use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
+use super::live_activity::{LiveActivity, RecorderUpdate};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_ACTIVITY_SAMPLES: usize = 120;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum CaptureMode {
+    #[default]
+    Continue,
+    Stop,
+}
+
+impl CaptureMode {
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Continue => "Record and continue",
+            Self::Stop => "Record and stop",
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Continue => Self::Stop,
+            Self::Stop => Self::Continue,
+        }
+    }
+}
+
+#[cfg(test)]
+fn connected_snapshot_ptr(screen: &Screen) -> Option<*const CapturedSnapshot> {
+    match screen {
+        Screen::Connected {
+            snapshot: Some(snapshot), ..
+        } => Some(std::ptr::from_ref(snapshot.as_ref())),
+        Screen::Browse | Screen::Offline { .. } | Screen::Connected { snapshot: None, .. } => None,
+    }
+}
+
 pub(super) const EVENT_BUFFER_CAPACITIES: [u32; 15] = [
     64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
 ];
@@ -28,6 +63,7 @@ pub(super) const EVENT_SAMPLING_RATES: [u32; 19] = [
 pub(super) struct Instance {
     pub(super) descriptor: MonitorDescriptor,
     pub(super) recording: RecordingConfiguration,
+    pub(super) server_version: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,6 +77,63 @@ pub(super) struct ActivitySample {
 pub(super) struct RecordingConfigurationPopup {
     pub(super) draft: RecordingConfiguration,
     pub(super) selected: usize,
+    modes: [RecordingMode; 6],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecordingMode {
+    Off,
+    On,
+    Custom,
+}
+
+impl RecordingMode {
+    const ALL: [Self; 3] = [Self::Off, Self::On, Self::Custom];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Custom => "custom",
+        }
+    }
+
+    fn adjusted(self, direction: isize) -> Self {
+        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
+        Self::ALL[index.saturating_add_signed(direction).min(Self::ALL.len() - 1)]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecorderKind {
+    Allocations,
+    General,
+    ArcDereferences,
+    RuntimeTasks,
+    Io,
+    Cache,
+}
+
+impl RecorderKind {
+    const ALL: [Self; 6] = [
+        Self::Allocations,
+        Self::General,
+        Self::ArcDereferences,
+        Self::RuntimeTasks,
+        Self::Io,
+        Self::Cache,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Allocations => 0,
+            Self::General => 1,
+            Self::ArcDereferences => 2,
+            Self::RuntimeTasks => 3,
+            Self::Io => 4,
+            Self::Cache => 5,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,86 +156,74 @@ pub(super) enum RecordingConfigurationField {
     CacheBacktraces,
     CacheSampling,
     EventBufferCapacity,
-    Apply,
-    Cancel,
 }
 
 impl RecordingConfigurationField {
-    pub(super) const ALL: [Self; 20] = [
-        Self::AllocationRecording,
-        Self::AllocationBacktraces,
-        Self::AllocationSampling,
-        Self::GeneralRecording,
-        Self::GeneralBacktraces,
-        Self::GeneralSampling,
-        Self::ArcDereferenceRecording,
-        Self::ArcDereferenceBacktraces,
-        Self::ArcDereferenceSampling,
-        Self::RuntimeTaskRecording,
-        Self::RuntimeTaskBacktraces,
-        Self::IoRecording,
-        Self::IoBacktraces,
-        Self::IoSampling,
-        Self::CacheRecording,
-        Self::CacheBacktraces,
-        Self::CacheSampling,
-        Self::EventBufferCapacity,
-        Self::Apply,
-        Self::Cancel,
-    ];
-
     pub(super) const fn label(self) -> &'static str {
         match self {
-            Self::AllocationRecording => "Allocations recording",
-            Self::AllocationBacktraces => "Allocations backtraces",
-            Self::AllocationSampling => "Allocations sampling",
-            Self::GeneralRecording => "General events recording",
-            Self::GeneralBacktraces => "General events backtraces",
-            Self::GeneralSampling => "General events sampling",
-            Self::ArcDereferenceRecording => "Arc dereference recording",
-            Self::ArcDereferenceBacktraces => "Arc dereference backtraces",
-            Self::ArcDereferenceSampling => "Arc dereference sampling",
-            Self::RuntimeTaskRecording => "Runtime task recording",
-            Self::RuntimeTaskBacktraces => "Runtime task backtraces",
-            Self::IoRecording => "I/O recording",
-            Self::IoBacktraces => "I/O backtraces",
-            Self::IoSampling => "I/O resource sampling",
-            Self::CacheRecording => "Cache recording",
-            Self::CacheBacktraces => "Cache backtraces",
-            Self::CacheSampling => "Cache tier sampling",
+            Self::AllocationRecording => "Allocations",
+            Self::GeneralRecording => "Events",
+            Self::ArcDereferenceRecording => "Arc",
+            Self::RuntimeTaskRecording => "Runtime tasks",
+            Self::IoRecording => "I/O",
+            Self::CacheRecording => "Cache",
+            Self::AllocationBacktraces
+            | Self::GeneralBacktraces
+            | Self::ArcDereferenceBacktraces
+            | Self::RuntimeTaskBacktraces
+            | Self::IoBacktraces
+            | Self::CacheBacktraces => "  Backtraces",
+            Self::AllocationSampling | Self::GeneralSampling | Self::ArcDereferenceSampling | Self::IoSampling | Self::CacheSampling => {
+                "  Sampling"
+            }
             Self::EventBufferCapacity => "Event buffer capacity",
-            Self::Apply => "OK",
-            Self::Cancel => "Cancel",
         }
     }
 
-    pub(super) fn value(self, configuration: RecordingConfiguration) -> String {
+    const fn recorder(self) -> Option<RecorderKind> {
         match self {
-            Self::AllocationRecording => toggle_label(configuration.allocations.enabled),
+            Self::AllocationRecording | Self::AllocationBacktraces | Self::AllocationSampling => Some(RecorderKind::Allocations),
+            Self::GeneralRecording | Self::GeneralBacktraces | Self::GeneralSampling => Some(RecorderKind::General),
+            Self::ArcDereferenceRecording | Self::ArcDereferenceBacktraces | Self::ArcDereferenceSampling => {
+                Some(RecorderKind::ArcDereferences)
+            }
+            Self::RuntimeTaskRecording | Self::RuntimeTaskBacktraces => Some(RecorderKind::RuntimeTasks),
+            Self::IoRecording | Self::IoBacktraces | Self::IoSampling => Some(RecorderKind::Io),
+            Self::CacheRecording | Self::CacheBacktraces | Self::CacheSampling => Some(RecorderKind::Cache),
+            Self::EventBufferCapacity => None,
+        }
+    }
+
+    pub(super) fn value(self, popup: RecordingConfigurationPopup) -> String {
+        let configuration = popup.draft;
+        match self {
             Self::AllocationBacktraces => toggle_label(configuration.allocations.capture_backtraces),
             Self::AllocationSampling => sampling_label(configuration.allocations.sampling_one_in),
-            Self::GeneralRecording => toggle_label(configuration.general_events.enabled),
             Self::GeneralBacktraces => toggle_label(configuration.general_events.capture_backtraces),
             Self::GeneralSampling => sampling_label(configuration.general_events.sampling_one_in),
-            Self::ArcDereferenceRecording => toggle_label(configuration.arc_dereferences.enabled),
             Self::ArcDereferenceBacktraces => toggle_label(configuration.arc_dereferences.capture_backtraces),
             Self::ArcDereferenceSampling => sampling_label(configuration.arc_dereferences.sampling_one_in),
-            Self::RuntimeTaskRecording => toggle_label(configuration.runtime_tasks.enabled),
             Self::RuntimeTaskBacktraces => toggle_label(configuration.runtime_tasks.capture_backtraces),
-            Self::IoRecording => toggle_label(configuration.io.enabled),
             Self::IoBacktraces => toggle_label(configuration.io.capture_backtraces),
             Self::IoSampling => sampling_label(configuration.io.sampling_one_in),
-            Self::CacheRecording => toggle_label(configuration.cache.enabled),
             Self::CacheBacktraces => toggle_label(configuration.cache.capture_backtraces),
             Self::CacheSampling => sampling_label(configuration.cache.sampling_one_in),
             Self::EventBufferCapacity => format!("{} events / thread", configuration.event_capacity_per_thread),
-            Self::Apply | Self::Cancel => String::new(),
+            Self::AllocationRecording
+            | Self::GeneralRecording
+            | Self::ArcDereferenceRecording
+            | Self::RuntimeTaskRecording
+            | Self::IoRecording
+            | Self::CacheRecording => popup
+                .mode(self.recorder().expect("recording mode fields always identify a recorder"))
+                .label()
+                .to_owned(),
         }
     }
 
-    fn adjust(self, configuration: &mut RecordingConfiguration, direction: isize) {
+    fn adjust(self, popup: &mut RecordingConfigurationPopup, direction: isize) {
+        let configuration = &mut popup.draft;
         match self {
-            Self::AllocationRecording => configuration.allocations.enabled = !configuration.allocations.enabled,
             Self::AllocationBacktraces => {
                 configuration.allocations.capture_backtraces = !configuration.allocations.capture_backtraces;
             }
@@ -150,16 +231,12 @@ impl RecordingConfigurationField {
                 configuration.allocations.sampling_one_in =
                     adjusted_value(configuration.allocations.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::GeneralRecording => configuration.general_events.enabled = !configuration.general_events.enabled,
             Self::GeneralBacktraces => {
                 configuration.general_events.capture_backtraces = !configuration.general_events.capture_backtraces;
             }
             Self::GeneralSampling => {
                 configuration.general_events.sampling_one_in =
                     adjusted_value(configuration.general_events.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
-            }
-            Self::ArcDereferenceRecording => {
-                configuration.arc_dereferences.enabled = !configuration.arc_dereferences.enabled;
             }
             Self::ArcDereferenceBacktraces => {
                 configuration.arc_dereferences.capture_backtraces = !configuration.arc_dereferences.capture_backtraces;
@@ -168,18 +245,15 @@ impl RecordingConfigurationField {
                 configuration.arc_dereferences.sampling_one_in =
                     adjusted_value(configuration.arc_dereferences.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::RuntimeTaskRecording => configuration.runtime_tasks.enabled = !configuration.runtime_tasks.enabled,
             Self::RuntimeTaskBacktraces => {
                 configuration.runtime_tasks.capture_backtraces = !configuration.runtime_tasks.capture_backtraces;
             }
-            Self::IoRecording => configuration.io.enabled = !configuration.io.enabled,
             Self::IoBacktraces => {
                 configuration.io.capture_backtraces = !configuration.io.capture_backtraces;
             }
             Self::IoSampling => {
                 configuration.io.sampling_one_in = adjusted_value(configuration.io.sampling_one_in, &EVENT_SAMPLING_RATES, direction);
             }
-            Self::CacheRecording => configuration.cache.enabled = !configuration.cache.enabled,
             Self::CacheBacktraces => {
                 configuration.cache.capture_backtraces = !configuration.cache.capture_backtraces;
             }
@@ -190,15 +264,164 @@ impl RecordingConfigurationField {
                 configuration.event_capacity_per_thread =
                     adjusted_value(configuration.event_capacity_per_thread, &EVENT_BUFFER_CAPACITIES, direction);
             }
-            Self::Apply | Self::Cancel => {}
+            Self::AllocationRecording
+            | Self::GeneralRecording
+            | Self::ArcDereferenceRecording
+            | Self::RuntimeTaskRecording
+            | Self::IoRecording
+            | Self::CacheRecording => {
+                let recorder = self.recorder().expect("recording mode fields always identify a recorder");
+                popup.modes[recorder.index()] = popup.mode(recorder).adjusted(direction);
+            }
         }
     }
 }
 
 impl RecordingConfigurationPopup {
-    pub(super) fn field(self) -> RecordingConfigurationField {
-        RecordingConfigurationField::ALL[self.selected]
+    pub(super) fn new(draft: RecordingConfiguration) -> Self {
+        let modes = RecorderKind::ALL.map(|recorder| recording_mode(recorder_policy(draft, recorder)));
+        Self { draft, selected: 0, modes }
     }
+
+    pub(super) fn field(self) -> RecordingConfigurationField {
+        self.fields()[self.selected]
+    }
+
+    pub(super) fn fields(self) -> Vec<RecordingConfigurationField> {
+        let mut fields = Vec::with_capacity(19);
+        for (recorder, mode, group) in [
+            (
+                RecorderKind::Allocations,
+                self.mode(RecorderKind::Allocations),
+                [
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::AllocationBacktraces,
+                    RecordingConfigurationField::AllocationSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::General,
+                self.mode(RecorderKind::General),
+                [
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::GeneralBacktraces,
+                    RecordingConfigurationField::GeneralSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::ArcDereferences,
+                self.mode(RecorderKind::ArcDereferences),
+                [
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::ArcDereferenceBacktraces,
+                    RecordingConfigurationField::ArcDereferenceSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::RuntimeTasks,
+                self.mode(RecorderKind::RuntimeTasks),
+                [
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::RuntimeTaskBacktraces,
+                    RecordingConfigurationField::RuntimeTaskBacktraces,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::Io,
+                self.mode(RecorderKind::Io),
+                [
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::IoBacktraces,
+                    RecordingConfigurationField::IoSampling,
+                ]
+                .as_slice(),
+            ),
+            (
+                RecorderKind::Cache,
+                self.mode(RecorderKind::Cache),
+                [
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::CacheBacktraces,
+                    RecordingConfigurationField::CacheSampling,
+                ]
+                .as_slice(),
+            ),
+        ] {
+            fields.push(group[0]);
+            if mode == RecordingMode::Custom {
+                fields.push(group[1]);
+                if recorder != RecorderKind::RuntimeTasks {
+                    fields.push(group[2]);
+                }
+            }
+        }
+        fields.push(RecordingConfigurationField::EventBufferCapacity);
+        fields
+    }
+
+    fn mode(self, recorder: RecorderKind) -> RecordingMode {
+        self.modes[recorder.index()]
+    }
+
+    fn configuration(self) -> RecordingConfiguration {
+        let mut configuration = self.draft;
+        for recorder in RecorderKind::ALL {
+            let policy = recorder_policy_mut(&mut configuration, recorder);
+            match self.mode(recorder) {
+                RecordingMode::Off => policy.enabled = false,
+                RecordingMode::On => {
+                    policy.enabled = true;
+                    policy.capture_backtraces = true;
+                    policy.sampling_one_in = 1;
+                }
+                RecordingMode::Custom => policy.enabled = true,
+            }
+        }
+        configuration
+    }
+}
+
+fn recorder_policy(configuration: RecordingConfiguration, recorder: RecorderKind) -> seismograph_protocol::message::RecordingPolicy {
+    match recorder {
+        RecorderKind::Allocations => configuration.allocations,
+        RecorderKind::General => configuration.general_events,
+        RecorderKind::ArcDereferences => configuration.arc_dereferences,
+        RecorderKind::RuntimeTasks => configuration.runtime_tasks,
+        RecorderKind::Io => configuration.io,
+        RecorderKind::Cache => configuration.cache,
+    }
+}
+
+fn recorder_policy_mut(
+    configuration: &mut RecordingConfiguration,
+    recorder: RecorderKind,
+) -> &mut seismograph_protocol::message::RecordingPolicy {
+    match recorder {
+        RecorderKind::Allocations => &mut configuration.allocations,
+        RecorderKind::General => &mut configuration.general_events,
+        RecorderKind::ArcDereferences => &mut configuration.arc_dereferences,
+        RecorderKind::RuntimeTasks => &mut configuration.runtime_tasks,
+        RecorderKind::Io => &mut configuration.io,
+        RecorderKind::Cache => &mut configuration.cache,
+    }
+}
+
+const fn recording_mode(policy: seismograph_protocol::message::RecordingPolicy) -> RecordingMode {
+    if !policy.enabled {
+        RecordingMode::Off
+    } else if !policy.capture_backtraces || policy.sampling_one_in != 1 {
+        RecordingMode::Custom
+    } else {
+        RecordingMode::On
+    }
+}
+
+pub(super) fn recording_policy_label(policy: seismograph_protocol::message::RecordingPolicy) -> &'static str {
+    recording_mode(policy).label()
 }
 
 fn toggle_label(enabled: bool) -> String {
@@ -389,11 +612,15 @@ pub(super) struct RuntimeViewState {
     pub(super) focus: RuntimeFocus,
     pub(super) worker_selected: usize,
     pub(super) task_selected: usize,
-    pub(super) detail_view: RuntimeDetailView,
-    pub(super) detail_scroll: usize,
+    pub(super) activity_scroll: usize,
     pub(super) task_sort: RuntimeTaskSort,
     pub(super) task_sort_descending: bool,
+    pub(super) task_histogram: TaskHistogram,
+    pub(super) events: TaskEventsViewState,
 }
+
+/// Fits readable duration buckets in the activity panes while keeping keyboard bounds stable.
+pub(super) const RUNTIME_HISTOGRAM_BINS: usize = super::runtime_timeline::HISTOGRAM_BINS;
 
 impl RuntimeViewState {
     const fn new() -> Self {
@@ -401,10 +628,11 @@ impl RuntimeViewState {
             focus: RuntimeFocus::Workers,
             worker_selected: 0,
             task_selected: 0,
-            detail_view: RuntimeDetailView::Details,
-            detail_scroll: 0,
+            activity_scroll: 0,
             task_sort: RuntimeTaskSort::Polls,
             task_sort_descending: true,
+            task_histogram: TaskHistogram::Poll,
+            events: TaskEventsViewState::new(),
         }
     }
 
@@ -416,36 +644,104 @@ impl RuntimeViewState {
 
     fn reset_task(&mut self) {
         self.task_selected = 0;
-        self.detail_view = RuntimeDetailView::Details;
-        self.detail_scroll = 0;
+        self.reset_details();
     }
+
+    fn reset_details(&mut self) {
+        self.activity_scroll = 0;
+        self.events.reset();
+    }
+
+    pub(super) fn selected_task<'a>(
+        &self,
+        runtime: &'a super::data::RuntimeMonitorSnapshot,
+    ) -> Option<&'a super::data::RuntimeTaskSummary> {
+        let worker = runtime
+            .workers
+            .get(self.worker_selected.min(runtime.workers.len().saturating_sub(1)))?;
+        let tasks = worker.sorted_tasks(self.task_sort, self.task_sort_descending);
+        tasks.get(self.task_selected.min(tasks.len().saturating_sub(1))).copied()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TaskHistogram {
+    Poll,
+    Ready,
+}
+
+impl TaskHistogram {
+    const fn toggle(self) -> Self {
+        match self {
+            Self::Poll => Self::Ready,
+            Self::Ready => Self::Poll,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct TaskEventsViewState {
+    pub(super) focus: TaskEventsFocus,
+    pub(super) operation_selected: usize,
+    pub(super) event_selected: usize,
+    pub(super) stack_scroll: usize,
+    pub(super) stack_horizontal_scroll: u16,
+    pub(super) stack_filter: AllocationStackFilter,
+}
+
+impl TaskEventsViewState {
+    const fn new() -> Self {
+        Self {
+            focus: TaskEventsFocus::Operations,
+            operation_selected: 0,
+            event_selected: 0,
+            stack_scroll: 0,
+            stack_horizontal_scroll: 0,
+            stack_filter: AllocationStackFilter::Application,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.focus = TaskEventsFocus::Operations;
+        self.operation_selected = 0;
+        self.reset_event();
+    }
+
+    fn reset_event(&mut self) {
+        self.event_selected = 0;
+        self.stack_scroll = 0;
+        self.stack_horizontal_scroll = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TaskEventsFocus {
+    Operations,
+    Occurrences,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeFocus {
     Workers,
     Tasks,
-    Details,
+    Activity,
+    Events,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RuntimeDetailView {
-    Details,
-    SpawnStack,
+enum RuntimeDashboardFocus {
+    Workers,
+    Tasks,
+    Activity,
 }
 
-impl RuntimeDetailView {
-    pub(super) const fn toggle(self) -> Self {
+impl RuntimeFocus {
+    const fn dashboard(self) -> Option<RuntimeDashboardFocus> {
         match self {
-            Self::Details => Self::SpawnStack,
-            Self::SpawnStack => Self::Details,
-        }
-    }
-
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Details => "Details",
-            Self::SpawnStack => "Spawn Stack",
+            Self::Workers => Some(RuntimeDashboardFocus::Workers),
+            Self::Tasks => Some(RuntimeDashboardFocus::Tasks),
+            Self::Activity => Some(RuntimeDashboardFocus::Activity),
+            Self::Events => None,
         }
     }
 }
@@ -563,6 +859,11 @@ impl MonitorTab {
 
 pub(super) enum Screen {
     Browse,
+    Offline {
+        path: PathBuf,
+        tab: MonitorTab,
+        snapshot: Option<Box<CapturedSnapshot>>,
+    },
     Connected {
         descriptor: MonitorDescriptor,
         recording: RecordingConfiguration,
@@ -575,6 +876,7 @@ pub(super) struct App {
     pub(super) instances: Vec<Instance>,
     pub(super) selected: usize,
     pub(super) screen: Screen,
+    pub(super) server_version: Option<String>,
     pub(super) status: String,
     pub(super) allocation_view: AllocationViewState,
     pub(super) heap_view: HeapViewState,
@@ -583,18 +885,29 @@ pub(super) struct App {
     pub(super) runtime_view: RuntimeViewState,
     pub(super) io_view: IoViewState,
     pub(super) cache_view: CacheViewState,
+    pub(super) panels: super::panels::Panels,
     pub(super) activity_samples: VecDeque<ActivitySample>,
     pub(super) recorder_statistics: Option<RecorderStatistics>,
-    pub(super) snapshot_options: SnapshotOptions,
+    pub(super) live_activity: LiveActivity,
+    pub(super) info_thread_selected: usize,
+    pub(super) capture_mode: CaptureMode,
+    pub(super) recording_unknown: bool,
     pub(super) snapshot_error: Option<String>,
     pub(super) recording_configuration_popup: Option<RecordingConfigurationPopup>,
+    pub(super) filters: super::filter_ui::Filters,
+    pub(super) help: Option<super::help::Help>,
     activity_observed_at: Option<Instant>,
     pub(super) capture_started_at: Option<Instant>,
     pub(super) capture_step: Option<CaptureStep>,
+    capture_instance_id: Option<InstanceId>,
+    capture_generation: u64,
+    clear_in_progress: bool,
     capture_receiver: Option<Receiver<CaptureMessage>>,
     discovery_receiver: Option<Receiver<Result<Vec<Instance>, String>>>,
-    statistics_receiver: Option<Receiver<Result<RecorderStatistics, String>>>,
+    statistics_receiver: Option<Receiver<Result<RecorderUpdate, String>>>,
     recording_receiver: Option<Receiver<Result<RecordingUpdate, String>>>,
+    connection_generation: u64,
+    recording_generation: u64,
     next_refresh: Instant,
 }
 
@@ -635,6 +948,8 @@ impl CaptureStep {
 
 enum CaptureMessage {
     Progress(CaptureStep),
+    Recording(Result<RecordingConfiguration, String>),
+    Cleared(Result<(), String>),
     Complete(Result<CaptureOutcome, String>),
 }
 
@@ -649,11 +964,32 @@ struct RecordingUpdate {
 }
 
 impl App {
+    pub(super) fn offline(path: PathBuf) -> Self {
+        Self {
+            screen: Screen::Offline {
+                path,
+                tab: MonitorTab::Info,
+                snapshot: None,
+            },
+            status: "Loading snapshot…".into(),
+            ..Self::new()
+        }
+    }
+
+    pub(super) fn finish_offline_load(&mut self, loaded: Box<CapturedSnapshot>) {
+        if let Screen::Offline { snapshot, .. } = &mut self.screen {
+            self.status = loaded.heap_error.clone().unwrap_or_default();
+            *snapshot = Some(loaded);
+            self.filter_snapshot_arrived();
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             instances: Vec::new(),
             selected: 0,
             screen: Screen::Browse,
+            server_version: None,
             status: String::new(),
             allocation_view: AllocationViewState::new(),
             heap_view: HeapViewState::new(),
@@ -662,18 +998,29 @@ impl App {
             runtime_view: RuntimeViewState::new(),
             io_view: IoViewState::new(),
             cache_view: CacheViewState::new(),
+            panels: super::panels::Panels::default(),
             activity_samples: VecDeque::new(),
             recorder_statistics: None,
-            snapshot_options: SnapshotOptions::default(),
+            live_activity: LiveActivity::default(),
+            info_thread_selected: 0,
+            capture_mode: CaptureMode::default(),
+            recording_unknown: false,
             snapshot_error: None,
             recording_configuration_popup: None,
+            filters: super::filter_ui::Filters::default(),
+            help: None,
             activity_observed_at: None,
             capture_started_at: None,
             capture_step: None,
+            capture_instance_id: None,
+            capture_generation: 0,
+            clear_in_progress: false,
             capture_receiver: None,
             discovery_receiver: None,
             statistics_receiver: None,
             recording_receiver: None,
+            connection_generation: 0,
+            recording_generation: 0,
             next_refresh: Instant::now(),
         }
     }
@@ -684,21 +1031,20 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn refresh(&mut self) {
-        self.refresh_with(discover, recorder_statistics);
+        self.refresh_with(discover, recorder_activity);
     }
 
     fn refresh_with<D, S>(&mut self, discover: D, recorder_statistics: S)
     where
         D: FnOnce() -> Result<Vec<Instance>, super::Error> + Send + 'static,
-        S: FnOnce(&MonitorDescriptor) -> Result<RecorderStatistics, super::Error> + Send + 'static,
+        S: FnOnce(&MonitorDescriptor) -> Result<RecorderUpdate, super::Error> + Send + 'static,
     {
         self.next_refresh = Instant::now().checked_add(REFRESH_INTERVAL).unwrap_or_else(Instant::now);
+        if matches!(self.screen, Screen::Offline { .. }) {
+            return;
+        }
         if let Screen::Connected { descriptor, .. } = &self.screen {
-            if workers_are_idle(
-                self.capture_receiver.is_some(),
-                self.statistics_receiver.is_some(),
-                self.recording_receiver.is_some(),
-            ) {
+            if self.statistics_receiver.is_none() && self.recording_receiver.is_none() && self.capture_receiver.is_none() {
                 self.start_recorder_statistics_with(descriptor.clone(), recorder_statistics);
             }
             return;
@@ -708,25 +1054,48 @@ impl App {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Top-level key routing is terminal input glue covered by focused handlers.
     pub(super) fn handle_key(&mut self, code: KeyCode) -> bool {
+        if self.handle_help_key(code) {
+            return false;
+        }
+        if self.filters.popup.is_some() {
+            self.handle_filter_key(code);
+            return false;
+        }
         if matches!(code, KeyCode::Char('q' | 'Q')) {
             return true;
+        }
+        let offline = matches!(self.screen, Screen::Offline { .. });
+        if offline && code == KeyCode::Esc {
+            return true;
+        }
+        if offline && matches!(code, KeyCode::Char('s' | 'c' | 'd' | 'C')) {
+            return false;
         }
         let capture_in_progress = self.capture_receiver.is_some();
         if self.recording_configuration_popup.is_some() {
             self.handle_recording_configuration_key(code);
             return false;
         }
-        if code == KeyCode::Char('s') {
-            if capture_in_progress {
+        if code == KeyCode::Char('F') {
+            self.open_filter_popup();
+            return false;
+        }
+        if matches!(code, KeyCode::Char('s' | 'C')) {
+            if capture_in_progress || self.recording_receiver.is_some() {
                 return false;
             }
             let capture = match &self.screen {
                 Screen::Connected { descriptor, .. } => Some(descriptor.clone()),
-                Screen::Browse => None,
+                Screen::Browse | Screen::Offline { .. } => None,
             };
             if let Some(descriptor) = capture {
-                self.start_snapshot_capture(descriptor, self.snapshot_options);
+                if code == KeyCode::Char('C') {
+                    self.start_clear_buffers(descriptor);
+                } else {
+                    self.start_snapshot_capture(descriptor, self.capture_mode);
+                }
             }
             return false;
         }
@@ -736,27 +1105,11 @@ impl App {
                 KeyCode::Down => {
                     self.selected = advance_selection(self.selected, self.instances.len());
                 }
-                KeyCode::Enter => {
-                    if let Some(instance) = self.instances.get(self.selected) {
-                        self.activity_samples.clear();
-                        self.recorder_statistics = None;
-                        self.activity_observed_at = None;
-                        self.screen = Screen::Connected {
-                            descriptor: instance.descriptor.clone(),
-                            recording: instance.recording,
-                            tab: MonitorTab::Info,
-                            snapshot: None,
-                        };
-                        self.snapshot_error = None;
-                        self.status.clear();
-                    }
-                }
+                KeyCode::Enter => self.connect_selected_instance(),
                 KeyCode::Char('r') => self.refresh(),
                 _ => {}
             },
-            Screen::Connected {
-                recording, tab, snapshot, ..
-            } => {
+            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => {
                 let handled_by_tab = match *tab {
                     MonitorTab::Heaps => handle_heap_key(code, &mut self.heap_view, snapshot.as_deref()),
                     MonitorTab::Allocations => handle_allocation_key(code, &mut self.allocation_view, snapshot.as_deref()),
@@ -765,14 +1118,18 @@ impl App {
                     MonitorTab::Runtime => handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()),
                     MonitorTab::Io => handle_io_key(code, &mut self.io_view, snapshot.as_deref()),
                     MonitorTab::Cache => handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()),
-                    MonitorTab::Info => false,
+                    MonitorTab::Info => handle_info_key(code, &mut self.info_thread_selected, self.live_activity.threads.len()),
                 };
                 if handled_by_tab {
                     return false;
                 }
                 match code {
                     KeyCode::Esc => {
+                        self.filters.invalidate();
+                        self.connection_generation += 1;
+                        self.statistics_receiver = None;
                         self.screen = Screen::Browse;
+                        self.server_version = None;
                         self.refresh();
                     }
                     KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => *tab = tab.previous(),
@@ -786,14 +1143,13 @@ impl App {
                     KeyCode::Char('7') => *tab = MonitorTab::Io,
                     KeyCode::Char('8') => *tab = MonitorTab::Cache,
                     KeyCode::Char('d') => {
-                        self.snapshot_options.event_buffers = next_buffer_disposition(self.snapshot_options.event_buffers);
-                        self.status = format!("Snapshot buffers: {:?}", self.snapshot_options.event_buffers);
+                        self.capture_mode = self.capture_mode.next();
+                        self.status = format!("{} selected (s to capture)", self.capture_mode.label());
                     }
-                    KeyCode::Char('c') if !capture_in_progress && self.recording_receiver.is_none() => {
-                        self.recording_configuration_popup = Some(RecordingConfigurationPopup {
-                            draft: *recording,
-                            selected: 0,
-                        });
+                    KeyCode::Char('c') if self.recording_receiver.is_none() && !capture_in_progress && !self.recording_unknown => {
+                        if let Screen::Connected { recording, .. } = &self.screen {
+                            self.recording_configuration_popup = Some(RecordingConfigurationPopup::new(*recording));
+                        }
                     }
                     _ => {}
                 }
@@ -802,29 +1158,57 @@ impl App {
         false
     }
 
+    #[cfg_attr(test, mutants::skip)] // Selection-to-connection state transfer is interactive monitor glue.
+    fn connect_selected_instance(&mut self) {
+        if let Some(instance) = self.instances.get(self.selected) {
+            self.filters.invalidate();
+            self.connection_generation += 1;
+            self.statistics_receiver = None;
+            self.discovery_receiver = None;
+            self.next_refresh = Instant::now();
+            self.activity_samples.clear();
+            self.recorder_statistics = None;
+            self.live_activity = LiveActivity::default();
+            self.info_thread_selected = 0;
+            self.activity_observed_at = None;
+            self.recording_unknown = false;
+            self.server_version.clone_from(&instance.server_version);
+            self.screen = Screen::Connected {
+                descriptor: instance.descriptor.clone(),
+                recording: instance.recording,
+                tab: MonitorTab::Info,
+                snapshot: None,
+            };
+            self.snapshot_error = None;
+            self.status.clear();
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
     fn handle_recording_configuration_key(&mut self, code: KeyCode) {
+        if code == KeyCode::Enter {
+            if let Some(popup) = self.recording_configuration_popup {
+                self.apply_recording_configuration(popup.configuration());
+            }
+            return;
+        }
         let Some(popup) = &mut self.recording_configuration_popup else {
             return;
         };
         match code {
             KeyCode::Up => popup.selected = popup.selected.saturating_sub(1),
             KeyCode::Down => {
-                popup.selected = advance_selection(popup.selected, RecordingConfigurationField::ALL.len());
+                popup.selected = advance_selection(popup.selected, popup.fields().len());
             }
-            KeyCode::Left => popup.field().adjust(&mut popup.draft, -1),
-            KeyCode::Right | KeyCode::Char(' ') => popup.field().adjust(&mut popup.draft, 1),
+            KeyCode::Left => {
+                popup.field().adjust(popup, -1);
+                popup.selected = popup.selected.min(popup.fields().len().saturating_sub(1));
+            }
+            KeyCode::Right | KeyCode::Char(' ') => {
+                popup.field().adjust(popup, 1);
+                popup.selected = popup.selected.min(popup.fields().len().saturating_sub(1));
+            }
             KeyCode::Esc => self.recording_configuration_popup = None,
-            KeyCode::Enter => match popup.field() {
-                RecordingConfigurationField::Apply => {
-                    let configuration = popup.draft;
-                    self.apply_recording_configuration(configuration);
-                }
-                RecordingConfigurationField::Cancel => {
-                    self.recording_configuration_popup = None;
-                    self.status = "Recording configuration unchanged".into();
-                }
-                field => field.adjust(&mut popup.draft, 1),
-            },
             _ => {}
         }
     }
@@ -836,8 +1220,11 @@ impl App {
 
     fn apply_recording_configuration_with<F>(&mut self, configuration: RecordingConfiguration, set_recording: F)
     where
-        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<RecordingConfiguration, super::Error> + Send + 'static,
     {
+        if self.recording_receiver.is_some() || self.capture_receiver.is_some() || self.recording_unknown {
+            return;
+        }
         let Screen::Connected { descriptor, .. } = &self.screen else {
             self.recording_configuration_popup = None;
             return;
@@ -852,12 +1239,21 @@ impl App {
             return;
         };
         self.recording_receiver = None;
+        // A failed multi-command update can still have changed part of the configuration.
+        self.next_refresh = Instant::now();
+        if self.recording_generation != self.connection_generation {
+            return;
+        }
         match result {
             Ok(update) => {
                 if let Screen::Connected { descriptor, recording, .. } = &mut self.screen
                     && descriptor.instance_id == update.descriptor.instance_id
                 {
                     *recording = update.configuration;
+                    if let Some(statistics) = &mut self.recorder_statistics {
+                        statistics.recording = update.configuration;
+                        statistics.event_capacity_per_thread = u64::from(update.configuration.event_capacity_per_thread);
+                    }
                 }
                 self.status = "Recording configuration applied".into();
             }
@@ -871,12 +1267,29 @@ impl App {
                 Ok(Some(message)) => message,
                 Ok(None) => return,
                 Err(error) => {
-                    self.finish_snapshot_capture(Err(error));
+                    if self.clear_in_progress {
+                        self.finish_clear_buffers(Err(error));
+                    } else {
+                        self.finish_snapshot_capture(Err(error));
+                    }
                     return;
                 }
             };
             match message {
-                CaptureMessage::Progress(step) => self.capture_step = Some(step),
+                CaptureMessage::Recording(result) => {
+                    if self.capture_is_current() {
+                        self.reconcile_recording(result);
+                    }
+                }
+                CaptureMessage::Cleared(result) => {
+                    self.finish_clear_buffers(result);
+                    return;
+                }
+                CaptureMessage::Progress(step) => {
+                    if self.capture_is_current() {
+                        self.capture_step = Some(step);
+                    }
+                }
                 CaptureMessage::Complete(result) => {
                     self.finish_snapshot_capture(result);
                     return;
@@ -916,20 +1329,42 @@ impl App {
             return;
         };
         self.statistics_receiver = None;
+        if !matches!(self.screen, Screen::Connected { .. }) || self.recording_receiver.is_some() || self.capture_receiver.is_some() {
+            return;
+        }
         match result {
-            Ok(statistics) => self.record_activity(statistics),
-            Err(error) => self.status = error,
+            Ok(update) => {
+                let statistics = update.statistics();
+                self.recording_unknown = false;
+                if let Screen::Connected { recording, .. } = &mut self.screen {
+                    *recording = statistics.recording;
+                }
+                // The popup is a draft, not another copy of the live configuration.
+                self.record_recorder_update(update);
+            }
+            Err(error) => {
+                self.live_activity.stale = true;
+                self.status = error;
+            }
         }
     }
 
     fn finish_snapshot_capture(&mut self, result: Result<CaptureOutcome, String>) {
+        let current = self.capture_is_current();
         self.capture_receiver = None;
         self.capture_started_at = None;
         self.capture_step = None;
+        let capture_instance_id = self.capture_instance_id.take();
+        if !current {
+            return;
+        }
         match result {
             Ok(outcome) => {
                 self.snapshot_error = None;
-                if let Screen::Connected { snapshot, .. } = &mut self.screen {
+                self.status = outcome.status;
+                if let Screen::Connected { descriptor, snapshot, .. } = &mut self.screen
+                    && capture_instance_id == Some(descriptor.instance_id)
+                {
                     *snapshot = Some(outcome.snapshot);
                     self.heap_view.reset();
                     self.allocation_view.reset_position();
@@ -937,9 +1372,10 @@ impl App {
                     self.runtime_view.reset();
                     self.io_view.reset();
                     self.cache_view.reset();
+                    self.filter_snapshot_arrived();
                 }
-                self.status = outcome.status;
             }
+
             Err(error) => {
                 self.snapshot_error = Some(error.clone());
                 self.status = error;
@@ -947,24 +1383,105 @@ impl App {
         }
     }
 
+    fn finish_clear_buffers(&mut self, result: Result<(), String>) {
+        if self.capture_is_current() {
+            self.status = match result {
+                Ok(()) => "Server buffers cleared; recording policy, captured view and saved files preserved".into(),
+                Err(error) => format!("Clear failed: {error}"),
+            };
+        }
+        self.capture_receiver = None;
+        self.capture_instance_id = None;
+        self.clear_in_progress = false;
+    }
+
+    pub(super) fn reset_filtered_views(&mut self) {
+        self.heap_view.reset();
+        self.allocation_view.reset_position();
+        self.primitive_view.focus = PrimitiveFocus::Types;
+        self.primitive_view.primitive_selected = 0;
+        self.primitive_view.reset_operations();
+        self.thread_view.reset();
+        self.runtime_view.reset();
+        self.io_view.reset();
+        self.cache_view.reset();
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn start_snapshot_capture(&mut self, descriptor: MonitorDescriptor, options: SnapshotOptions) {
+    #[cfg_attr(test, mutants::skip)] // Thread creation and capture progress are nondeterministic integration glue.
+    fn start_snapshot_capture(&mut self, descriptor: MonitorDescriptor, mode: CaptureMode) {
         let (sender, receiver) = unbounded();
+        let instance_id = descriptor.instance_id;
         match thread::Builder::new().name("seismograph-snapshot".into()).spawn(move || {
-            let result = capture_connected_snapshot(&descriptor, options, &sender);
-            let _receiver_closed = sender.send_sync(CaptureMessage::Complete(result));
+            let result = capture_connected_snapshot(&descriptor, mode, &sender);
+            let _receiver_closed = sender.send(CaptureMessage::Complete(result));
         }) {
             Ok(_worker) => {
                 self.snapshot_error = None;
                 self.capture_started_at = Some(Instant::now());
                 self.capture_step = Some(CaptureStep::Capture);
+                self.capture_instance_id = Some(instance_id);
+                self.capture_generation = self.connection_generation;
+                self.statistics_receiver = None;
                 self.capture_receiver = Some(receiver);
+                if mode == CaptureMode::Stop {
+                    self.recording_unknown = true;
+                }
                 self.status.clear();
             }
             Err(error) => self.status = format!("failed to start snapshot capture: {error}"),
         }
     }
 
+    fn capture_is_current(&self) -> bool {
+        self.capture_generation == self.connection_generation
+            && matches!(&self.screen, Screen::Connected { descriptor, .. }
+                        if Some(descriptor.instance_id) == self.capture_instance_id)
+    }
+
+    fn reconcile_recording(&mut self, result: Result<RecordingConfiguration, String>) {
+        self.statistics_receiver = None;
+        self.activity_samples.clear();
+        self.activity_observed_at = None;
+        self.recorder_statistics = None;
+        self.live_activity = LiveActivity::default();
+        self.info_thread_selected = 0;
+        match result {
+            Ok(configuration) => {
+                self.recording_unknown = false;
+                if let Screen::Connected { recording, .. } = &mut self.screen {
+                    *recording = configuration;
+                }
+            }
+            Err(error) => {
+                self.recording_unknown = true;
+                self.status = format!("Recording state unknown; refresh required: {error}");
+            }
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn start_clear_buffers(&mut self, descriptor: MonitorDescriptor) {
+        let (sender, receiver) = unbounded();
+        let instance_id = descriptor.instance_id;
+        match thread::Builder::new().name("seismograph-clear".into()).spawn(move || {
+            let result = clear_event_buffers(&descriptor).map_err(|error| error.to_string());
+            let recording = handshake(&descriptor).map_err(|error| error.to_string());
+            if sender.send(CaptureMessage::Recording(recording)).is_ok() {
+                let _receiver_closed = sender.send(CaptureMessage::Cleared(result));
+            }
+        }) {
+            Ok(_worker) => {
+                self.capture_generation = self.connection_generation;
+                self.capture_instance_id = Some(instance_id);
+                self.capture_receiver = Some(receiver);
+                self.statistics_receiver = None;
+                self.clear_in_progress = true;
+                self.status = "Clearing server buffers (no snapshot)...".into();
+            }
+            Err(error) => self.status = format!("failed to start clear worker: {error}"),
+        }
+    }
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start_discovery_with<F>(&mut self, discover: F)
     where
@@ -973,7 +1490,7 @@ impl App {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-discovery".into()).spawn(move || {
             let result = discover().map_err(|error| error.to_string());
-            let _receiver_closed = sender.send_sync(result);
+            let _receiver_closed = sender.send(result);
         }) {
             Ok(_worker) => self.discovery_receiver = Some(receiver),
             Err(error) => self.status = format!("failed to start monitor discovery worker: {error}"),
@@ -983,12 +1500,12 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start_recorder_statistics_with<F>(&mut self, descriptor: MonitorDescriptor, recorder_statistics: F)
     where
-        F: FnOnce(&MonitorDescriptor) -> Result<RecorderStatistics, super::Error> + Send + 'static,
+        F: FnOnce(&MonitorDescriptor) -> Result<RecorderUpdate, super::Error> + Send + 'static,
     {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-statistics".into()).spawn(move || {
             let result = recorder_statistics(&descriptor).map_err(|error| error.to_string());
-            let _receiver_closed = sender.send_sync(result);
+            let _receiver_closed = sender.send(result);
         }) {
             Ok(_worker) => self.statistics_receiver = Some(receiver),
             Err(error) => self.status = format!("failed to start recorder statistics worker: {error}"),
@@ -1002,14 +1519,14 @@ impl App {
         configuration: RecordingConfiguration,
         set_recording: F,
     ) where
-        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<(), super::Error> + Send + 'static,
+        F: FnOnce(&MonitorDescriptor, RecordingConfiguration) -> Result<RecordingConfiguration, super::Error> + Send + 'static,
     {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-recording".into()).spawn(move || {
             let result = set_recording(&descriptor, configuration)
-                .map(|()| RecordingUpdate { descriptor, configuration })
+                .map(|configuration| RecordingUpdate { descriptor, configuration })
                 .map_err(|error| error.to_string());
-            let _receiver_closed = sender.send_sync(result);
+            let _receiver_closed = sender.send(result);
         }) {
             Ok(_worker) => self.finish_start_recording_configuration(receiver, Ok(())),
             Err(error) => self.finish_start_recording_configuration(receiver, Err(error)),
@@ -1019,11 +1536,43 @@ impl App {
     fn finish_start_recording_configuration(&mut self, receiver: Receiver<Result<RecordingUpdate, String>>, result: std::io::Result<()>) {
         match result {
             Ok(()) => {
+                // Dropping this receiver invalidates reads started before this write.
+                self.statistics_receiver = None;
+                self.discovery_receiver = None;
+                self.recording_generation = self.connection_generation;
                 self.recording_receiver = Some(receiver);
                 self.status = "Applying recording configuration...".into();
             }
             Err(error) => self.status = format!("failed to start recording configuration worker: {error}"),
         }
+    }
+
+    fn record_recorder_update(&mut self, update: RecorderUpdate) {
+        let statistics = update.statistics();
+        let selected = self
+            .live_activity
+            .threads
+            .get(self.info_thread_selected)
+            .map(|thread| thread.statistics.thread_id);
+        match update {
+            RecorderUpdate::Detailed(activity) => {
+                if self.live_activity.record(activity, Instant::now()) {
+                    self.activity_samples.clear();
+                    self.recorder_statistics = None;
+                    self.activity_observed_at = None;
+                }
+            }
+            RecorderUpdate::Legacy(_) => self.live_activity.unsupported(),
+        }
+        self.info_thread_selected = selected
+            .and_then(|id| {
+                self.live_activity
+                    .threads
+                    .iter()
+                    .position(|thread| thread.statistics.thread_id == id)
+            })
+            .unwrap_or_else(|| self.info_thread_selected.min(self.live_activity.threads.len().saturating_sub(1)));
+        self.record_activity(statistics);
     }
 
     fn record_activity(&mut self, statistics: RecorderStatistics) {
@@ -1041,6 +1590,21 @@ impl App {
         self.activity_observed_at = Some(captured_at);
         self.recorder_statistics = Some(statistics);
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Row-navigation arithmetic is terminal input glue.
+fn handle_info_key(code: KeyCode, selected: &mut usize, count: usize) -> bool {
+    let last = count.saturating_sub(1);
+    match code {
+        KeyCode::Up => *selected = selected.saturating_sub(1).min(last),
+        KeyCode::Down => *selected = selected.saturating_add(1).min(last),
+        KeyCode::PageUp => *selected = selected.saturating_sub(8).min(last),
+        KeyCode::PageDown => *selected = selected.saturating_add(8).min(last),
+        KeyCode::Home => *selected = 0,
+        KeyCode::End => *selected = last,
+        _ => return false,
+    }
+    true
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1063,6 +1627,7 @@ fn receive_worker_result<T>(receiver: Option<&Receiver<Result<T, String>>>, work
     }
 }
 
+#[cfg(test)]
 const fn workers_are_idle(capturing: bool, fetching_statistics: bool, updating_recording: bool) -> bool {
     !capturing && !fetching_statistics && !updating_recording
 }
@@ -1077,6 +1642,7 @@ fn activity_rate(previous_total: u64, current_total: u64, elapsed: Duration) -> 
     u64::try_from(rate).unwrap_or(u64::MAX)
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     match code {
         KeyCode::Up => {
@@ -1117,6 +1683,7 @@ fn tier_with_kind(tiers: &[MemoryTierData], kind: MemoryTier) -> Option<&MemoryT
     tiers.iter().find(|tier| tier.kind == kind)
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let memory = snapshot.and_then(|snapshot| snapshot.memory.as_ref());
     let tier = memory.and_then(|memory| tier_with_kind(&memory.tiers, view.tier));
@@ -1171,6 +1738,7 @@ fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&Ca
     true
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_primitive_key(code: KeyCode, view: &mut PrimitiveViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let primitives = snapshot.map(|snapshot| &snapshot.primitives);
     let group = primitives.and_then(|primitives| primitives.groups.get(view.primitive_selected));
@@ -1247,6 +1815,7 @@ fn handle_primitive_key(code: KeyCode, view: &mut PrimitiveViewState, snapshot: 
     true
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let threads = snapshot.map(|snapshot| &snapshot.threads);
     let thread = threads.and_then(|threads| threads.threads.get(view.thread_selected));
@@ -1320,55 +1889,78 @@ fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option
     true
 }
 
+#[cfg_attr(test, mutants::skip)] // Dashboard focus and scrolling are terminal input glue.
 fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let runtime = snapshot.map(|snapshot| &snapshot.runtime);
     let worker = runtime.and_then(|runtime| runtime.workers.get(view.worker_selected));
+    if code == KeyCode::Char('e') {
+        view.focus = RuntimeFocus::Events;
+        return true;
+    }
+    if code == KeyCode::Char('t') {
+        view.task_histogram = view.task_histogram.toggle();
+        view.focus = RuntimeFocus::Activity;
+        return true;
+    }
+    if view.focus == RuntimeFocus::Events {
+        let task = runtime.and_then(|runtime| view.selected_task(runtime));
+        let events = snapshot.and_then(|snapshot| task.and_then(|task| snapshot.task_events.tasks.get(&(task.runtime_id, task.task_id))));
+        if code == KeyCode::Backspace && view.events.focus == TaskEventsFocus::Operations {
+            view.focus = RuntimeFocus::Activity;
+            return true;
+        }
+        return handle_task_events_key(code, &mut view.events, events);
+    }
+    let focus = view.focus.dashboard().expect("event focus returns above");
     match code {
-        KeyCode::Up => match view.focus {
-            RuntimeFocus::Workers => {
+        KeyCode::Left if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
+        KeyCode::Right if focus == RuntimeDashboardFocus::Activity => {
+            view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
+        }
+        KeyCode::Up => match focus {
+            RuntimeDashboardFocus::Workers => {
                 view.worker_selected = view.worker_selected.saturating_sub(1);
                 view.reset_task();
             }
-            RuntimeFocus::Tasks => {
+            RuntimeDashboardFocus::Tasks => {
                 view.task_selected = view.task_selected.saturating_sub(1);
-                view.detail_view = RuntimeDetailView::Details;
-                view.detail_scroll = 0;
+                view.reset_details();
             }
-            RuntimeFocus::Details => view.detail_scroll = view.detail_scroll.saturating_sub(1),
+            RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
         },
-        KeyCode::Down => match view.focus {
-            RuntimeFocus::Workers => {
+        KeyCode::Down => match focus {
+            RuntimeDashboardFocus::Workers => {
                 let count = runtime.map_or(0, |runtime| runtime.workers.len());
                 view.worker_selected = advance_selection(view.worker_selected, count);
                 view.reset_task();
             }
-            RuntimeFocus::Tasks => {
+            RuntimeDashboardFocus::Tasks => {
                 let count = worker.map_or(0, |worker| worker.tasks.len());
                 view.task_selected = advance_selection(view.task_selected, count);
-                view.detail_view = RuntimeDetailView::Details;
-                view.detail_scroll = 0;
+                view.reset_details();
             }
-            RuntimeFocus::Details => view.detail_scroll = view.detail_scroll.saturating_add(1),
+            RuntimeDashboardFocus::Activity => {
+                view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
+            }
         },
         KeyCode::Enter => {
-            view.focus = match view.focus {
-                RuntimeFocus::Workers => RuntimeFocus::Tasks,
-                RuntimeFocus::Tasks | RuntimeFocus::Details => RuntimeFocus::Details,
+            view.focus = match focus {
+                RuntimeDashboardFocus::Workers => RuntimeFocus::Tasks,
+                RuntimeDashboardFocus::Tasks => RuntimeFocus::Activity,
+                RuntimeDashboardFocus::Activity => RuntimeFocus::Events,
             };
         }
         KeyCode::Backspace => {
-            view.focus = match view.focus {
-                RuntimeFocus::Workers => return false,
-                RuntimeFocus::Tasks => RuntimeFocus::Workers,
-                RuntimeFocus::Details => RuntimeFocus::Tasks,
+            view.focus = match focus {
+                RuntimeDashboardFocus::Workers => return false,
+                RuntimeDashboardFocus::Tasks => RuntimeFocus::Workers,
+                RuntimeDashboardFocus::Activity => RuntimeFocus::Tasks,
             };
         }
-        KeyCode::Tab | KeyCode::BackTab if view.focus == RuntimeFocus::Details => {
-            view.detail_view = view.detail_view.toggle();
-            view.detail_scroll = 0;
+        KeyCode::PageUp if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(5),
+        KeyCode::PageDown if focus == RuntimeDashboardFocus::Activity => {
+            view.activity_scroll = view.activity_scroll.saturating_add(5).min(RUNTIME_HISTOGRAM_BINS - 1);
         }
-        KeyCode::PageUp => view.detail_scroll = view.detail_scroll.saturating_sub(5),
-        KeyCode::PageDown => view.detail_scroll = view.detail_scroll.saturating_add(5),
         KeyCode::Char('[') => {
             view.task_sort = view.task_sort.previous();
             view.reset_task();
@@ -1386,6 +1978,57 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
     true
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
+fn handle_task_events_key(code: KeyCode, view: &mut TaskEventsViewState, task: Option<&super::task_events::TaskEventSummary>) -> bool {
+    let operation = task.and_then(|task| {
+        task.operations
+            .get(view.operation_selected.min(task.operations.len().saturating_sub(1)))
+    });
+    match code {
+        KeyCode::Up | KeyCode::Down => {
+            let next = |selected, count| {
+                if code == KeyCode::Up {
+                    usize::saturating_sub(selected, 1)
+                } else {
+                    advance_selection(selected, count)
+                }
+            };
+            match view.focus {
+                TaskEventsFocus::Operations => {
+                    view.operation_selected = next(view.operation_selected, task.map_or(0, |task| task.operations.len()));
+                    view.reset_event();
+                }
+                TaskEventsFocus::Occurrences => {
+                    view.event_selected = next(view.event_selected, operation.map_or(0, |operation| operation.occurrences().len()));
+                    view.stack_scroll = 0;
+                    view.stack_horizontal_scroll = 0;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            view.focus = TaskEventsFocus::Occurrences;
+        }
+        KeyCode::Backspace => {
+            view.focus = match view.focus {
+                TaskEventsFocus::Operations => return false,
+                TaskEventsFocus::Occurrences => TaskEventsFocus::Operations,
+            };
+        }
+        KeyCode::PageUp => view.stack_scroll = view.stack_scroll.saturating_sub(5),
+        KeyCode::PageDown => view.stack_scroll = view.stack_scroll.saturating_add(5),
+        KeyCode::Left => view.stack_horizontal_scroll = view.stack_horizontal_scroll.saturating_sub(8),
+        KeyCode::Right => view.stack_horizontal_scroll = view.stack_horizontal_scroll.saturating_add(8),
+        KeyCode::Char('f') => {
+            view.stack_filter = view.stack_filter.toggle();
+            view.stack_scroll = 0;
+            view.stack_horizontal_scroll = 0;
+        }
+        _ => return false,
+    }
+    true
+}
+
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let io = snapshot.map(|snapshot| &snapshot.io);
     let resource = io.and_then(|io| io.resources.get(view.resource_selected));
@@ -1420,6 +2063,7 @@ fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&Captur
     true
 }
 
+#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let cache = snapshot.map(|snapshot| &snapshot.cache);
     let tier = cache.and_then(|cache| cache.tiers.get(view.tier_selected));
@@ -1457,74 +2101,32 @@ fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn capture_connected_snapshot(
     descriptor: &MonitorDescriptor,
-    options: SnapshotOptions,
+    mode: CaptureMode,
     progress: &Sender<CaptureMessage>,
 ) -> Result<CaptureOutcome, String> {
     report_capture_step(progress, CaptureStep::Capture)?;
-    let bytes = capture_snapshot(descriptor, options).map_err(|error| error.to_string())?;
-    report_capture_step(progress, CaptureStep::Decode)?;
-    let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| format!("invalid Seismograph snapshot: {error}"))?;
-    let allocator = source_with_id(&decoded.sources, seismograph_rallocator::source::ID)
-        .ok_or(super::Error::MissingMemorySource)
-        .and_then(|source| seismograph_rallocator::decode(&source.data).map_err(super::Error::MemorySnapshot));
-    let runtime_source = source_with_id(&decoded.sources, seismograph_runtime::snapshot::source::ID)
-        .and_then(|source| seismograph_runtime::snapshot::decode(&source.data).ok());
-    let runtime_addresses = runtime_source
-        .iter()
-        .flat_map(|source| &source.addresses)
-        .map(|lookup| {
-            seismograph_rallocator::callers::AddressLookup::from_fields(seismograph_rallocator::callers::AddressLookupFields {
-                address: lookup.address,
-                symbol: lookup.symbol.clone(),
-                filename: lookup.filename.clone(),
-                line: lookup.line,
-                column: lookup.column,
-            })
-        })
-        .collect::<Vec<_>>();
-    let (memory, allocations, runtime, heap_error, mut status) = match allocator {
-        Ok(allocator) => {
-            let mut addresses = allocator
-                .addresses
-                .iter()
-                .cloned()
-                .map(|lookup| (lookup.address, lookup))
-                .collect::<std::collections::BTreeMap<_, _>>();
-            for lookup in runtime_addresses {
-                addresses.insert(lookup.address, lookup);
-            }
-            let addresses = addresses.into_values().collect::<Vec<_>>();
-            let runtime = RuntimeSnapshot::from_events(&decoded, &addresses, runtime_source.as_ref());
-            (
-                Some(MemorySnapshot::from_snapshot(&allocator)),
-                Some(AllocationSnapshot::from_snapshot(&allocator)),
-                runtime,
-                None,
-                String::new(),
-            )
-        }
-        Err(error) => {
-            let error = format!("heap data unavailable: {error}");
-            (
-                None,
-                None,
-                RuntimeSnapshot::from_events(&decoded, &runtime_addresses, runtime_source.as_ref()),
-                Some(error.clone()),
-                error,
-            )
+    let captured = match mode {
+        CaptureMode::Continue => capture_snapshot(descriptor, SnapshotOptions::default()),
+        CaptureMode::Stop => {
+            let result = capture_snapshot_and_stop(descriptor);
+            // Cleanup can succeed even when subsequent source capture/encoding fails.
+            // Always reconcile, including after a lost response or remote error.
+            let recording = handshake(descriptor).map_err(|error| error.to_string());
+            progress
+                .send(CaptureMessage::Recording(recording))
+                .map_err(|_send_error| "snapshot progress receiver closed".to_owned())?;
+            result
         }
     };
-    let snapshot = Box::new(CapturedSnapshot {
-        memory,
-        allocations,
-        heap_error,
-        primitives: runtime.primitives,
-        runtime: runtime.runtime,
-        io: runtime.io,
-        cache: runtime.cache,
-        threads: runtime.threads,
-        captured_at: SystemTime::now(),
-        captured_instant: Instant::now(),
+    let bytes = captured.map_err(|error| error.to_string())?;
+    report_capture_step(progress, CaptureStep::Decode)?;
+    let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| format!("invalid Seismograph snapshot: {error}"))?;
+    let mut snapshot = super::snapshot::prepare(decoded)?;
+    snapshot.captured_at = Some(SystemTime::now());
+    snapshot.captured_instant = Some(Instant::now());
+    let mut status = snapshot.heap_error.clone().unwrap_or_else(|| match mode {
+        CaptureMode::Continue => "Captured; server buffers and recording policy preserved".into(),
+        CaptureMode::Stop => "Captured; recording stopped and server ring buffers deallocated".into(),
     });
     report_capture_step(progress, CaptureStep::Save)?;
     if let Err(error) = save_snapshot(descriptor, &bytes) {
@@ -1533,16 +2135,9 @@ fn capture_connected_snapshot(
     Ok(CaptureOutcome { snapshot, status })
 }
 
-fn source_with_id(
-    sources: &[seismograph::snapshot::SourceSnapshot],
-    id: seismograph::snapshot::SourceId,
-) -> Option<&seismograph::snapshot::SourceSnapshot> {
-    sources.iter().find(|source| source.id == id)
-}
-
 fn report_capture_step(progress: &Sender<CaptureMessage>, step: CaptureStep) -> Result<(), String> {
     progress
-        .send_sync(CaptureMessage::Progress(step))
+        .send(CaptureMessage::Progress(step))
         .map_err(|_send_error| "snapshot progress receiver closed".to_owned())
 }
 
@@ -1561,14 +2156,6 @@ pub(super) fn format_sampling_percentage(sampling_one_in: u32) -> String {
     };
     let formatted = format!("{percentage:.precision$}");
     format!("{}%", formatted.trim_end_matches('0').trim_end_matches('.'))
-}
-
-const fn next_buffer_disposition(disposition: EventBufferDisposition) -> EventBufferDisposition {
-    match disposition {
-        EventBufferDisposition::Retain => EventBufferDisposition::Clear,
-        EventBufferDisposition::Clear => EventBufferDisposition::Release,
-        EventBufferDisposition::Release => EventBufferDisposition::Retain,
-    }
 }
 
 #[cfg(test)]
@@ -1598,11 +2185,14 @@ mod tests {
                 groups: Vec::new(),
             },
             runtime: RuntimeMonitorSnapshot::default(),
+            task_events: super::super::task_events::TaskEventsSnapshot::default(),
             io: IoMonitorSnapshot::default(),
             cache: CacheMonitorSnapshot::default(),
             threads: ThreadSnapshot { threads: Vec::new() },
-            captured_at: SystemTime::UNIX_EPOCH,
-            captured_instant: Instant::now(),
+            captured_at: Some(SystemTime::UNIX_EPOCH),
+            captured_instant: Some(Instant::now()),
+            filter_index: None,
+            filter_summary: super::super::filter_index::FilterSummary::default(),
         })
     }
 
@@ -1619,7 +2209,7 @@ mod tests {
 
     fn connected_fields(screen: &Screen) -> Option<(seismograph_protocol::monitor::InstanceId, RecordingConfiguration, MonitorTab, bool)> {
         match screen {
-            Screen::Browse => None,
+            Screen::Browse | Screen::Offline { .. } => None,
             Screen::Connected {
                 descriptor,
                 recording,
@@ -1651,82 +2241,74 @@ mod tests {
         configuration.cache.sampling_one_in = 10;
         configuration.event_capacity_per_thread = 1_024;
 
+        let popup = RecordingConfigurationPopup::new(configuration);
+        assert_eq!(RecordingConfigurationField::RuntimeTaskBacktraces.value(popup), "on");
         assert_eq!(
-            RecordingConfigurationField::ALL.map(|field| (field.label(), field.value(configuration))),
-            [
-                ("Allocations recording", "on".into()),
-                ("Allocations backtraces", "on".into()),
-                ("Allocations sampling", "1/8 (12.5%)".into()),
-                ("General events recording", "on".into()),
-                ("General events backtraces", "on".into()),
-                ("General events sampling", "1/20 (5%)".into()),
-                ("Arc dereference recording", "on".into()),
-                ("Arc dereference backtraces", "on".into()),
-                ("Arc dereference sampling", "1/100 (1%)".into()),
-                ("Runtime task recording", "on".into()),
-                ("Runtime task backtraces", "on".into()),
-                ("I/O recording", "on".into()),
-                ("I/O backtraces", "on".into()),
-                ("I/O resource sampling", "1/4 (25%)".into()),
-                ("Cache recording", "on".into()),
-                ("Cache backtraces", "on".into()),
-                ("Cache tier sampling", "1/10 (10%)".into()),
+            popup
+                .fields()
+                .into_iter()
+                .map(|field| (field.label(), field.value(popup)))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Allocations", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/8 (12.5%)".into()),
+                ("Events", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/20 (5%)".into()),
+                ("Arc", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/100 (1%)".into()),
+                ("Runtime tasks", "on".into()),
+                ("I/O", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/4 (25%)".into()),
+                ("Cache", "custom".into()),
+                ("  Backtraces", "on".into()),
+                ("  Sampling", "1/10 (10%)".into()),
                 ("Event buffer capacity", "1024 events / thread".into()),
-                ("OK", String::new()),
-                ("Cancel", String::new()),
             ]
         );
     }
 
     #[test]
-    fn every_recording_field_adjusts_only_its_value() {
-        let mut configuration = RecordingConfiguration::default();
-        for field in RecordingConfigurationField::ALL {
-            field.adjust(&mut configuration, 1);
-        }
-
+    fn recording_modes_expand_custom_fields_and_normalize_on_apply() {
+        let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, 1);
+        let on_fields = popup.fields();
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, 1);
+        let custom_fields = popup.fields();
+        RecordingConfigurationField::AllocationBacktraces.adjust(&mut popup, 1);
+        RecordingConfigurationField::AllocationSampling.adjust(&mut popup, 1);
+        let configuration = popup.configuration();
         assert_eq!(
+            (on_fields, custom_fields, configuration.allocations,),
             (
-                configuration.allocations,
-                configuration.general_events,
-                configuration.arc_dereferences,
-                configuration.runtime_tasks,
-                configuration.io,
-                configuration.cache,
-                configuration.event_capacity_per_thread,
-            ),
-            (
+                vec![
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::EventBufferCapacity,
+                ],
+                vec![
+                    RecordingConfigurationField::AllocationRecording,
+                    RecordingConfigurationField::AllocationBacktraces,
+                    RecordingConfigurationField::AllocationSampling,
+                    RecordingConfigurationField::GeneralRecording,
+                    RecordingConfigurationField::ArcDereferenceRecording,
+                    RecordingConfigurationField::RuntimeTaskRecording,
+                    RecordingConfigurationField::IoRecording,
+                    RecordingConfigurationField::CacheRecording,
+                    RecordingConfigurationField::EventBufferCapacity,
+                ],
                 seismograph_protocol::message::RecordingPolicy {
                     enabled: true,
                     capture_backtraces: true,
                     sampling_one_in: 2,
                 },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 1,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                seismograph_protocol::message::RecordingPolicy {
-                    enabled: true,
-                    capture_backtraces: true,
-                    sampling_one_in: 2,
-                },
-                131_072,
             )
         );
     }
@@ -1757,11 +2339,10 @@ mod tests {
         thread.stack_scroll = 6;
         thread.reset();
         let mut runtime = RuntimeViewState::new();
-        runtime.focus = RuntimeFocus::Details;
+        runtime.focus = RuntimeFocus::Activity;
         runtime.worker_selected = 2;
         runtime.task_selected = 3;
-        runtime.detail_view = RuntimeDetailView::SpawnStack;
-        runtime.detail_scroll = 4;
+        runtime.activity_scroll = 4;
         runtime.reset();
         let mut io = IoViewState {
             focus: IoFocus::Operations,
@@ -1791,7 +2372,217 @@ mod tests {
     }
 
     #[test]
-    fn tabs_and_runtime_detail_views_cover_every_variant() {
+    fn event_buffer_capacity_is_not_associated_with_a_recorder() {
+        assert_eq!(RecordingConfigurationField::EventBufferCapacity.recorder(), None);
+    }
+
+    macro_rules! recording_configuration_regressions {
+        ($cycle:ident, $backtraces:ident, $policy:ident, $mode:ident, $trace_field:ident, $sampling:expr) => {
+            #[test]
+            fn $cycle() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.capture_backtraces = $sampling != 1;
+                configuration.$policy.sampling_one_in = $sampling;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$mode)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Left);
+                let on = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let off = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let lower_bound = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Char(' '));
+                app.handle_key(KeyCode::Right);
+                let restored = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Right);
+                let upper_bound = app.recording_configuration_popup.unwrap();
+
+                let mut enabled = configuration;
+                enabled.$policy.capture_backtraces = true;
+                enabled.$policy.sampling_one_in = 1;
+                let mut disabled = configuration;
+                disabled.$policy.enabled = false;
+                assert_eq!(
+                    (
+                        on.configuration(),
+                        off.configuration(),
+                        lower_bound,
+                        restored,
+                        upper_bound,
+                        on.field(),
+                        off.field(),
+                    ),
+                    (
+                        enabled,
+                        disabled,
+                        off,
+                        popup,
+                        popup,
+                        RecordingConfigurationField::$mode,
+                        RecordingConfigurationField::$mode,
+                    )
+                );
+            }
+
+            #[test]
+            fn $backtraces() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.capture_backtraces = true;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                RecordingConfigurationField::$mode.adjust(&mut popup, 1);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$trace_field)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Right);
+                let toggled = app.recording_configuration_popup.unwrap();
+                app.handle_key(KeyCode::Left);
+                let restored = app.recording_configuration_popup.unwrap();
+
+                let mut expected = configuration;
+                expected.$policy.capture_backtraces = false;
+                assert_eq!(
+                    (toggled.configuration(), toggled.fields(), restored),
+                    (expected, popup.fields(), popup)
+                );
+            }
+        };
+    }
+
+    recording_configuration_regressions!(
+        allocation_modes_preserve_custom_draft,
+        allocation_backtraces_toggle_without_collapsing_custom_fields,
+        allocations,
+        AllocationRecording,
+        AllocationBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        general_modes_preserve_custom_draft,
+        general_backtraces_toggle_without_collapsing_custom_fields,
+        general_events,
+        GeneralRecording,
+        GeneralBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        arc_modes_preserve_custom_draft,
+        arc_backtraces_toggle_without_collapsing_custom_fields,
+        arc_dereferences,
+        ArcDereferenceRecording,
+        ArcDereferenceBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        runtime_modes_preserve_custom_draft,
+        runtime_backtraces_toggle_without_collapsing_custom_fields,
+        runtime_tasks,
+        RuntimeTaskRecording,
+        RuntimeTaskBacktraces,
+        1
+    );
+    recording_configuration_regressions!(
+        io_modes_preserve_custom_draft,
+        io_backtraces_toggle_without_collapsing_custom_fields,
+        io,
+        IoRecording,
+        IoBacktraces,
+        8
+    );
+    recording_configuration_regressions!(
+        cache_modes_preserve_custom_draft,
+        cache_backtraces_toggle_without_collapsing_custom_fields,
+        cache,
+        CacheRecording,
+        CacheBacktraces,
+        8
+    );
+
+    macro_rules! recording_sampling_regression {
+        ($name:ident, $policy:ident, $field:ident) => {
+            #[test]
+            fn $name() {
+                let mut configuration = RecordingConfiguration::default();
+                configuration.$policy.enabled = true;
+                configuration.$policy.sampling_one_in = 8;
+                let mut app = connected_app(MonitorTab::Info);
+                let mut popup = RecordingConfigurationPopup::new(configuration);
+                popup.selected = popup
+                    .fields()
+                    .iter()
+                    .position(|field| *field == RecordingConfigurationField::$field)
+                    .unwrap();
+                app.recording_configuration_popup = Some(popup);
+
+                app.handle_key(KeyCode::Right);
+                let increased = app.recording_configuration_popup.unwrap().configuration();
+                app.handle_key(KeyCode::Left);
+                let restored = app.recording_configuration_popup.unwrap();
+                let mut expected = configuration;
+                expected.$policy.sampling_one_in = 16;
+                assert_eq!((increased, restored), (expected, popup));
+            }
+        };
+    }
+
+    recording_sampling_regression!(allocation_sampling_edits_only_allocations, allocations, AllocationSampling);
+    recording_sampling_regression!(general_sampling_edits_only_events, general_events, GeneralSampling);
+    recording_sampling_regression!(arc_sampling_edits_only_arc, arc_dereferences, ArcDereferenceSampling);
+    recording_sampling_regression!(io_sampling_edits_only_io, io, IoSampling);
+    recording_sampling_regression!(cache_sampling_edits_only_cache, cache, CacheSampling);
+
+    #[test]
+    fn configuration_keyboard_navigation_clamps_and_edits_capacity() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.handle_key(KeyCode::Char('c'));
+        let original = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Up);
+        let at_start = app.recording_configuration_popup.unwrap();
+        for _ in 0..original.fields().len() {
+            app.handle_key(KeyCode::Down);
+        }
+        app.handle_key(KeyCode::Right);
+        let increased = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Left);
+        let restored = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Up);
+        let previous = app.recording_configuration_popup.unwrap().field();
+
+        let mut expected = original.draft;
+        expected.event_capacity_per_thread = 131_072;
+        assert_eq!(
+            (
+                at_start,
+                increased.configuration(),
+                restored.configuration(),
+                restored.field(),
+                previous
+            ),
+            (
+                original,
+                expected,
+                original.draft,
+                RecordingConfigurationField::EventBufferCapacity,
+                RecordingConfigurationField::CacheRecording,
+            )
+        );
+    }
+
+    #[test]
+    fn tabs_cover_every_variant() {
         assert_eq!(
             [
                 MonitorTab::Info,
@@ -1815,16 +2606,6 @@ mod tests {
                 (7, MonitorTab::Info, MonitorTab::Io),
             ]
         );
-        assert_eq!(
-            [
-                (RuntimeDetailView::Details.toggle(), RuntimeDetailView::Details.label()),
-                (RuntimeDetailView::SpawnStack.toggle(), RuntimeDetailView::SpawnStack.label()),
-            ],
-            [
-                (RuntimeDetailView::SpawnStack, "Details"),
-                (RuntimeDetailView::Details, "Spawn Stack"),
-            ]
-        );
     }
 
     #[test]
@@ -1838,29 +2619,45 @@ mod tests {
     }
 
     #[test]
-    fn recording_toggle_preserves_backtraces() {
+    fn recording_mode_changes_preserve_custom_values_until_apply() {
         let mut configuration = RecordingConfiguration::default();
         configuration.allocations.enabled = true;
         configuration.allocations.capture_backtraces = true;
-        RecordingConfigurationField::AllocationRecording.adjust(&mut configuration, 1);
+        configuration.allocations.sampling_one_in = 8;
+        let mut popup = RecordingConfigurationPopup::new(configuration);
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, -1);
 
         assert_eq!(
-            (configuration.allocations.enabled, configuration.allocations.capture_backtraces),
-            (false, true)
+            (
+                popup.mode(RecorderKind::Allocations),
+                popup.draft.allocations.capture_backtraces,
+                popup.configuration().allocations,
+            ),
+            (
+                RecordingMode::On,
+                true,
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: true,
+                    sampling_one_in: 1,
+                }
+            )
         );
     }
 
     #[test]
     fn backtrace_toggle_preserves_recording() {
-        let mut configuration = RecordingConfiguration::default();
-        RecordingConfigurationField::GeneralBacktraces.adjust(&mut configuration, 1);
+        let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::GeneralRecording.adjust(&mut popup, 1);
+        RecordingConfigurationField::GeneralRecording.adjust(&mut popup, 1);
+        RecordingConfigurationField::GeneralBacktraces.adjust(&mut popup, 1);
 
         assert_eq!(
             (
-                configuration.general_events.enabled,
-                configuration.general_events.capture_backtraces
+                popup.configuration().general_events.enabled,
+                popup.configuration().general_events.capture_backtraces
             ),
-            (false, true)
+            (true, true)
         );
     }
 
@@ -1901,24 +2698,13 @@ mod tests {
     #[test]
     fn configuration_popup_uses_arrow_keys_and_escape() {
         let mut app = App::new();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Down);
         let moved = app.recording_configuration_popup;
         app.handle_key(KeyCode::Esc);
 
-        assert_eq!(
-            (moved, app.recording_configuration_popup),
-            (
-                Some(RecordingConfigurationPopup {
-                    draft: RecordingConfiguration::default(),
-                    selected: 1,
-                }),
-                None
-            )
-        );
+        assert_eq!(moved.map(|popup| popup.selected), Some(1));
+        assert_eq!(app.recording_configuration_popup, None);
     }
 
     #[test]
@@ -1930,64 +2716,34 @@ mod tests {
         app.poll_snapshot_capture();
         app.poll_discovery();
         app.poll_recorder_statistics();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_recording_configuration_key(KeyCode::Char('x'));
 
         assert_eq!((app.next_refresh(), app.status), (refresh, String::new()));
     }
 
     #[test]
-    fn configuration_popup_handles_adjust_cancel_and_disconnected_apply() {
+    fn configuration_popup_handles_modes_custom_settings_and_disconnected_apply() {
         let mut app = App::new();
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 1,
-        });
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Right);
         let after_right = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Left);
-        let after_left = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Char(' '));
-        let after_space = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Up);
-        let after_up = app.recording_configuration_popup.unwrap();
-        app.handle_key(KeyCode::Down);
-        let after_down = app.recording_configuration_popup.unwrap();
-        app.recording_configuration_popup.as_mut().unwrap().selected = 2;
         app.handle_key(KeyCode::Right);
-        let sampling_after_right = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
-        app.handle_key(KeyCode::Left);
-        let sampling_after_left = app.recording_configuration_popup.unwrap().draft.allocations.sampling_one_in;
-        app.recording_configuration_popup.as_mut().unwrap().selected = RecordingConfigurationField::ALL.len() - 1;
+        let after_custom = app.recording_configuration_popup.unwrap();
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Right);
+        let backtraces = app.recording_configuration_popup.unwrap().draft.allocations.capture_backtraces;
         app.handle_key(KeyCode::Enter);
 
         assert_eq!(
             (
-                after_right.selected,
-                after_right.draft.allocations.capture_backtraces,
-                after_left.selected,
-                after_left.draft.allocations.capture_backtraces,
-                after_space.selected,
-                after_space.draft.allocations.capture_backtraces,
-                after_up.selected,
-                after_down.selected,
-                sampling_after_right,
-                sampling_after_left,
+                after_right.mode(RecorderKind::Allocations),
+                after_custom.mode(RecorderKind::Allocations),
+                backtraces,
                 app.recording_configuration_popup,
-                app.status.as_str(),
             ),
-            (1, true, 1, false, 1, true, 0, 1, 2, 1, None, "Recording configuration unchanged")
+            (RecordingMode::On, RecordingMode::Custom, true, None)
         );
-
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: RecordingConfigurationField::ALL.len() - 2,
-        });
-        app.handle_key(KeyCode::Enter);
-        assert_eq!(app.recording_configuration_popup, None);
     }
 
     #[test]
@@ -2011,13 +2767,7 @@ mod tests {
 
         app.handle_key(KeyCode::Char('c'));
 
-        assert_eq!(
-            app.recording_configuration_popup,
-            Some(RecordingConfigurationPopup {
-                draft: recording,
-                selected: 0,
-            })
-        );
+        assert_eq!(app.recording_configuration_popup, Some(RecordingConfigurationPopup::new(recording)));
     }
 
     #[test]
@@ -2058,12 +2808,7 @@ mod tests {
             tab: MonitorTab::Info,
             snapshot: None,
         };
-        app.recording_configuration_popup = Some(RecordingConfigurationPopup {
-            draft: RecordingConfiguration::default(),
-            selected: 0,
-        });
-
-        app.handle_key(KeyCode::Enter);
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_key(KeyCode::Esc);
 
         assert_eq!(
@@ -2073,18 +2818,15 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_buffer_disposition_cycles() {
+    fn capture_mode_has_two_actions_and_defaults_to_continue() {
         assert_eq!(
             (
-                next_buffer_disposition(EventBufferDisposition::Retain),
-                next_buffer_disposition(EventBufferDisposition::Clear),
-                next_buffer_disposition(EventBufferDisposition::Release),
+                CaptureMode::default(),
+                CaptureMode::Continue.next(),
+                CaptureMode::Stop.next(),
+                TaskHistogram::Ready.toggle(),
             ),
-            (
-                EventBufferDisposition::Clear,
-                EventBufferDisposition::Release,
-                EventBufferDisposition::Retain,
-            )
+            (CaptureMode::Continue, CaptureMode::Stop, CaptureMode::Continue, TaskHistogram::Poll,)
         );
     }
 
@@ -2096,10 +2838,12 @@ mod tests {
             Instance {
                 descriptor: descriptor(1),
                 recording: RecordingConfiguration::default(),
+                server_version: None,
             },
             Instance {
                 descriptor: descriptor(2),
                 recording: RecordingConfiguration::default(),
+                server_version: None,
             },
         ];
         assert!(app.handle_key(KeyCode::Char('q')));
@@ -2134,7 +2878,7 @@ mod tests {
             assert_eq!(connected_fields(&app.screen).unwrap().2, expected);
         }
         app.handle_key(KeyCode::Char('d'));
-        assert_eq!(app.snapshot_options.event_buffers, EventBufferDisposition::Clear);
+        assert_eq!(app.capture_mode, CaptureMode::Stop);
         app.handle_key(KeyCode::Char('x'));
         app.handle_key(KeyCode::Esc);
         assert!(matches!(app.screen, Screen::Browse));
@@ -2219,7 +2963,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::AveragePoll,
+                    RuntimeTaskSort::Executing,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Runtime,
@@ -2249,12 +2993,13 @@ mod tests {
     }
 
     #[test]
-    fn recording_popup_is_blocked_by_capture_and_recording_updates() {
+    fn recording_popup_is_blocked_during_capture_and_recording_updates() {
         let mut app = connected_app(MonitorTab::Info);
         let (_capture_sender, capture_receiver) = unbounded();
         app.capture_receiver = Some(capture_receiver);
         app.handle_key(KeyCode::Char('c'));
         let while_capturing = app.recording_configuration_popup;
+        app.recording_configuration_popup = None;
         app.capture_receiver = None;
         let (_recording_sender, recording_receiver) = unbounded();
         app.recording_receiver = Some(recording_receiver);
@@ -2264,8 +3009,12 @@ mod tests {
         app.handle_key(KeyCode::Char('c'));
 
         assert_eq!(
-            (while_capturing, while_recording, app.recording_configuration_popup.is_some()),
-            (None, None, true)
+            (
+                while_capturing.is_some(),
+                while_recording,
+                app.recording_configuration_popup.is_some()
+            ),
+            (false, None, true)
         );
     }
 
@@ -2273,11 +3022,11 @@ mod tests {
     fn refresh_schedules_the_next_worker_for_each_screen() {
         let mut browse = App::new();
         let before = browse.next_refresh();
-        browse.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0)));
+        browse.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0).into()));
         let browse_state = (browse.next_refresh() > before, browse.discovery_receiver.is_some());
 
         let mut connected = connected_app(MonitorTab::Info);
-        connected.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0)));
+        connected.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0).into()));
         let connected_state = (connected.statistics_receiver.is_some(), connected.discovery_receiver.is_none());
 
         assert_eq!((browse_state, connected_state), ((true, true), (true, true)));
@@ -2488,7 +3237,8 @@ mod tests {
 
     #[test]
     fn failed_snapshot_capture_is_available_to_content_panels() {
-        let mut app = App::new();
+        let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
 
         app.finish_snapshot_capture(Err("snapshot decode failed".into()));
 
@@ -2496,12 +3246,149 @@ mod tests {
     }
 
     #[test]
+    fn clear_preserves_the_captured_view_and_resets_activity_baselines() {
+        let mut app = connected_app(MonitorTab::Info);
+        assert!(connected_snapshot_ptr(&Screen::Browse).is_none());
+        let snapshot_before = connected_snapshot_ptr(&app.screen).unwrap();
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.record_activity(RecorderStatistics {
+            total_events: 100,
+            ..Default::default()
+        });
+        app.record_activity(RecorderStatistics {
+            total_events: 110,
+            ..Default::default()
+        });
+        let (sender, receiver) = unbounded();
+        app.capture_receiver = Some(receiver);
+        sender
+            .send(CaptureMessage::Recording(Ok(RecordingConfiguration::default())))
+            .unwrap();
+        sender.send(CaptureMessage::Cleared(Ok(()))).unwrap();
+        app.poll_snapshot_capture();
+        let snapshot_after = connected_snapshot_ptr(&app.screen).unwrap();
+        assert_eq!(snapshot_before, snapshot_after);
+        assert!(app.status.contains("Server buffers cleared"));
+        assert!(app.activity_samples.is_empty());
+        assert!(app.recorder_statistics.is_none());
+        assert!(app.activity_observed_at.is_none());
+        assert!(app.capture_receiver.is_none());
+        assert!(app.capture_started_at.is_none());
+    }
+
+    #[test]
+    fn stale_capture_and_clear_completions_cannot_mutate_a_new_connection() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.connection_generation += 1;
+        app.status = "new connection".into();
+        let (sender, receiver) = unbounded();
+        app.capture_receiver = Some(receiver);
+        sender.send(CaptureMessage::Recording(Err("old connection failed".into()))).unwrap();
+        sender.send(CaptureMessage::Cleared(Err("old clear failed".into()))).unwrap();
+        app.poll_snapshot_capture();
+        app.finish_snapshot_capture(Err("old capture failed".into()));
+        assert_eq!(
+            (app.status.as_str(), app.recording_unknown, app.snapshot_error),
+            ("new connection", false, None)
+        );
+    }
+
+    #[test]
+    fn failed_reconciliation_marks_state_unknown_without_claiming_deallocation() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.reconcile_recording(Err("connection lost".into()));
+        app.finish_snapshot_capture(Err("stop response lost".into()));
+        app.handle_key(KeyCode::Char('c'));
+        assert!(app.recording_unknown);
+        assert_eq!(app.status, "stop response lost");
+        assert!(app.recording_configuration_popup.is_none());
+    }
+
+    #[test]
+    fn lifecycle_keys_are_blocked_by_configuration_and_modal_drafts() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (_sender, receiver) = unbounded();
+        app.recording_receiver = Some(receiver);
+        for key in ['s', 'C'] {
+            app.handle_key(KeyCode::Char(key));
+        }
+        assert!(app.capture_receiver.is_none());
+        app.recording_receiver = None;
+        app.handle_key(KeyCode::Char('c'));
+        let draft = app.recording_configuration_popup;
+        for key in ['s', 'C', 'd'] {
+            app.handle_key(KeyCode::Char(key));
+        }
+        assert_eq!(app.recording_configuration_popup, draft);
+        assert_eq!(app.capture_mode, CaptureMode::Continue);
+        assert!(app.capture_receiver.is_none());
+        app.recording_configuration_popup = None;
+        app.handle_key(KeyCode::F(1));
+        for key in ['s', 'C', 'd'] {
+            app.handle_key(KeyCode::Char(key));
+        }
+        assert!(app.capture_receiver.is_none());
+        assert_eq!(app.capture_mode, CaptureMode::Continue);
+    }
+
+    #[test]
+    fn stop_worker_reconciles_server_policy_after_a_capture_error() {
+        use std::net::TcpListener;
+
+        use seismograph_protocol::message::{Request, Response};
+        use seismograph_protocol::{read_request, write_response};
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut descriptor = descriptor(1);
+        descriptor.port = listener.local_addr().unwrap().port();
+        let id = descriptor.instance_id;
+        let worker = thread::spawn(move || {
+            for stop in [true, false] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                assert!(matches!(read_request(&mut stream).unwrap(), (1, Request::Hello { .. })));
+                write_response(
+                    &mut stream,
+                    1,
+                    &Response::Hello {
+                        instance_id: id,
+                        recording: RecordingConfiguration::default(),
+                    },
+                )
+                .unwrap();
+                let request = read_request(&mut stream).unwrap();
+                let response = if stop {
+                    assert_eq!(request, (2, Request::CaptureSnapshotAndStop));
+                    Response::Error("source failed after recorder cleanup".into())
+                } else {
+                    assert_eq!(request, (2, Request::ReadCacheRecording));
+                    Response::CacheRecording(seismograph_protocol::message::RecordingPolicy::default())
+                };
+                write_response(&mut stream, 2, &response).unwrap();
+            }
+        });
+        let (sender, receiver) = unbounded();
+        let error = capture_connected_snapshot(&descriptor, CaptureMode::Stop, &sender).err().unwrap();
+        worker.join().unwrap();
+        assert!(error.contains("source failed after recorder cleanup"));
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            CaptureMessage::Progress(CaptureStep::Capture)
+        ));
+        assert!(matches!(receiver.try_recv().unwrap(), CaptureMessage::Recording(Ok(configuration))
+            if configuration == RecordingConfiguration::default()));
+        receiver.try_recv().err().unwrap();
+    }
+
+    #[test]
     fn successful_snapshot_capture_resets_views_and_installs_snapshot() {
         let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
         app.heap_view.focus = HeapFocus::Hotspots;
         app.allocation_view.selected = 3;
         app.thread_view.focus = ThreadFocus::Objects;
-        app.runtime_view.focus = RuntimeFocus::Details;
+        app.runtime_view.focus = RuntimeFocus::Activity;
         app.io_view.focus = IoFocus::Operations;
         app.cache_view.focus = CacheFocus::Operations;
         app.finish_snapshot_capture(Ok(CaptureOutcome {
@@ -2535,17 +3422,19 @@ mod tests {
 
     #[test]
     fn snapshot_capture_messages_cover_progress_completion_and_closed_worker() {
-        let mut app = App::new();
+        let mut app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
         let (sender, receiver) = unbounded();
         app.capture_receiver = Some(receiver);
-        sender.send_sync(CaptureMessage::Progress(CaptureStep::Decode)).unwrap();
-        sender.send_sync(CaptureMessage::Complete(Err("decode failed".into()))).unwrap();
+        sender.send(CaptureMessage::Progress(CaptureStep::Decode)).unwrap();
+        sender.send(CaptureMessage::Complete(Err("decode failed".into()))).unwrap();
         app.poll_snapshot_capture();
         assert_eq!((app.capture_step, app.snapshot_error.as_deref()), (None, Some("decode failed")));
 
         let (sender, receiver) = unbounded::<CaptureMessage>();
         drop(sender);
         app.capture_receiver = Some(receiver);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
         app.poll_snapshot_capture();
         assert_eq!(app.snapshot_error.as_deref(), Some("Snapshot capture worker stopped unexpectedly"));
     }
@@ -2554,7 +3443,7 @@ mod tests {
     fn worker_receivers_distinguish_empty_closed_and_available_channels() {
         let (capture_sender, capture_receiver) = unbounded();
         assert!(matches!(receive_capture_message(Some(&capture_receiver)), Ok(None)));
-        capture_sender.send_sync(CaptureMessage::Progress(CaptureStep::Save)).unwrap();
+        capture_sender.send(CaptureMessage::Progress(CaptureStep::Save)).unwrap();
         assert!(matches!(
             receive_capture_message(Some(&capture_receiver)),
             Ok(Some(CaptureMessage::Progress(CaptureStep::Save)))
@@ -2568,7 +3457,7 @@ mod tests {
 
         let (worker_sender, worker_receiver) = unbounded();
         assert!(receive_worker_result::<u64>(Some(&worker_receiver), "test").is_none());
-        worker_sender.send_sync(Ok(42)).unwrap();
+        worker_sender.send(Ok(42)).unwrap();
         assert_eq!(receive_worker_result(Some(&worker_receiver), "test"), Some(Ok(42)));
         drop(worker_sender);
         assert_eq!(
@@ -2584,17 +3473,20 @@ mod tests {
         app.instances = vec![Instance {
             descriptor: descriptor(2),
             recording: RecordingConfiguration::default(),
+            server_version: None,
         }];
         let (sender, receiver) = unbounded();
         sender
-            .send_sync(Ok(vec![
+            .send(Ok(vec![
                 Instance {
                     descriptor: descriptor(1),
                     recording: RecordingConfiguration::default(),
+                    server_version: None,
                 },
                 Instance {
                     descriptor: descriptor(2),
                     recording: RecordingConfiguration::default(),
+                    server_version: None,
                 },
             ]))
             .unwrap();
@@ -2603,13 +3495,13 @@ mod tests {
         assert_eq!((app.selected, app.status.as_str()), (1, "2 application(s) available"));
 
         let (sender, receiver) = unbounded();
-        sender.send_sync(Ok(Vec::new())).unwrap();
+        sender.send(Ok(Vec::new())).unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
         assert_eq!(app.status, "No reachable Seismograph monitors found");
 
         let (sender, receiver) = unbounded();
-        sender.send_sync(Err("discovery failed".into())).unwrap();
+        sender.send(Err("discovery failed".into())).unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
         assert_eq!(app.status, "discovery failed");
@@ -2625,7 +3517,7 @@ mod tests {
     fn discovery_results_are_ignored_after_connecting() {
         let mut app = connected_app(MonitorTab::Info);
         let (sender, receiver) = unbounded();
-        sender.send_sync(Ok(Vec::new())).unwrap();
+        sender.send(Ok(Vec::new())).unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
 
@@ -2633,21 +3525,78 @@ mod tests {
     }
 
     #[test]
-    fn statistics_messages_record_activity_and_handle_errors() {
-        let mut app = App::new();
+    fn detailed_statistics_refresh_without_capture_and_info_navigation_keeps_thread_identity() {
+        use seismograph_protocol::message::{EventClassCounts, RecorderActivity, ThreadRecorderStatistics};
+        let mut app = connected_app(MonitorTab::Info);
+        if let Screen::Connected { snapshot, .. } = &mut app.screen {
+            *snapshot = None;
+        }
+        let activity = |session_id, ids: &[u64]| RecorderActivity {
+            session_id,
+            statistics: recorder_statistics_with_total(100),
+            class_events: EventClassCounts {
+                general_events: 100,
+                ..EventClassCounts::default()
+            },
+            threads: ids
+                .iter()
+                .map(|&thread_id| ThreadRecorderStatistics {
+                    thread_id,
+                    name: format!("worker-{thread_id}"),
+                    total_events: 100,
+                    retained_events: 64,
+                    lost_events: 36,
+                    event_capacity: 64,
+                    ..ThreadRecorderStatistics::default()
+                })
+                .collect(),
+        };
         let (sender, receiver) = unbounded();
-        sender.send_sync(Ok(recorder_statistics_with_total(10))).unwrap();
+        sender.send(Ok(RecorderUpdate::Detailed(activity(1, &[2, 4, 8])))).unwrap();
+        app.statistics_receiver = Some(receiver);
+        app.poll_recorder_statistics();
+        assert!(matches!(app.screen, Screen::Connected { snapshot: None, .. }));
+        assert_eq!(app.live_activity.availability, super::super::live_activity::Availability::Supported);
+        app.handle_key(KeyCode::Down);
+        assert_eq!(app.info_thread_selected, 1);
+        app.record_recorder_update(RecorderUpdate::Detailed(activity(1, &[1, 2, 4, 8])));
+        assert_eq!(app.live_activity.threads[app.info_thread_selected].statistics.thread_id, 4);
+        app.handle_key(KeyCode::End);
+        assert_eq!(app.info_thread_selected, 3);
+        app.handle_key(KeyCode::Home);
+        app.handle_key(KeyCode::PageDown);
+        assert_eq!(app.info_thread_selected, 3);
+        app.handle_key(KeyCode::PageUp);
+        assert_eq!(app.info_thread_selected, 0);
+        app.handle_key(KeyCode::Tab);
+        assert!(matches!(
+            app.screen,
+            Screen::Connected {
+                tab: MonitorTab::Heaps,
+                ..
+            }
+        ));
+        app.record_recorder_update(RecorderUpdate::Detailed(activity(2, &[4])));
+        assert!(app.live_activity.samples.is_empty() && app.activity_samples.is_empty());
+    }
+
+    #[test]
+    fn statistics_messages_record_activity_and_handle_errors() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (sender, receiver) = unbounded();
+        sender.send(Ok(recorder_statistics_with_total(10).into())).unwrap();
         app.statistics_receiver = Some(receiver);
         app.poll_recorder_statistics();
         assert_eq!(app.recorder_statistics.as_ref().map(|value| value.total_events), Some(10));
 
         let (sender, receiver) = unbounded();
-        sender.send_sync(Err("statistics failed".into())).unwrap();
+        sender.send(Err("statistics failed".into())).unwrap();
         app.statistics_receiver = Some(receiver);
         app.poll_recorder_statistics();
         assert_eq!(app.status, "statistics failed");
+        assert!(app.live_activity.stale);
 
-        let (sender, receiver) = unbounded::<Result<RecorderStatistics, String>>();
+        let (sender, receiver) = unbounded::<Result<RecorderUpdate, String>>();
         drop(sender);
         app.statistics_receiver = Some(receiver);
         app.poll_recorder_statistics();
@@ -2655,14 +3604,44 @@ mod tests {
     }
 
     #[test]
+    fn queued_statistics_are_discarded_during_capture() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.recorder_statistics = Some(recorder_statistics_with_total(1));
+        app.recording_unknown = true;
+        let original_recording = connected_fields(&app.screen).unwrap().1;
+        let (_capture_sender, capture_receiver) = unbounded::<CaptureMessage>();
+        app.capture_receiver = Some(capture_receiver);
+        let (sender, receiver) = unbounded();
+        let mut stale = recorder_statistics_with_total(10);
+        stale.recording.io.enabled = !original_recording.io.enabled;
+        sender.send(Ok(stale.into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (
+                app.statistics_receiver.is_none(),
+                app.recorder_statistics.map(|statistics| statistics.total_events),
+                app.recording_unknown,
+                connected_fields(&app.screen).unwrap().1,
+                app.activity_samples.len(),
+            ),
+            (true, Some(1), true, original_recording, 0)
+        );
+    }
+
+    #[test]
     fn recording_configuration_messages_update_the_connected_instance() {
         let mut app = connected_app(MonitorTab::Info);
         app.poll_recording_configuration();
+        app.recorder_statistics = Some(recorder_statistics_with_total(1));
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
+        configuration.event_capacity_per_thread = 128;
         let (sender, receiver) = unbounded();
         sender
-            .send_sync(Ok(RecordingUpdate {
+            .send(Ok(RecordingUpdate {
                 descriptor: descriptor(1),
                 configuration,
             }))
@@ -2672,12 +3651,26 @@ mod tests {
         app.poll_recording_configuration();
 
         assert_eq!(
-            connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
-            Some(true)
+            (
+                connected_fields(&app.screen).map(|(_, recording, _, _)| recording.io.enabled),
+                app.recorder_statistics.map(|statistics| statistics.event_capacity_per_thread),
+            ),
+            (Some(true), Some(128))
         );
 
         let (sender, receiver) = unbounded();
-        sender.send_sync(Err("configuration failed".into())).unwrap();
+        sender
+            .send(Ok(RecordingUpdate {
+                descriptor: descriptor(2),
+                configuration: RecordingConfiguration::default(),
+            }))
+            .unwrap();
+        app.recording_receiver = Some(receiver);
+        app.poll_recording_configuration();
+        assert!(connected_fields(&app.screen).unwrap().1.io.enabled);
+
+        let (sender, receiver) = unbounded();
+        sender.send(Err("configuration failed".into())).unwrap();
         app.recording_receiver = Some(receiver);
         app.poll_recording_configuration();
         assert_eq!(app.status, "configuration failed");
@@ -2689,18 +3682,238 @@ mod tests {
         let mut configuration = RecordingConfiguration::default();
         configuration.io.enabled = true;
 
-        app.apply_recording_configuration_with(configuration, |_descriptor, _configuration| Ok(()));
-        let result = app
-            .recording_receiver
-            .take()
-            .unwrap()
-            .recv_timeout_sync(Duration::from_secs(1))
-            .unwrap();
+        app.apply_recording_configuration_with(configuration, |_descriptor, configuration| Ok(configuration));
+        let result = app.recording_receiver.take().unwrap().recv_timeout(Duration::from_secs(1)).unwrap();
 
         assert_eq!(
             (app.recording_configuration_popup, result.is_ok(), app.status.as_str(),),
             (None, true, "Applying recording configuration...")
         );
+    }
+
+    #[test]
+    fn recording_configuration_apply_is_ignored_while_another_operation_is_active() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (_sender, receiver) = unbounded::<CaptureMessage>();
+        app.capture_receiver = Some(receiver);
+
+        app.apply_recording_configuration_with(RecordingConfiguration::default(), |_, _| panic!("overlapping recording write"));
+
+        assert!(app.recording_receiver.is_none());
+    }
+
+    #[test]
+    fn live_recording_refresh_preserves_popup_edits() {
+        let mut app = connected_app(MonitorTab::Info);
+        let mut draft = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+        RecordingConfigurationField::AllocationRecording.adjust(&mut draft, 1);
+        app.recording_configuration_popup = Some(draft);
+        let mut statistics = recorder_statistics_with_total(10);
+        statistics.recording.cache.enabled = true;
+        statistics.recording.io.capture_backtraces = true;
+        let (sender, receiver) = unbounded();
+        sender.send(Ok(statistics.into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (
+                connected_fields(&app.screen).unwrap().1,
+                app.recorder_statistics,
+                app.recording_configuration_popup,
+            ),
+            (statistics.recording, Some(statistics), Some(draft))
+        );
+    }
+
+    #[test]
+    fn recording_write_invalidates_older_reads_and_pauses_refresh() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (statistics_sender, statistics_receiver) = unbounded();
+        statistics_sender.send(Ok(recorder_statistics_with_total(10).into())).unwrap();
+        app.statistics_receiver = Some(statistics_receiver);
+        let (_sender, receiver) = unbounded();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+
+        app.refresh_with(|| panic!("connected discovery"), |_| panic!("read during write"));
+        app.poll_recorder_statistics();
+
+        assert_eq!((app.statistics_receiver.is_none(), app.recorder_statistics), (true, None));
+    }
+
+    #[test]
+    fn reconnect_discards_previous_statistics_and_write_completion() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.instances.push(Instance {
+            descriptor: descriptor(1),
+            recording: RecordingConfiguration::default(),
+            server_version: None,
+        });
+        let (statistics_sender, statistics_receiver) = unbounded();
+        statistics_sender.send(Ok(recorder_statistics_with_total(10).into())).unwrap();
+        app.statistics_receiver = Some(statistics_receiver);
+        let (sender, receiver) = unbounded();
+        let mut configuration = RecordingConfiguration::default();
+        configuration.io.enabled = true;
+        sender
+            .send(Ok(RecordingUpdate {
+                descriptor: descriptor(1),
+                configuration,
+            }))
+            .unwrap();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+        // Keep Escape's automatic discovery deterministic and local.
+        let (_discovery_sender, discovery_receiver) = unbounded();
+        app.discovery_receiver = Some(discovery_receiver);
+
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Enter);
+        app.poll_recorder_statistics();
+        app.poll_recording_configuration();
+
+        assert_eq!(
+            (
+                connected_fields(&app.screen).unwrap().1,
+                app.recorder_statistics,
+                app.status.as_str()
+            ),
+            (RecordingConfiguration::default(), None, "")
+        );
+    }
+
+    #[test]
+    fn failed_recording_write_schedules_authoritative_refresh() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.next_refresh = Instant::now() + Duration::from_mins(1);
+        let (sender, receiver) = unbounded();
+        sender.send(Err("cache update failed after legacy update".into())).unwrap();
+        app.finish_start_recording_configuration(receiver, Ok(()));
+
+        app.poll_recording_configuration();
+
+        assert_eq!(
+            (
+                app.next_refresh <= Instant::now(),
+                app.recording_receiver.is_none(),
+                app.status.as_str()
+            ),
+            (true, true, "cache update failed after legacy update")
+        );
+    }
+
+    #[test]
+    fn changing_instances_discards_queued_statistics() {
+        let mut app = connected_app(MonitorTab::Info);
+        app.instances.push(Instance {
+            descriptor: descriptor(2),
+            recording: RecordingConfiguration::default(),
+            server_version: None,
+        });
+        let (sender, receiver) = unbounded();
+        sender.send(Ok(recorder_statistics_with_total(10).into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+        let (_discovery_sender, discovery_receiver) = unbounded();
+        app.discovery_receiver = Some(discovery_receiver);
+
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Enter);
+        app.poll_recorder_statistics();
+
+        assert_eq!(
+            (connected_fields(&app.screen).unwrap().0, app.recorder_statistics),
+            (descriptor(2).instance_id, None)
+        );
+    }
+
+    #[test]
+    fn recording_worker_uses_readback_instead_of_requested_configuration() {
+        let mut app = connected_app(MonitorTab::Info);
+        let authoritative = RecordingConfiguration {
+            event_capacity_per_thread: 128,
+            ..RecordingConfiguration::default()
+        };
+        app.apply_recording_configuration_with(RecordingConfiguration::default(), move |_, _| Ok(authoritative));
+        let receiver = app.recording_receiver.take().unwrap();
+        let result = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(result.unwrap().configuration, authoritative);
+    }
+
+    #[test]
+    fn on_preset_enables_backtraces_without_sampling() {
+        let mut configuration = RecordingConfiguration::default();
+        configuration.allocations.enabled = true;
+        configuration.allocations.capture_backtraces = true;
+        configuration.allocations.sampling_one_in = 8;
+        let mut popup = RecordingConfigurationPopup::new(configuration);
+        RecordingConfigurationField::AllocationRecording.adjust(&mut popup, -1);
+
+        assert_eq!(
+            (
+                RecordingConfigurationField::AllocationRecording.value(popup),
+                popup.configuration().allocations,
+            ),
+            (
+                "on".to_owned(),
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: true,
+                    sampling_one_in: 1,
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn every_on_preset_records_all_events_with_backtraces_and_reads_back_as_on() {
+        let actual = [
+            (RecordingConfigurationField::AllocationRecording, RecorderKind::Allocations),
+            (RecordingConfigurationField::GeneralRecording, RecorderKind::General),
+            (RecordingConfigurationField::ArcDereferenceRecording, RecorderKind::ArcDereferences),
+            (RecordingConfigurationField::RuntimeTaskRecording, RecorderKind::RuntimeTasks),
+            (RecordingConfigurationField::IoRecording, RecorderKind::Io),
+            (RecordingConfigurationField::CacheRecording, RecorderKind::Cache),
+        ]
+        .map(|(field, recorder)| {
+            let mut popup = RecordingConfigurationPopup::new(RecordingConfiguration::default());
+            field.adjust(&mut popup, 1);
+            let configuration = popup.configuration();
+            let readback = RecordingConfigurationPopup::new(configuration);
+            (
+                recorder_policy(configuration, recorder),
+                field.value(readback),
+                readback.configuration() == configuration,
+            )
+        });
+        assert_eq!(
+            actual,
+            std::array::from_fn(|_| (
+                seismograph_protocol::message::RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: true,
+                    sampling_one_in: 1,
+                },
+                "on".to_owned(),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn sampled_or_stackless_recording_is_custom() {
+        let policies = [
+            seismograph_protocol::message::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                sampling_one_in: 1,
+            },
+            seismograph_protocol::message::RecordingPolicy {
+                enabled: true,
+                capture_backtraces: true,
+                sampling_one_in: 8,
+            },
+        ];
+        assert_eq!(policies.map(recording_policy_label), ["custom", "custom"]);
     }
 
     #[test]
@@ -2781,26 +3994,96 @@ mod tests {
     }
 
     #[test]
-    fn runtime_details_tab_toggles_spawn_stack_view() {
-        let mut view = RuntimeViewState::new();
-        view.focus = RuntimeFocus::Details;
+    fn runtime_activity_tab_always_changes_the_main_tab() {
+        for focus in [
+            RuntimeFocus::Workers,
+            RuntimeFocus::Tasks,
+            RuntimeFocus::Activity,
+            RuntimeFocus::Events,
+        ] {
+            let mut app = App::offline("capture.seismograph".into());
+            if let Screen::Offline { tab, .. } = &mut app.screen {
+                *tab = MonitorTab::Runtime;
+            }
+            app.runtime_view.focus = focus;
+            app.handle_key(KeyCode::Tab);
+            assert!(matches!(app.screen, Screen::Offline { tab: MonitorTab::Io, .. }));
+            app.handle_key(KeyCode::BackTab);
+            assert!(matches!(
+                app.screen,
+                Screen::Offline {
+                    tab: MonitorTab::Runtime,
+                    ..
+                }
+            ));
+            assert_eq!(app.runtime_view.focus, focus);
+        }
+    }
 
-        handle_runtime_key(KeyCode::Tab, &mut view, None);
-        let stack_view = view.detail_view;
-        handle_runtime_key(KeyCode::BackTab, &mut view, None);
-
+    #[test]
+    fn dashboard_keeps_main_tab_navigation_and_independent_chart_and_event_focus() {
+        let mut app = connected_app(MonitorTab::Runtime);
+        app.runtime_view.focus = RuntimeFocus::Tasks;
+        app.runtime_view.activity_scroll = 4;
+        app.handle_key(KeyCode::Char('e'));
+        assert_eq!(app.runtime_view.focus, RuntimeFocus::Events);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
+        app.handle_key(KeyCode::Char('f'));
+        app.handle_key(KeyCode::PageDown);
+        app.handle_key(KeyCode::Right);
         assert_eq!(
-            (stack_view, view.detail_view),
-            (RuntimeDetailView::SpawnStack, RuntimeDetailView::Details)
+            (
+                app.runtime_view.events.stack_filter,
+                app.runtime_view.events.stack_scroll,
+                app.runtime_view.events.stack_horizontal_scroll
+            ),
+            (AllocationStackFilter::All, 5, 8)
+        );
+        app.handle_key(KeyCode::Tab);
+        assert!(matches!(app.screen, Screen::Connected { tab: MonitorTab::Io, .. }));
+        app.handle_key(KeyCode::BackTab);
+        app.handle_key(KeyCode::Char('t'));
+        assert_eq!(
+            (
+                app.runtime_view.focus,
+                app.runtime_view.task_histogram,
+                app.runtime_view.activity_scroll
+            ),
+            (RuntimeFocus::Activity, TaskHistogram::Ready, 4)
+        );
+        app.handle_key(KeyCode::Char('e'));
+        for _ in 0..3 {
+            app.handle_key(KeyCode::Backspace);
+        }
+        assert_eq!(app.runtime_view.focus, RuntimeFocus::Tasks);
+        app.handle_key(KeyCode::Down);
+        assert_eq!(
+            (
+                app.runtime_view.events.event_selected,
+                app.runtime_view.events.stack_scroll,
+                app.runtime_view.events.stack_horizontal_scroll
+            ),
+            (0, 0, 0)
         );
     }
 
     #[test]
     fn runtime_keys_cover_navigation_sorting_and_scroll() {
+        assert_eq!(RuntimeFocus::Events.dashboard(), None);
+        let mut selected = 2;
+        assert!(handle_info_key(KeyCode::Up, &mut selected, 3));
+        assert_eq!(selected, 1);
+        let mut activity = RuntimeViewState::new();
+        activity.focus = RuntimeFocus::Activity;
+        assert!(handle_runtime_key(KeyCode::Enter, &mut activity, None));
+        assert_eq!(activity.focus, RuntimeFocus::Events);
+
         let mut view = RuntimeViewState::new();
         view.worker_selected = 2;
         view.task_selected = 2;
-        view.detail_scroll = 6;
+        view.activity_scroll = 6;
         for key in [
             KeyCode::Up,
             KeyCode::Down,
@@ -2810,6 +4093,8 @@ mod tests {
             KeyCode::Enter,
             KeyCode::Up,
             KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Right,
             KeyCode::PageUp,
             KeyCode::PageDown,
             KeyCode::Char('['),
@@ -2828,6 +4113,54 @@ mod tests {
         let mut unchanged = original;
         assert!(!handle_runtime_key(KeyCode::Tab, &mut unchanged, None));
         assert_eq!(unchanged, original);
+
+        let mut events = TaskEventsViewState::new();
+        assert!(!handle_task_events_key(KeyCode::Backspace, &mut events, None));
+        events.focus = TaskEventsFocus::Occurrences;
+        events.stack_scroll = 6;
+        events.stack_horizontal_scroll = 9;
+        assert!(handle_task_events_key(KeyCode::PageUp, &mut events, None));
+        assert!(handle_task_events_key(KeyCode::Left, &mut events, None));
+        assert_eq!((events.stack_scroll, events.stack_horizontal_scroll), (1, 1));
+    }
+
+    #[test]
+    fn stale_and_failed_background_messages_are_discarded_or_reported() {
+        let mut app = connected_app(MonitorTab::Info);
+        let (sender, receiver) = unbounded();
+        sender.send(Ok(recorder_statistics_with_total(1).into())).unwrap();
+        app.statistics_receiver = Some(receiver);
+        app.screen = Screen::Browse;
+        app.poll_recorder_statistics();
+        assert!(app.recorder_statistics.is_none());
+
+        app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.capture_generation = app.connection_generation;
+        app.clear_in_progress = true;
+        let (sender, receiver) = unbounded::<CaptureMessage>();
+        drop(sender);
+        app.capture_receiver = Some(receiver);
+        app.poll_snapshot_capture();
+        assert!(app.status.contains("Clear failed"));
+
+        app = connected_app(MonitorTab::Info);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        app.capture_generation = app.connection_generation.wrapping_add(1);
+        app.finish_snapshot_capture(Ok(CaptureOutcome {
+            snapshot: empty_capture(),
+            status: "stale".into(),
+        }));
+        assert_ne!(app.status, "stale");
+    }
+
+    #[test]
+    fn clear_key_starts_the_connected_clear_worker() {
+        let mut app = connected_app(MonitorTab::Info);
+
+        app.handle_key(KeyCode::Char('C'));
+
+        assert!(app.clear_in_progress);
     }
 
     #[test]
@@ -2920,27 +4253,113 @@ mod tests {
 
     #[test]
     fn snapshot_sources_are_selected_by_exact_identifier() {
-        let allocator = seismograph::snapshot::SourceSnapshot {
-            id: seismograph_rallocator::source::ID,
-            name: "allocator".into(),
-            schema_version: 1,
-            data: Vec::new(),
-        };
-        let runtime = seismograph::snapshot::SourceSnapshot {
-            id: seismograph_runtime::snapshot::source::ID,
-            name: "runtime".into(),
-            schema_version: 1,
-            data: Vec::new(),
-        };
-        let sources = [allocator, runtime];
+        for (id, expected) in [
+            (seismograph_rallocator::source::ID, Some("invalid rallocator snapshot")),
+            (seismograph_runtime::snapshot::source::ID, Some("invalid runtime snapshot")),
+            (seismograph::snapshot::SourceId::new(999), None),
+        ] {
+            let decoded = seismograph::snapshot::DecodedSnapshot {
+                sources: vec![seismograph::snapshot::SourceSnapshot {
+                    id,
+                    name: "not-used-for-identification".into(),
+                    schema_version: 1,
+                    data: Vec::new(),
+                }],
+                ..Default::default()
+            };
+            let result = super::super::snapshot::prepare(decoded);
+            assert_eq!(
+                result.err().map(|error| error.split(':').next().unwrap().to_owned()),
+                expected.map(str::to_owned),
+            );
+        }
+    }
 
+    #[test]
+    fn offline_initial_status_reports_loading_before_a_snapshot_arrives() {
+        let app = App::offline(PathBuf::from("capture.seismograph"));
+
+        assert_eq!(app.status, "Loading snapshot…");
+    }
+
+    #[test]
+    fn offline_navigation_never_starts_remote_actions() {
+        let mut app = App::offline(PathBuf::from("capture.seismograph"));
+        app.finish_offline_load(empty_capture());
+        for tab in ['1', '2', '3', '4', '5', '6', '7', '8'] {
+            app.handle_key(KeyCode::Char(tab));
+            for key in ['s', 'r', 'c', 'd', 'C'] {
+                assert!(!app.handle_key(KeyCode::Char(key)));
+            }
+            app.refresh_with(|| panic!("offline discovery"), |_| panic!("offline statistics"));
+            app.apply_recording_configuration_with(RecordingConfiguration::default(), |_, _| panic!("offline recording"));
+        }
+        assert!(matches!(
+            app.screen,
+            Screen::Offline {
+                tab: MonitorTab::Cache,
+                ..
+            }
+        ));
         assert_eq!(
             (
-                source_with_id(&sources, seismograph_rallocator::source::ID).map(|source| source.name.as_str()),
-                source_with_id(&sources, seismograph_runtime::snapshot::source::ID).map(|source| source.name.as_str()),
-                source_with_id(&sources, seismograph::snapshot::SourceId::new(999)).map(|source| source.name.as_str()),
+                app.capture_receiver.is_none(),
+                app.discovery_receiver.is_none(),
+                app.statistics_receiver.is_none(),
+                app.recording_receiver.is_none(),
+                app.recording_configuration_popup.is_none(),
+                app.capture_mode,
             ),
-            (Some("allocator"), Some("runtime"), None)
+            (true, true, true, true, true, CaptureMode::Continue),
         );
+        assert!(app.handle_key(KeyCode::Esc));
+        assert!(app.handle_key(KeyCode::Char('q')));
+    }
+
+    #[test]
+    fn offline_navigation_sorting_and_stack_filters_match_monitor() {
+        for tab in [
+            MonitorTab::Info,
+            MonitorTab::Heaps,
+            MonitorTab::Allocations,
+            MonitorTab::Primitives,
+            MonitorTab::Threads,
+            MonitorTab::Runtime,
+            MonitorTab::Io,
+            MonitorTab::Cache,
+        ] {
+            let mut live = connected_app(tab);
+            let mut offline = App::offline(PathBuf::from("capture.seismograph"));
+            offline.screen = Screen::Offline {
+                path: PathBuf::from("capture.seismograph"),
+                tab,
+                snapshot: Some(empty_capture()),
+            };
+            for key in [
+                KeyCode::Char(']'),
+                KeyCode::Char('r'),
+                KeyCode::Char('f'),
+                KeyCode::Down,
+                KeyCode::Enter,
+                KeyCode::PageDown,
+                KeyCode::Backspace,
+                KeyCode::Tab,
+                KeyCode::BackTab,
+            ] {
+                assert_eq!(live.handle_key(key), offline.handle_key(key));
+                let state = |app: &App| {
+                    (
+                        app.heap_view,
+                        app.allocation_view,
+                        app.primitive_view,
+                        app.thread_view,
+                        app.runtime_view,
+                        app.io_view,
+                        app.cache_view,
+                    )
+                };
+                assert_eq!(state(&live), state(&offline), "{tab:?} {key:?}");
+            }
+        }
     }
 }

@@ -38,6 +38,9 @@ seismograph_protocol.workspace = true
 seismograph_rallocator.workspace = true
 seismograph_runtime.workspace = true
 
+[dev-dependencies]
+mutants.workspace = true
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

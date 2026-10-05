@@ -1572,6 +1572,83 @@ mod tests {
         assert_eq!((state.len(), state.span_count()), (0, 0));
     }
 
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn seismograph_io_recording_is_gated_and_captures_buffer_state_delta() {
+        use seismograph::recorder::event::EventKind;
+        use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+        use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
+        use seismograph_io::{Buffer, IoOutcome, IoResourceKind, Operation, Resource};
+
+        let release = SnapshotOptions {
+            event_buffers: EventBufferDisposition::Release,
+        };
+        let memory = FixedBlockMemory::new(nz!(4));
+        let mut buffer = memory.reserve(8);
+        buffer.put_slice(*b"abcdef");
+        let resource = Resource::new(IoResourceKind::Other);
+
+        seismograph::recorder(Configuration::default());
+        seismograph::snapshot(release).unwrap();
+        let disabled = Operation::write_started(&resource, 2, || buffer.recording_state());
+        assert!(!disabled.was_recorded());
+        disabled.finish(0, IoOutcome::Canceled, || buffer.recording_state());
+        let snapshot = seismograph::snapshot(release).unwrap();
+        let disabled_events = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap().events;
+        assert_eq!(
+            (
+                disabled_events.total_events,
+                disabled_events.lost_events,
+                disabled_events.threads.len(),
+                disabled_events.events.len(),
+            ),
+            (0, 0, 0, 0)
+        );
+
+        seismograph::recorder(Configuration {
+            io: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            ..Configuration::default()
+        });
+        let initial_state = buffer.recording_state();
+        let operation = Operation::write_started(&resource, 2, || buffer.recording_state());
+        buffer.put_slice(*b"gh");
+        operation.finish(2, IoOutcome::Success, || buffer.recording_state());
+
+        let snapshot = seismograph::snapshot(release).unwrap();
+        let events = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap().events;
+        let io = events
+            .events
+            .iter()
+            .map(|event| (event.kind, event.io().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                events.total_events,
+                events.lost_events,
+                events.threads.len(),
+                io.iter()
+                    .map(|(kind, event)| (*kind, event.buffer_id, event.buffer_len, event.buffer_span_count))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                2,
+                0,
+                1,
+                vec![
+                    (
+                        EventKind::IoWriteStarted,
+                        initial_state.id(),
+                        initial_state.len(),
+                        initial_state.span_count(),
+                    ),
+                    (EventKind::IoWriteFinished, initial_state.id(), 8, 2),
+                ],
+            )
+        );
+        seismograph::recorder(Configuration::default());
+    }
+
     #[test]
     fn smoke_test() {
         let memory = FixedBlockMemory::new(nz!(1234));

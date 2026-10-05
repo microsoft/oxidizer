@@ -150,11 +150,23 @@ impl MakeMutTarget for str {
 /// A strategy-based reference-counting pointer that records ownership operations.
 ///
 /// `Arc<T, PerProcess>` has the same representation size as
-/// `std::sync::Arc<T>`. Per-core and per-NUMA strategies keep their factory and
-/// affinity storage in strategy-owned state shared by all clones. Every strategy
-/// implements [`ThreadAware`]; relocation is a no-op for `PerProcess`.
+/// `std::sync::Arc<T>`. Per-thread and per-NUMA strategies keep their factory and
+/// affinity storage in strategy-owned state shared by all clones. Only
+/// [`PerThread`] and [`PerNuma`] implement [`ThreadAware`] for this pointer.
+/// [`PerProcess`] shares one allocation and does not implement [`ThreadAware`],
+/// even when its pointee does.
 ///
 /// ```
+/// use performables::arc::{Arc, PerNuma, PerThread};
+/// use thread_aware_core::ThreadAware;
+///
+/// fn require_thread_aware<T: ThreadAware>() {}
+///
+/// require_thread_aware::<Arc<u64, PerThread>>();
+/// require_thread_aware::<Arc<u64, PerNuma>>();
+/// ```
+///
+/// ```compile_fail
 /// use performables::arc::{Arc, PerProcess};
 /// use thread_aware_core::ThreadAware;
 ///
@@ -406,7 +418,7 @@ impl<T: ?Sized, S: private::AffinityStrategy> Strategy<T> for S {
 impl<T, S> ThreadAware for Arc<T, S>
 where
     T: Send + Sync + ?Sized,
-    S: Strategy<T>,
+    S: Strategy<T> + private::AffinityStrategy,
     S::State: Send,
 {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
@@ -910,9 +922,9 @@ where
     S: Strategy<T>,
 {
     fn drop(&mut self) {
-        if S::strong_count(&self.state) == 1 {
-            telemetry::record(EventKind::ArcDrop, Self::as_ptr(self).cast::<()>());
-        }
+        telemetry::record_if(EventKind::ArcDrop, Self::as_ptr(self).cast::<()>(), || {
+            S::strong_count(&self.state) == 1
+        });
     }
 }
 
@@ -1169,12 +1181,14 @@ mod tests {
     }
 
     #[test]
-    fn per_process_relocation_keeps_the_value() {
+    fn per_process_relocation_keeps_the_same_value() {
         let mut value = Arc::<_, PerProcess>::new(42);
-        let original = value.clone();
-        _ = Relocator::between_threads().relocate(&mut value);
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let before = StdArc::clone(&value.state);
 
-        assert!(Arc::ptr_eq(&value, &original));
+        <PerProcess as Strategy<i32>>::relocate(&mut value.state, source.as_ref(), &destination);
+
+        assert!(StdArc::ptr_eq(&before, &value.state));
     }
 
     #[test]
