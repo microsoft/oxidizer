@@ -3,10 +3,9 @@
 
 //! Argument parsing for the fakeable attribute macro.
 
-use proc_macro2::Span;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, LitStr, Path, Result, Token};
+use syn::{Ident, LitBool, LitStr, Path, Result, Token};
 
 /// Arguments for the `#[fakeable(...)]` attribute macro.
 #[derive(Debug, Clone)]
@@ -37,9 +36,9 @@ impl Parse for FakeableArgs {
             match arg {
                 FakeableArg::FakesFeature(value) => {
                     if fakes_feature.is_some() {
-                        return Err(syn::Error::new_spanned(value, "fakes_feature specified multiple times"));
+                        return Err(syn::Error::new_spanned(&value, "fakes_feature specified multiple times"));
                     }
-                    fakes_feature = Some(value);
+                    fakes_feature = Some(value.value());
                 }
                 FakeableArg::FakeImpl(path) => {
                     if fake_impl.is_some() {
@@ -49,21 +48,21 @@ impl Parse for FakeableArgs {
                 }
                 FakeableArg::FakeConstructor(name) => {
                     if fake_constructor.is_some() {
-                        return Err(syn::Error::new_spanned(name, "fake_constructor specified multiple times"));
+                        return Err(syn::Error::new_spanned(&name, "fake_constructor specified multiple times"));
                     }
-                    fake_constructor = Some(name);
+                    fake_constructor = Some(name.value());
                 }
                 FakeableArg::GenerateMockallFake(enabled) => {
                     if generate_mockall_fake.is_some() {
-                        return Err(syn::Error::new(Span::call_site(), "generate_mockall_fake specified multiple times"));
+                        return Err(syn::Error::new_spanned(&enabled, "generate_mockall_fake specified multiple times"));
                     }
-                    generate_mockall_fake = Some(enabled);
+                    generate_mockall_fake = Some(enabled.value);
                 }
                 FakeableArg::MockallFakeModule(module) => {
                     if mockall_fake_module.is_some() {
-                        return Err(syn::Error::new(Span::call_site(), "mockall_fake_module specified multiple times"));
+                        return Err(syn::Error::new_spanned(&module, "mockall_fake_module specified multiple times"));
                     }
-                    mockall_fake_module = Some(module);
+                    mockall_fake_module = Some(module.value());
                 }
             }
         }
@@ -84,11 +83,11 @@ impl Parse for FakeableArgs {
 
 #[derive(Debug, Clone)]
 enum FakeableArg {
-    FakesFeature(String),
+    FakesFeature(LitStr),
     FakeImpl(Path),
-    FakeConstructor(String),
-    GenerateMockallFake(bool),
-    MockallFakeModule(String),
+    FakeConstructor(LitStr),
+    GenerateMockallFake(LitBool),
+    MockallFakeModule(LitStr),
 }
 
 impl Parse for FakeableArg {
@@ -99,7 +98,7 @@ impl Parse for FakeableArg {
         match name.to_string().as_str() {
             "fakes_feature" | "fakes_attribute" => {
                 let value: LitStr = input.parse()?;
-                Ok(Self::FakesFeature(value.value()))
+                Ok(Self::FakesFeature(value))
             }
             "fake_impl" => {
                 let path: Path = input.parse()?;
@@ -108,7 +107,7 @@ impl Parse for FakeableArg {
             "fake_constructor" => {
                 let value: LitStr = input.parse()?;
                 validate_identifier(&value, "fake_constructor")?;
-                Ok(Self::FakeConstructor(value.value()))
+                Ok(Self::FakeConstructor(value))
             }
             "generate_mockall_fake" => {
                 // Only accept boolean true
@@ -116,7 +115,7 @@ impl Parse for FakeableArg {
                 if lookahead.peek(syn::LitBool) {
                     let value: syn::LitBool = input.parse()?;
                     if value.value {
-                        Ok(Self::GenerateMockallFake(true))
+                        Ok(Self::GenerateMockallFake(value))
                     } else {
                         Err(syn::Error::new_spanned(value, "generate_mockall_fake must be true"))
                     }
@@ -129,7 +128,7 @@ impl Parse for FakeableArg {
                 if value.value() != "." {
                     validate_identifier(&value, "mockall_fake_module")?;
                 }
-                Ok(Self::MockallFakeModule(value.value()))
+                Ok(Self::MockallFakeModule(value))
             }
             _ => Err(syn::Error::new_spanned(
                 name,

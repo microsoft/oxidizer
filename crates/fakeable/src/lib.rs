@@ -228,7 +228,7 @@ use proc_macro::TokenStream;
 ///   bounds (for example, `Clone`), and derives that depend on struct shape or an enum default
 ///   variant may be unsuitable.
 /// - Complex parameter patterns in method signatures are not supported in public methods
-/// - Generic types in impl blocks require careful handling
+/// - Generic impl blocks are supported with manual fakes; Mockall generation rejects them.
 ///
 /// # Private Methods
 ///
