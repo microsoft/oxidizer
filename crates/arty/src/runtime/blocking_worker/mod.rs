@@ -75,7 +75,7 @@ impl BlockingWorker {
         let identity = Arc::clone(&self.pool.identity);
         let shutdown = Arc::clone(&self.is_shutting_down);
         let (task, join_handle) = prepare_blocking(body);
-        let join_handle = join_handle.from_blocking_pool(Arc::clone(&self.pool.identity));
+        let join_handle = join_handle.with_blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
             if shutdown.load(Ordering::Acquire) {

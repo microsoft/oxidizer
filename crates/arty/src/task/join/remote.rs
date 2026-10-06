@@ -73,7 +73,7 @@ where
         }
     }
 
-    pub(crate) fn from_blocking_pool(mut self, pool: Arc<()>) -> Self {
+    pub(crate) fn with_blocking_pool(mut self, pool: Arc<()>) -> Self {
         self.blocking_pool = Some(pool);
         self
     }
@@ -109,9 +109,10 @@ where
     /// ```
     pub fn wait(self) -> Result<R, JoinError> {
         assert_not_flagged();
-        if self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool) {
-            panic!("blocking JoinHandle::wait cannot wait for the current blocking pool");
-        }
+        assert!(
+            !self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
+            "blocking JoinHandle::wait cannot wait for the current blocking pool"
+        );
 
         futures::executor::block_on(self)
     }
