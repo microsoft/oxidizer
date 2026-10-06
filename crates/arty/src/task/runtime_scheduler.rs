@@ -104,6 +104,11 @@ impl RuntimeScheduler {
     /// a worker belonging to another runtime. It also returns an error from
     /// inside an already-running `futures` executor, before submitting the task.
     ///
+    /// Calling this from a blocking callback is supported for async work that
+    /// does not wait for another task from the same blocking pool. A blocking
+    /// callback must not wait on a same-pool blocking join; [`JoinHandle::wait`]
+    /// rejects that case to prevent pool starvation.
+    ///
     /// # Examples
     ///
     /// ```
