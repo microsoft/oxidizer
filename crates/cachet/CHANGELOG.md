@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.15.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.1` of `anyspawn`
+  - Now requires `0.11.0` of `bytesbuf`
+  - Now requires `0.8.1` of `cachet_memory`
+  - Now requires `0.2.0` of `seismograph`
+  - Now requires `0.7.1` of `tick`
+  - Now requires `0.7.0` of `uniflight`
+
+- ⚡ Performance
+
+  - consolidate v1 and Seismograph improvements ([#764](https://github.com/microsoft/oxidizer/pull/764))
+  - reduce runtime analysis duration ([#767](https://github.com/microsoft/oxidizer/pull/767))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.14.0] - 2026-09-10
 
 ### Breaking

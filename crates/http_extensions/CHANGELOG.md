@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.11.0` of `bytesbuf`
+  - Now requires `0.7.1` of `tick`
+
+- ⚡ Performance
+
+  - reduce runtime analysis duration ([#767](https://github.com/microsoft/oxidizer/pull/767))
+
+- ♻️ Code Refactoring
+
+  - rename _documentation modules to documentation ([#786](https://github.com/microsoft/oxidizer/pull/786))
+
 ## [0.11.1] - 2026-09-16
 
 - ✨ Features

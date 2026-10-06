@@ -74,6 +74,13 @@
     dependency version. Dev-only dependents are skipped — they automatically
     pick up the new workspace version.
 
+    Bin-only packages are also detected from `cargo metadata` before the
+    unsupported library check. Every bin-only package in the release set requires
+    explicit manual review of command-line inputs, options, output and behavior.
+    This is distinct from procedural macro compatibility and does not propagate
+    a proc-macro-dependent review. Mixed library/binary packages still run the
+    automated library check.
+
     Proc-macro-only packages are detected from `cargo metadata` before
     cargo-semver-checks runs. The tool cannot inspect procedural macro names,
     accepted inputs, diagnostics, or generated output, so every proc-macro-only

@@ -538,6 +538,14 @@ function Reset-ReleaseScriptCaches {
 # results are cached per cargo name for the run. Test suites Mock this function to
 # supply deterministic verdicts without invoking the real tool (see the scenario
 # harness).
+function Get-PackageManualSemverReviewKind {
+    param([Parameter(Mandatory = $true)]$Package)
+
+    if ($Package.IsProcMacroOnly) { return 'proc-macro' }
+    if ($Package.IsBinOnly) { return 'bin-only' }
+    return $null
+}
+
 function Get-CrateRequiredChangeType {
     [CmdletBinding()]
     param(
@@ -554,8 +562,9 @@ function Get-CrateRequiredChangeType {
     $workspacePackage = Get-WorkspacePackages -repoRoot $RepoRoot |
         Where-Object { $_.Folder -eq $Folder -or $_.Name -eq $CargoName } |
         Select-Object -First 1
-    if ($null -ne $workspacePackage -and $workspacePackage.IsProcMacroOnly) {
-        Write-Host "cargo semver-checks: '$CargoName' is proc-macro-only; manual SemVer review is required." -ForegroundColor Yellow
+    if ($null -ne $workspacePackage -and (Get-PackageManualSemverReviewKind $workspacePackage)) {
+        $kind = Get-PackageManualSemverReviewKind $workspacePackage
+        Write-Host "cargo semver-checks: '$CargoName' is $kind; manual compatibility review is required." -ForegroundColor Yellow
         $script:CrateSemverVerdictCache[$CargoName] = 'manual'
         return 'manual'
     }
@@ -588,8 +597,9 @@ function Get-CrateRequiredChangeType {
 #                           is the root an allowlist carries for a re-exported type.
 #   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
 #                           or $null if the package does not declare them
-#   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
+#   HasLibraryTarget      - $true when cargo metadata reports an ordinary Rust/native library target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
+#   IsBinOnly             - $true when the package has binaries but no library or proc-macro target
 function Get-WorkspacePackages {
     param([string]$repoRoot)
 
@@ -597,6 +607,7 @@ function Get-WorkspacePackages {
     $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
 
     $packages = @()
+    $libraryKinds = @('lib', 'rlib', 'dylib', 'cdylib', 'staticlib')
 
     # A dependency is nameable in Rust source -- and so in an
     # allowed_external_types entry -- by its *crate root*, which is not always
@@ -612,7 +623,7 @@ function Get-WorkspacePackages {
     $crateRootByPackage = @{}
     foreach ($package in $metadata.packages) {
         $libTarget = $package.targets |
-            Where-Object { @($_.kind) -contains 'lib' -or @($_.kind) -contains 'proc-macro' } |
+            Where-Object { @($_.kind | Where-Object { $_ -in $libraryKinds -or $_ -eq 'proc-macro' }).Count -gt 0 } |
             Select-Object -First 1
         if ($null -eq $libTarget) { continue }
         $crateRootByPackage[$package.name.Replace('-', '_')] = ([string]$libTarget.name).Replace('-', '_')
@@ -731,7 +742,7 @@ function Get-WorkspacePackages {
         }
 
         $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
-        $hasLibraryTarget = $targetKinds -contains 'lib'
+        $hasLibraryTarget = @($targetKinds | Where-Object { $_ -in $libraryKinds }).Count -gt 0
 
         $packages += [pscustomobject]@{
             Name                 = $package.name
@@ -744,6 +755,7 @@ function Get-WorkspacePackages {
             AllowedExternalTypes = $allowedTypes
             HasLibraryTarget     = $hasLibraryTarget
             IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
+            IsBinOnly            = (-not $hasLibraryTarget) -and ($targetKinds -notcontains 'proc-macro') -and ($targetKinds -contains 'bin')
         }
     }
 
@@ -1890,7 +1902,7 @@ function Get-UnreleasedModifiedDependencies {
                             EffectiveTargetVersion     = if ($isInReleaseSet) { $depEntry.EffectiveTargetVersion } else { $null }
                             ChangedFileCount           = $modifiedMap[$depFolder]
                             DependencyChains           = @(, $depChain)
-                            RequiresManualSemverReview = [bool]$depPackage.IsProcMacroOnly
+                            RequiresManualSemverReview = [bool](Get-PackageManualSemverReviewKind $depPackage)
                         }
                     }
                     else {
@@ -1945,7 +1957,7 @@ function Get-UnreleasedModifiedDependencies {
             EffectiveTargetVersion     = if ($null -ne $entry) { $entry.EffectiveTargetVersion } else { $null }
             ChangedFileCount           = $modifiedMap[$folder]
             DependencyChains           = @()
-            RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
+            RequiresManualSemverReview = [bool](Get-PackageManualSemverReviewKind $pkg)
         }
     }
 

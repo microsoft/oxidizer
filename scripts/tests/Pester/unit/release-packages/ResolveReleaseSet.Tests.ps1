@@ -25,6 +25,7 @@ BeforeAll {
             [string[]] $Deps = @(),
             [bool]     $Published = $true,
             [bool]     $IsProcMacroOnly = $false,
+            [bool]     $IsBinOnly = $false,
             [hashtable] $DepAliases = @{},
             # The crate's rustdoc name -- its [lib] name, which defaults to the
             # normalized package name. Allowlist entries earned on an INDIRECT
@@ -45,6 +46,7 @@ BeforeAll {
             DepAliases = $DepAliases
             CrateRoot = $CrateRoot
             IsProcMacroOnly = $IsProcMacroOnly
+            IsBinOnly = $IsBinOnly
             AllowedExternalTypes = $AllowedExternalTypes
         }
     }
@@ -183,6 +185,100 @@ Describe 'Resolve-ReleaseSet' {
             $resolved[0].EffectiveChangeType | Should -Be 'patch'
             $resolved[0].RequiresManualSemverReview | Should -BeTrue
             $resolved[0].IsProcMacroOnly | Should -BeTrue
+        }
+    }
+
+    Describe 'bin-only command-line compatibility review' {
+        It 'requires targeted bin review without running the automated classifier or propagating a Rust API review' {
+            $baseline = @(
+                (New-BaselinePackage -Folder cli -IsBinOnly $true)
+                (New-BaselinePackage -Folder consumer -Deps @('cli'))
+            )
+            $resolved = @(Resolve-ReleaseSet -ParsedTokens (Parse-ReleaseTokens @('cli@breaking')) `
+                -WorkspaceBaseline $baseline -GetRequiredChangeType {
+                    param($folder, $name)
+                    if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                    'patch'
+                })
+            $set = @{}
+            foreach ($entry in $resolved) { $set[$entry.Folder] = $entry }
+            $set.ContainsKey('consumer') | Should -BeTrue
+            $set.cli.RequiresManualSemverReview | Should -BeTrue
+            $set.cli.IsProcMacroOnly | Should -BeFalse
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            $findings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set -WorkspaceBaseline $baseline)
+            $findings.Count | Should -Be 1
+            $findings[0].ManualSemverReviewKind | Should -Be 'bin-only'
+            [void]$reviewed.Add('cli')
+            Set-ManualSemverReviewAnnotations -ResolvedReleaseSet $set -WorkspaceBaseline $baseline -ReviewedManualSemver $reviewed
+            $set.cli.ManualSemverReviewCompleted | Should -BeTrue
+            $set.cli.ManualSemverReviewSources | Should -BeNullOrEmpty
+            $reviewedFindings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set `
+                -WorkspaceBaseline $baseline -ReviewedManualSemver $reviewed)
+            @($reviewedFindings | Where-Object Folder -eq consumer).Count | Should -Be 0
+            $set.consumer.RequiresManualSemverReview | Should -BeFalse
+            $set.consumer.ManualSemverReviewSources | Should -BeNullOrEmpty
+        }
+
+        It 'cascades an unchanged binary at patch but keeps mandatory manual review' {
+            $baseline = @(
+                (New-BaselinePackage -Folder library)
+                (New-BaselinePackage -Folder cli -Deps @('library') -IsBinOnly $true)
+            )
+            $classifier = { param($folder, $name)
+                if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                'patch'
+            }
+            $resolved = @(Resolve-ReleaseSet -ParsedTokens (Parse-ReleaseTokens @('library@patch')) `
+                -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier)
+            $cli = $resolved | Where-Object Folder -eq cli
+            $cli.EffectiveChangeType | Should -Be 'patch'
+            $cli.RequiresManualSemverReview | Should -BeTrue
+        }
+
+        It 'keeps a binary at patch when its dependency breaks and exposure metadata is absent' {
+            $baseline = @(
+                (New-BaselinePackage -Folder library)
+                (New-BaselinePackage -Folder cli -Deps @('library') -IsBinOnly $true -AllowedExternalTypes $null)
+            )
+            $classifier = { param($folder, $name)
+                if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                'patch'
+            }
+            $resolved = @(Resolve-ReleaseSet -ParsedTokens (Parse-ReleaseTokens @('library@breaking')) `
+                -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier)
+            $cli = $resolved | Where-Object Folder -eq cli
+            $cli.EffectiveChangeType | Should -Be 'patch'
+            $cli.RequiresManualSemverReview | Should -BeTrue
+            $set = @{}
+            foreach ($entry in $resolved) { $set[$entry.Folder] = $entry }
+            $findings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set -WorkspaceBaseline $baseline)
+            $findings.Count | Should -Be 1
+            $findings[0].Folder | Should -Be 'cli'
+            $findings[0].ManualSemverReviewKind | Should -Be 'bin-only'
+        }
+
+        It 'prompts once for an unchanged cascade binary and records a no-material review' {
+            $script:BinaryBaseline = @(
+                (New-BaselinePackage -Folder library)
+                (New-BaselinePackage -Folder cli -Deps @('library') -IsBinOnly $true)
+            )
+            Mock Get-WorkspacePackages { $script:BinaryBaseline }
+            Mock Get-UnreleasedModifiedDependencies { @() }
+            Mock Get-PackageReleaseDecision { @{ Action = 'ignore' } }
+            $plan = Invoke-PlanReview -RepoRoot $TestDrive `
+                -ParsedTokens (Parse-ReleaseTokens @('library@patch')) `
+                -WorkspaceBaseline $script:BinaryBaseline -ModifiedSnapshot @{} `
+                -GetRequiredChangeType { param($folder, $name)
+                    if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                    'patch'
+                }
+            Should -Invoke Get-PackageReleaseDecision -Times 1 -Exactly -ParameterFilter {
+                $Finding.Folder -eq 'cli' -and $Finding.ManualSemverReviewKind -eq 'bin-only'
+            }
+            $plan.cli.EffectiveChangeType | Should -Be 'patch'
+            $plan.cli.ManualSemverReviewCompleted | Should -BeTrue
+            $plan.cli.ManualSemverReviewKind | Should -Be 'bin-only'
         }
     }
 
