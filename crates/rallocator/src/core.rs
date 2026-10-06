@@ -1121,6 +1121,27 @@ mod tests {
     }
 
     #[test]
+    fn slab_metadata_commit_failure_returns_null_and_can_be_retried() {
+        let address = fresh_owner();
+        // SAFETY: This fresh endpoint's core has no live allocations or other lease.
+        let core = unsafe { (*(address as *const Owner)).core_ptr() };
+        // SAFETY: The test retains the endpoint's sole lease throughout this regression.
+        let core = unsafe { &mut *core };
+        // SAFETY: The replacement uses the same unique backend map, with no frontend entries.
+        core.backend = unsafe { Local::new(core.map()) };
+        let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        crate::hal::fail_next(crate::hal::Failure::Commit);
+        assert!(core.allocate(request).is_null());
+        assert!(core.is_empty());
+        let ptr = core.allocate(request);
+        assert!(!ptr.is_null());
+        // SAFETY: The successful retry's live allocation is returned once.
+        unsafe { core.deallocate(ptr as usize) };
+        core.flush();
+        assert!(core.is_empty());
+    }
+
+    #[test]
     fn owner_spare_tail_supplies_reusable_slab_metadata() {
         let address = fresh_owner();
         let start = address + Owner::LOGICAL_SIZE;

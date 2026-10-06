@@ -439,23 +439,21 @@ mod tests {
         };
         swapped.wait();
         let mut seen = Vec::new();
+        let mut accept = |message| {
+            seen.push(message);
+            true
+        };
         // SAFETY: This test is the only consumer throughout the queue's lifetime.
         unsafe {
-            queue.drain(|message| {
-                seen.push(message);
-                true
-            });
+            queue.drain(&mut accept);
         };
-        assert!(seen.is_empty());
+        assert_eq!(queue.retained_message(), Some(a));
         resume.wait();
         producer.join().unwrap();
         // SAFETY: Same sole consumer; the acquired successor makes only a
         // reclaimable. b remains the user tail until another real message arrives.
         unsafe {
-            queue.drain(|message| {
-                seen.push(message);
-                true
-            });
+            queue.drain(&mut accept);
             assert_eq!(seen, [a]);
             assert_eq!(queue.retained_message(), Some(b));
             assert!(!queue.can_dequeue());
@@ -568,5 +566,45 @@ mod tests {
             }
             assert_eq!(current, message);
         }
+    }
+    #[test]
+    fn outgoing_observation_counts_closed_messages_and_marks_budget_truncation() {
+        let map = Map::reserve().unwrap();
+        let size = crate::hal::RESERVE_MIN;
+        let address = crate::hal::reserve(size, size) as usize;
+        assert_ne!(address, 0);
+        // SAFETY: The test exclusively owns and registers this complete reservation.
+        assert!(unsafe { map.register(address, size) });
+        // SAFETY: The complete owned reservation is committed before writing any messages.
+        assert!(unsafe { crate::hal::commit(address as *mut u8, size) });
+        // SAFETY: The registered range remains exclusively owned by the test.
+        unsafe { map.assign(address, size, 0x1000, 0x2040) };
+        let mut cache = Cache::new();
+        // SAFETY: This message-sized object belongs to the registered test slab.
+        unsafe { cache.deallocate(map, 0x1000, address) };
+        // SAFETY: The second message-sized object is disjoint and belongs to the same slab.
+        unsafe { cache.deallocate(map, 0x1000, address + 32) };
+        let open = cache.observe(map, &mut 1);
+        assert_eq!((open.open_rings, open.open_objects, open.messages), (1, 2, 0));
+        let index = Cache::ring_set(0x1000);
+        // SAFETY: Closing transfers this test's exclusive initialized ring to an outgoing list.
+        unsafe { cache.close_ring(map, index) };
+        let complete = cache.observe(map, &mut 1);
+        assert_eq!(
+            (
+                complete.open_rings,
+                complete.outgoing_lists,
+                complete.messages,
+                complete.message_objects,
+                complete.message_bytes
+            ),
+            (0, 1, 1, 2, 32)
+        );
+        assert!(complete.complete);
+        let partial = cache.observe(map, &mut 0);
+        assert!(!partial.complete);
+        assert_eq!((partial.outgoing_lists, partial.messages), (1, 0));
+        // SAFETY: No queue publication occurred; the test retires all ring storage together.
+        unsafe { crate::hal::release(address as *mut u8, size) };
     }
 }

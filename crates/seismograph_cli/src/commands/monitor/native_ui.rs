@@ -808,6 +808,63 @@ mod tests {
     }
 
     #[test]
+    fn navigation_scrolls_saturates_and_rejects_unrelated_keys_and_targets() {
+        let snapshot = crate::native_view::fixture::snapshot();
+        let mut nav = Navigation::default();
+        assert!(!nav.key(KeyCode::Char('x'), None));
+        assert!(nav.key(KeyCode::PageDown, None));
+        assert_eq!(nav.root, 1);
+        assert!(nav.key(KeyCode::PageUp, None));
+        assert_eq!(nav.root, 0);
+        nav.key(KeyCode::Enter, Some(&snapshot));
+        nav.key(KeyCode::Enter, Some(&snapshot));
+        assert_eq!(nav.depth, Depth::MemoryDetail);
+        nav.key(KeyCode::PageDown, Some(&snapshot));
+        assert_eq!(nav.scroll, 5);
+        nav.key(KeyCode::PageUp, Some(&snapshot));
+        assert_eq!(nav.scroll, 0);
+        assert!(!nav.key(KeyCode::Char('x'), Some(&snapshot)));
+        assert!(nav.key(KeyCode::Esc, Some(&snapshot)));
+        assert_eq!(nav.depth, Depth::Memory);
+        nav.click(ListTarget::NativeMemory, 3);
+        assert_eq!(nav.memory, 3);
+        nav.click(ListTarget::Threads, 99);
+        assert_eq!(nav.memory, 3);
+        nav.focus_list(ListTarget::NativeMemory);
+        assert_eq!(nav.depth, Depth::Memory);
+        nav.focus_list(ListTarget::Threads);
+        assert_eq!(nav.depth, Depth::Memory);
+        nav.click(ListTarget::HeapBuckets, 2);
+        nav.click(ListTarget::NativeSubsystems, 1);
+        assert_eq!((nav.subsystem, nav.depth), (1, Depth::Subsystems));
+        nav.key(KeyCode::Enter, Some(&snapshot));
+        assert!(nav.key(KeyCode::Enter, Some(&snapshot)));
+        assert_eq!(nav.depth, Depth::Detail);
+        nav.click(ListTarget::NativeClasses, 43);
+        assert_eq!((nav.class, nav.depth), (43, Depth::Classes));
+    }
+
+    #[test]
+    fn unknown_owner_and_uninitialized_class_details_stay_unknown_at_narrow_widths() {
+        let snapshot = crate::native_view::fixture::snapshot();
+        for (root, class) in [(3, 1), (2, 0)] {
+            for width in [36, 60, 120] {
+                let nav = Navigation {
+                    root,
+                    class,
+                    depth: Depth::Class,
+                    ..Default::default()
+                };
+                let screen = render(Some(&snapshot), nav, width, 24);
+                assert!(screen.contains("Unknown"), "{screen}");
+                assert!(!screen.contains("Object size"), "{screen}");
+                assert_eq!(screen.lines().count(), 24);
+                assert!(screen.lines().all(|line| line.chars().count() == usize::from(width)));
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "writes local TestBackend screens into the ignored package target directory"]
     fn write_native_visual_acceptance_screens() -> std::io::Result<()> {
         let mut snapshot = crate::native_view::fixture::snapshot();

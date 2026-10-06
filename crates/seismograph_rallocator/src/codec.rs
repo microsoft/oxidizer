@@ -421,3 +421,22 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
     }
     Ok(snapshot)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writer_rejects_truncated_and_overflowing_positions_without_writing() {
+        let mut output = [0xa5; 1];
+        let mut writer = Writer {
+            output: &mut output,
+            position: 0,
+        };
+        assert_eq!(writer.bytes(&[1, 2]).unwrap_err().kind(), ErrorKind::Truncated);
+        assert_eq!(writer.position, 0);
+        writer.position = usize::MAX;
+        assert_eq!(writer.bytes(&[1]).unwrap_err().kind(), ErrorKind::LengthOverflow);
+        assert_eq!(output, [0xa5]);
+    }
+}

@@ -131,13 +131,13 @@ mod tests {
 
     #[test]
     fn runtime_table_generation_matches_compiled_tables() {
-        for (generated, compiled) in make_classes().iter().zip(CLASSES) {
+        for (generated, compiled) in std::hint::black_box(make_classes)().iter().zip(CLASSES) {
             assert_eq!(
                 (generated.size, generated.slab, generated.capacity, generated.waking),
                 (compiled.size, compiled.slab, compiled.capacity, compiled.waking)
             );
         }
-        assert_eq!(make_lookup(), SIZE_LOOKUP);
+        assert_eq!(std::hint::black_box(make_lookup)(), SIZE_LOOKUP);
     }
 
     #[test]

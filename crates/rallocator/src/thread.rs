@@ -354,6 +354,25 @@ mod tests {
     use crate::classes;
 
     #[test]
+    fn usable_size_without_a_thread_lease_reads_the_live_pagemap_entry() {
+        let layout = Layout::from_size_align(513, 16).unwrap();
+        let address = allocate(layout) as usize;
+        assert_ne!(address, 0);
+        std::thread::spawn(move || {
+            assert_eq!(CURRENT.with(Cell::get), 0);
+            // SAFETY: Thread spawn transfers this allocation without freeing or mutating it.
+            assert!(unsafe { usable_size(address as *mut u8) } >= layout.size());
+            assert_eq!(CURRENT.with(Cell::get), 0);
+            // SAFETY: The spawned thread exclusively owns and returns the live allocation once.
+            unsafe { deallocate(address as *mut u8) };
+            flush();
+        })
+        .join()
+        .unwrap();
+        flush();
+    }
+
+    #[test]
     #[ignore = "requires RALLOCATOR_SIZECLASS_REFERENCE pointing to an independent snmalloc CSV"]
     fn upstream_sizeclass_oracle() {
         let path = std::env::var_os("RALLOCATOR_SIZECLASS_REFERENCE").unwrap();

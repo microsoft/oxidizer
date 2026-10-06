@@ -26,6 +26,39 @@ fn empty_observation_defaults_and_freshness_labels_preserve_unknown_state() {
     }
 }
 
+#[test]
+fn inventory_validation_rejects_zero_ids_missing_observations_and_oversized_rows() {
+    let mut snapshot = Snapshot {
+        owner_count: 1,
+        owners_complete: true,
+        owners: vec![Owner::default()],
+        ..Snapshot::default()
+    };
+    assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::DuplicateOwner);
+    snapshot.owners[0].id = 1;
+    for source in [ObservationSource::Published, ObservationSource::IdleInspection] {
+        snapshot.owners[0].source = source;
+        assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::Malformed);
+    }
+    snapshot.owners[0].source = ObservationSource::IdleInspection;
+    snapshot.owners[0].observation = Some(Observation {
+        session_id: 1,
+        ..Observation::default()
+    });
+    assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::Malformed);
+    snapshot.owners = vec![Owner::default(); seismograph_rallocator::MAX_OWNERS + 1];
+    assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::LengthOverflow);
+}
+
+#[test]
+fn decoded_inventory_count_must_agree_with_capture_metadata() {
+    let mut encoded = bytes(&fixture());
+    encoded[36..44].copy_from_slice(&0_u64.to_le_bytes());
+    assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::Malformed);
+    let mut encoded = bytes(&fixture());
+    encoded[44] = 1;
+    assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::Malformed);
+}
 fn fixture() -> Snapshot {
     let ranges = Ranges {
         counts: core::array::from_fn(|index| index as u64 + 1),
@@ -116,6 +149,21 @@ fn fixture() -> Snapshot {
             global_refill_bytes: 34,
         },
     }
+}
+
+#[test]
+fn unavailable_owner_round_trips_without_inventing_observation() {
+    let snapshot = Snapshot {
+        owner_count: 1,
+        owners_complete: true,
+        owners: vec![Owner {
+            id: 7,
+            source: ObservationSource::Unavailable,
+            ..Owner::default()
+        }],
+        ..Snapshot::default()
+    };
+    assert_eq!(decode(&bytes(&snapshot)).unwrap(), snapshot);
 }
 
 fn bytes(snapshot: &Snapshot) -> Vec<u8> {

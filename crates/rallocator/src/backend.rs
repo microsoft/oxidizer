@@ -288,6 +288,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reserved_refill_failures_do_not_publish_ranges_or_accounting() {
+        let mut global = Global {
+            map: None,
+            ranges: Buddy::new(),
+            requested: 0,
+        };
+        assert_eq!(global_alloc_reserved(&mut global, CHUNK), 0);
+        global.map = Some(Map::reserve().unwrap());
+        hal::fail_next(hal::Failure::Reserve);
+        assert_eq!(global_alloc_reserved(&mut global, CHUNK), 0);
+        assert_eq!(global.requested, 0);
+        hal::fail_next(hal::Failure::Commit);
+        assert_eq!(global_alloc_reserved(&mut global, CHUNK), 0);
+        assert_eq!(global.requested, 0);
+        let mut budget = usize::MAX;
+        // SAFETY: This isolated global and all its map nodes are exclusively test-owned.
+        let ranges = unsafe { global.ranges.observe(Nodes::Map(global.map.unwrap()), &mut budget) };
+        assert_eq!(ranges.observed_bytes(), 0);
+    }
+
+    #[test]
+    fn local_rejects_invalid_sizes_and_round_trips_chunk_sized_metadata() {
+        let map = map().unwrap();
+        // SAFETY: This handle comes from the backend's unique global map.
+        let mut local = unsafe { Local::new(map) };
+        for size in [0, 1, CHUNK - 1, CHUNK + 1, 1usize << 47] {
+            assert_eq!(local.alloc(size), 0);
+        }
+        for size in [0, 1, 15, 17] {
+            assert_eq!(local.alloc_meta(size), 0);
+        }
+        let address = local.alloc_meta(CHUNK);
+        assert_ne!(address, 0);
+        // SAFETY: The test returns the entire live, unpublished metadata allocation.
+        unsafe { local.free_meta(address, CHUNK) };
+        local.validate();
+        assert_eq!(local.alloc_meta(CHUNK), address);
+        // SAFETY: The reused chunk was not subdivided or published.
+        unsafe { local.free_meta(address, CHUNK) };
+        let mut budget = usize::MAX;
+        let observed = local.observe(&mut budget);
+        assert!(observed.ranges.complete);
+        assert!(observed.metadata.complete);
+        assert_eq!(observed.requested_bytes, CHUNK as u64);
+    }
+
+    #[test]
+    fn metadata_refill_commit_failure_can_be_retried() {
+        let map = map().unwrap();
+        // SAFETY: This handle comes from the backend's unique global map.
+        let mut local = unsafe { Local::new(map) };
+        hal::fail_next(hal::Failure::Commit);
+        assert_eq!(local.alloc_meta(16), 0);
+        assert_eq!(local.requested, 0);
+        let address = local.alloc_meta(16);
+        assert_ne!(address, 0);
+        // SAFETY: The unpublished metadata allocation is returned once.
+        unsafe { local.free_meta(address, 16) };
+        local.validate();
+    }
+
+    #[test]
     fn local_geometric_refill_and_committed_reuse() {
         let map = map().unwrap();
         // SAFETY: The handle comes from this backend's unique global map.

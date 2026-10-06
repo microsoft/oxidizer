@@ -135,6 +135,15 @@ mod tests {
     use crate::buddy::{Buddy, Nodes};
 
     #[test]
+    fn registration_rejects_addresses_outside_the_map_without_touching_entries() {
+        let map = Map::reserve().unwrap();
+        for address in [usize::MAX, (1usize << ADDRESS_BITS) - hal::PAGE / 2] {
+            // SAFETY: These rejected ranges never refer to entries or existing reservations.
+            assert!(!unsafe { map.register(address, hal::PAGE) });
+        }
+    }
+
+    #[test]
     fn boundary_bit_survives_frontend_and_tree_states() {
         let map = Map::reserve().unwrap();
         let size = 1 << 17;
