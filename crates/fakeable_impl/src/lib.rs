@@ -750,18 +750,8 @@ fn generate_delegation_method(
 
     // Transform expect attributes to allow attributes
     let method_attrs: Vec<syn::Attribute> = original_method.attrs.iter().map(transform_expect_to_allow).collect();
-    let async_lint_attr: Option<syn::Attribute> = is_async.then(|| {
-        parse_quote!(
-            #[allow(
-                clippy::future_not_send,
-                reason = "fake delegation preserves the future sendability of both real and fake implementations"
-            )]
-        )
-    });
-
     Ok(parse_quote! {
         #(#method_attrs)*
-        #async_lint_attr
         #[allow(unused_mut)]
         #[allow(clippy::used_underscore_binding)]
         #method_vis #method_sig {
@@ -1178,7 +1168,7 @@ fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStrea
     // with the future shape that Mockall can configure directly.
     let mut converted = sig.clone();
     converted.asyncness = None;
-    converted.output = parse_quote!(-> impl ::std::future::Future<Output = #output_type>);
+    converted.output = parse_quote!(-> impl ::std::future::Future<Output = #output_type> + Send);
     quote! { #converted }
 }
 

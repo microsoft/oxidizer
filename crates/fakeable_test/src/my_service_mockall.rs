@@ -28,13 +28,6 @@ impl MyService {
         &self.value
     }
 
-    #[allow(clippy::future_not_send, reason = "Fixture verifies non-Send async method preservation")]
-    pub async fn non_send_future(&self) -> usize {
-        let value = std::rc::Rc::new(1);
-        std::future::ready(()).await;
-        *value
-    }
-
     pub fn get_value_with_ref_arg(&self, prefix: &str, suffix: Option<&str>) -> String {
         format!("{}{}{}", prefix, self.value, suffix.unwrap_or(""))
     }

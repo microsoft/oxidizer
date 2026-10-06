@@ -9,6 +9,8 @@ use futures::executor::block_on;
 use static_assertions::assert_impl_all;
 use thread_aware::{ThreadAware, Unaware};
 
+fn assert_send<T: Send>(_: T) {}
+
 #[test]
 fn test_mock_implementation() {
     let mut mock = MockMyService::new();
@@ -23,6 +25,7 @@ fn test_mock_implementation() {
     assert_eq!(service.get_value_with_ref_arg("pre-", Some("post")), "pre-mockedpost");
     assert_eq!(service.get_value_with_ref_arg("pre-", None), "pre-mocked");
     assert_eq!(service.get_other_value(), 43);
+    assert_send(service.async_function(5));
     assert_eq!(block_on(service.async_function(5)).unwrap(), 44);
 }
 
@@ -31,6 +34,7 @@ fn test_real_implementation() {
     let service = MyService::new("real".to_string(), 10);
     assert_eq!(service.get_value(), "real");
     assert_eq!(service.get_other_value(), 10);
+    assert_send(service.async_function(5));
     assert_eq!(block_on(service.async_function(5)).unwrap(), 5);
 }
 

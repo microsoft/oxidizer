@@ -50,10 +50,6 @@ impl MyService {
             }
         }
     }
-    #[allow(
-        clippy::future_not_send,
-        reason = "fake delegation preserves the future sendability of both real and fake implementations"
-    )]
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub async fn async_clone(&self) -> Self {

@@ -30,10 +30,6 @@ impl MyService {
     #[cfg_attr(feature = "some_feature", allow(some_expectation, another_expectation))]
     #[allow(whatever)]
     #[cfg_attr(test, allow(whatever2))]
-    #[allow(
-        clippy::future_not_send,
-        reason = "fake delegation preserves the future sendability of both real and fake implementations"
-    )]
     #[allow(unused_mut)]
     #[allow(clippy::used_underscore_binding)]
     pub async fn get_value(&self) -> &str {

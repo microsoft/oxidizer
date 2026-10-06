@@ -186,8 +186,8 @@ use proc_macro::TokenStream;
 /// - Mockall generation preserves method `cfg`/`cfg_attr` attributes and rejects nested elided
 ///   references beneath implicit higher-ranked function-pointer or trait-object binders.
 ///   Diagnostics for unsupported cfg-gated methods carry the same gating attributes.
-/// - Generated Mockall signatures preserve whether async method futures are `Send` and do not add a
-///   `Send` bound.
+/// - Generated Mockall signatures require async method futures to be `Send`; use a manual fake for
+///   async methods whose futures are not `Send`.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
 /// - Mockall generation rejects trait impl blocks; use a manual fake for trait implementations.
 /// - Unsafe impl blocks are rejected because the macro cannot establish their safety invariants for
