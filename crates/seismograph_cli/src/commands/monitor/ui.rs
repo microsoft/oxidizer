@@ -309,9 +309,8 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             &view.panels.rows,
             content,
             view.snapshot.and_then(|capture| capture.native.as_deref()),
-            view.snapshot
-                .and_then(|capture| capture.heap_error.as_deref())
-                .or(view.snapshot_error),
+            view.snapshot_error
+                .or_else(|| view.snapshot.and_then(|capture| capture.heap_error.as_deref())),
             view.heap_view,
         ),
         MonitorTab::Allocations => draw_allocations(
@@ -908,13 +907,23 @@ fn draw_allocation_records(
     );
 }
 
-fn wrapped_detail_paragraph(lines: &[String], block: Block<'static>, area: Rect, scroll: usize) -> Paragraph<'static> {
+pub(super) fn wrapped_detail_paragraph(lines: &[String], block: Block<'static>, area: Rect, scroll: usize) -> Paragraph<'static> {
+    wrapped_detail_with_limit(lines, block, area, scroll).0
+}
+
+pub(super) fn wrapped_detail_with_limit(lines: &[String], block: Block<'static>, area: Rect, scroll: usize) -> (Paragraph<'static>, usize) {
     let inner = block.inner(area);
     let paragraph = Paragraph::new(lines.join("\n")).wrap(ratatui::widgets::Wrap { trim: false });
-    let max_scroll = paragraph.line_count(inner.width).saturating_sub(usize::from(inner.height));
-    paragraph
-        .scroll((u16::try_from(scroll.min(max_scroll)).unwrap_or(u16::MAX), 0))
-        .block(block)
+    let max_scroll = paragraph
+        .line_count(inner.width)
+        .saturating_sub(usize::from(inner.height))
+        .min(usize::from(u16::MAX));
+    (
+        paragraph
+            .scroll((u16::try_from(scroll.min(max_scroll)).unwrap_or(u16::MAX), 0))
+            .block(block),
+        max_scroll,
+    )
 }
 
 fn draw_allocation_stack(
@@ -1702,86 +1711,7 @@ fn draw_native(
     unavailable: Option<&str>,
     view: HeapViewState,
 ) {
-    let Some(snapshot) = snapshot else {
-        draw_empty_panel_with_message(frame, area, " Native v4 structure explorer ", unavailable);
-        return;
-    };
-    let [summary, body, limitations] = Layout::vertical([Constraint::Length(7), Constraint::Min(5), Constraint::Length(5)]).areas(area);
-    let [owners, details] = Layout::horizontal([Constraint::Percentage(32), Constraint::Percentage(68)]).areas(body);
-    frame.render_widget(
-        Paragraph::new(crate::native_view::overview(snapshot).join("\n"))
-            .block(Block::default().title(" Global backend / coverage ").borders(Borders::ALL)),
-        summary,
-    );
-    let selected = view.bucket_selected.min(snapshot.owners.len());
-    let visible = usize::from(owners.height.saturating_sub(2)).max(1);
-    let first = selected.saturating_sub(visible - 1);
-    let rows = (first..(snapshot.owners.len() + 1).min(first + visible)).map(|index| {
-        if index == 0 {
-            return ListItem::new("Global backend");
-        }
-        let owner = &snapshot.owners[index - 1];
-        ListItem::new(crate::native_view::owner_label(snapshot, owner)).style(Style::default().fg(
-            if owner.source == seismograph_rallocator::native::ObservationSource::Unavailable {
-                Color::Red
-            } else if owner.source == seismograph_rallocator::native::ObservationSource::Busy {
-                Color::Yellow
-            } else {
-                match owner.freshness(snapshot) {
-                    seismograph_rallocator::native::Freshness::Current | seismograph_rallocator::native::Freshness::IdleInspection => {
-                        Color::Green
-                    }
-                    seismograph_rallocator::native::Freshness::Unknown => Color::DarkGray,
-                    _ => Color::Yellow,
-                }
-            },
-        ))
-    });
-    let mut state = ListState::default().with_selected(Some(selected - first));
-    frame.render_stateful_widget(
-        List::new(rows)
-            .block(Block::default().title(" Backend / owners · ↑↓ select ").borders(Borders::ALL))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
-            .highlight_symbol("> "),
-        owners,
-        &mut state,
-    );
-    mouse_rows.register(
-        owners,
-        0,
-        first + state.offset(),
-        snapshot.owners.len() + 1,
-        ListTarget::HeapBuckets,
-    );
-    let lines = selected.checked_sub(1).and_then(|index| snapshot.owners.get(index)).map_or_else(
-        || {
-            let mut lines = crate::native_view::overview(snapshot);
-            lines.push("Global cached bins: capacity only; physical residency unknown.".into());
-            for (exponent, count) in snapshot.global.ranges.counts.iter().enumerate().filter(|(_, count)| **count != 0) {
-                lines.push(format!("  2^{exponent} B: {count} ranges"));
-            }
-            lines
-        },
-        |owner| crate::native_view::owner_lines(snapshot, owner),
-    );
-    frame.render_widget(
-        wrapped_detail_paragraph(
-            &lines,
-            Block::default()
-                .title(" Native structures · PgUp/PgDn scroll ")
-                .borders(Borders::ALL),
-            details,
-            view.stack_scroll,
-        ),
-        details,
-    );
-    frame.render_widget(
-        Paragraph::new(crate::native_view::LIMITATIONS)
-            .wrap(ratatui::widgets::Wrap { trim: false })
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().title(" Meaning / limitations ").borders(Borders::ALL)),
-        limitations,
-    );
+    super::native_ui::draw(frame, mouse_rows, area, snapshot, unavailable, view.native);
 }
 
 fn draw_empty_panel(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, title: &'static str) {
@@ -2539,7 +2469,7 @@ mod tests {
             tab: MonitorTab::Heaps,
             snapshot: Some(capture),
         };
-        app.heap_view.bucket_selected = 65;
+        app.heap_view.native.root = 65;
         let area = Rect::new(0, 0, 180, 40);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
@@ -2551,7 +2481,7 @@ mod tests {
             let text = (0..58)
                 .map(|column| terminal.backend().buffer()[(column, row)].symbol())
                 .collect::<String>();
-            assert!(text.contains(&format!("0x{index:x}")), "{index}: {text}");
+            assert!(text.contains(&format!("Owner {}", index - 1)), "{index}: {text}");
             found += 1;
         }
         assert!(found > 5);
@@ -2621,7 +2551,9 @@ mod tests {
             for _ in 0..index {
                 keyboard.handle_key(KeyCode::Down);
             }
-            keyboard.handle_key(KeyCode::Enter);
+            if target != ListTarget::HeapBuckets {
+                keyboard.handle_key(KeyCode::Enter);
+            }
             mouse.handle_mouse(
                 mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
                 Rect::new(0, 0, 180, 60),
@@ -2688,19 +2620,26 @@ mod tests {
             snapshot: Some(representative_capture()),
         };
         app.handle_key(KeyCode::Down);
-        assert!(render(&app).contains("Small-class slab inventory"));
-        app.handle_key(KeyCode::PageDown);
-        assert!(app.heap_view.stack_scroll > 0);
         app.handle_key(KeyCode::Down);
-        assert!(render(&app).contains("No readable observation"));
-        assert_eq!(app.heap_view.stack_scroll, 0);
+        assert!(render(&app).contains("Small slabs"));
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::PageDown);
+        assert!(app.heap_view.native.scroll > 0);
+        for _ in 0..3 {
+            assert!(!app.handle_key(KeyCode::Esc));
+        }
+        app.handle_key(KeyCode::Down);
+        assert!(render(&app).contains("Unknown"));
+        assert_eq!(app.heap_view.native.scroll, 0);
         render(&app);
         let (column, row, index) = rendered_target(&app, ListTarget::HeapBuckets);
         app.handle_mouse(
             mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
             Rect::new(0, 0, 180, 60),
         );
-        assert_eq!(app.heap_view.bucket_selected, index);
+        assert_eq!(app.heap_view.native.root, index);
     }
 
     #[test]
@@ -2715,12 +2654,14 @@ mod tests {
             ..Default::default()
         });
         let mut view = App::offline("native-scroll.seismograph".into()).heap_view;
-        view.bucket_selected = 1;
+        view.native.root = 2;
+        view.native.subsystem = 4;
+        view.native.depth = super::super::native_ui::Depth::Detail;
         let rows = MouseRows::default();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut reached_remote = false;
         for scroll in (0..1000).step_by(5) {
-            view.stack_scroll = scroll;
+            view.native.scroll = scroll;
             terminal
                 .draw(|frame| draw_native(frame, &rows, frame.area(), Some(&snapshot), None, view))
                 .unwrap();
@@ -2731,15 +2672,12 @@ mod tests {
                 .iter()
                 .map(ratatui::buffer::Cell::symbol)
                 .collect();
-            if text.contains("Sampled front != back:") {
+            if text.contains("Inbox work") {
                 reached_remote = true;
                 break;
             }
         }
-        assert!(
-            reached_remote,
-            "wrapped native class rows must not make the later remote subsystem unreachable"
-        );
+        assert!(reached_remote, "wrapped native detail scrolling must reach incoming queue state");
     }
 
     #[test]
@@ -2793,18 +2731,143 @@ mod tests {
             snapshot: Some(snapshot),
         };
         app.handle_key(KeyCode::End);
-        assert_eq!(app.heap_view.bucket_selected, 1024);
-        assert!(render(&app).contains("0x13ff"));
+        assert_eq!(app.heap_view.native.root, 1025);
+        assert!(render(&app).contains("Owner 1024"));
         let (column, row, index) = rendered_target(&app, ListTarget::HeapBuckets);
         assert!(index > 900);
         app.handle_mouse(
             mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
             Rect::new(0, 0, 180, 60),
         );
-        assert_eq!(app.heap_view.bucket_selected, index);
+        assert_eq!(app.heap_view.native.root, index);
         app.handle_key(KeyCode::Home);
-        assert_eq!(app.heap_view.bucket_selected, 0);
+        assert_eq!(app.heap_view.native.root, 0);
         assert!(render(&app).contains("Global backend"));
+    }
+
+    fn render_native_sized(app: &App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect()
+    }
+
+    #[test]
+    fn native_end_then_page_up_and_resized_up_use_actual_wrapped_bounds() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut capture = representative_capture();
+        std::sync::Arc::make_mut(capture.native.as_mut().unwrap()).owners[0]
+            .observation
+            .as_mut()
+            .unwrap()
+            .classes
+            .fill(seismograph_rallocator::native::ClassState {
+                object_bytes: 65_536,
+                slab_bytes: 262_144,
+                capacity: 4,
+                observed_slabs: 2,
+                ..Default::default()
+            });
+        let mut app = App::offline("wrapped-native.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "wrapped-native.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        app.heap_view.native.root = 2;
+        app.heap_view.native.depth = Depth::Class;
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 5);
+        app.handle_key(KeyCode::PageUp);
+        assert_ne!(render_native_sized(&app, 80, 24), bottom);
+        assert_eq!(app.heap_view.native.scroll, limit - 5);
+        app.handle_key(KeyCode::End);
+        let resized = render_native_sized(&app, 80, 28);
+        let resized_limit = app.panels.rows.native_scroll_limit.get();
+        assert!(resized_limit > 0 && resized_limit < limit);
+        app.handle_key(KeyCode::Up);
+        assert_ne!(render_native_sized(&app, 80, 28), resized);
+        assert_eq!(app.heap_view.native.scroll, resized_limit - 1);
+    }
+
+    #[test]
+    fn native_end_then_page_up_moves_owner_return_details() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("returns-scroll.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "returns-scroll.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        app.heap_view.native.root = 2;
+        app.heap_view.native.subsystem = 4;
+        app.heap_view.native.depth = Depth::Detail;
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 0);
+        app.handle_key(KeyCode::PageUp);
+        assert_ne!(render_native_sized(&app, 80, 24), bottom);
+        assert_eq!(app.heap_view.native.scroll, limit.saturating_sub(5));
+    }
+
+    #[test]
+    fn native_memory_category_enter_focuses_scrollable_reserved_details() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("memory-detail.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "memory-detail.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Memory);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::MemoryDetail);
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        assert!(bottom.contains("Global cached"));
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 0);
+        app.handle_key(KeyCode::Up);
+        assert_eq!((app.heap_view.native.scroll, app.heap_view.native.memory), (limit - 1, 0));
+        assert!(!app.handle_key(KeyCode::Esc));
+        assert_eq!(app.heap_view.native.depth, Depth::Memory);
+    }
+
+    #[test]
+    fn native_source_decode_and_capture_errors_remain_visible() {
+        let mut capture = representative_capture();
+        capture.native = None;
+        capture.heap_error = Some("native payload decode failed: invalid class tag".into());
+        let mut app = App::offline("native-error.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "native-error.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        let output = render(&app);
+        assert!(output.contains("[Error]") && output.contains("native payload decode failed: invalid class tag"));
+        app.snapshot_error = Some("capture unavailable: transport disconnected".into());
+        let output = render(&app);
+        assert!(output.contains("capture unavailable: transport disconnected"));
+        assert!(!output.contains("native payload decode failed: invalid class tag"));
     }
 
     #[test]
@@ -2821,14 +2884,79 @@ mod tests {
         };
         app.handle_key(KeyCode::Down);
         app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
         let output = render(&app);
-        for evidence in [
-            "UNAVAILABLE",
-            "Publication slot System allocation failed",
-            "not zero or merely never-observed",
-        ] {
-            assert!(output.contains(evidence), "missing {evidence}");
-        }
+        assert!(output.contains("Unavailable"));
+        assert!(!output.contains("allocation failed"));
+    }
+
+    #[test]
+    fn native_mouse_drilldowns_and_wheel_focus_the_actual_lists() {
+        use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("native-mouse.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "native-mouse.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        let area = Rect::new(0, 0, 180, 60);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeSubsystems);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        assert_eq!(app.heap_view.native.subsystem, index);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Detail);
+        assert!(!app.handle_key(KeyCode::Esc));
+        app.handle_key(KeyCode::Home);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::End);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeClasses);
+        assert_eq!(index, 43);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Class);
+        render(&app);
+        let (column, row, _) = rendered_target(&app, ListTarget::NativeClasses);
+        app.handle_mouse(mouse_event(MouseEventKind::ScrollUp, column, row), area);
+        assert_eq!((app.heap_view.native.depth, app.heap_view.native.class), (Depth::Classes, 42));
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Home);
+        app.handle_key(KeyCode::Enter);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeMemory);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        assert_eq!(app.heap_view.native.memory, index);
+        assert!(render(&app).contains("— [Unknown]"));
+    }
+
+    #[test]
+    fn native_missing_source_navigation_preserves_unknown_and_back_hierarchy() {
+        use crossterm::event::KeyCode;
+        let mut capture = representative_capture();
+        capture.native = None;
+        let mut app = App::offline("missing-native.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "missing-native.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::End);
+        assert!(render(&app).contains("Swapped · F1"));
+        assert!(render(&app).contains("— [Unknown]"));
+        assert!(!app.handle_key(KeyCode::Esc));
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        assert!(render(&app).contains("Global backend"));
+        assert!(!app.handle_key(KeyCode::Backspace));
+        assert!(app.handle_key(KeyCode::Esc));
     }
 
     #[test]
@@ -4209,7 +4337,7 @@ mod tests {
         };
         let rendered = render(&app);
         assert!(rendered.contains("Global backend"));
-        assert!(rendered.contains("Owners: 7 / 9"));
+        assert!(rendered.contains("7 / 9 [Partial]"));
 
         let mut capture = representative_capture();
         let bucket = &mut capture.memory.as_mut().unwrap().tiers[0].buckets[0];
@@ -4223,7 +4351,7 @@ mod tests {
             tab: MonitorTab::Heaps,
             snapshot: Some(capture),
         };
-        assert!(render(&app).contains("physical residency unknown"));
+        assert!(render(&app).contains("Page-map VA"));
 
         assert!(
             render_frame(|frame| {
@@ -4591,6 +4719,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (664_188, 15_392_596_828_520_045_353));
+        assert_eq!(stable_digest(&output), (691_592, 3_962_280_200_487_367_007));
     }
 }

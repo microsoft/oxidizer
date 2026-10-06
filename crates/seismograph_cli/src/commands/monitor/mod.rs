@@ -11,6 +11,7 @@ mod help;
 mod help_content;
 mod live_activity;
 mod mouse;
+mod native_ui;
 mod offline;
 mod panels;
 #[cfg(test)]

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crossterm::event::KeyCode;
 use ratatui::layout::Rect;
@@ -16,6 +16,9 @@ pub(super) enum ListTarget {
     Applications,
     InfoThreads,
     HeapBuckets,
+    NativeSubsystems,
+    NativeClasses,
+    NativeMemory,
     Allocations,
     PrimitiveTypes,
     PrimitiveOperations,
@@ -41,7 +44,7 @@ impl ListTarget {
         match self {
             Self::Applications => None,
             Self::InfoThreads => Some(MonitorTab::Info),
-            Self::HeapBuckets => Some(MonitorTab::Heaps),
+            Self::HeapBuckets | Self::NativeSubsystems | Self::NativeClasses | Self::NativeMemory => Some(MonitorTab::Heaps),
             Self::Allocations => Some(MonitorTab::Allocations),
             Self::PrimitiveTypes | Self::PrimitiveOperations | Self::PrimitiveHotspots => Some(MonitorTab::Primitives),
             Self::Threads | Self::ThreadOperations | Self::ThreadParticipants | Self::ThreadObjects => Some(MonitorTab::Threads),
@@ -61,6 +64,7 @@ impl ListTarget {
 pub(super) struct MouseRows {
     frame: RefCell<Rect>,
     rows: RefCell<Vec<(Rect, ListTarget, usize)>>,
+    pub(super) native_scroll_limit: Cell<usize>,
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -147,6 +151,29 @@ impl App {
             self.info_thread_selected = index.min(self.live_activity.threads.len().saturating_sub(1));
             return;
         }
+        if matches!(
+            target,
+            ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
+        ) && matches!(
+            self.screen,
+            Screen::Connected {
+                tab: MonitorTab::Heaps,
+                ..
+            } | Screen::Offline {
+                tab: MonitorTab::Heaps,
+                ..
+            }
+        ) {
+            self.heap_view.native.click(target, index);
+            let snapshot = match &self.screen {
+                Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot.as_deref(),
+                Screen::Browse => None,
+            };
+            self.heap_view
+                .native
+                .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
+            return;
+        }
         if target == ListTarget::RuntimeActivity {
             self.runtime_view.focus = RuntimeFocus::Activity;
             self.runtime_view.activity_scroll = index;
@@ -231,7 +258,13 @@ impl App {
                 self.cache_view.focus = CacheFocus::Operations;
                 &mut self.cache_view.operation_selected
             }
-            ListTarget::Applications | ListTarget::InfoThreads | ListTarget::RuntimeActivity | ListTarget::RuntimeHistogram(_) => return,
+            ListTarget::Applications
+            | ListTarget::NativeSubsystems
+            | ListTarget::NativeClasses
+            | ListTarget::NativeMemory
+            | ListTarget::InfoThreads
+            | ListTarget::RuntimeActivity
+            | ListTarget::RuntimeHistogram(_) => return,
         };
         // Reuse keyboard selection (including dependent selections and scroll resets),
         // then the exact same Enter action as keyboard navigation.

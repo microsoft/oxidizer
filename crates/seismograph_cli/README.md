@@ -8,20 +8,19 @@ sources remain visible in the source inventory.
 
 **Native v4**, immediately left of Allocations, explores the global backend
 and every inventoried owner endpoint, including active never-observed owners.
-Up/Down selects global state or an owner; Home/End jumps to the first/last
-row and PgUp/PgDn scrolls class slabs, large ranges, local range/metadata
-caches, outgoing returns and incoming atomic queue endpoints.
-Green rows contributed this round or are fresh idle inspections; other rows
-explicitly identify old leases, sessions, rounds, busy slots and unknown state.
-Red Unavailable rows identify System publication-slot allocation failure,
-distinct from a never-observed endpoint; neither is measured zero.
-Last-contributor IDs do not identify the current lease holder. Bounded walks
-and independently sampled state are not a transactional heap census.
-A matching round is not an exact current census; the first round can predate
-polling. Observation age at capture is shown even for matching rounds.
-Large outstanding ranges include pending/retained frees, not app-live objects.
-Sampled incoming front != back means potential work, not a guaranteed ready
-link or queue depth; equality does not establish emptiness.
+The top diagram follows OS reservations through the shared backend to owners,
+slabs, ranges, caches and returns. Select Memory, Global backend or an owner
+with Up/Down, then Enter to focus category details, subsystem choices and class details.
+Escape/Backspace returns one level without leaving the capture; Escape exits
+only at the root. Home/End and PgUp/PgDn navigate long lists or focused details.
+Mouse rows focus their list, and cyan borders identify keyboard focus.
+Contextual F1 help contains metric meanings and coverage limitations; regular
+panels show only structures, concise metrics and observation badges.
+OS reserved combines cumulative native OS reservations (including metadata
+backing) and separate sparse page-map virtual address space using 128-bit
+arithmetic. Committed, resident and swapped memory are explicitly Unknown.
+Observed, Older, Unknown, Busy, Unavailable and Partial badges preserve missing
+evidence without inventing zero measurements or current-lease attribution.
 Native capacity is not application-live memory, batching budget is not pending
 bytes, and global cached ranges are not guaranteed physically decommitted.
 Self-publication defaults on but costs nothing with recording off. Capture

@@ -253,6 +253,18 @@ impl App {
                 return;
             }
         }
+        if tab == MonitorTab::Heaps {
+            self.panels.cancel_drag();
+            if let Some(key) = info_scroll_key(event.kind) {
+                if let Some((target, _)) = self.panels.rows.at(area, event.column, event.row) {
+                    self.heap_view.native.focus_list(target);
+                }
+                self.handle_key(key);
+            } else {
+                self.handle_row_click(event, area);
+            }
+            return;
+        }
         if tab == MonitorTab::Runtime && Panels::runtime_compact(content) {
             self.panels.cancel_drag();
         } else {
