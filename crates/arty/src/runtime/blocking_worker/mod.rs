@@ -138,7 +138,7 @@ pub(crate) fn with_active_blocking_wait_pool<F: Future>(inner: F, pool: Option<A
 
 #[derive(Debug)]
 pub(crate) struct BlockingWaitContext {
-    parent: Option<Arc<Self>>,
+    parent: Option<PerformableWeak<Self>>,
     active_wait: Mutex<Option<BlockingWaitMarker>>,
     waker: AtomicWaker,
     children: Mutex<Vec<PerformableWeak<Self>>>,
@@ -147,17 +147,15 @@ pub(crate) struct BlockingWaitContext {
 impl BlockingWaitContext {
     pub(crate) fn new(parent: Option<Arc<Self>>) -> Arc<Self> {
         let context = Arc::new(Self {
-            parent: parent.clone(),
+            parent: parent.as_ref().map(Arc::downgrade),
             active_wait: Mutex::new(None),
             waker: AtomicWaker::new(),
             children: Mutex::new(Vec::new()),
         });
         if let Some(parent) = parent {
-            parent
-                .children
-                .lock_result()
-                .expect(ERR_POISONED_LOCK)
-                .push(Arc::downgrade(&context));
+            let mut children = parent.children.lock_result().expect(ERR_POISONED_LOCK);
+            children.retain(|child| child.strong_count() > 0);
+            children.push(Arc::downgrade(&context));
         }
         context
     }
@@ -180,32 +178,83 @@ impl BlockingWaitContext {
     }
 
     fn active_pool(&self) -> Option<Arc<()>> {
-        self.active_wait
+        let active = self
+            .active_wait
             .lock_result()
             .expect(ERR_POISONED_LOCK)
             .as_ref()
-            .and_then(BlockingWaitMarker::active_pool)
-            .or_else(|| self.parent.as_ref().and_then(|parent| parent.active_pool()))
+            .and_then(BlockingWaitMarker::active_pool);
+        if active.is_some() {
+            return active;
+        }
+
+        let mut parent = self.parent.as_ref().and_then(PerformableWeak::upgrade);
+        while let Some(context) = parent {
+            let active = context
+                .active_wait
+                .lock_result()
+                .expect(ERR_POISONED_LOCK)
+                .as_ref()
+                .and_then(BlockingWaitMarker::active_pool);
+            if active.is_some() {
+                return active;
+            }
+            parent = context.parent.as_ref().and_then(PerformableWeak::upgrade);
+        }
+        None
     }
 
     fn wake_descendants(&self) {
         self.waker.wake();
-        let children = {
-            let mut children = self.children.lock_result().expect(ERR_POISONED_LOCK);
-            let mut live = Vec::with_capacity(children.len());
-            children.retain(|child| {
-                let Some(child) = child.upgrade() else {
-                    return false;
-                };
-                live.push(child);
-                true
-            });
-            live
-        };
-        for child in children {
-            child.wake_descendants();
+        let mut pending = self.live_children();
+        while let Some(context) = pending.pop() {
+            context.waker.wake();
+            pending.extend(context.live_children());
         }
     }
+
+    fn live_children(&self) -> Vec<Arc<Self>> {
+        let mut children = self.children.lock_result().expect(ERR_POISONED_LOCK);
+        let mut live = Vec::with_capacity(children.len());
+        children.retain(|child| {
+            let Some(child) = child.upgrade() else {
+                return false;
+            };
+            live.push(child);
+            true
+        });
+        live
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test body is scaffolding; exercised context methods remain measured.
+#[test]
+fn blocking_wait_context_prunes_expired_children_and_walks_deep_trees_iteratively() {
+    let root = BlockingWaitContext::new(None);
+    let expired = BlockingWaitContext::new(Some(Arc::clone(&root)));
+    drop(expired);
+    assert_eq!(root.children.lock_result().unwrap().len(), 1);
+
+    let replacement = BlockingWaitContext::new(Some(Arc::clone(&root)));
+    assert_eq!(root.children.lock_result().unwrap().len(), 1);
+
+    let pool = Arc::new(());
+    let active = BlockingWaitContext::activate_pool(&root, Arc::clone(&pool));
+    let mut contexts = vec![root];
+    contexts.push(replacement);
+    for _ in 0..4096 {
+        let parent = Arc::clone(contexts.last().unwrap());
+        contexts.push(BlockingWaitContext::new(Some(parent)));
+    }
+    let expired_after_registration = BlockingWaitContext::new(Some(Arc::clone(&contexts[0])));
+    drop(expired_after_registration);
+    let deepest = contexts.last().unwrap();
+    assert!(deepest.active_pool().is_some_and(|active| Arc::ptr_eq(&active, &pool)));
+    contexts[0].wake_descendants();
+    assert_eq!(contexts[0].children.lock_result().unwrap().len(), 1);
+    drop(active);
+    assert!(deepest.active_pool().is_none());
 }
 
 pub(crate) struct BlockingWaitActivation {

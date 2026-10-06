@@ -14,6 +14,10 @@ pub(crate) fn runtime() -> Runtime {
 }
 
 pub(crate) fn isolated(name: &str, body: fn()) {
+    isolated_with_timeout(name, testing_aids::TEST_TIMEOUT * 3, body);
+}
+
+pub(crate) fn isolated_with_timeout(name: &str, timeout: std::time::Duration, body: fn()) {
     #[cfg(miri)]
     {
         let _ = name;
@@ -37,7 +41,7 @@ pub(crate) fn isolated(name: &str, body: fn()) {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + testing_aids::TEST_TIMEOUT * 3;
+        let deadline = Instant::now() + timeout;
         loop {
             if child.try_wait().unwrap().is_some() {
                 break;

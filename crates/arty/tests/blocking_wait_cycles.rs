@@ -16,15 +16,19 @@ use std::task::Poll;
 
 use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use arty::task::JoinError;
-use panic_support::{isolated, runtime as shared_runtime};
+use panic_support::{isolated, isolated_with_timeout, runtime as shared_runtime};
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
+fn isolated_deadlock(name: &str, body: fn()) {
+    isolated_with_timeout(name, TEST_TIMEOUT + std::time::Duration::from_secs(5), body);
+}
+
 #[test]
 fn blocking_join_future_rejects_its_current_pool() {
-    isolated("blocking_join_future_rejects_its_current_pool", || {
+    isolated_deadlock("blocking_join_future_rejects_its_current_pool", || {
         let runtime = shared_runtime();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let nested = scheduler.clone();
@@ -43,7 +47,7 @@ fn blocking_join_future_rejects_its_current_pool() {
 
 #[test]
 fn blocking_block_on_rejects_an_async_dependency_on_its_pool() {
-    isolated("blocking_block_on_rejects_an_async_dependency_on_its_pool", || {
+    isolated_deadlock("blocking_block_on_rejects_an_async_dependency_on_its_pool", || {
         let runtime = shared_runtime();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let task = scheduler.spawn_blocking(move || {
@@ -62,7 +66,7 @@ fn blocking_block_on_rejects_an_async_dependency_on_its_pool() {
 
 #[test]
 fn blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool() {
-    isolated("blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool", || {
+    isolated_deadlock("blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool", || {
         let runtime = Runtime::builder()
             .cpu_policy(CpuPolicy::exactly(1))
             .blocking_pool_policy(BlockingPoolPolicy::isolated())
@@ -85,7 +89,7 @@ fn blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool() {
 
 #[test]
 fn blocking_wait_rejects_an_async_dependency_on_its_pool() {
-    isolated("blocking_wait_rejects_an_async_dependency_on_its_pool", || {
+    isolated_deadlock("blocking_wait_rejects_an_async_dependency_on_its_pool", || {
         let runtime = shared_runtime();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let nested = scheduler.clone();
@@ -107,7 +111,7 @@ fn blocking_wait_rejects_an_async_dependency_on_its_pool() {
 
 #[test]
 fn blocking_wait_reaches_descendants_created_before_the_wait() {
-    isolated("blocking_wait_reaches_descendants_created_before_the_wait", || {
+    isolated_deadlock("blocking_wait_reaches_descendants_created_before_the_wait", || {
         let runtime = shared_runtime();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let (release, released) = events_once::Event::boxed();

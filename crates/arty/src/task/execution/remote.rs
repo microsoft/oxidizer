@@ -182,6 +182,25 @@ mod tests {
         }
     }
 
+    struct PanicOnPollAndDrop {
+        dropped: StdArc<AtomicBool>,
+    }
+
+    impl Future for PanicOnPollAndDrop {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            panic!("task panic");
+        }
+    }
+
+    impl Drop for PanicOnPollAndDrop {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::Release);
+            panic!("task destructor panic");
+        }
+    }
+
     struct AssertDroppedOnWake {
         dropped: StdArc<AtomicBool>,
     }
@@ -246,5 +265,24 @@ mod tests {
             receiver.as_mut().poll(&mut Context::from_waker(Waker::noop())),
             Poll::Ready(Ok(TaskResult::Panicked(_)))
         ));
+    }
+
+    #[test]
+    fn poll_and_destructor_panics_are_contained_before_notification() {
+        let sink = Sink::noop();
+        let dropped = StdArc::new(AtomicBool::new(false));
+        let (sender, receiver) = Event::<TaskResult<()>>::boxed();
+        let mut task = pin!(RemoteTaskFuture::new(
+            PanicOnPollAndDrop {
+                dropped: StdArc::clone(&dropped),
+            },
+            sender,
+            sink.transfer_context(),
+            sink,
+        ));
+
+        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(matches!(futures::executor::block_on(receiver).unwrap(), TaskResult::Panicked(_)));
     }
 }
