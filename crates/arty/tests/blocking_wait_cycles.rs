@@ -10,7 +10,9 @@ mod panic_support;
 
 use std::error::Error as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::pin;
 use std::sync::{Arc, mpsc};
+use std::task::Poll;
 
 use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use arty::task::JoinError;
@@ -99,6 +101,59 @@ fn blocking_wait_rejects_an_async_dependency_on_its_pool() {
         });
 
         assert!(task.wait().unwrap());
+        runtime.stop().unwrap();
+    });
+}
+
+#[test]
+fn blocking_wait_reaches_descendants_created_before_the_wait() {
+    isolated("blocking_wait_reaches_descendants_created_before_the_wait", || {
+        let runtime = shared_runtime();
+        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+        let (release, released) = events_once::Event::boxed();
+        let (ready, child_ready) = mpsc::channel();
+        let (parked, child_parked) = mpsc::channel();
+        let parent = scheduler.spawn({
+            let scheduler = scheduler.clone();
+            async move |_| {
+                scheduler
+                    .spawn(async move |cx| {
+                        ready.send(()).unwrap();
+                        released.await.unwrap();
+                        let blocking = cx.scheduler().spawn_blocking(|| 42);
+                        let mut blocking = pin!(blocking);
+                        let mut parked = Some(parked);
+                        futures::future::poll_fn(move |context| match blocking.as_mut().poll(context) {
+                            Poll::Pending => {
+                                if let Some(parked) = parked.take() {
+                                    parked.send(()).unwrap();
+                                }
+                                Poll::Pending
+                            }
+                            Poll::Ready(outcome) => Poll::Ready(outcome),
+                        })
+                        .await
+                        .unwrap()
+                    })
+                    .await
+                    .unwrap()
+            }
+        });
+        child_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        let (started, waiter_started) = mpsc::channel();
+        let (begin_wait, wait_permitted) = mpsc::channel();
+        let waiter = scheduler.spawn_blocking(move || {
+            started.send(()).unwrap();
+            wait_permitted.recv_timeout(TEST_TIMEOUT).unwrap();
+            parent.wait().unwrap_err().is_panic()
+        });
+        waiter_started.recv_timeout(TEST_TIMEOUT).unwrap();
+        release.send(());
+        child_parked.recv_timeout(TEST_TIMEOUT).unwrap();
+        begin_wait.send(()).unwrap();
+
+        assert!(waiter.wait().unwrap());
         runtime.stop().unwrap();
     });
 }

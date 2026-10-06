@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::task::Waker;
 use std::thread;
 
@@ -68,6 +69,7 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shared_state: SharedState = (0..worker_count).map(|_| OnceLock::new()).collect();
+    let shutdown_started = Arc::new(AtomicBool::new(false));
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
             &sink,
@@ -98,6 +100,7 @@ pub(in crate::runtime) fn build(
                 worker_endpoint_tx,
                 thread_builder: thread_builder.clone(),
                 blocking_pools: blocking_pools.clone(),
+                shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
             }
             .start(),
@@ -116,11 +119,12 @@ pub(in crate::runtime) fn build(
     }
 
     let runtime_sink = sink.clone();
-    let dispatcher = Arc::new(DispatcherCore::new(
+    let dispatcher = Arc::new(DispatcherCore::new_with_shutdown(
         ThreadWaiter::new(async_worker_join_handles),
         NonEmpty::from_vec(async_worker_command_txs)
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
+        shutdown_started,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -165,6 +169,7 @@ struct AsyncWorkerStartInfo {
     worker_endpoint_tx: Sender<(Waker, Thread, Arc<BlockingWorker>)>,
     thread_builder: ThreadBuilder,
     blocking_pools: BlockingPools,
+    shutdown_started: Arc<AtomicBool>,
     sink: Sink,
 }
 
@@ -192,6 +197,7 @@ impl AsyncWorkerStartInfo {
             worker_endpoint_tx,
             thread_builder,
             blocking_pools,
+            shutdown_started,
             sink,
         } = self;
 
@@ -208,7 +214,7 @@ impl AsyncWorkerStartInfo {
         clock.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone());
+        let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
 
         let signal = Arc::new(WorkerSignal::default());
 

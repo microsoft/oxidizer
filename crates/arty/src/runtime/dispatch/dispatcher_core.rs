@@ -74,7 +74,17 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
 }
 
 impl<WFS> DispatcherCore<WFS> {
+    #[cfg(test)]
     pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
+        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
+    }
+
+    pub(in crate::runtime) fn new_with_shutdown(
+        wait_for_shutdown: WFS,
+        worker_endpoints: NonEmpty<WorkerEndpoint>,
+        sink: observed::Sink,
+        shutdown_started: Arc<AtomicBool>,
+    ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -92,7 +102,7 @@ impl<WFS> DispatcherCore<WFS> {
         );
         Self {
             wait_for_shutdown,
-            shutdown_started: Arc::new(AtomicBool::new(false)),
+            shutdown_started,
             stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             worker_indices,

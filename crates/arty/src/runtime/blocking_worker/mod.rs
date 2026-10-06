@@ -8,12 +8,12 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc as StdArc, Weak};
+use std::sync::{Arc as StdArc, Weak as StdWeak};
 use std::task::{Context, Poll};
 
 use futures::task::AtomicWaker;
 use observed::{Sink, emit};
-use performables::arc::Arc;
+use performables::arc::{Arc, Weak as PerformableWeak};
 use performables::sync::mutex::Mutex;
 use pin_project::pin_project;
 use threadpool::ThreadPool;
@@ -26,7 +26,7 @@ const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution becau
 
 thread_local! {
     static CURRENT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
-    static BLOCKING_WAIT_POOL: RefCell<Option<BlockingWaitMarker>> = const { RefCell::new(None) };
+    static BLOCKING_WAIT_CONTEXT: RefCell<Option<Arc<BlockingWaitContext>>> = const { RefCell::new(None) };
 }
 
 struct BlockingTaskScope {
@@ -50,14 +50,14 @@ impl Drop for BlockingTaskScope {
 }
 
 struct BlockingWaitScope {
-    previous: Option<BlockingWaitMarker>,
+    previous: Option<Arc<BlockingWaitContext>>,
     _not_send: PhantomData<Rc<()>>,
 }
 
 impl BlockingWaitScope {
-    fn enter(marker: Option<BlockingWaitMarker>) -> Self {
+    fn enter(context: Option<Arc<BlockingWaitContext>>) -> Self {
         Self {
-            previous: BLOCKING_WAIT_POOL.replace(marker),
+            previous: BLOCKING_WAIT_CONTEXT.replace(context),
             _not_send: PhantomData,
         }
     }
@@ -65,14 +65,14 @@ impl BlockingWaitScope {
 
 impl Drop for BlockingWaitScope {
     fn drop(&mut self) {
-        BLOCKING_WAIT_POOL.set(self.previous.take());
+        BLOCKING_WAIT_CONTEXT.set(self.previous.take());
     }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct BlockingWaitMarker {
     pool: Arc<()>,
-    active: Weak<()>,
+    active: StdWeak<()>,
 }
 
 impl BlockingWaitMarker {
@@ -90,18 +90,14 @@ impl BlockingWaitMarker {
     fn active_pool(&self) -> Option<Arc<()>> {
         self.active.upgrade().map(|_| Arc::clone(&self.pool))
     }
-
-    fn is_active_for(&self, pool: &Arc<()>) -> bool {
-        self.active_pool().is_some_and(|active| Arc::ptr_eq(&active, pool))
-    }
 }
 
 #[pin_project]
 struct BlockingWaitFuture<F> {
     #[pin]
     inner: F,
-    marker: Option<BlockingWaitMarker>,
-    _active: Option<StdArc<()>>,
+    context: Option<Arc<BlockingWaitContext>>,
+    _active: Option<BlockingWaitActivation>,
 }
 
 impl<F: Future> Future for BlockingWaitFuture<F> {
@@ -109,7 +105,7 @@ impl<F: Future> Future for BlockingWaitFuture<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _scope = BlockingWaitScope::enter(this.marker.clone());
+        let _scope = this.context.as_ref().map(|context| BlockingWaitContext::enter(context, cx.waker()));
         this.inner.poll(cx)
     }
 }
@@ -118,64 +114,97 @@ pub(crate) fn current_blocking_pool() -> Option<Arc<()>> {
     CURRENT_POOL.with_borrow(Clone::clone)
 }
 
-pub(crate) fn current_blocking_wait_marker() -> Option<BlockingWaitMarker> {
-    BLOCKING_WAIT_POOL.with_borrow(Clone::clone)
+pub(crate) fn current_blocking_wait_context() -> Option<Arc<BlockingWaitContext>> {
+    BLOCKING_WAIT_CONTEXT.with_borrow(Clone::clone)
 }
 
-pub(crate) fn with_blocking_wait_marker<F: Future>(inner: F, marker: Option<BlockingWaitMarker>) -> impl Future<Output = F::Output> {
+pub(crate) fn with_blocking_wait_context<F: Future>(inner: F, context: Arc<BlockingWaitContext>) -> impl Future<Output = F::Output> {
     BlockingWaitFuture {
         inner,
-        marker,
+        context: Some(context),
         _active: None,
     }
 }
 
 pub(crate) fn with_active_blocking_wait_pool<F: Future>(inner: F, pool: Option<Arc<()>>) -> impl Future<Output = F::Output> {
-    let (marker, active) = match pool {
-        Some(pool) => {
-            let (marker, active) = BlockingWaitMarker::new(pool);
-            (Some(marker), Some(active))
-        }
-        None => (None, None),
-    };
+    let context = BlockingWaitContext::new(current_blocking_wait_context());
+    let active = pool.map(|pool| BlockingWaitContext::activate_pool(&context, pool));
     BlockingWaitFuture {
         inner,
-        marker,
+        context: Some(context),
         _active: active,
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct BlockingWaitContext {
-    inherited: Option<BlockingWaitMarker>,
+    parent: Option<Arc<Self>>,
     active_wait: Mutex<Option<BlockingWaitMarker>>,
     waker: AtomicWaker,
+    children: Mutex<Vec<PerformableWeak<Self>>>,
 }
 
 impl BlockingWaitContext {
-    pub(crate) fn new(inherited: Option<BlockingWaitMarker>) -> Arc<Self> {
-        Arc::new(Self {
-            inherited,
+    pub(crate) fn new(parent: Option<Arc<Self>>) -> Arc<Self> {
+        let context = Arc::new(Self {
+            parent: parent.clone(),
             active_wait: Mutex::new(None),
             waker: AtomicWaker::new(),
-        })
+            children: Mutex::new(Vec::new()),
+        });
+        if let Some(parent) = parent {
+            parent
+                .children
+                .lock_result()
+                .expect(ERR_POISONED_LOCK)
+                .push(Arc::downgrade(&context));
+        }
+        context
     }
 
     pub(crate) fn activate_current_pool(context: &Arc<Self>) -> Option<BlockingWaitActivation> {
         let pool = current_blocking_pool()?;
-        let (marker, active) = BlockingWaitMarker::new(pool);
-        *context.active_wait.lock_result().expect(ERR_POISONED_LOCK) = Some(marker);
-        context.waker.wake();
-        Some(BlockingWaitActivation { _active: active })
+        Some(Self::activate_pool(context, pool))
     }
 
-    fn enter(&self, waker: &std::task::Waker) -> BlockingWaitScope {
-        self.waker.register(waker);
-        let active_wait = self.active_wait.lock_result().expect(ERR_POISONED_LOCK).clone();
-        let marker = active_wait
-            .filter(|marker| marker.active_pool().is_some())
-            .or_else(|| self.inherited.clone().filter(|marker| marker.active_pool().is_some()));
-        BlockingWaitScope::enter(marker)
+    fn activate_pool(context: &Arc<Self>, pool: Arc<()>) -> BlockingWaitActivation {
+        let (marker, active) = BlockingWaitMarker::new(pool);
+        *context.active_wait.lock_result().expect(ERR_POISONED_LOCK) = Some(marker);
+        context.wake_descendants();
+        BlockingWaitActivation { _active: active }
+    }
+
+    fn enter(context: &Arc<Self>, waker: &std::task::Waker) -> BlockingWaitScope {
+        context.waker.register(waker);
+        BlockingWaitScope::enter(Some(Arc::clone(context)))
+    }
+
+    fn active_pool(&self) -> Option<Arc<()>> {
+        self.active_wait
+            .lock_result()
+            .expect(ERR_POISONED_LOCK)
+            .as_ref()
+            .and_then(BlockingWaitMarker::active_pool)
+            .or_else(|| self.parent.as_ref().and_then(|parent| parent.active_pool()))
+    }
+
+    fn wake_descendants(&self) {
+        self.waker.wake();
+        let children = {
+            let mut children = self.children.lock_result().expect(ERR_POISONED_LOCK);
+            let mut live = Vec::with_capacity(children.len());
+            children.retain(|child| {
+                let Some(child) = child.upgrade() else {
+                    return false;
+                };
+                live.push(child);
+                true
+            });
+            live
+        };
+        for child in children {
+            child.wake_descendants();
+        }
     }
 }
 
@@ -183,41 +212,27 @@ pub(crate) struct BlockingWaitActivation {
     _active: StdArc<()>,
 }
 
-#[pin_project]
-struct SharedBlockingWaitFuture<F> {
-    #[pin]
-    inner: F,
-    context: Arc<BlockingWaitContext>,
-}
-
-impl<F: Future> Future for SharedBlockingWaitFuture<F> {
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let _scope = this.context.enter(cx.waker());
-        this.inner.poll(cx)
-    }
-}
-
-pub(crate) fn with_blocking_wait_context<F: Future>(inner: F, context: Arc<BlockingWaitContext>) -> impl Future<Output = F::Output> {
-    SharedBlockingWaitFuture { inner, context }
-}
-
 /// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
     pool: BlockingPool,
     is_shutting_down: Arc<AtomicBool>,
+    runtime_shutdown: Arc<AtomicBool>,
     saturation_reported: AtomicBool,
     sink: Sink,
 }
 
 impl BlockingWorker {
+    #[cfg(test)]
     pub(in crate::runtime) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
+        Self::new_with_shutdown(pool, sink, Arc::new(AtomicBool::new(false)))
+    }
+
+    pub(in crate::runtime) fn new_with_shutdown(pool: BlockingPool, sink: Sink, runtime_shutdown: Arc<AtomicBool>) -> Arc<Self> {
         Arc::new(Self {
             pool,
             is_shutting_down: Arc::new(AtomicBool::new(false)),
+            runtime_shutdown,
             saturation_reported: AtomicBool::new(false),
             sink,
         })
@@ -229,23 +244,21 @@ impl BlockingWorker {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if self.is_shutting_down.load(Ordering::Acquire) {
-            return JoinHandle::shutdown();
-        }
         let identity = Arc::clone(&self.pool.identity);
         let shutdown = Arc::clone(&self.is_shutting_down);
+        let runtime_shutdown = Arc::clone(&self.runtime_shutdown);
         let (task, join_handle) = prepare_blocking(body);
         let join_handle = join_handle.with_blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
-            if shutdown.load(Ordering::Acquire) {
+            if shutdown.load(Ordering::Acquire) || runtime_shutdown.load(Ordering::Acquire) {
                 drop(task);
                 return;
             }
             task();
         };
 
-        if !self.is_shutting_down.load(Ordering::Acquire) && self.pool.execute(task) {
+        if !self.is_shutting_down.load(Ordering::Acquire) && !self.runtime_shutdown.load(Ordering::Acquire) && self.pool.execute(task) {
             if self.pool.is_overloaded() {
                 if !self.pool.grow() && !self.saturation_reported.swap(true, Ordering::AcqRel) {
                     emit!(
@@ -281,7 +294,12 @@ impl BlockingWorker {
 
 pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
     CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
-        || BLOCKING_WAIT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| current.is_active_for(pool)))
+        || BLOCKING_WAIT_CONTEXT.with_borrow(|current| {
+            current
+                .as_ref()
+                .and_then(|current| current.active_pool())
+                .is_some_and(|current| Arc::ptr_eq(&current, pool))
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -401,7 +419,9 @@ pub(super) mod blocking_worker_tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::execute_or_abandon;
 
-    use crate::runtime::blocking_worker::{BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL};
+    use crate::runtime::blocking_worker::{
+        BLOCKING_WAIT_CONTEXT, BlockingPool, BlockingTaskScope, BlockingWaitContext, BlockingWaitScope, BlockingWorker, CURRENT_POOL,
+    };
 
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
@@ -429,6 +449,29 @@ pub(super) mod blocking_worker_tests {
             });
         }
         assert!(CURRENT_POOL.with_borrow(Option::is_none));
+    }
+
+    #[test]
+    fn blocking_wait_scopes_restore_the_previous_context() {
+        assert!(BLOCKING_WAIT_CONTEXT.with_borrow(Option::is_none));
+        let outer = BlockingWaitContext::new(None);
+        let inner = BlockingWaitContext::new(Some(Arc::clone(&outer)));
+        {
+            let _outer_scope = BlockingWaitScope::enter(Some(Arc::clone(&outer)));
+            BLOCKING_WAIT_CONTEXT.with_borrow(|current| {
+                assert!(Arc::ptr_eq(current.as_ref().unwrap(), &outer));
+            });
+            {
+                let _inner_scope = BlockingWaitScope::enter(Some(Arc::clone(&inner)));
+                BLOCKING_WAIT_CONTEXT.with_borrow(|current| {
+                    assert!(Arc::ptr_eq(current.as_ref().unwrap(), &inner));
+                });
+            }
+            BLOCKING_WAIT_CONTEXT.with_borrow(|current| {
+                assert!(Arc::ptr_eq(current.as_ref().unwrap(), &outer));
+            });
+        }
+        assert!(BLOCKING_WAIT_CONTEXT.with_borrow(Option::is_none));
     }
 
     #[test]
@@ -507,6 +550,47 @@ pub(super) mod blocking_worker_tests {
         assert!(dropped.load(Ordering::Acquire));
         assert!(!work_done.load(Ordering::Acquire));
         drop(task);
+    }
+
+    #[test]
+    fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
+        let runtime_shutdown = Arc::new(AtomicBool::new(false));
+        let worker = BlockingWorker::new_with_shutdown(BlockingPool::new(Some(1)), Sink::noop(), Arc::clone(&runtime_shutdown));
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = Event::<()>::boxed();
+
+        let running = worker.spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            futures::executor::block_on(release_rx).unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let invoked = Arc::new(AtomicBool::new(false));
+        let captured = Arc::clone(&invoked);
+        let queued = worker.spawn_blocking(move || captured.store(true, Ordering::Release));
+        runtime_shutdown.store(true, Ordering::Release);
+        release_tx.send(());
+
+        running.wait().unwrap();
+        assert!(queued.wait().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Acquire));
+        worker.shutdown();
+        worker.join();
+    }
+
+    #[test]
+    fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
+        let runtime_shutdown = Arc::new(AtomicBool::new(true));
+        let worker = BlockingWorker::new_with_shutdown(BlockingPool::new(Some(1)), Sink::noop(), runtime_shutdown);
+        let invoked = Arc::new(AtomicBool::new(false));
+        let captured = Arc::clone(&invoked);
+
+        let rejected = worker.spawn_blocking(move || captured.store(true, Ordering::Release));
+
+        assert!(rejected.wait().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Acquire));
+        worker.shutdown();
+        worker.join();
     }
 
     #[test]
