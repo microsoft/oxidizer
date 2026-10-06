@@ -105,7 +105,7 @@ where
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+        let mut this = self.project();
         let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
@@ -117,7 +117,7 @@ where
         // it will never be polled again - whatever it did to its internal state is now
         // irrelevant and if it corrupted some shared state, that is not really something we
         // can do anything about (a conscientious service will abort on panic to avoid that).
-        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| this.inner.poll(cx)));
+        let inner_poll_result = catch_unwind(AssertUnwindSafe(|| this.inner.as_mut().poll(cx)));
 
         match inner_poll_result {
             Ok(Poll::Ready(result)) => {
@@ -133,6 +133,9 @@ where
             }
             Ok(Poll::Pending) => Poll::Pending,
             Err(panic) => {
+                if let Err(disposal) = this.inner.as_mut().destroy_pinned() {
+                    discard_panic(disposal);
+                }
                 if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| {
                     if let Some(sender) = this.result_tx.take() {
                         sender.send(TaskResult::Panicked(panic));
@@ -153,11 +156,40 @@ where
 mod tests {
     use std::cell::Cell;
     use std::pin::pin;
-    use std::task::{Context, Waker};
+    use std::sync::Arc as StdArc;
+    use std::task::{Context, Wake, Waker};
 
     use events_once::Event;
 
     use super::*;
+
+    struct PanicOnPoll {
+        dropped: StdArc<AtomicBool>,
+    }
+
+    impl Future for PanicOnPoll {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            panic!("task panic");
+        }
+    }
+
+    impl Drop for PanicOnPoll {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::Release);
+        }
+    }
+
+    struct AssertDroppedOnWake {
+        dropped: StdArc<AtomicBool>,
+    }
+
+    impl Wake for AssertDroppedOnWake {
+        fn wake(self: StdArc<Self>) {
+            assert!(self.dropped.load(Ordering::Acquire));
+        }
+    }
 
     #[test]
     fn sender_disposal_panic_is_contained() {
@@ -186,5 +218,32 @@ mod tests {
         ));
 
         assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+    }
+
+    #[test]
+    fn panic_notification_follows_future_retirement() {
+        let sink = Sink::noop();
+        let dropped = StdArc::new(AtomicBool::new(false));
+        let (sender, receiver) = Event::<TaskResult<()>>::boxed();
+        let mut receiver = pin!(receiver);
+        let waker = Waker::from(StdArc::new(AssertDroppedOnWake {
+            dropped: StdArc::clone(&dropped),
+        }));
+        assert!(receiver.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+        let mut task = pin!(RemoteTaskFuture::new(
+            PanicOnPoll {
+                dropped: StdArc::clone(&dropped),
+            },
+            sender,
+            sink.transfer_context(),
+            sink,
+        ));
+        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(matches!(
+            receiver.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Ok(TaskResult::Panicked(_)))
+        ));
     }
 }

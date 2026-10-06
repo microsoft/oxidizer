@@ -10,7 +10,7 @@ use pin_project::pin_project;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;
-use crate::runtime::blocking_worker::{current_blocking_pool, with_blocking_wait_pool};
+use crate::runtime::blocking_worker::{current_blocking_pool, with_active_blocking_wait_pool};
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::thread::is_flagged;
 use crate::task::{Builtins, JoinHandle};
@@ -143,7 +143,7 @@ impl RuntimeScheduler {
             completion,
         };
         let factory: BoxedFutureFactory<'a, R> =
-            Box::new(move |cx| with_blocking_wait_pool(storage.into_future(cx), blocking_pool).boxed_local());
+            Box::new(move |cx| with_active_blocking_wait_pool(storage.into_future(cx), blocking_pool).boxed_local());
         // SAFETY: ScopedJoin cannot return or unwind until the borrowing factory/future
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.

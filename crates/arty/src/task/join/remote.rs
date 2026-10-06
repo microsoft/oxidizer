@@ -129,9 +129,7 @@ where
             !self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
             "blocking JoinHandle::wait cannot wait for the current blocking pool"
         );
-        if let Some(blocking_wait) = &self.blocking_wait {
-            blocking_wait.inherit_current_pool();
-        }
+        let _blocking_wait = self.blocking_wait.as_ref().and_then(BlockingWaitContext::activate_current_pool);
 
         futures::executor::block_on(self)
     }

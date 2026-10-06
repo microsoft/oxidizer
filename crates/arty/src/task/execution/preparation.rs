@@ -11,7 +11,7 @@ use observed::context::Transfer;
 use performables::arc::Arc;
 
 use crate::runtime::blocking_worker::{
-    BlockingWaitContext, current_blocking_wait_pool, with_blocking_wait_context, with_blocking_wait_pool,
+    BlockingWaitContext, current_blocking_wait_marker, with_blocking_wait_context, with_blocking_wait_marker,
 };
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
@@ -44,7 +44,7 @@ where
     R: 'static,
 {
     let (result_tx, result_rx) = LocalEvent::boxed();
-    let future = with_blocking_wait_pool(future, current_blocking_wait_pool());
+    let future = with_blocking_wait_marker(future, current_blocking_wait_marker());
     let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
     (future, LocalJoinHandle::new(result_rx))
 }
@@ -61,7 +61,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_pool());
+    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_marker());
     let task_blocking_wait = Arc::clone(&blocking_wait);
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
@@ -90,7 +90,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_pool());
+    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_marker());
     let inner = with_blocking_wait_context(async move { future_factory(builtins).await }, Arc::clone(&blocking_wait));
     drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
         inner,

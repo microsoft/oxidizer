@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc as StdArc, Weak};
 use std::task::{Context, Poll};
 
 use futures::task::AtomicWaker;
@@ -25,7 +26,7 @@ const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution becau
 
 thread_local! {
     static CURRENT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
-    static BLOCKING_WAIT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
+    static BLOCKING_WAIT_POOL: RefCell<Option<BlockingWaitMarker>> = const { RefCell::new(None) };
 }
 
 struct BlockingTaskScope {
@@ -49,14 +50,14 @@ impl Drop for BlockingTaskScope {
 }
 
 struct BlockingWaitScope {
-    previous: Option<Arc<()>>,
+    previous: Option<BlockingWaitMarker>,
     _not_send: PhantomData<Rc<()>>,
 }
 
 impl BlockingWaitScope {
-    fn enter(pool: Option<Arc<()>>) -> Self {
+    fn enter(marker: Option<BlockingWaitMarker>) -> Self {
         Self {
-            previous: BLOCKING_WAIT_POOL.replace(pool),
+            previous: BLOCKING_WAIT_POOL.replace(marker),
             _not_send: PhantomData,
         }
     }
@@ -68,11 +69,39 @@ impl Drop for BlockingWaitScope {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct BlockingWaitMarker {
+    pool: Arc<()>,
+    active: Weak<()>,
+}
+
+impl BlockingWaitMarker {
+    fn new(pool: Arc<()>) -> (Self, StdArc<()>) {
+        let active = StdArc::new(());
+        (
+            Self {
+                pool,
+                active: StdArc::downgrade(&active),
+            },
+            active,
+        )
+    }
+
+    fn active_pool(&self) -> Option<Arc<()>> {
+        self.active.upgrade().map(|_| Arc::clone(&self.pool))
+    }
+
+    fn is_active_for(&self, pool: &Arc<()>) -> bool {
+        self.active_pool().is_some_and(|active| Arc::ptr_eq(&active, pool))
+    }
+}
+
 #[pin_project]
 struct BlockingWaitFuture<F> {
     #[pin]
     inner: F,
-    pool: Option<Arc<()>>,
+    marker: Option<BlockingWaitMarker>,
+    _active: Option<StdArc<()>>,
 }
 
 impl<F: Future> Future for BlockingWaitFuture<F> {
@@ -80,7 +109,7 @@ impl<F: Future> Future for BlockingWaitFuture<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _scope = BlockingWaitScope::enter(this.pool.clone());
+        let _scope = BlockingWaitScope::enter(this.marker.clone());
         this.inner.poll(cx)
     }
 }
@@ -89,40 +118,69 @@ pub(crate) fn current_blocking_pool() -> Option<Arc<()>> {
     CURRENT_POOL.with_borrow(Clone::clone)
 }
 
-pub(crate) fn current_blocking_wait_pool() -> Option<Arc<()>> {
+pub(crate) fn current_blocking_wait_marker() -> Option<BlockingWaitMarker> {
     BLOCKING_WAIT_POOL.with_borrow(Clone::clone)
 }
 
-pub(crate) fn with_blocking_wait_pool<F: Future>(inner: F, pool: Option<Arc<()>>) -> impl Future<Output = F::Output> {
-    BlockingWaitFuture { inner, pool }
+pub(crate) fn with_blocking_wait_marker<F: Future>(inner: F, marker: Option<BlockingWaitMarker>) -> impl Future<Output = F::Output> {
+    BlockingWaitFuture {
+        inner,
+        marker,
+        _active: None,
+    }
+}
+
+pub(crate) fn with_active_blocking_wait_pool<F: Future>(inner: F, pool: Option<Arc<()>>) -> impl Future<Output = F::Output> {
+    let (marker, active) = match pool {
+        Some(pool) => {
+            let (marker, active) = BlockingWaitMarker::new(pool);
+            (Some(marker), Some(active))
+        }
+        None => (None, None),
+    };
+    BlockingWaitFuture {
+        inner,
+        marker,
+        _active: active,
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct BlockingWaitContext {
-    pool: Mutex<Option<Arc<()>>>,
+    inherited: Option<BlockingWaitMarker>,
+    active_wait: Mutex<Option<BlockingWaitMarker>>,
     waker: AtomicWaker,
 }
 
 impl BlockingWaitContext {
-    pub(crate) fn new(pool: Option<Arc<()>>) -> Arc<Self> {
+    pub(crate) fn new(inherited: Option<BlockingWaitMarker>) -> Arc<Self> {
         Arc::new(Self {
-            pool: Mutex::new(pool),
+            inherited,
+            active_wait: Mutex::new(None),
             waker: AtomicWaker::new(),
         })
     }
 
-    pub(crate) fn inherit_current_pool(&self) {
-        let Some(pool) = current_blocking_pool() else {
-            return;
-        };
-        *self.pool.lock_result().expect(ERR_POISONED_LOCK) = Some(pool);
-        self.waker.wake();
+    pub(crate) fn activate_current_pool(context: &Arc<Self>) -> Option<BlockingWaitActivation> {
+        let pool = current_blocking_pool()?;
+        let (marker, active) = BlockingWaitMarker::new(pool);
+        *context.active_wait.lock_result().expect(ERR_POISONED_LOCK) = Some(marker);
+        context.waker.wake();
+        Some(BlockingWaitActivation { _active: active })
     }
 
     fn enter(&self, waker: &std::task::Waker) -> BlockingWaitScope {
         self.waker.register(waker);
-        BlockingWaitScope::enter(self.pool.lock_result().expect(ERR_POISONED_LOCK).clone())
+        let active_wait = self.active_wait.lock_result().expect(ERR_POISONED_LOCK).clone();
+        let marker = active_wait
+            .filter(|marker| marker.active_pool().is_some())
+            .or_else(|| self.inherited.clone().filter(|marker| marker.active_pool().is_some()));
+        BlockingWaitScope::enter(marker)
     }
+}
+
+pub(crate) struct BlockingWaitActivation {
+    _active: StdArc<()>,
 }
 
 #[pin_project]
@@ -223,7 +281,7 @@ impl BlockingWorker {
 
 pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
     CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
-        || BLOCKING_WAIT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
+        || BLOCKING_WAIT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| current.is_active_for(pool)))
 }
 
 #[derive(Debug, Clone)]
