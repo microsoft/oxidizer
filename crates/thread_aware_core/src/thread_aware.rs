@@ -53,11 +53,6 @@ use crate::Thread;
 /// [`relocate`](Self::relocate) cannot fail and has no way to report an error, so every
 /// implementation must:
 ///
-/// * **Run on the destination thread.** The runtime invokes `relocate` from the thread that
-///   currently owns the value. `destination` describes that current thread; it is not a remote
-///   target for the callback. This lets an implementation release or rebuild state on the thread
-///   whose allocator and NUMA locality it is intended to use.
-///
 /// * **Preserve real data.** Anything that exists only for speed may be rebuilt: caches,
 ///   pools, scratch buffers, handles. Nothing observable through the value may be lost or
 ///   altered. A cache still holding writes that have not been flushed is real data, and must
@@ -89,10 +84,12 @@ use crate::Thread;
 /// A [`Thread`] may be cloned and retained. Its thread id remains unique after the OS thread exits,
 /// but retaining the coordinate does not keep that thread or its runtime operational.
 ///
-/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
-/// the value has actually moved, pass `None` when no previous [`Thread`] is known, build one
-/// [`Owner`](crate::Owner) per runtime, and never rely on the call for correctness. Nothing
-/// enforces any of this.
+/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) from the thread
+/// that now owns the value, only after the value has actually moved, pass `None` when no previous
+/// [`Thread`] is known, build one [`Owner`](crate::Owner) per runtime, and never rely on the call
+/// for correctness. `destination` describes the thread executing the callback rather than a remote
+/// target for it; this lets locality-sensitive implementations release or rebuild state on the
+/// thread whose allocator and NUMA locality they are intended to use. Nothing enforces any of this.
 ///
 /// # Examples
 ///

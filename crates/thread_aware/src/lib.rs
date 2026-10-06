@@ -221,7 +221,7 @@ mod thread;
 /// }
 ///
 /// fn demo(a1: Option<&Thread>, a2: &Thread, mut w: Wrapper) {
-///     // Move the wrapper from a1 to a2.
+///     // The wrapper has already moved from a1 to a2; tell it where it landed.
 ///     w.relocate(a1, a2);
 /// }
 /// ```

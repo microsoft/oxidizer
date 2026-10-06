@@ -234,11 +234,11 @@
 //!     skipped: Tracker,
 //! }
 //!
-//! // Build two worker coordinates and relocate the value between them.
+//! // Build a coordinate for the worker the value came from and one for this worker.
 //! let builder = ThreadBuilder::default();
-//! let from = builder.build(thread::current().id());
 //! let other = thread::spawn(|| thread::current().id()).join().unwrap();
-//! let to = builder.build(other);
+//! let from = builder.build(other);
+//! let to = builder.build(thread::current().id());
 //!
 //! let mut value = UnderTest {
 //!     tracked: Tracker::default(),
