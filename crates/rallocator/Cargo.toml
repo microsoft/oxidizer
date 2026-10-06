@@ -4,7 +4,7 @@
 [package]
 name = "rallocator"
 version = "0.1.0"
-description = "Windows and Linux x64 owner-return allocator with Seismograph allocation events."
+description = "Windows and Linux x64/ARM64 owner-return allocator with Seismograph allocation events."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
 categories = ["memory-management"]
@@ -18,16 +18,26 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 # v1 benchmark sources are retained unchanged, but are not v4 build targets.
 autobenches = false
 
-[dependencies]
-seismograph.workspace = true
-seismograph_rallocator.workspace = true
-
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
 [package.metadata.docs.rs]
 default-target = "x86_64-unknown-linux-gnu"
-targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-pc-windows-msvc",
+]
+
+[package.metadata.anvil.miri]
+# Native VM reservations and CPU prefetch instructions have no Miri backend.
+# Native tests, coverage, cargo careful and mutation testing remain enabled.
+exclude = true
+
+[dependencies]
+seismograph.workspace = true
+seismograph_rallocator.workspace = true
 
 [lints]
 workspace = true

@@ -4,20 +4,26 @@
 //! Platform memory operations. All unsafe calls require caller-owned ranges;
 //! this module never allocates through Rust's global allocator.
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "windows")]
 mod win64;
+#[cfg(target_arch = "x86_64")]
 mod x86_64;
 
 #[cfg(test)]
 use std::cell::Cell;
 
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::{pause, prefetch};
 #[cfg(target_os = "linux")]
 use linux as platform;
 pub(crate) use platform::{PAGE, RESERVE_MIN, release, wait, wake_one};
 #[cfg(target_os = "windows")]
 use win64 as platform;
+#[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{pause, prefetch};
 
 #[cfg(test)]
@@ -86,6 +92,14 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
+
+    #[test]
+    fn cpu_hints_accept_unreadable_addresses() {
+        for address in [0, 1, usize::MAX] {
+            prefetch(address);
+        }
+        pause();
+    }
 
     #[test]
     fn reserve_commit_decommit_recommit_zero() {

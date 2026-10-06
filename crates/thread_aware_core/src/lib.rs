@@ -13,12 +13,12 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
 )]
 
-//! Support for values that adapt when a runtime moves them to another thread.
+//! Support for values that adapt after arriving on a different thread.
 //!
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] is the trait for values that adapt after a move; its
-//!   [`relocate`](ThreadAware::relocate) callback reports the destination.
+//!   [`relocate`](ThreadAware::relocate) callback reports the current destination.
 //! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
 //!   nearest-memory identifiers.
 //!
@@ -98,6 +98,12 @@
 //!
 //! After moving a value, the runtime calls [`relocate`](ThreadAware::relocate), passing where
 //! the value came from and where it now runs.
+//! The call must execute on the thread that now owns the value: `destination` describes the
+//! current thread, rather than requesting that work be performed on another thread. A runtime
+//! must move or schedule the value to its destination first, then let that destination thread
+//! invoke `relocate`; a coordinator must not invoke it on the destination's behalf. This ordering
+//! matters because relocation may release, allocate, or initialize thread- and NUMA-local state,
+//! and those operations must happen on the thread whose locality they are intended to use.
 //!
 //! # Performance, not correctness
 //!
@@ -123,8 +129,8 @@
 //!
 //! # Relation to `Send`
 //!
-//! [`ThreadAware`] requires [`Send`], and in that order: a value is sent to another thread
-//! first, then told where it landed. [`Send`] is what makes the move safe, and
+//! [`ThreadAware`] requires [`Send`], and in that order: a value is sent to its destination thread
+//! first, then told where it landed on that same thread. [`Send`] is what makes the move safe, and
 //! [`ThreadAware`] adds nothing to it.
 //!
 //! # Provided implementations

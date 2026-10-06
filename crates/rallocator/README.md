@@ -1,9 +1,24 @@
-# rallocator ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![rallocator on crates.io](https://img.shields.io/crates/v/rallocator)](https://crates.io/crates/rallocator) [![rallocator on docs.rs](https://docs.rs/rallocator/badge.svg)](https://docs.rs/rallocator) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer/tree/main/crates/rallocator) [![Rust Version: 1.95.0](https://img.shields.io/badge/rustc-1.95.0-orange.svg)](https://github.com/rust-lang/rust/releases/tag/1.95.0)
+<div align="center">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Rallocator Logo" width="96">
+
+# Rallocator
+
+[![crate.io](https://img.shields.io/crates/v/rallocator.svg)](https://crates.io/crates/rallocator)
+[![docs.rs](https://docs.rs/rallocator/badge.svg)](https://docs.rs/rallocator)
+[![MSRV](https://img.shields.io/crates/msrv/rallocator)](https://crates.io/crates/rallocator)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 An owner-return allocator implemented in Rust.
 
-Supported: **x86-64 Linux**, and **x86-64 Windows 10 version 1809 or later,
-MSVC**. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
+Supported: **x86-64 and AArch64 Linux with 4-KiB kernel pages**, and
+**x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**.
+Linux hosts with larger kernel pages reject allocation requests rather than
+discarding neighboring live objects. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
 reservations and commit/decommit; Linux uses aligned anonymous `mmap`
 reservations, `mprotect` for access and `madvise(MADV_DONTNEED)` to discard
 unused backing pages without revoking access. Neither uses another allocator.
@@ -152,7 +167,12 @@ examples and benchmark targets are retired; benchmark source files are
 untouched and are not build targets. Miri is not a v4 backend.
 
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQb2o_SNWoR6AAb3_T-k0ODPHwbnQW7uS_D2XsbjVFFtK-lC3BhYvVhcoQb2il6Z9a9zowb6MEr0GwZ3HkbMxiXlTjNoeEbwkX5lgABBd9hZIKCanJhbGxvY2F0b3JlMC4xLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
+<hr/>
+<sub>
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
+</sub>
+
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5V9fnEsT42UbOoGturtJ474bX4EGOwxbOhYb20SxHKprEOphZIKCanJhbGxvY2F0b3JlMC4xLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
  [__link0]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::set_publication_enabled
  [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::request_observation
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/struct.Rallocator.html

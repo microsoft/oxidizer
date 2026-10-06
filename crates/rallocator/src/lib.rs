@@ -3,8 +3,10 @@
 
 //! An owner-return allocator implemented in Rust.
 //!
-//! Supported: **x86-64 Linux**, and **x86-64 Windows 10 version 1809 or later,
-//! MSVC**. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
+//! Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
+//! **x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**.
+//! Linux hosts with larger kernel pages reject allocation requests rather than
+//! discarding neighboring live objects. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
 //! reservations and commit/decommit; Linux uses aligned anonymous `mmap`
 //! reservations, `mprotect` for access and `madvise(MADV_DONTNEED)` to discard
 //! unused backing pages without revoking access. Neither uses another allocator.
@@ -155,8 +157,11 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[cfg(not(all(target_arch = "x86_64", any(target_os = "linux", all(target_os = "windows", target_env = "msvc")))))]
-compile_error!("rallocator supports x86_64 Linux and x86_64 Windows MSVC");
+#[cfg(not(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(target_os = "linux", all(target_os = "windows", target_env = "msvc"))
+)))]
+compile_error!("rallocator supports x86_64 and aarch64 Linux and Windows MSVC");
 
 mod backend;
 mod buddy;

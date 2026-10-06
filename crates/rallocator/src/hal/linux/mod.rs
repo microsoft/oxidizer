@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Linux x86-64 virtual memory and allocation-free process-private `futex` waits.
+//! Linux virtual memory and allocation-free process-private `futex` waits.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -10,6 +10,19 @@ pub(crate) const PAGE: usize = 4096;
 pub(crate) const RESERVE_MIN: usize = 65536;
 
 pub(crate) fn reserve(size: usize, alignment: usize) -> *mut u8 {
+    // SAFETY: sysconf queries a process-wide constant without pointer arguments.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    reserve_with_page_size(size, alignment, page_size)
+}
+
+fn reserve_with_page_size(size: usize, alignment: usize, page_size: libc::c_long) -> *mut u8 {
+    // Linux AArch64 also permits 16/64-KiB kernel pages. Rounding a discard to
+    // those sizes could destroy neighboring live objects in our 16-KiB chunks.
+    // Reject such hosts before creating any allocator-owned reservation.
+    if usize::try_from(page_size) != Ok(PAGE) {
+        return std::ptr::null_mut();
+    }
+
     let alignment = alignment.max(PAGE);
     let Some(mapped_size) = size.checked_add(alignment - PAGE) else {
         return std::ptr::null_mut();
@@ -116,8 +129,19 @@ pub(crate) fn wake_one(address: *const u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{PAGE, RESERVE_MIN};
+    use super::{PAGE, RESERVE_MIN, reserve_with_page_size};
     use crate::hal;
+
+    #[test]
+    fn unsupported_kernel_pages_fail_before_reserving_memory() {
+        for page_size in [-1, 0, 16_384, 65_536] {
+            assert!(reserve_with_page_size(RESERVE_MIN, RESERVE_MIN, page_size).is_null());
+        }
+        let ptr = reserve_with_page_size(RESERVE_MIN, RESERVE_MIN, 4096);
+        assert!(!ptr.is_null());
+        // SAFETY: The test owns the entire unused reservation.
+        unsafe { hal::release(ptr, RESERVE_MIN) };
+    }
 
     #[test]
     fn aligned_reservations_cover_small_and_large_alignment_requests() {
