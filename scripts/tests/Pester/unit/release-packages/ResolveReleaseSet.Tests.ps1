@@ -224,6 +224,28 @@ Describe 'Resolve-ReleaseSet' {
             $cli.RequiresManualSemverReview | Should -BeTrue
         }
 
+        It 'keeps a binary at patch when its dependency breaks and exposure metadata is absent' {
+            $baseline = @(
+                (New-BaselinePackage -Folder library)
+                (New-BaselinePackage -Folder cli -Deps @('library') -IsBinOnly $true -AllowedExternalTypes $null)
+            )
+            $classifier = { param($folder, $name)
+                if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                'patch'
+            }
+            $resolved = @(Resolve-ReleaseSet -ParsedTokens (Parse-ReleaseTokens @('library@breaking')) `
+                -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier)
+            $cli = $resolved | Where-Object Folder -eq cli
+            $cli.EffectiveChangeType | Should -Be 'patch'
+            $cli.RequiresManualSemverReview | Should -BeTrue
+            $set = @{}
+            foreach ($entry in $resolved) { $set[$entry.Folder] = $entry }
+            $findings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set -WorkspaceBaseline $baseline)
+            $findings.Count | Should -Be 1
+            $findings[0].Folder | Should -Be 'cli'
+            $findings[0].ManualSemverReviewKind | Should -Be 'bin-only'
+        }
+
         It 'prompts once for an unchanged cascade binary and records a no-material review' {
             $script:BinaryBaseline = @(
                 (New-BaselinePackage -Folder library)

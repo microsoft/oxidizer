@@ -75,7 +75,7 @@
     pick up the new workspace version.
 
     Bin-only packages are also detected from `cargo metadata` before the
-    unsupported library check. Every binary in the release set requires
+    unsupported library check. Every bin-only package in the release set requires
     explicit manual review of command-line inputs, options, output and behavior.
     This is distinct from procedural macro compatibility and does not propagate
     a proc-macro-dependent review. Mixed library/binary packages still run the

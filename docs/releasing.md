@@ -305,7 +305,8 @@ unchanged), then raised to the stronger of their own
 Packages with binary targets but no library or proc-macro target cannot be
 checked by `cargo-semver-checks`. The planner records them as `IsBinOnly`,
 separately from proc macros, and requires the normal interactive review menu
-for every binary in the release set, including unchanged cascade dependents.
+for every bin-only package in the release set, including unchanged cascade dependents.
+This is one review per package, even when it contains multiple binary targets.
 Review subcommands, options, accepted inputs, output formats, exit behavior,
 and observable behavior against the previous version-bump commit before
 choosing breaking, non-breaking, patch, or no material changes. A binary
@@ -628,9 +629,9 @@ The user-review queue therefore contains two categories of finding:
    - For every proc-macro-only or bin-only package in the release set, show the same
      menu as a mandatory manual SemVer review. This includes targeted
      packages and unchanged proc-macro or binary dependents added by cascade.
-     A breaking result then surfaces direct published consumers one edge
-     at a time; propagation stops at the first consumer reviewed below
-     breaking.
+     A breaking proc-macro review result then surfaces direct published
+     consumers one edge at a time; propagation stops at the first consumer
+     reviewed below breaking. Bin-only reviews do not propagate to consumers.
    - After review, apply all version-number increments, changelog
      updates, README regeneration, `Cargo.toml` rewrites, and workspace
      `[workspace.dependencies]` updates in one shot.
