@@ -36,7 +36,7 @@ struct CurrentWorker {
 /// [`spawn`](Self::spawn) creates its future on the worker, so the future can
 /// keep non-[`Send`] state across awaits. Factory captures and results must
 /// still be `Send`, even when called on the same worker. Use
-/// [`LocalTaskScheduler`](crate::task::LocalTaskScheduler) for non-`Send` captures
+/// [`LocalScheduler`](crate::task::LocalScheduler) for non-`Send` captures
 /// or results already on a worker.
 ///
 /// [`spawn_anywhere`](Self::spawn_anywhere) lets the runtime place new work and
@@ -61,7 +61,7 @@ struct CurrentWorker {
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
-pub struct TaskScheduler {
+pub struct Scheduler {
     pub(crate) dispatcher: DispatcherClient,
     binding: Binding,
 }
@@ -73,7 +73,7 @@ struct Binding {
     blocking_worker: Arc<BlockingWorker>,
 }
 
-impl TaskScheduler {
+impl Scheduler {
     pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
         CURRENT_WORKER.with_borrow_mut(|current| {
             assert!(current.is_none(), "a worker already owns this scheduler context");
@@ -372,7 +372,7 @@ impl TaskScheduler {
     }
 }
 
-impl ThreadAware for TaskScheduler {
+impl ThreadAware for Scheduler {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.binding.thread == *destination {
             return;
@@ -383,7 +383,7 @@ impl ThreadAware for TaskScheduler {
     }
 }
 
-impl AsRef<Self> for TaskScheduler {
+impl AsRef<Self> for Scheduler {
     fn as_ref(&self) -> &Self {
         self
     }
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn assert_send_sync() {
-        static_assertions::assert_impl_all!(TaskScheduler: Send, Sync);
+        static_assertions::assert_impl_all!(Scheduler: Send, Sync);
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         assert_ne!(source.owner(), foreign.owner());
 
         scheduler.relocate(None, &foreign);
-        let scheduler: &TaskScheduler = scheduler.as_ref();
+        let scheduler: &Scheduler = scheduler.as_ref();
         let actual = scheduler
             .spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 })
             .wait()

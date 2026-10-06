@@ -391,7 +391,7 @@ fn local_non_send_state_is_destroyed_on_its_worker() {
 #[test]
 fn cancellation_cleanup_cannot_reenter_the_local_executor() {
     struct Cleanup {
-        scheduler: arty::task::LocalTaskScheduler,
+        scheduler: arty::task::LocalScheduler,
         dropped: mpsc::Sender<bool>,
     }
 

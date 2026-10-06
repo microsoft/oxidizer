@@ -45,7 +45,7 @@ impl LocalTaskScope {
     }
 
     pub(crate) fn close() {
-        super::scheduler::TaskScheduler::clear_current();
+        super::scheduler::Scheduler::clear_current();
         let tasks =
             LOCAL_TASKS.with_borrow_mut(|registered| registered.as_mut().expect("local task scope is installed until drop").tasks.take());
         drop(tasks);
@@ -77,10 +77,10 @@ impl LocalTaskBinding {
         Self { identity, sink, shutdown }
     }
 
-    pub(crate) fn local_scheduler(&self) -> Option<LocalTaskScheduler> {
+    pub(crate) fn local_scheduler(&self) -> Option<LocalScheduler> {
         LOCAL_TASKS.with_borrow(|registered| {
             let registered = registered.as_ref()?;
-            Arc::ptr_eq(&self.identity, &registered.identity).then(|| LocalTaskScheduler {
+            Arc::ptr_eq(&self.identity, &registered.identity).then(|| LocalScheduler {
                 binding: self.clone(),
                 _not_send_sync: PhantomData,
             })
@@ -124,12 +124,12 @@ impl LocalTaskBinding {
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
-pub struct LocalTaskScheduler {
+pub struct LocalScheduler {
     binding: LocalTaskBinding,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-impl LocalTaskScheduler {
+impl LocalScheduler {
     fn tasks(&self) -> Option<TaskSet> {
         LOCAL_TASKS.with_borrow(|registered| {
             let registered = registered.as_ref().expect("local scheduler's worker is not running on this thread");
@@ -221,8 +221,8 @@ mod tests {
 
     #[test]
     fn local_scheduler_tokens_are_thread_confined_but_bindings_are_portable() {
-        static_assertions::assert_not_impl_any!(LocalTaskScheduler: Send, Sync);
-        static_assertions::assert_impl_all!(LocalTaskScheduler: Clone);
+        static_assertions::assert_not_impl_any!(LocalScheduler: Send, Sync);
+        static_assertions::assert_impl_all!(LocalScheduler: Clone);
         static_assertions::assert_not_impl_any!(LocalTaskScope: Send, Sync);
         static_assertions::assert_impl_all!(LocalTaskBinding: Send, Sync, Clone);
     }
@@ -301,7 +301,7 @@ mod tests {
         thread::spawn(move || assert!(retained.local_scheduler().is_none())).join().unwrap();
     }
 
-    fn assert_rejected_before_factory(scheduler: &LocalTaskScheduler) {
+    fn assert_rejected_before_factory(scheduler: &LocalScheduler) {
         let invoked = Rc::new(Cell::new(false));
         let captured = Rc::clone(&invoked);
         let result = catch_unwind(AssertUnwindSafe(|| {

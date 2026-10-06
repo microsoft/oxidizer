@@ -81,13 +81,13 @@
 //! # Async I/O
 //!
 //! Arty does not provide an async I/O driver. Use
-//! [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking) for synchronous
+//! [`spawn_blocking`](crate::task::Scheduler::spawn_blocking) for synchronous
 //! I/O; libraries requiring another runtime's I/O driver still need that driver.
 //!
 //! # Worker placement
 //!
 //! A task stays on its worker once started. For
 //! [`RuntimeScheduler::spawn_anywhere`](crate::task::RuntimeScheduler::spawn_anywhere)
-//! and [`TaskScheduler::spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere),
+//! and [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere),
 //! the runtime chooses where new work starts; it does not move running tasks
 //! between workers. Measure your workload before choosing worker and pool limits.

@@ -29,7 +29,7 @@ be. Use the local scheduler for non-`Send` captures or results; local schedulers
 and joins cannot leave their worker.
 
 `spawn_anywhere` lets the runtime choose a worker;
-`TaskScheduler::spawn_everywhere` starts one task per worker. Submission order
+`Scheduler::spawn_everywhere` starts one task per worker. Submission order
 does not guarantee completion order. See the
 [scheduling guide](../src/documentation/scheduling.rs) for examples.
 
@@ -40,7 +40,7 @@ It includes `Send`, so moving the value must be safe even without relocation.
 Moving or cloning alone does not change its worker association.
 
 `spawn_anywhere` and `spawn_everywhere` relocate their explicit input to the
-destination worker before starting the task. On a worker's `TaskScheduler`,
+destination worker before starting the task. On a worker's `Scheduler`,
 their results must also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts
 any `Send` result. Joining does not relocate results; ordinary `spawn` and
 `block_on` do not relocate captures or results either.

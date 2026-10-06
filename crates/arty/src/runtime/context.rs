@@ -14,7 +14,7 @@ use tick::Clock;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::task::builtins::InnerBuiltins;
 use crate::task::local::LocalTaskBinding;
-use crate::task::scheduler::TaskScheduler;
+use crate::task::scheduler::Scheduler;
 
 /// Runtime-local slots sharing the dispatcher's worker-index ordering. Each worker publishes
 /// its immutable service bundle once during startup; relocation selects the corresponding
@@ -27,7 +27,7 @@ pub(crate) type SharedState = Arc<[OnceLock<Arc<InnerBuiltins>>]>;
 pub(crate) struct RuntimeBuiltins {
     pub(crate) core: CoreRuntimeBuiltins,
 
-    pub(crate) task_scheduler: TaskScheduler,
+    pub(crate) task_scheduler: Scheduler,
 
     pub(crate) clock: Clock,
 }
@@ -36,7 +36,7 @@ impl RuntimeBuiltins {
     pub(in crate::runtime) fn new(dispatcher: &Rc<DispatcherClient>, core: CoreRuntimeBuiltins, clock: Clock, thread: Thread) -> Self {
         Self {
             core,
-            task_scheduler: TaskScheduler::new(dispatcher.as_ref().clone(), thread),
+            task_scheduler: Scheduler::new(dispatcher.as_ref().clone(), thread),
             clock,
         }
     }

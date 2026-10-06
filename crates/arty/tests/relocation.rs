@@ -18,7 +18,7 @@ use thread_aware::ThreadAware;
 /// Identifies which thread-aware handle a relocation scenario should move.
 #[derive(Clone, Copy)]
 enum RelocationTarget {
-    /// Relocate a worker-bound `TaskScheduler` clone directly.
+    /// Relocate a worker-bound `Scheduler` clone directly.
     Scheduler,
     /// Relocate a `Builtins` clone directly.
     Builtins,

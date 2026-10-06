@@ -32,7 +32,7 @@ use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::Builtins;
-use crate::task::scheduler::TaskScheduler;
+use crate::task::scheduler::Scheduler;
 
 pub(in crate::runtime) fn build(
     processor_config: RuntimeConfig,
@@ -227,7 +227,7 @@ impl AsyncWorkerStartInfo {
                 let core_builtins = CoreRuntimeBuiltins::new(tasks.clone(), dispatcher.as_ref(), current.clone(), processor, sink);
 
                 let builtins = Builtins::sync_init(&shared_state, RuntimeBuiltins::new(&dispatcher, core_builtins, clock, current));
-                TaskScheduler::register_current(builtins.clone(), tasks);
+                Scheduler::register_current(builtins.clone(), tasks);
                 builtins
             }
         };

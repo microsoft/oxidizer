@@ -82,7 +82,7 @@ fn collect_enrichment_keys(sink: &Sink) -> Vec<String> {
         .collect()
 }
 
-/// Enrichment propagates through `TaskScheduler::spawn`.
+/// Enrichment propagates through `Scheduler::spawn`.
 #[test]
 fn enrichment_propagates_via_scheduler_spawn() {
     let sink = Sink::noop();
@@ -106,7 +106,7 @@ fn enrichment_propagates_via_scheduler_spawn() {
     assert_eq!(result, ["request.id"]);
 }
 
-/// Enrichment propagates through `TaskScheduler::spawn_anywhere`.
+/// Enrichment propagates through `Scheduler::spawn_anywhere`.
 #[test]
 fn enrichment_propagates_via_spawn_anywhere() {
     let sink = Sink::noop();
@@ -129,7 +129,7 @@ fn enrichment_propagates_via_spawn_anywhere() {
     assert_eq!(result, ["request.id"]);
 }
 
-/// Enrichment propagates through `LocalTaskScheduler::spawn`.
+/// Enrichment propagates through `LocalScheduler::spawn`.
 #[test]
 fn enrichment_propagates_via_local_scheduler_spawn() {
     let sink = Sink::noop();

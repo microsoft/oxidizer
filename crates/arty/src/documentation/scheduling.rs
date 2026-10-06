@@ -9,19 +9,19 @@
 //! # Choose where work runs
 //!
 //! Borrow a [`RuntimeScheduler`](crate::task::RuntimeScheduler) from the runtime
-//! to let it place a new task. A [`TaskScheduler`](crate::task::TaskScheduler)
+//! to let it place a new task. A [`Scheduler`](crate::task::Scheduler)
 //! from [`Builtins`](crate::task::Builtins) keeps child tasks on its worker,
 //! even when cloned.
 //!
-//! Use [`spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere) to let the
+//! Use [`spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) to let the
 //! runtime choose a worker for a new task and relocate a `ThreadAware` value;
-//! [`spawn_everywhere`](crate::task::TaskScheduler::spawn_everywhere) starts one
+//! [`spawn_everywhere`](crate::task::Scheduler::spawn_everywhere) starts one
 //! task per worker. The runtime-wide `spawn_anywhere` also relocates its
 //! `ThreadAware` input. Pass that input separately to a non-capturing function,
 //! rather than capturing it in a closure. The order in which you submit tasks
 //! does not determine when they finish.
 //!
-//! Results from worker-bound `TaskScheduler::spawn_anywhere` and
+//! Results from worker-bound `Scheduler::spawn_anywhere` and
 //! `spawn_everywhere` must also implement [`ThreadAware`](crate::core::ThreadAware),
 //! which includes `Send`. Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts
 //! any `Send` result. Joining does not relocate results; relocate worker-aware
@@ -29,7 +29,7 @@
 //!
 //! # Create local state on a worker
 //!
-//! [`TaskScheduler::spawn`](crate::task::TaskScheduler::spawn) calls your
+//! [`Scheduler::spawn`](crate::task::Scheduler::spawn) calls your
 //! factory on the destination worker. This lets its future create and retain
 //! non-`Send` state across awaits. The factory's captures and the task's result
 //! must still be `Send` to cross threads. Here the `Rc` is created on the worker:

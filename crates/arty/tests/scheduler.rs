@@ -10,7 +10,7 @@ testing_aids::init_tracing!();
 use std::cell::RefCell;
 
 use arty::runtime::Runtime;
-use arty::task::TaskScheduler;
+use arty::task::Scheduler;
 use testing_aids::execute_or_terminate_process;
 
 #[test]
@@ -19,7 +19,7 @@ fn stash_scheduler() {
     // exact type of the task or task context.
 
     struct Thingy {
-        scheduler: TaskScheduler,
+        scheduler: Scheduler,
     }
 
     impl Thingy {
@@ -99,5 +99,5 @@ fn stash_scheduler() {
 }
 
 thread_local! {
-    static THREAD_LOCAL_STASH: RefCell<Option<TaskScheduler>> = const { RefCell::new(None) };
+    static THREAD_LOCAL_STASH: RefCell<Option<Scheduler>> = const { RefCell::new(None) };
 }

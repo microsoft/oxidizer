@@ -19,7 +19,7 @@ use thread_aware::{ThreadAware, Unaware};
 fn pinned_processor(operations: RuntimeOperations, worker: Thread) -> ProcessorId {
     // Keep persistent affinity changes off the shared test-harness thread.
     thread::spawn(move || {
-        operations.pin_to(&worker).unwrap();
+        operations.pin_current_thread_to(&worker).unwrap();
         assert!(SystemHardware::current().is_thread_processor_pinned());
         SystemHardware::current().current_processor_id()
     })
@@ -106,7 +106,7 @@ fn operations_reject_foreign_workers_without_changing_runtime_identity() {
         .wait()
         .unwrap();
 
-    assert!(operations.pin_to(&destination).is_err());
+    assert!(operations.pin_current_thread_to(&destination).is_err());
 
     assert_eq!(pinned_processor(operations, source), processor);
 }

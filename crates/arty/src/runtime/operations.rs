@@ -18,7 +18,7 @@ use crate::task::Builtins;
 /// or retaining an association with the task's worker.
 ///
 /// [`request_stop`](Self::request_stop) initiates shutdown without waiting.
-/// [`pin_to`](Self::pin_to) sets the calling thread's
+/// [`pin_current_thread_to`](Self::pin_current_thread_to) sets the calling thread's
 /// processor affinity using an explicitly supplied worker coordinate.
 #[derive(Debug, Clone)]
 pub struct RuntimeOperations {
@@ -50,26 +50,26 @@ impl RuntimeOperations {
     ///     .block_on(async |cx| (RuntimeOperations::from(&cx), cx.thread().clone()))?;
     /// std::thread::scope(|scope| {
     ///     scope
-    ///         .spawn(move || operations.pin_to(&worker))
+    ///         .spawn(move || operations.pin_current_thread_to(&worker))
     ///         .join()
     ///         .expect("the callback only pins a registered worker")
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[inline]
-    pub fn pin_to(&self, worker: &Thread) -> Result<(), Error> {
+    pub fn pin_current_thread_to(&self, worker: &Thread) -> Result<(), Error> {
         if !self.dispatcher.owns(worker) {
-            return Err(Error::new("the worker passed to pin_to must belong to this runtime"));
+            return Err(Error::new("the worker passed to pin_current_thread_to must belong to this runtime"));
         }
         let worker_index = self
             .dispatcher
             .worker_index(worker.id())
-            .ok_or_else(|| Error::new("the worker passed to pin_to must be a registered runtime worker"))?;
+            .ok_or_else(|| Error::new("the worker passed to pin_current_thread_to must be a registered runtime worker"))?;
         let inner = self
             .shared_state
             .get(usize::from(worker_index))
             .and_then(OnceLock::get)
-            .ok_or_else(|| Error::new("processor services for the worker passed to pin_to are unavailable"))?;
+            .ok_or_else(|| Error::new("processor services for the worker passed to pin_current_thread_to are unavailable"))?;
         inner.processor_set.pin_current_thread_to();
         Ok(())
     }
@@ -159,7 +159,12 @@ mod tests {
             .unwrap();
         let foreign = ThreadBuilder::default().build(worker.id());
         let operations = RuntimeOperations::from(&runtime);
-        assert!(thread::spawn(move || operations.pin_to(&foreign)).join().unwrap().is_err());
+        assert!(
+            thread::spawn(move || operations.pin_current_thread_to(&foreign))
+                .join()
+                .unwrap()
+                .is_err()
+        );
     }
 
     #[test]
@@ -167,7 +172,7 @@ mod tests {
         let (runtime, coordinates) = runtime_with_coordinates(1);
         let operations = RuntimeOperations::from(&runtime);
         let unregistered = coordinates.build(thread::current().id());
-        assert!(operations.pin_to(&unregistered).is_err());
+        assert!(operations.pin_current_thread_to(&unregistered).is_err());
     }
 
     #[test]
@@ -179,7 +184,7 @@ mod tests {
             .wait()
             .unwrap();
         runtime.shared_state = vec![OnceLock::new()].into();
-        assert!(RuntimeOperations::from(&runtime).pin_to(&worker).is_err());
+        assert!(RuntimeOperations::from(&runtime).pin_current_thread_to(&worker).is_err());
     }
 
     #[test]
@@ -218,7 +223,7 @@ mod tests {
             for operations in [operations.clone(), RuntimeOperations::from(&builtins)] {
                 let source = source.clone();
                 let observed = thread::spawn(move || {
-                    operations.pin_to(&source).unwrap();
+                    operations.pin_current_thread_to(&source).unwrap();
                     let hardware = SystemHardware::current();
                     (hardware.is_thread_processor_pinned(), hardware.current_processor_id())
                 })

@@ -12,7 +12,7 @@ use arty::core::{Thread, ThreadAware};
 #[cfg(not(miri))]
 use arty::runtime::ProcessorCount;
 use arty::runtime::Runtime;
-use arty::task::TaskScheduler;
+use arty::task::Scheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
 use testing_aids::{YieldFuture, execute_or_terminate_process};
@@ -197,7 +197,7 @@ fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
 }
 
 struct EverywhereProbe {
-    scheduler: TaskScheduler,
+    scheduler: Scheduler,
     source: Option<Thread>,
     destination: Option<Thread>,
 }

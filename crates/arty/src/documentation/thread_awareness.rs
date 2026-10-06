@@ -31,7 +31,7 @@
 //!
 //! # Let the runtime place new work
 //!
-//! [`TaskScheduler::spawn_anywhere`](crate::task::TaskScheduler::spawn_anywhere)
+//! [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere)
 //! lets the runtime choose a worker for a new task. Pass a
 //! [`ThreadAware`](crate::core::ThreadAware) value explicitly; Arty relocates it
 //! to the chosen worker before the task uses it:

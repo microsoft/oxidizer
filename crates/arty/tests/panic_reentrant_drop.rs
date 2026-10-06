@@ -13,14 +13,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll};
 
-use arty::task::LocalTaskScheduler;
+use arty::task::LocalScheduler;
 use panic_support::{isolated, runtime};
 use testing_aids::TEST_TIMEOUT;
 
 testing_aids::init_tracing!();
 
 struct Cleanup {
-    scheduler: LocalTaskScheduler,
+    scheduler: LocalScheduler,
     drops: Arc<AtomicUsize>,
     factory: mpsc::Sender<()>,
     finished: mpsc::Sender<()>,

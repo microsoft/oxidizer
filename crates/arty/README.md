@@ -58,8 +58,8 @@ Await child work before returning; shutdown cancels pending async tasks.
 * [`Builtins`][__link6] gives each task its scheduler, clock,
   and worker. [`RuntimeScheduler`][__link7] lets the
   runtime place new work.
-* [`TaskScheduler`][__link8] keeps child work on its
-  worker; [`LocalTaskScheduler`][__link9] lets tasks
+* [`Scheduler`][__link8] keeps child work on its
+  worker; [`LocalScheduler`][__link9] lets tasks
   share non-`Send` state there.
 * [`Clock`][__link10] provides timers and timeouts;
   [`ClockControl`][__link11] controls time in tests.
@@ -111,7 +111,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbtSljwYR0MeEb8HAyuZca6B0b-q6-1uLDDIsbQ-pdCMewxX1hZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL7CuuqeC3u8bTCTE_dTOGUwbjtBjCOjOE0UbR1V3f_mzChlhZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.3.1/arty/?search=time::Clock
@@ -135,5 +135,5 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link5]: https://docs.rs/arty/0.3.1/arty/?search=runtime::Runtime
  [__link6]: https://docs.rs/arty/0.3.1/arty/?search=task::Builtins
  [__link7]: https://docs.rs/arty/0.3.1/arty/?search=task::RuntimeScheduler
- [__link8]: https://docs.rs/arty/0.3.1/arty/?search=task::TaskScheduler
- [__link9]: https://docs.rs/arty/0.3.1/arty/?search=task::LocalTaskScheduler
+ [__link8]: https://docs.rs/arty/0.3.1/arty/?search=task::Scheduler
+ [__link9]: https://docs.rs/arty/0.3.1/arty/?search=task::LocalScheduler

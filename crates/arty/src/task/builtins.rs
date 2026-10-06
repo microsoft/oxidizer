@@ -9,13 +9,13 @@ use observed::Sink;
 use observed::emit;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
-use tick::{Clock, SimpleClock};
+use tick::Clock;
 
 use crate::runtime::context::{RuntimeBuiltins, SharedState};
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
-use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
-use crate::task::scheduler::TaskScheduler;
+use crate::task::local::{LocalScheduler, LocalTaskBinding};
+use crate::task::scheduler::Scheduler;
 
 /// Services supplied to an async task on its worker.
 ///
@@ -27,7 +27,7 @@ use crate::task::scheduler::TaskScheduler;
 /// New tasks receive their own `Builtins`. Cloning or moving an existing value
 /// does not change its worker or keep its runtime running.
 ///
-/// [`TaskScheduler::spawn_anywhere`] can relocate an existing `Builtins` to
+/// [`Scheduler::spawn_anywhere`] can relocate an existing `Builtins` to
 /// another ready worker of the same runtime. A worker from another runtime, or
 /// one that is not ready, leaves its association unchanged. Local scheduling
 /// is available only on the associated worker.
@@ -55,7 +55,7 @@ use crate::task::scheduler::TaskScheduler;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Builtins {
-    pub(crate) scheduler: TaskScheduler,
+    pub(crate) scheduler: Scheduler,
     thread: Thread,
     inner: Arc<InnerBuiltins>,
     pub(crate) shared_state: SharedState,
@@ -67,7 +67,7 @@ impl Builtins {
     /// Returns a scheduler that creates tasks on the associated worker.
     ///
     /// A clone still targets the same worker, even if used from another
-    /// thread. Use [`TaskScheduler::spawn_anywhere`] to let the runtime choose
+    /// thread. Use [`Scheduler::spawn_anywhere`] to let the runtime choose
     /// a worker for new work instead.
     ///
     /// # Examples
@@ -88,7 +88,7 @@ impl Builtins {
     /// ```
     #[must_use]
     #[inline]
-    pub fn scheduler(&self) -> &TaskScheduler {
+    pub fn scheduler(&self) -> &Scheduler {
         self.validate();
 
         &self.scheduler
@@ -204,7 +204,7 @@ impl Builtins {
     /// ```
     #[must_use]
     #[inline]
-    pub fn local_scheduler(&self) -> Option<LocalTaskScheduler> {
+    pub fn local_scheduler(&self) -> Option<LocalScheduler> {
         self.inner.local_task_binding.local_scheduler()
     }
 
@@ -292,8 +292,8 @@ impl Builtins {
     }
 }
 
-impl AsRef<TaskScheduler> for Builtins {
-    fn as_ref(&self) -> &TaskScheduler {
+impl AsRef<Scheduler> for Builtins {
+    fn as_ref(&self) -> &Scheduler {
         self.scheduler()
     }
 }
@@ -301,12 +301,6 @@ impl AsRef<TaskScheduler> for Builtins {
 impl AsRef<Clock> for Builtins {
     fn as_ref(&self) -> &Clock {
         self.clock()
-    }
-}
-
-impl AsRef<SimpleClock> for Builtins {
-    fn as_ref(&self) -> &SimpleClock {
-        self.clock().as_ref()
     }
 }
 

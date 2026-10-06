@@ -127,7 +127,7 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::task::scheduler::TaskScheduler;
+    use crate::task::scheduler::Scheduler;
 
     #[test]
     fn clients_observe_the_shared_shutdown_state() {
@@ -181,7 +181,7 @@ mod tests {
             Sink::noop(),
         ));
 
-        let mut scheduler = TaskScheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
+        let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
         // Relocate to worker 1.
         scheduler.relocate(Some(&threads[0]), &threads[1]);
@@ -226,7 +226,7 @@ mod tests {
             Sink::noop(),
         ));
 
-        let mut scheduler = TaskScheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
+        let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
         let before = (
             Arc::ptr_eq(scheduler.blocking_worker(), &source_worker),

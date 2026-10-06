@@ -15,8 +15,8 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 
 use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
-use arty::task::{Builtins, TaskScheduler};
-use arty::time::{Clock, SimpleClock};
+use arty::task::{Builtins, Scheduler};
+use arty::time::Clock;
 use observed::Sink;
 use observed_testing::{TEST_ID, test_emitter};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
@@ -31,7 +31,7 @@ fn runtime(workers: usize) -> Runtime {
         .unwrap()
 }
 
-fn worker_scheduler(runtime: &Runtime) -> TaskScheduler {
+fn worker_scheduler(runtime: &Runtime) -> Scheduler {
     runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap()
 }
 
@@ -229,13 +229,11 @@ fn builtins_publish_the_same_services_on_every_worker() {
     let runtime = runtime(2);
     let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
     let tasks = builtins.scheduler().spawn_everywhere(builtins.clone(), |cx: Builtins| async move {
-        let scheduler: &TaskScheduler = cx.as_ref();
+        let scheduler: &Scheduler = cx.as_ref();
         let clock: &Clock = cx.as_ref();
-        let simple_clock: &SimpleClock = cx.as_ref();
         let sink: &Sink = cx.as_ref();
         assert!(std::ptr::eq(scheduler, cx.scheduler()));
         assert!(std::ptr::eq(clock, cx.clock()));
-        assert!(std::ptr::eq(simple_clock, cx.clock().as_ref()));
         assert!(std::ptr::eq(sink, cx.sink()));
         assert!(sink.is_noop());
         assert!(cx.local_scheduler().is_some());

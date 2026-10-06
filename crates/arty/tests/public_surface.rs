@@ -16,14 +16,13 @@ fn core_types_are_reexported() {
 #[cfg(feature = "time")]
 #[test]
 fn time_types_are_reexported() {
-    use arty::time::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
+    use arty::time::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch, Timeout};
 
     fn assert_future_ext<T: FutureExt>() {}
 
     let _ = std::mem::size_of::<Clock>();
     let _ = std::mem::size_of::<Delay>();
     let _ = std::mem::size_of::<PeriodicTimer>();
-    let _ = std::mem::size_of::<SimpleClock>();
     let _ = std::mem::size_of::<Stopwatch>();
     let _ = std::mem::size_of::<Timeout<(), ()>>();
     assert_future_ext::<std::future::Ready<()>>();

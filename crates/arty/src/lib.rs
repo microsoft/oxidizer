@@ -60,8 +60,8 @@
 //! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
-//! - [`TaskScheduler`](crate::task::TaskScheduler) keeps child work on its
-//!   worker; [`LocalTaskScheduler`](crate::task::LocalTaskScheduler) lets tasks
+//! - [`Scheduler`](crate::task::Scheduler) keeps child work on its
+//!   worker; [`LocalScheduler`](crate::task::LocalScheduler) lets tasks
 //!   share non-`Send` state there.
 //! - [`Clock`](crate::time::Clock) provides timers and timeouts;
 //!   [`ClockControl`](crate::time::ClockControl) controls time in tests.
@@ -312,7 +312,8 @@ pub mod core {
 /// Enable `time` to use [`tick`] clocks without starting an Arty runtime.
 /// A task's `Builtins::clock()` has timers driven by its worker. Outside the
 /// runtime, delays on [`Clock`](crate::time::Clock) need a timer driver;
-/// [`SimpleClock`](crate::time::SimpleClock) reads time without one.
+/// `tick::SimpleClock` can read time without a timer driver when the underlying
+/// tick API is needed directly.
 ///
 /// Enable `test-util` in dev-dependencies to use `ClockControl` for simulated time.
 ///
@@ -337,7 +338,7 @@ pub mod time {
     #[doc(inline)]
     pub use tick::ClockControl;
     #[doc(inline)]
-    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, SimpleClock, Stopwatch, Timeout};
+    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch, Timeout};
 }
 
 #[cfg(test)]

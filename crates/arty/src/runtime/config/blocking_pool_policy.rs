@@ -7,7 +7,7 @@ use crate::runtime::bootstrap::pools::BlockingPools;
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::blocking_pool_policy`](crate::runtime::RuntimeBuilder::blocking_pool_policy).
-/// These pools run [`spawn_blocking`](crate::task::TaskScheduler::spawn_blocking)
+/// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
 /// callbacks separately from async workers.
 ///
 /// # Choosing between isolated and shared

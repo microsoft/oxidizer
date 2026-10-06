@@ -9,7 +9,7 @@
 //! [`Builtins::scheduler`] keeps child tasks on the same worker.
 //!
 //! Pass a factory, not an already-created future. Arty creates the future on
-//! its worker, where it can retain non-[`Send`] state. Use [`LocalTaskScheduler`]
+//! its worker, where it can retain non-[`Send`] state. Use [`LocalScheduler`]
 //! when captures or results also need to be non-`Send`; use
 //! [`ThreadAware`](crate::core::ThreadAware) data with `spawn_anywhere` when
 //! the runtime should choose a worker.
@@ -50,8 +50,8 @@ pub use builtins::Builtins;
 #[doc(inline)]
 pub use join::{JoinError, JoinHandle, LocalJoinHandle};
 #[doc(inline)]
-pub use local::LocalTaskScheduler;
+pub use local::LocalScheduler;
 #[doc(inline)]
 pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]
-pub use scheduler::TaskScheduler;
+pub use scheduler::Scheduler;

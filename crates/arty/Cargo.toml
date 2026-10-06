@@ -31,7 +31,6 @@ allowed_external_types = [
     "tick::future_ext::FutureExt",
     "tick::periodic_timer::PeriodicTimer",
     "tick::runtime::inactive_clock::InactiveClock",
-    "tick::simple_clock::SimpleClock",
     "tick::stopwatch::Stopwatch",
     "tick::timeout::Timeout",
 ]

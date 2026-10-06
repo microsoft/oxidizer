@@ -82,6 +82,6 @@
 //! # Without an Arty runtime
 //!
 //! Enabling `time` alone does not start a timer driver.
-//! [`SimpleClock`](crate::time::SimpleClock) reads time without one, but delays
+//! The underlying `tick::SimpleClock` reads time without a driver, but delays
 //! on [`Clock`](crate::time::Clock) need a driver or controlled time. See
 //! [`tick`] for using these clocks outside Arty.

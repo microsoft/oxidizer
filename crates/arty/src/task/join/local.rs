@@ -12,7 +12,7 @@ use crate::task::execution::TaskResult;
 
 /// A worker-local handle for receiving a task's result.
 ///
-/// Returned by [`LocalTaskScheduler::spawn`](crate::task::LocalTaskScheduler::spawn).
+/// Returned by [`LocalScheduler::spawn`](crate::task::LocalScheduler::spawn).
 /// Await it on the worker that created it. Both the handle and its result may
 /// be non-[`Send`]; the handle cannot be sent to another thread.
 ///

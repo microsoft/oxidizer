@@ -316,11 +316,11 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
-    use crate::task::local::{LocalTaskBinding, LocalTaskScheduler};
+    use crate::task::local::{LocalScheduler, LocalTaskBinding};
 
     #[derive(Clone, Debug)]
     struct TestTaskContext {
-        local_task_scheduler: LocalTaskScheduler,
+        local_task_scheduler: LocalScheduler,
     }
 
     impl TestTaskContext {
