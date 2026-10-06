@@ -240,6 +240,25 @@ mod tests {
     }
 
     #[test]
+    fn blocking_callback_is_detected_before_waiting_for_shutdown() {
+        let runtime = Runtime::builder()
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+
+        assert!(
+            runtime
+                .scheduler()
+                .spawn_blocking(move || dispatcher.is_current_blocking_task())
+                .wait()
+                .unwrap()
+        );
+
+        runtime.stop().unwrap();
+    }
+
+    #[test]
     fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
         let runtime = Runtime::builder()
             .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
