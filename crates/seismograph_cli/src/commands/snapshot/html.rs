@@ -190,6 +190,27 @@ mod tests {
     static ALLOCATOR_SOURCE: seismograph::snapshot::Source =
         seismograph::snapshot::Source::new(seismograph_rallocator::source::ID, "test-rallocator", 3, capture_allocator_source);
 
+    fn run_source_test_in_child(name: &str) -> bool {
+        let name = format!("commands::snapshot::html::tests::{name}");
+        if std::env::var("SEISMOGRAPH_HTML_SOURCE_TEST").as_deref() == Ok(name.as_str()) {
+            return false;
+        }
+        // Source registration is process-global and permanent; cargo test shares
+        // a process, unlike nextest. Give each conflicting source its own registry.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &name, "--nocapture"])
+            .env("SEISMOGRAPH_HTML_SOURCE_TEST", &name)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
+
     fn capture_allocator_source(
         _context: seismograph::snapshot::SnapshotContext<'_>,
     ) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
@@ -402,6 +423,9 @@ mod tests {
 
     #[test]
     fn native_snapshot_allocator_source_is_decoded() {
+        if run_source_test_in_child("native_snapshot_allocator_source_is_decoded") {
+            return;
+        }
         seismograph::snapshot::register_source(&ALLOCATOR_SOURCE);
         let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
             .unwrap()
@@ -427,6 +451,9 @@ mod tests {
             2,
             capture_allocator_source,
         );
+        if run_source_test_in_child("native_source_rejects_unsupported_schema_before_payload_decode") {
+            return;
+        }
         seismograph::snapshot::register_source(&SOURCE);
         let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let error = decode_snapshot(recording.as_bytes()).unwrap_err();
@@ -442,6 +469,9 @@ mod tests {
             seismograph_rallocator::source::SCHEMA_VERSION,
             capture_corrupt_source,
         );
+        if run_source_test_in_child("corrupt_native_source_payload_preserves_allocator_error") {
+            return;
+        }
         seismograph::snapshot::register_source(&SOURCE);
         let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let error = decode_snapshot(recording.as_bytes()).unwrap_err();
@@ -461,6 +491,9 @@ mod tests {
             6,
             capture_corrupt_source,
         );
+        if run_source_test_in_child("corrupt_runtime_source_payload_preserves_runtime_error") {
+            return;
+        }
         seismograph::snapshot::register_source(&SOURCE);
         let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let error = decode_snapshot(recording.as_bytes()).unwrap_err();
@@ -482,6 +515,9 @@ mod tests {
             6,
             capture_runtime_symbol,
         );
+        if run_source_test_in_child("runtime_source_projects_symbol_names_and_locations_into_report") {
+            return;
+        }
         seismograph::snapshot::register_source(&SOURCE);
         let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let (snapshot, sources) = decode_snapshot(recording.as_bytes()).unwrap();
