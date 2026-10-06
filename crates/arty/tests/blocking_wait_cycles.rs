@@ -17,14 +17,6 @@ use panic_support::{isolated, runtime as shared_runtime};
 
 testing_aids::init_tracing!();
 
-fn isolated_runtime() -> Runtime {
-    Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
-        .blocking_pool_policy(BlockingPoolPolicy::isolated())
-        .build()
-        .unwrap()
-}
-
 #[test]
 fn blocking_join_future_rejects_its_current_pool() {
     isolated("blocking_join_future_rejects_its_current_pool", || {
@@ -66,7 +58,11 @@ fn blocking_block_on_rejects_an_async_dependency_on_its_pool() {
 #[test]
 fn blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool() {
     isolated("blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool", || {
-        let runtime = isolated_runtime();
+        let runtime = Runtime::builder()
+            .cpu_policy(CpuPolicy::exactly(1))
+            .blocking_pool_policy(BlockingPoolPolicy::isolated())
+            .build()
+            .unwrap();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let task = scheduler.spawn_blocking(move || {
             runtime
