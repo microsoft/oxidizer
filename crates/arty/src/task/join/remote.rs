@@ -5,10 +5,11 @@ use std::pin::Pin;
 use std::task::{self, Poll};
 
 use events_once::BoxedReceiver;
+use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
-use crate::runtime::blocking_worker::assert_not_current_blocking_task;
+use crate::runtime::blocking_worker::is_current_blocking_pool;
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
@@ -48,6 +49,8 @@ where
     #[debug(ignore)]
     #[pin]
     result_rx: Option<BoxedReceiver<TaskResult<R>>>,
+    blocking_pool: Option<Arc<()>>,
+    completed: bool,
 }
 
 impl<R> JoinHandle<R>
@@ -57,11 +60,22 @@ where
     pub(in crate::task) fn new(result_rx: BoxedReceiver<TaskResult<R>>) -> Self {
         Self {
             result_rx: Some(result_rx),
+            blocking_pool: None,
+            completed: false,
         }
     }
 
     pub(crate) fn shutdown() -> Self {
-        Self { result_rx: None }
+        Self {
+            result_rx: None,
+            blocking_pool: None,
+            completed: false,
+        }
+    }
+
+    pub(crate) fn from_blocking_pool(mut self, pool: Arc<()>) -> Self {
+        self.blocking_pool = Some(pool);
+        self
     }
 
     /// Blocks until the task's result is available.
@@ -78,9 +92,10 @@ where
     /// # Panics
     ///
     /// Panics if the result has already been received by polling the handle.
-    /// Also panics if called from an async Arty worker or a blocking callback,
-    /// even if the result is already ready. Blocking callbacks cannot wait
-    /// for work through a blocking pool without risking pool starvation.
+    /// Also panics if called from an async Arty worker or while waiting for a
+    /// task belonging to the current blocking pool, even if the result is
+    /// already ready. A blocking callback may wait for an async task, but not
+    /// for another task queued behind itself in the same pool.
     ///
     /// # Examples
     ///
@@ -94,7 +109,9 @@ where
     /// ```
     pub fn wait(self) -> Result<R, JoinError> {
         assert_not_flagged();
-        assert_not_current_blocking_task();
+        if self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool) {
+            panic!("blocking JoinHandle::wait cannot wait for the current blocking pool");
+        }
 
         futures::executor::block_on(self)
     }
@@ -108,15 +125,23 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
+        assert!(!*this.completed, "JoinHandle polled after completion");
         let Some(result_rx) = this.result_rx.as_mut().as_pin_mut() else {
+            *this.completed = true;
             return Poll::Ready(Err(JoinError::shutdown()));
         };
         match result_rx.poll(cx) {
-            Poll::Ready(Ok(result)) => match result {
-                TaskResult::Completed(value) => Poll::Ready(Ok(value)),
-                TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),
-            },
-            Poll::Ready(Err(_)) => Poll::Ready(Err(JoinError::shutdown())),
+            Poll::Ready(Ok(result)) => {
+                *this.completed = true;
+                match result {
+                    TaskResult::Completed(value) => Poll::Ready(Ok(value)),
+                    TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),
+                }
+            }
+            Poll::Ready(Err(_)) => {
+                *this.completed = true;
+                Poll::Ready(Err(JoinError::shutdown()))
+            }
             Poll::Pending => Poll::Pending,
         }
     }

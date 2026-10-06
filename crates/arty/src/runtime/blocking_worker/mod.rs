@@ -75,6 +75,7 @@ impl BlockingWorker {
         let identity = Arc::clone(&self.pool.identity);
         let shutdown = Arc::clone(&self.is_shutting_down);
         let (task, join_handle) = prepare_blocking(body);
+        let join_handle = join_handle.from_blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
             if shutdown.load(Ordering::Acquire) {
@@ -120,11 +121,8 @@ impl BlockingWorker {
     }
 }
 
-pub(crate) fn assert_not_current_blocking_task() {
-    assert!(
-        CURRENT_POOL.with_borrow(Option::is_none),
-        "blocking JoinHandle::wait cannot be called from a blocking callback"
-    );
+pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
+    CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
 }
 
 #[derive(Debug, Clone)]
