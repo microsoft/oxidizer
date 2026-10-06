@@ -536,6 +536,7 @@ function Get-PublishedDependentsExposingTarget {
     return @($WorkspaceBaseline | Where-Object {
             $_.Published -and
             -not $_.IsProcMacroOnly -and
+            -not $_.IsBinOnly -and
             $Resolved.Contains($_.Folder) -and
             (Test-PackageExposesTargetOnAnyEdge -Dependent $_ -TargetPackage $TargetPackage `
                 -TargetCargoName $targetCargoName -DependentCargoNames $dependentNames)
@@ -633,7 +634,8 @@ function Update-EntryForExposedDependency {
 #     AutoUpgraded              = $true|$false   # user-source entry strengthened by cascade
 #     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
 #     IsProcMacroOnly           = $true|$false   # cargo metadata target classification
-#     RequiresManualSemverReview = $true|$false  # proc-macro API cannot be checked automatically
+#     IsBinOnly                = $true|$false   # binaries with no library or proc-macro
+#     RequiresManualSemverReview = $true|$false  # unsupported proc-macro/CLI contract
 #     CascadeReasons            = [List<{Target,Breaking}>]                  # one per target package cause
 #     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
@@ -752,7 +754,8 @@ function Resolve-ReleaseSet {
             AutoUpgraded             = $false
             PinHonoredAgainstCascade = $false
             IsProcMacroOnly          = [bool]$pkg.IsProcMacroOnly
-            RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
+            IsBinOnly                = [bool]$pkg.IsBinOnly
+            RequiresManualSemverReview = [bool](Get-PackageManualSemverReviewKind $pkg)
             CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
             RawToken                 = $req.RawToken
         }
@@ -771,10 +774,10 @@ function Resolve-ReleaseSet {
     # its types.
     foreach ($folder in $requestedFolders) {
         $entry = $resolved[$folder]
-        if ($entry.IsProcMacroOnly) { continue }
+        if (Get-PackageManualSemverReviewKind $entry) { continue }
         $required = & $GetRequiredChangeType $entry.Folder $entry.Name
         if ($required -eq 'manual') {
-            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only or bin-only."
         }
         if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
         Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
@@ -794,15 +797,15 @@ function Resolve-ReleaseSet {
             # Ordinary library dependents are classified from their own API diff
             # and floored at patch because they must re-release to pick up the new
             # dependency version. cargo-semver-checks deliberately has no
-            # proc-macro-only API surface, so those dependents keep the mechanical
+            # proc-macro or command-line API surface, so those dependents keep the mechanical
             # patch floor until the interactive manual-review queue asks the user
             # to inspect their diff and choose the final change type.
-            if ($depPkg.IsProcMacroOnly) {
+            if (Get-PackageManualSemverReviewKind $depPkg) {
                 $dependentChangeType = 'patch'
             } else {
                 $classifiedChangeType = & $GetRequiredChangeType $depPkg.Folder $depPkg.Name
                 if ($classifiedChangeType -eq 'manual') {
-                    throw "Internal error: '$($depPkg.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+                    throw "Internal error: '$($depPkg.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only or bin-only."
                 }
                 $dependentChangeType = Get-StrongerChangeType 'patch' $classifiedChangeType
             }
@@ -839,7 +842,8 @@ function Resolve-ReleaseSet {
                     AutoUpgraded             = $false
                     PinHonoredAgainstCascade = $false
                     IsProcMacroOnly          = [bool]$depPkg.IsProcMacroOnly
-                    RequiresManualSemverReview = [bool]$depPkg.IsProcMacroOnly
+                    IsBinOnly                = [bool]$depPkg.IsBinOnly
+                    RequiresManualSemverReview = [bool](Get-PackageManualSemverReviewKind $depPkg)
                     CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
                     RawToken                 = $null
                 }
@@ -865,7 +869,7 @@ function Resolve-ReleaseSet {
 
         foreach ($sourceEntry in @($resolved.Values)) {
             $sourcePkg = $baselineByFolder[$sourceEntry.Folder]
-            if ($null -eq $sourcePkg -or $sourcePkg.IsProcMacroOnly) { continue }
+            if ($null -eq $sourcePkg -or (Get-PackageManualSemverReviewKind $sourcePkg)) { continue }
             if (-not (Test-EntryPlansBreakingRelease -Entry $sourceEntry)) { continue }
 
             $dependentPkgs = Get-PublishedDependentsExposingTarget -TargetPackage $sourcePkg `
@@ -887,7 +891,7 @@ function Resolve-ReleaseSet {
 }
 
 # Builds the mandatory manual-review queue for:
-#   * every proc-macro-only package already present in the release set, and
+#   * every proc-macro-only or bin-only package already present in the release set, and
 #   * direct published consumers of a manually reviewed breaking entry.
 #
 # The second category advances one dependency edge at a time. A consumer is not
@@ -913,7 +917,8 @@ function Get-ManualSemverReviewFindings {
 
     $findingsByFolder = [ordered]@{}
     foreach ($entry in @($ResolvedReleaseSet.Values | Sort-Object -Property Folder)) {
-        if (-not $entry.IsProcMacroOnly) { continue }
+        $manualKind = Get-PackageManualSemverReviewKind $entry
+        if (-not $manualKind) { continue }
         $pkg = $byFolder[$entry.Folder]
         if ($null -eq $pkg) { continue }
 
@@ -934,7 +939,7 @@ function Get-ManualSemverReviewFindings {
             DependencyChains           = @()
             WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $entry.Folder
             RequiresManualSemverReview = $true
-            ManualSemverReviewKind      = 'proc-macro'
+            ManualSemverReviewKind      = $manualKind
             ManualSemverReviewSources   = @()
         }
     }
@@ -942,6 +947,9 @@ function Get-ManualSemverReviewFindings {
     foreach ($sourceFolder in @($ReviewedManualSemver | Sort-Object)) {
         if (-not $ResolvedReleaseSet.ContainsKey($sourceFolder)) { continue }
         $sourceEntry = $ResolvedReleaseSet[$sourceFolder]
+        # A binary's command-line surface cannot flow into a Rust consumer API.
+        # Keep the existing proc-macro-chain review propagation library-only.
+        if ($sourceEntry.IsBinOnly) { continue }
         # -Force can intentionally keep an explicit version pin below the
         # required severity while upgrading only EffectiveChangeType for cascade
         # bookkeeping. Manual review propagation follows the version that will
@@ -2063,10 +2071,10 @@ function Invoke-PlanReview {
     # applied level, don't elevate". Entries are never removed: the decision
     # stands even if cascade strengthens the level on a later iteration.
     $reviewedCascadeAsIs = [System.Collections.Generic.HashSet[string]]::new()
-    # Proc-macro-only packages cannot be classified by cargo-semver-checks.
+    # Proc-macro-only and bin-only packages cannot be classified by cargo-semver-checks.
     # Every such package that enters the plan is shown in the standard review
     # dialog exactly once, including user-source entries and unchanged thin
-    # proc-macro crates pulled in by an implementation-crate release.
+    # proc-macro crates and binaries pulled in by an implementation-crate release.
     $reviewedManualSemver = [System.Collections.Generic.HashSet[string]]::new()
 
     # Runaway cap is a defence-in-depth safety net; the real termination
@@ -2139,8 +2147,9 @@ function Invoke-PlanReview {
 
             # Manual SemVer findings take precedence over ordinary
             # modification/elevation findings for the same folder. The queue
-            # includes unchanged proc-macro release-set members and advances to
-            # direct published consumers one breaking reviewed edge at a time.
+            # includes unchanged proc-macro and binary release-set members.
+            # Proc-macro review advances to direct published consumers one
+            # breaking reviewed edge at a time.
             $findingsByFolder = [ordered]@{}
             $manualFindings = @(Get-ManualSemverReviewFindings `
                 -ResolvedReleaseSet $resolvedHash `
@@ -2157,7 +2166,7 @@ function Invoke-PlanReview {
                 $findingsByFolder.Values | Where-Object {
                     if ($_.RequiresManualSemverReview) {
                         # A prior ordinary "skip" or "keep cascade level"
-                        # decision did not evaluate the opaque proc-macro
+                        # decision did not evaluate the opaque proc-macro or CLI
                         # contract. Only a completed manual review may suppress
                         # this finding. Choosing "No material changes" in the
                         # manual dialog counts as a completed review.
@@ -2514,6 +2523,8 @@ function Show-ReleasePlan {
         Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [$tag]" -ForegroundColor $color
         if ($entry.IsProcMacroOnly) {
             Write-Host '      SemVer classification: manual proc-macro review (cargo-semver-checks not run)' -ForegroundColor Yellow
+        } elseif ($entry.IsBinOnly) {
+            Write-Host '      SemVer classification: manual command-line compatibility review (cargo-semver-checks not run)' -ForegroundColor Yellow
         } elseif ($entry.ManualSemverReviewCompleted) {
             $sources = @($entry.ManualSemverReviewSources) -join ', '
             Write-Host "      SemVer classification: cargo-semver-checks plus manual review of breaking proc-macro dependency chain ($sources)" -ForegroundColor Yellow
@@ -2529,6 +2540,8 @@ function Show-ReleasePlan {
         Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [cascade ($($entry.EffectiveChangeType))]" -ForegroundColor DarkCyan
         if ($entry.IsProcMacroOnly) {
             Write-Host '      SemVer classification: manual proc-macro review (cargo-semver-checks not run)' -ForegroundColor Yellow
+        } elseif ($entry.IsBinOnly) {
+            Write-Host '      SemVer classification: manual command-line compatibility review (cargo-semver-checks not run)' -ForegroundColor Yellow
         } elseif ($entry.ManualSemverReviewCompleted) {
             $sources = @($entry.ManualSemverReviewSources) -join ', '
             Write-Host "      SemVer classification: cargo-semver-checks plus manual review of breaking proc-macro dependency chain ($sources)" -ForegroundColor Yellow

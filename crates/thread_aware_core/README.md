@@ -13,12 +13,12 @@
 
 </div>
 
-Support for values that adapt when a runtime moves them to another thread.
+Support for values that adapt after arriving on a different thread.
 
 This crate contains the small API shared by thread-aware libraries:
 
 * [`ThreadAware`][__link0] is the trait for values that adapt after a move; its
-  [`relocate`][__link1] callback reports the destination.
+  [`relocate`][__link1] callback reports the current destination.
 * [`Thread`][__link2] is the coordinate where a value now runs, composed of runtime, OS-thread, and
   nearest-memory identifiers.
 
@@ -93,6 +93,12 @@ consumers.
 
 After moving a value, the runtime calls [`relocate`][__link22], passing where
 the value came from and where it now runs.
+The call must execute on the thread that now owns the value: `destination` describes the
+current thread, rather than requesting that work be performed on another thread. A runtime
+must move or schedule the value to its destination first, then let that destination thread
+invoke `relocate`; a coordinator must not invoke it on the destination’s behalf. This ordering
+matters because relocation may release, allocate, or initialize thread- and NUMA-local state,
+and those operations must happen on the thread whose locality they are intended to use.
 
 ## Performance, not correctness
 
@@ -118,8 +124,8 @@ depends on, and store keyed state in a map rather than an indexed array.
 
 ## Relation to `Send`
 
-[`ThreadAware`][__link26] requires [`Send`][__link27], and in that order: a value is sent to another thread
-first, then told where it landed. [`Send`][__link28] is what makes the move safe, and
+[`ThreadAware`][__link26] requires [`Send`][__link27], and in that order: a value is sent to its destination thread
+first, then told where it landed on that same thread. [`Send`][__link28] is what makes the move safe, and
 [`ThreadAware`][__link29] adds nothing to it.
 
 ## Provided implementations
@@ -146,7 +152,7 @@ immutable process-lifetime labels cannot dangle and carry no referent state to r
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbmZMSr1CdOtQbji0VWctOlw0bg5-BcXSNHZQbrgPvE0UF_8FhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvDzLj46mCfYbOXRzic-3mzMbhE7XN3WF4xUbgpjfFmDe0CVhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
  [__link0]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode

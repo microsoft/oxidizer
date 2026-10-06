@@ -107,16 +107,16 @@ require_send(mutex.lock());
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbXtvRAuEVsrEbGCTGty00QhgbrMfHmb1_2HgbGQZYcIW5oaFhZIGCbHBlcmZvcm1hYmxlc2UwLjEuMA
- [__link0]: https://docs.rs/performables/0.1.0/performables/?search=sync::mode::Sync
- [__link1]: https://docs.rs/performables/0.1.0/performables/?search=sync::mode::Async
- [__link10]: https://docs.rs/performables/0.1.0/performables/?search=arc::Arc
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbXtvRAuEVsrEbGCTGty00QhgbrMfHmb1_2HgbGQZYcIW5oaFhZIGCbHBlcmZvcm1hYmxlc2UwLjIuMA
+ [__link0]: https://docs.rs/performables/0.2.0/performables/?search=sync::mode::Sync
+ [__link1]: https://docs.rs/performables/0.2.0/performables/?search=sync::mode::Async
+ [__link10]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
  [__link11]: https://doc.rust-lang.org/stable/std/?search=sync::Arc
- [__link2]: https://docs.rs/performables/0.1.0/performables/?search=sync::mutex::Mutex::lock
- [__link3]: https://docs.rs/performables/0.1.0/performables/?search=sync::mutex::Mutex::lock_async
- [__link4]: https://docs.rs/performables/0.1.0/performables/?search=sync::PoisonError
- [__link5]: https://docs.rs/performables/0.1.0/performables/?search=sync::barrier::Barrier
- [__link6]: https://docs.rs/performables/0.1.0/performables/?search=sync::condition::Condvar
- [__link7]: https://docs.rs/performables/0.1.0/performables/?search=sync::once::OnceLock
- [__link8]: https://docs.rs/performables/0.1.0/performables/?search=sync::once::LazyLock
- [__link9]: https://docs.rs/performables/0.1.0/performables/?search=sync::channel
+ [__link2]: https://docs.rs/performables/0.2.0/performables/?search=sync::mutex::Mutex::lock
+ [__link3]: https://docs.rs/performables/0.2.0/performables/?search=sync::mutex::Mutex::lock_async
+ [__link4]: https://docs.rs/performables/0.2.0/performables/?search=sync::PoisonError
+ [__link5]: https://docs.rs/performables/0.2.0/performables/?search=sync::barrier::Barrier
+ [__link6]: https://docs.rs/performables/0.2.0/performables/?search=sync::condition::Condvar
+ [__link7]: https://docs.rs/performables/0.2.0/performables/?search=sync::once::OnceLock
+ [__link8]: https://docs.rs/performables/0.2.0/performables/?search=sync::once::LazyLock
+ [__link9]: https://docs.rs/performables/0.2.0/performables/?search=sync::channel

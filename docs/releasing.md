@@ -300,6 +300,24 @@ up the new dependency version even when their own public API is
 unchanged), then raised to the stronger of their own
 `cargo semver-checks` result and the exposed-dependency cascade.
 
+#### Bin-only packages require manual command-line compatibility review
+
+Packages with binary targets but no library or proc-macro target cannot be
+checked by `cargo-semver-checks`. The planner records them as `IsBinOnly`,
+separately from proc macros, and requires the normal interactive review menu
+for every bin-only package in the release set, including unchanged cascade dependents.
+This is one review per package, even when it contains multiple binary targets.
+Review subcommands, options, accepted inputs, output formats, exit behavior,
+and observable behavior against the previous version-bump commit before
+choosing breaking, non-breaking, patch, or no material changes. A binary
+already required by cascade retains its patch floor after a no-material decision.
+
+The final plan records manual command-line compatibility review, not an
+automated Rust API verdict. Mixed library/binary packages still run the library
+check. Binary changes do not propagate the proc-macro-dependent manual review:
+command-line compatibility is not a Rust type exposure relationship. Existing
+proc-macro review propagation is unchanged.
+
 #### Windows (MSVC): baseline builds link with rust-lld
 
 The MSVC `link.exe` is not long-path aware, so a baseline build under a
@@ -608,12 +626,12 @@ The user-review queue therefore contains two categories of finding:
      publishable packages with no on-disk changes; the "View diff" option
      is relabelled `View diff (no changes in this package)` so the empty
      state is obvious before you open the editor.
-   - For every proc-macro-only package in the release set, show the same
+   - For every proc-macro-only or bin-only package in the release set, show the same
      menu as a mandatory manual SemVer review. This includes targeted
-     packages and unchanged proc-macro dependents added by cascade.
-     A breaking result then surfaces direct published consumers one edge
-     at a time; propagation stops at the first consumer reviewed below
-     breaking.
+     packages and unchanged proc-macro or binary dependents added by cascade.
+     A breaking proc-macro review result then surfaces direct published
+     consumers one edge at a time; propagation stops at the first consumer
+     reviewed below breaking. Bin-only reviews do not propagate to consumers.
    - After review, apply all version-number increments, changelog
      updates, README regeneration, `Cargo.toml` rewrites, and workspace
      `[workspace.dependencies]` updates in one shot.

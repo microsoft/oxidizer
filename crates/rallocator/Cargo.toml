@@ -3,7 +3,7 @@
 
 [package]
 name = "rallocator"
-version = "0.1.0"
+version = "0.2.0"
 description = "A high-performance global allocator with passive allocation hints and telemetry."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
