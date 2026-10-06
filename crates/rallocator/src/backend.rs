@@ -331,6 +331,69 @@ mod tests {
     }
 
     #[test]
+    fn reserved_refill_partitions_the_entire_reservation_without_overlap() {
+        let mut global = Global {
+            map: Some(Map::reserve().unwrap()),
+            ranges: Buddy::new(),
+            requested: 0,
+        };
+        let base = global_alloc_reserved(&mut global, CHUNK);
+        assert_ne!(base, 0);
+        assert_eq!(base % hal::RESERVE_MIN, 0);
+        let mut addresses = vec![base];
+        for allocated in 1..=hal::RESERVE_MIN / CHUNK {
+            let state = observe_global(&global);
+            assert!(state.ranges.complete);
+            assert_eq!(state.reserved_bytes, hal::RESERVE_MIN as u64);
+            assert_eq!(state.ranges.observed_bytes(), (hal::RESERVE_MIN - allocated * CHUNK) as u128);
+            if allocated < hal::RESERVE_MIN / CHUNK {
+                let address = global_alloc_reserved(&mut global, CHUNK);
+                assert!((base..base + hal::RESERVE_MIN).contains(&address));
+                assert_eq!(address % CHUNK, 0);
+                assert!(!addresses.contains(&address));
+                addresses.push(address);
+            }
+        }
+        assert_eq!(addresses.len() * CHUNK, hal::RESERVE_MIN);
+        // SAFETY: The isolated reservation was exhausted without publishing objects;
+        // its exclusive blocks are all retired together, with no cached nodes remaining.
+        unsafe { hal::release(base as *mut u8, hal::RESERVE_MIN) };
+    }
+
+    #[test]
+    fn globally_retired_block_is_observable_and_reused_without_reserving() {
+        const CHILD: &str = "RALLOCATOR_GLOBAL_REUSE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "backend::tests::globally_retired_block_is_observable_and_reused_without_reserving",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        // A fresh process prevents other allocator tests from changing global accounting.
+        map().unwrap();
+        let size = 1 << LOCAL_BITS;
+        let address = global_alloc(size);
+        assert_ne!(address, 0);
+        let reserved = observe().reserved_bytes;
+        assert_eq!(observe().ranges.observed_bytes(), 0);
+        global_free(address, size);
+        let returned = observe();
+        assert!(returned.ranges.complete);
+        assert_eq!(returned.reserved_bytes, reserved);
+        assert_eq!(returned.ranges.observed_bytes(), size as u128);
+        assert_eq!(global_alloc(size), address);
+        assert_eq!(observe().reserved_bytes, reserved);
+        assert_eq!(observe().ranges.observed_bytes(), 0);
+        global_free(address, size);
+    }
+
+    #[test]
     fn local_rejects_invalid_sizes_and_round_trips_chunk_sized_metadata() {
         let map = map().unwrap();
         // SAFETY: This handle comes from the backend's unique global map.
@@ -381,7 +444,13 @@ mod tests {
             let address = local.alloc(CHUNK);
             assert_ne!(address, 0);
             assert_eq!(local.requested, expected);
+            assert_eq!(address % CHUNK, 0);
+            assert!(!addresses.contains(&address));
             addresses.push(address);
+            let mut budget = usize::MAX;
+            let state = local.observe(&mut budget);
+            assert!(state.ranges.complete);
+            assert_eq!(state.ranges.observed_bytes(), (expected - addresses.len() * CHUNK) as u128);
         }
         let a = addresses.pop().unwrap();
         // SAFETY: Raw backend blocks were never published as frontend objects;

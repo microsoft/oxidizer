@@ -586,6 +586,8 @@ mod tests {
         unsafe { cache.deallocate(map, 0x1000, address + 32) };
         let open = cache.observe(map, &mut 1);
         assert_eq!((open.open_rings, open.open_objects, open.messages), (1, 2, 0));
+        assert_eq!(open.budget_remaining, BUDGET as u64);
+        assert!(cache.reserve(32));
         let index = Cache::ring_set(0x1000);
         // SAFETY: Closing transfers this test's exclusive initialized ring to an outgoing list.
         unsafe { cache.close_ring(map, index) };
@@ -601,9 +603,13 @@ mod tests {
             (0, 1, 1, 2, 32)
         );
         assert!(complete.complete);
+        assert_eq!(complete.budget_remaining, (BUDGET - 32) as u64);
         let partial = cache.observe(map, &mut 0);
         assert!(!partial.complete);
         assert_eq!((partial.outgoing_lists, partial.messages), (1, 0));
+        assert_eq!(partial.budget_remaining, complete.budget_remaining);
+        cache.clear_budget();
+        assert_eq!(cache.observe(map, &mut 1).budget_remaining, 0);
         // SAFETY: No queue publication occurred; the test retires all ring storage together.
         unsafe { crate::hal::release(address as *mut u8, size) };
     }

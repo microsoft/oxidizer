@@ -141,6 +141,17 @@ mod tests {
     }
 
     #[test]
+    fn slab_geometry_and_waking_policy_match_quarter_capacity() {
+        for class in CLASSES {
+            assert_eq!(class.slab, (class.size * 4).next_power_of_two().max(CHUNK));
+            assert_eq!(usize::from(class.capacity), class.slab / class.size);
+            assert_eq!(class.waking, (class.capacity / 4).min(32));
+        }
+        assert!(CLASSES.iter().any(|class| class.waking == 32));
+        assert!(CLASSES.iter().any(|class| class.waking < 32));
+    }
+
+    #[test]
     fn all_class_boundaries() {
         assert_eq!(CLASSES[COUNT - 1].size, SMALL_MAX);
         for n in 1..=SMALL_MAX {
