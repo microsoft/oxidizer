@@ -531,6 +531,12 @@ fn generate_wrapper_impl(
                     }
                 }
             }
+            syn::ImplItem::Macro(item_macro) => {
+                return Err(syn::Error::new_spanned(
+                    item_macro,
+                    "macros in impl blocks are not supported because their generated public API cannot be delegated reliably",
+                ));
+            }
             _ if is_trait_impl => {
                 if token_stream_contains_ident(item.to_token_stream(), "Self")
                     || token_stream_contains_ident(item.to_token_stream(), &real_struct_segment.ident.to_string())
@@ -541,12 +547,6 @@ fn generate_wrapper_impl(
                     ));
                 }
                 delegation_methods.push(item.clone());
-            }
-            syn::ImplItem::Macro(item_macro) => {
-                return Err(syn::Error::new_spanned(
-                    item_macro,
-                    "macros in inherent impl blocks are not supported because their generated public API cannot be delegated reliably",
-                ));
             }
             syn::ImplItem::Const(item_const) if matches!(item_const.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_)) => {
                 return Err(syn::Error::new_spanned(

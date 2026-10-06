@@ -214,8 +214,8 @@ use proc_macro::TokenStream;
 ///   access or struct-literal construction.
 /// - Public associated constants and types in inherent impls are rejected because the generated
 ///   wrapper cannot preserve them.
-/// - Macros inside inherent impl blocks are rejected because the macro cannot determine which
-///   public methods they generate; expand them before applying `fakeable`.
+/// - Macros inside impl blocks are rejected because the macro cannot determine which public methods
+///   they generate; expand them before applying `fakeable`.
 /// - Attributes on method receivers, parameters, or generic parameters, `ref`/`ref mut` bindings,
 ///   and sub-patterns are rejected because forwarding could change under cfg or binding semantics.
 /// - `impl Trait` return types are rejected because real and fake implementations may choose

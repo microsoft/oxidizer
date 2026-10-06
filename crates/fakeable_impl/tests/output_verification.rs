@@ -972,18 +972,22 @@ fn fakeable_rejects_public_inherent_associated_items() {
 }
 
 #[test]
-fn fakeable_rejects_macros_in_inherent_impls() {
-    let result = fakeable_impl::fakeable_impl(
-        quote! {},
+fn fakeable_rejects_macros_in_impls() {
+    for input in [
         quote! {
             impl MyService {
                 service_methods!();
             }
         },
-    )
-    .to_string();
-
-    assert!(result.contains("macros in inherent impl blocks are not supported"));
+        quote! {
+            impl Service for MyService {
+                service_methods!();
+            }
+        },
+    ] {
+        let result = fakeable_impl::fakeable_impl(quote! {}, input).to_string();
+        assert!(result.contains("macros in impl blocks are not supported"));
+    }
 }
 
 #[test]
