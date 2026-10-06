@@ -192,12 +192,19 @@ Describe 'Resolve-ReleaseSet' {
         It 'requires targeted bin review without running the automated classifier or propagating a Rust API review' {
             $baseline = @(
                 (New-BaselinePackage -Folder cli -IsBinOnly $true)
+                (New-BaselinePackage -Folder consumer -Deps @('cli'))
             )
             $resolved = @(Resolve-ReleaseSet -ParsedTokens (Parse-ReleaseTokens @('cli@breaking')) `
-                -WorkspaceBaseline $baseline -GetRequiredChangeType { throw 'No Rust library to check.' })
-            $resolved[0].RequiresManualSemverReview | Should -BeTrue
-            $resolved[0].IsProcMacroOnly | Should -BeFalse
-            $set = @{ cli = $resolved[0] }
+                -WorkspaceBaseline $baseline -GetRequiredChangeType {
+                    param($folder, $name)
+                    if ($folder -eq 'cli') { throw 'No Rust library to check.' }
+                    'patch'
+                })
+            $set = @{}
+            foreach ($entry in $resolved) { $set[$entry.Folder] = $entry }
+            $set.ContainsKey('consumer') | Should -BeTrue
+            $set.cli.RequiresManualSemverReview | Should -BeTrue
+            $set.cli.IsProcMacroOnly | Should -BeFalse
             $reviewed = [System.Collections.Generic.HashSet[string]]::new()
             $findings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set -WorkspaceBaseline $baseline)
             $findings.Count | Should -Be 1
@@ -206,6 +213,11 @@ Describe 'Resolve-ReleaseSet' {
             Set-ManualSemverReviewAnnotations -ResolvedReleaseSet $set -WorkspaceBaseline $baseline -ReviewedManualSemver $reviewed
             $set.cli.ManualSemverReviewCompleted | Should -BeTrue
             $set.cli.ManualSemverReviewSources | Should -BeNullOrEmpty
+            $reviewedFindings = @(Get-ManualSemverReviewFindings -ResolvedReleaseSet $set `
+                -WorkspaceBaseline $baseline -ReviewedManualSemver $reviewed)
+            @($reviewedFindings | Where-Object Folder -eq consumer).Count | Should -Be 0
+            $set.consumer.RequiresManualSemverReview | Should -BeFalse
+            $set.consumer.ManualSemverReviewSources | Should -BeNullOrEmpty
         }
 
         It 'cascades an unchanged binary at patch but keeps mandatory manual review' {
