@@ -4,7 +4,7 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use events_once::{BoxedReceiver, Event};
+use events_once::BoxedReceiver;
 use pin_project::pin_project;
 
 use super::JoinError;
@@ -47,7 +47,7 @@ where
 {
     #[debug(ignore)]
     #[pin]
-    result_rx: BoxedReceiver<TaskResult<R>>,
+    result_rx: Option<BoxedReceiver<TaskResult<R>>>,
 }
 
 impl<R> JoinHandle<R>
@@ -55,13 +55,13 @@ where
     R: Send + 'static,
 {
     pub(in crate::task) fn new(result_rx: BoxedReceiver<TaskResult<R>>) -> Self {
-        Self { result_rx }
+        Self {
+            result_rx: Some(result_rx),
+        }
     }
 
     pub(crate) fn shutdown() -> Self {
-        let (sender, receiver) = Event::boxed();
-        drop(sender);
-        Self::new(receiver)
+        Self { result_rx: None }
     }
 
     /// Blocks until the task's result is available.
@@ -107,8 +107,11 @@ where
     type Output = Result<R, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        match this.result_rx.poll(cx) {
+        let mut this = self.project();
+        let Some(result_rx) = this.result_rx.as_mut().as_pin_mut() else {
+            return Poll::Ready(Err(JoinError::shutdown()));
+        };
+        match result_rx.poll(cx) {
             Poll::Ready(Ok(result)) => match result {
                 TaskResult::Completed(value) => Poll::Ready(Ok(value)),
                 TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),

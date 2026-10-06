@@ -13,6 +13,10 @@ use panic_support::{isolated, runtime};
 testing_aids::init_tracing!();
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
+)]
 fn async_worker_stop_returns_without_self_joining() {
     isolated("async_worker_stop_returns_without_self_joining", || {
         let runtime = runtime();

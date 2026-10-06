@@ -240,6 +240,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
+    )]
     fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
         let runtime = Runtime::builder()
             .processor_count(crate::runtime::ProcessorCount::exactly(1))
