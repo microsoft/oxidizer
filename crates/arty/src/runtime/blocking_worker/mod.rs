@@ -209,6 +209,22 @@ impl BlockingPool {
     }
 }
 
+// Keep the private closed-pool race outside the coverage-excluded test scaffolding.
+#[cfg(test)]
+#[test]
+fn closed_pool_rejects_worker_submission_after_admission() {
+    let pool = BlockingPool::new(Some(1));
+    let worker = BlockingWorker::new(pool.clone(), Sink::noop());
+    pool.join();
+
+    let invoked = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&invoked);
+    let join = worker.spawn_blocking(move || captured.store(true, Ordering::Relaxed));
+
+    assert!(join.wait().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Relaxed));
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 pub(super) mod blocking_worker_tests {
@@ -377,20 +393,6 @@ pub(super) mod blocking_worker_tests {
         assert!(!invoked.load(Ordering::Relaxed));
         assert!(!pool.grow());
         assert!(!pool.is_overloaded());
-    }
-
-    #[test]
-    fn closed_pool_rejects_worker_submission_after_admission() {
-        let pool = BlockingPool::new(Some(1));
-        let worker = BlockingWorker::new(pool.clone(), Sink::noop());
-        pool.join();
-
-        let invoked = Arc::new(AtomicBool::new(false));
-        let captured = Arc::clone(&invoked);
-        let join = worker.spawn_blocking(move || captured.store(true, Ordering::Relaxed));
-
-        assert!(join.wait().unwrap_err().is_shutdown());
-        assert!(!invoked.load(Ordering::Relaxed));
     }
 
     #[cfg(not(miri))]
