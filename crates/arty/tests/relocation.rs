@@ -9,7 +9,7 @@ testing_aids::init_tracing!();
 
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use arty::task::Builtins;
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
@@ -46,7 +46,7 @@ struct RelocationObservation {
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(2))
+        .cpu_policy(CpuPolicy::exactly(2))
         .blocking_pool_policy(policy)
         .build()
         .expect("failed to build runtime");
@@ -184,8 +184,8 @@ fn relocating_builtins_uses_same_pool_when_shared() {
 
 #[test]
 fn foreign_owner_relocation_preserves_runtime_binding() {
-    let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+    let source_runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let destination_runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
     let mut builtins = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
@@ -216,7 +216,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
     // Exercise the cached route repeatedly without turning this regression test into a load test.
     const SPAWN_COUNT: usize = 100;
 
-    let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }))
         .map(|handle| handle.wait().unwrap())
@@ -236,8 +236,8 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
 #[test]
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
-    let source_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
-    let destination_runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+    let source_runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let destination_runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
     let builtins = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })

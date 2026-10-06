@@ -14,7 +14,7 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
 use arty::task::{Builtins, Scheduler};
 use arty::time::Clock;
 use observed::Sink;
@@ -25,10 +25,7 @@ use thread_aware::Unaware;
 testing_aids::init_tracing!();
 
 fn runtime(workers: usize) -> Runtime {
-    Runtime::builder()
-        .processor_count(ProcessorCount::exactly(workers))
-        .build()
-        .unwrap()
+    Runtime::builder().cpu_policy(CpuPolicy::exactly(workers)).build().unwrap()
 }
 
 fn worker_scheduler(runtime: &Runtime) -> Scheduler {
@@ -45,23 +42,23 @@ fn count_workers(runtime: &Runtime) -> usize {
 
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
-    assert_eq!(ProcessorCount::default(), ProcessorCount::auto());
+    assert_eq!(CpuPolicy::default(), CpuPolicy::auto());
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
 }
 
 #[test]
 fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
     for previous in [
-        ProcessorCount::exactly(0),
-        ProcessorCount::at_most(0),
-        ProcessorCount::exactly(usize::MAX),
-        ProcessorCount::exactly(2),
-        ProcessorCount::all(),
-        ProcessorCount::auto(),
+        CpuPolicy::exactly(0),
+        CpuPolicy::at_most(0),
+        CpuPolicy::exactly(usize::MAX),
+        CpuPolicy::exactly(2),
+        CpuPolicy::all(),
+        CpuPolicy::auto(),
     ] {
         let runtime = Runtime::builder()
-            .processor_count(previous)
-            .processor_count(ProcessorCount::at_most(1))
+            .cpu_policy(previous)
+            .cpu_policy(CpuPolicy::at_most(1))
             .build()
             .unwrap();
         assert_eq!(count_workers(&runtime), 1);
@@ -88,9 +85,9 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
     let runtime = Runtime::builder()
         .stack_size(STACK)
         .blocking_pool_policy(BlockingPoolPolicy::isolated())
-        .processor_count(ProcessorCount::at_most(1))
+        .cpu_policy(CpuPolicy::at_most(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-        .processor_count(ProcessorCount::exactly(2))
+        .cpu_policy(CpuPolicy::exactly(2))
         .sink(sink)
         .build()
         .unwrap();
@@ -162,7 +159,7 @@ fn nested_block_on_rejects_the_factory_before_submission() {
 #[test]
 fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
     let first = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap();
@@ -257,7 +254,7 @@ fn configured_clock_control_remains_the_worker_time_source() {
 
     let control = ClockControl::new();
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .clock(control.clone())
         .build()
         .unwrap();

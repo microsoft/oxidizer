@@ -419,7 +419,7 @@ mod tests {
     fn check_borrowed_future_completion(panics: bool) {
         execute_or_terminate_process(|| {
             let runtime = Runtime::builder()
-                .processor_count(crate::runtime::ProcessorCount::exactly(1))
+                .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
                 .build()
                 .unwrap();
             let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

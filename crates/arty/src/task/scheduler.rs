@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let registered = runtime
@@ -429,7 +429,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let (started_tx, started_rx) = mpsc::channel();
@@ -464,7 +464,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let (source, mut scheduler) = runtime

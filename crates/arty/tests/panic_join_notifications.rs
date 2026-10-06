@@ -160,3 +160,39 @@ fn blocking_panicking_join_waker_is_contained() {
         runtime.stop().unwrap();
     });
 }
+
+#[test]
+fn blocking_panicking_join_waker_on_cancellation_is_contained() {
+    isolated("blocking_panicking_join_waker_on_cancellation_is_contained", || {
+        let runtime = runtime();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let running = runtime.scheduler().spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let queued = runtime.scheduler().spawn_blocking(|| 42);
+        let mut queued = pin!(queued);
+        let notified = Arc::new(AtomicBool::new(false));
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(PanicWake {
+            notified: Arc::clone(&notified),
+            notifications: Arc::clone(&notifications),
+        }));
+        assert!(queued.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+        RuntimeOperations::from(&runtime).request_stop();
+        release_tx.send(()).unwrap();
+        running.wait().unwrap();
+        runtime.stop().unwrap();
+
+        let Poll::Ready(Err(error)) = queued.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+            panic!("queued blocking work must report shutdown");
+        };
+        assert!(error.is_shutdown());
+        assert!(notified.load(Ordering::SeqCst));
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+    });
+}

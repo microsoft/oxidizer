@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
 use arty::task::{JoinError, JoinHandle};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 use thread_aware::Unaware;
@@ -26,7 +26,7 @@ testing_aids::init_tracing!();
 #[cfg(test)]
 fn runtime() -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
@@ -53,7 +53,7 @@ fn async_and_blocking_panics_do_not_unwind_the_joiner() {
 #[test]
 fn blocking_callback_cannot_wait_for_blocking_work() {
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(2))
         .build()
         .unwrap();

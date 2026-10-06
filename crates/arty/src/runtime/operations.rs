@@ -129,13 +129,13 @@ mod tests {
 
     use super::*;
     use crate::runtime::bootstrap;
-    use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
+    use crate::runtime::config::{BlockingPoolPolicy, CpuPolicy, RuntimeConfig};
 
     #[cfg_attr(test, mutants::skip)]
     fn runtime_with_coordinates(processors: usize) -> (Runtime, ThreadBuilder) {
         let coordinates = ThreadBuilder::default();
         let config = RuntimeConfig {
-            num_processors: ProcessorCount::exactly(processors),
+            cpu_policy: CpuPolicy::exactly(processors),
             blocking_pool_policy: BlockingPoolPolicy::shared(1),
             ..RuntimeConfig::default()
         };

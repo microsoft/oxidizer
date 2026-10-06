@@ -31,7 +31,7 @@ fn many_timers_with_relocation_ensure_advanced() {
         let builder = Runtime::builder();
         // Two workers preserve cross-worker timer relocation under the interpreter.
         #[cfg(miri)]
-        let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(workers()));
+        let builder = builder.cpu_policy(arty::runtime::CpuPolicy::exactly(workers()));
         let runtime = builder.build().unwrap();
         let count = workers();
         runtime
@@ -69,7 +69,7 @@ fn many_timers_with_relocation_ensure_advanced() {
 fn many_timers_ensure_advanced() {
     let builder = Runtime::builder();
     #[cfg(miri)]
-    let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(workers()));
+    let builder = builder.cpu_policy(arty::runtime::CpuPolicy::exactly(workers()));
     let runtime = builder.build().unwrap();
 
     let count = workers();

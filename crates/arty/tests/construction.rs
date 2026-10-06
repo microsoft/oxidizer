@@ -10,17 +10,17 @@ testing_aids::init_tracing!();
 
 use std::error::Error as StdError;
 
-use arty::runtime::{Error, ProcessorCount, Runtime};
+use arty::runtime::{CpuPolicy, Error, Runtime};
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
 #[test]
 fn zero_counts_are_rejected_when_the_runtime_is_built() {
-    const EXACT: ProcessorCount = ProcessorCount::exactly(0);
-    const MAXIMUM: ProcessorCount = ProcessorCount::at_most(0);
+    const EXACT: CpuPolicy = CpuPolicy::exactly(0);
+    const MAXIMUM: CpuPolicy = CpuPolicy::at_most(0);
 
     for policy in [EXACT, MAXIMUM] {
         let (sink, processor) = test_emitter(TEST_ID);
-        let builder = Runtime::builder().processor_count(policy).sink(sink);
+        let builder = Runtime::builder().cpu_policy(policy).sink(sink);
         let error: Error = builder.build().unwrap_err();
 
         assert_eq!(error.to_string(), "processor count must be greater than zero");
@@ -33,10 +33,7 @@ fn zero_counts_are_rejected_when_the_runtime_is_built() {
 
 #[test]
 fn unavailable_processors_return_a_typed_construction_error() {
-    let error: Error = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(usize::MAX))
-        .build()
-        .unwrap_err();
+    let error: Error = Runtime::builder().cpu_policy(CpuPolicy::exactly(usize::MAX)).build().unwrap_err();
     assert!(error.to_string().contains(&usize::MAX.to_string()));
     assert!(error.source().is_some());
 }
@@ -46,7 +43,7 @@ fn processor_selection_failure_reports_failure_without_starting_threads() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(usize::MAX))
+        .cpu_policy(CpuPolicy::exactly(usize::MAX))
         .sink(sink)
         .build()
         .unwrap_err();
@@ -58,12 +55,9 @@ fn processor_selection_failure_reports_failure_without_starting_threads() {
 
 #[test]
 fn runtime_can_be_constructed_after_a_rejected_processor_request() {
-    Runtime::builder()
-        .processor_count(ProcessorCount::exactly(usize::MAX))
-        .build()
-        .unwrap_err();
+    Runtime::builder().cpu_policy(CpuPolicy::exactly(usize::MAX)).build().unwrap_err();
 
-    let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(1)).build().unwrap();
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).build().unwrap();
 
     assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
 }

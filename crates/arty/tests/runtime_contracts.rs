@@ -16,7 +16,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
 use arty::task::JoinError;
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
 use thread_aware::{ThreadAware, Unaware};
@@ -27,7 +27,7 @@ testing_aids::init_tracing!();
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(workers))
+        .cpu_policy(CpuPolicy::exactly(workers))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
@@ -280,11 +280,7 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
 fn worker_can_drive_a_controlled_clock_without_io() {
     execute_or_terminate_process(|| {
         let control = ClockControl::new().auto_advance_timers(true);
-        let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(1))
-            .clock(control)
-            .build()
-            .unwrap();
+        let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).clock(control).build().unwrap();
         runtime
             .scheduler()
             .block_on(async |cx| {
@@ -435,7 +431,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
     execute_or_terminate_process(|| {
         for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
             let runtime = Runtime::builder()
-                .processor_count(ProcessorCount::exactly(1))
+                .cpu_policy(CpuPolicy::exactly(1))
                 .blocking_pool_policy(policy)
                 .build()
                 .unwrap();
@@ -458,11 +454,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 #[test]
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
-    let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
-        .sink(sink)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).sink(sink).build().unwrap();
     let operations = RuntimeOperations::from(&runtime);
     operations.request_stop();
     operations.request_stop();

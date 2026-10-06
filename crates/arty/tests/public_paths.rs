@@ -12,7 +12,7 @@ use std::fmt::Debug;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::{BlockingPoolPolicy, Error, ProcessorCount, Runtime, RuntimeBuilder, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Error, Runtime, RuntimeBuilder, RuntimeOperations};
 use arty::task::{Builtins, JoinError, JoinHandle, LocalJoinHandle, LocalScheduler, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
@@ -34,12 +34,12 @@ assert_not_impl_any!(RuntimeOperations: ThreadAware);
 assert_impl_all!(RuntimeScheduler: Send, Sync, Debug);
 assert_not_impl_any!(RuntimeScheduler: Clone, ThreadAware);
 assert_impl_all!(BlockingPoolPolicy: Clone, Debug);
-assert_impl_all!(ProcessorCount: Clone, Copy, Debug, Default);
+assert_impl_all!(CpuPolicy: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
 
-const _: fn(usize) -> ProcessorCount = ProcessorCount::exactly;
-const _: fn(usize) -> ProcessorCount = ProcessorCount::at_most;
+const _: fn(usize) -> CpuPolicy = CpuPolicy::exactly;
+const _: fn(usize) -> CpuPolicy = CpuPolicy::at_most;
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;

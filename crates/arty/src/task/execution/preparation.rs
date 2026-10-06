@@ -313,4 +313,35 @@ mod tests {
         };
         assert!(error.is_shutdown());
     }
+
+    #[test]
+    fn discarded_blocking_task_contains_body_destructor_panic() {
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("discarded blocking capture");
+            }
+        }
+
+        let capture = PanicOnDrop;
+        let (task, handle) = prepare_blocking(move || drop(capture));
+        catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
+        assert!(block_on(handle).unwrap_err().is_shutdown());
+    }
+
+    #[test]
+    fn discarded_blocking_task_contains_join_waker_panic() {
+        let (task, handle) = prepare_blocking(|| 42);
+        let mut handle = pin!(handle);
+        let waker = Waker::from(Arc::new(PanicWake));
+        assert!(handle.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+        catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
+
+        let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+            panic!("discarded blocking work must report shutdown");
+        };
+        assert!(error.is_shutdown());
+    }
 }

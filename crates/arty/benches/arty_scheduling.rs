@@ -22,7 +22,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use arty::task::{Builtins, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
@@ -91,7 +91,7 @@ struct ArtyCase {
 impl ArtyCase {
     fn new(workers: usize, count: usize, workload: Workload) -> Self {
         let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(workers))
+            .cpu_policy(CpuPolicy::exactly(workers))
             .blocking_pool_policy(BlockingPoolPolicy::shared(BLOCKING_THREADS))
             .build()
             .expect("benchmark requires the selected number of available processors");

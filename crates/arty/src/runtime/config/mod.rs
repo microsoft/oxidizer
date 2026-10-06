@@ -7,5 +7,5 @@ mod blocking_pool_policy;
 mod processors;
 
 pub use blocking_pool_policy::BlockingPoolPolicy;
-pub use processors::ProcessorCount;
+pub use processors::CpuPolicy;
 pub(crate) use processors::RuntimeConfig;

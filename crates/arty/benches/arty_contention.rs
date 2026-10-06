@@ -23,7 +23,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{ProcessorCount, Runtime};
+use arty::runtime::{CpuPolicy, Runtime};
 use arty::task::Builtins;
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
@@ -87,7 +87,7 @@ impl ArtyCase {
     fn new(workers: usize) -> Self {
         let case = Self {
             runtime: Runtime::builder()
-                .processor_count(ProcessorCount::exactly(workers))
+                .cpu_policy(CpuPolicy::exactly(workers))
                 .build()
                 .expect("benchmark runtime construction must succeed"),
             cache: Cache::new(),

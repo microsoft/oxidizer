@@ -334,14 +334,14 @@ mod tests {
     #[cfg(not(miri))]
     use crate::runtime::Runtime;
     #[cfg(not(miri))]
-    use crate::runtime::config::ProcessorCount;
+    use crate::runtime::config::CpuPolicy;
 
     #[cfg(all(debug_assertions, not(miri)))]
     #[test]
     fn validation_accepts_associated_worker() {
         let (sink, processor) = test_emitter(TEST_ID);
         Runtime::builder()
-            .processor_count(ProcessorCount::exactly(1))
+            .cpu_policy(CpuPolicy::exactly(1))
             .sink(sink)
             .build()
             .unwrap()
@@ -381,11 +381,7 @@ mod tests {
             return;
         }
         let (sink, processor) = test_emitter(TEST_ID);
-        let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(2))
-            .sink(sink)
-            .build()
-            .unwrap();
+        let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(2)).sink(sink).build().unwrap();
         let workers: Vec<_> = (0..2)
             .map(|_| {
                 runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
@@ -422,7 +418,7 @@ mod tests {
     #[test]
     fn worker_services_are_ready_before_spawning() {
         let count = many_cpus::SystemHardware::current().processors().len().min(2);
-        let runtime = Runtime::builder().processor_count(ProcessorCount::at_most(2)).build().unwrap();
+        let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(2)).build().unwrap();
         let (actual, expected) = runtime
             .scheduler()
             .block_on(async move |cx| {

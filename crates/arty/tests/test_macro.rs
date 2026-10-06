@@ -64,10 +64,10 @@ async fn zero_workers_fail_during_construction(_cx: Builtins) {
 }
 
 fn custom_builder() -> arty::runtime::RuntimeBuilder {
-    use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+    use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 
     Runtime::builder()
-        .processor_count(ProcessorCount::at_most(1))
+        .cpu_policy(CpuPolicy::at_most(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
 }
 

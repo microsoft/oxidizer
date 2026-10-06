@@ -12,7 +12,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use arty::task::JoinHandle;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use data_privacy::RedactionEngine;
@@ -52,7 +52,7 @@ fn active_sink() -> Sink {
 
 fn runtime(sink: Sink) -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .sink(sink)
         .build()

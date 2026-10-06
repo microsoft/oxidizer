@@ -111,29 +111,29 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL7CuuqeC3u8bTCTE_dTOGUwbjtBjCOjOE0UbR1V3f_mzChlhZIOCZGFydHllMC4zLjGCa2FydHlfbWFjcm9zZTAuMy4xgmhvYnNlcnZlZGYwLjI2LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL7CuuqeC3u8bTCTE_dTOGUwbjtBjCOjOE0UbR1V3f_mzChlhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI2LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link1]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
- [__link10]: https://docs.rs/arty/0.3.1/arty/?search=time::Clock
- [__link11]: https://docs.rs/arty/0.3.1/arty/?search=time::ClockControl
- [__link12]: https://docs.rs/arty/0.3.1/arty/?search=core::Thread
- [__link13]: https://docs.rs/arty/0.3.1/arty/?search=core::ThreadAware
- [__link14]: https://docs.rs/arty/0.3.1/arty/?search=documentation
- [__link15]: https://docs.rs/arty/0.3.1/arty/?search=documentation::scheduling
- [__link16]: https://docs.rs/arty/0.3.1/arty/?search=documentation::configuration
- [__link17]: https://docs.rs/arty/0.3.1/arty/?search=documentation::shutdown
- [__link18]: https://docs.rs/arty/0.3.1/arty/?search=documentation::thread_awareness
- [__link19]: https://docs.rs/arty/0.3.1/arty/?search=documentation::time
- [__link2]: https://docs.rs/arty/0.3.1/arty/?search=task::JoinError
- [__link20]: https://docs.rs/arty/0.3.1/arty/?search=documentation::telemetry
+ [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
+ [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::Clock
+ [__link11]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
+ [__link12]: https://docs.rs/arty/0.4.0/arty/?search=core::Thread
+ [__link13]: https://docs.rs/arty/0.4.0/arty/?search=core::ThreadAware
+ [__link14]: https://docs.rs/arty/0.4.0/arty/?search=documentation
+ [__link15]: https://docs.rs/arty/0.4.0/arty/?search=documentation::scheduling
+ [__link16]: https://docs.rs/arty/0.4.0/arty/?search=documentation::configuration
+ [__link17]: https://docs.rs/arty/0.4.0/arty/?search=documentation::shutdown
+ [__link18]: https://docs.rs/arty/0.4.0/arty/?search=documentation::thread_awareness
+ [__link19]: https://docs.rs/arty/0.4.0/arty/?search=documentation::time
+ [__link2]: https://docs.rs/arty/0.4.0/arty/?search=task::JoinError
+ [__link20]: https://docs.rs/arty/0.4.0/arty/?search=documentation::telemetry
  [__link21]: https://crates.io/crates/observed/0.26.0
- [__link22]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
- [__link23]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=test
- [__link24]: https://docs.rs/arty/0.3.1/arty/?search=time::ClockControl
- [__link3]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=main
- [__link4]: https://docs.rs/arty_macros/0.3.1/arty_macros/?search=test
- [__link5]: https://docs.rs/arty/0.3.1/arty/?search=runtime::Runtime
- [__link6]: https://docs.rs/arty/0.3.1/arty/?search=task::Builtins
- [__link7]: https://docs.rs/arty/0.3.1/arty/?search=task::RuntimeScheduler
- [__link8]: https://docs.rs/arty/0.3.1/arty/?search=task::Scheduler
- [__link9]: https://docs.rs/arty/0.3.1/arty/?search=task::LocalScheduler
+ [__link22]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
+ [__link23]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
+ [__link24]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
+ [__link3]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
+ [__link4]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
+ [__link5]: https://docs.rs/arty/0.4.0/arty/?search=runtime::Runtime
+ [__link6]: https://docs.rs/arty/0.4.0/arty/?search=task::Builtins
+ [__link7]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler
+ [__link8]: https://docs.rs/arty/0.4.0/arty/?search=task::Scheduler
+ [__link9]: https://docs.rs/arty/0.4.0/arty/?search=task::LocalScheduler

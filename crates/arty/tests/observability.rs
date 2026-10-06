@@ -14,7 +14,7 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::{ProcessorCount, Runtime};
+use arty::runtime::{CpuPolicy, Runtime};
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
@@ -30,11 +30,11 @@ fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
 }
 
 #[test]
-fn started_event_reports_processor_counts() {
+fn started_event_reports_cpu_policys() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -59,7 +59,7 @@ fn each_async_worker_starts_and_stops() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -79,7 +79,7 @@ fn async_worker_os_threads_report_lifecycle() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -115,7 +115,7 @@ fn spawned_task_emits_spawned_and_completed() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -142,7 +142,7 @@ fn panicking_task_emits_panicked_event() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -164,7 +164,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -186,7 +186,7 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -219,7 +219,7 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .processor_count(ProcessorCount::exactly(PROCESSORS))
+        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();

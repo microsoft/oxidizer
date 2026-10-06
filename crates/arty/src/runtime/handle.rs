@@ -246,7 +246,7 @@ mod tests {
     )]
     fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
         let runtime = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let scheduler = runtime
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
         let runtime = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let scheduler = runtime
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
         let runtime = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn dropping_the_owner_on_an_async_worker_does_not_wait_for_shutdown() {
         let runtime = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -323,11 +323,11 @@ mod tests {
     #[test]
     fn dropping_another_runtime_on_a_worker_does_not_wait_for_blocking_work() {
         let runtime = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let caller = Runtime::builder()
-            .processor_count(crate::runtime::ProcessorCount::exactly(1))
+            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();

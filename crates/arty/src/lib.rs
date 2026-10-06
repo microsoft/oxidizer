@@ -138,7 +138,7 @@ use arty_io_core as _;
 ///
 /// `workers` and `builder` cannot be combined. A worker limit does not limit
 /// blocking-pool threads. Without a limit, the runtime uses
-/// [`ProcessorCount::auto`](crate::runtime::ProcessorCount::auto).
+/// [`CpuPolicy::auto`](crate::runtime::CpuPolicy::auto).
 ///
 /// The builder expression runs before the async body, so it cannot use the
 /// injected argument or variables declared inside the body. It must produce
@@ -178,10 +178,10 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// fn app_builder() -> arty::runtime::RuntimeBuilder {
-///     use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+///     use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 ///
 ///     Runtime::builder()
-///         .processor_count(ProcessorCount::at_most(4))
+///         .cpu_policy(CpuPolicy::at_most(4))
 ///         .blocking_pool_policy(BlockingPoolPolicy::shared(8))
 /// }
 ///

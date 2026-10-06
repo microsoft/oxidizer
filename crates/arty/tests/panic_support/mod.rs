@@ -3,11 +3,11 @@
 
 #![cfg(test)]
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 
 pub(crate) fn runtime() -> Runtime {
     Runtime::builder()
-        .processor_count(ProcessorCount::exactly(1))
+        .cpu_policy(CpuPolicy::exactly(1))
         .blocking_pool_policy(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()

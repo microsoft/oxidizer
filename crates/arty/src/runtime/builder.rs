@@ -6,7 +6,7 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, ProcessorCount, RuntimeConfig};
+use crate::runtime::config::{BlockingPoolPolicy, CpuPolicy, RuntimeConfig};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
@@ -16,16 +16,16 @@ use crate::runtime::handle::Runtime;
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
-/// The defaults are [`ProcessorCount::auto`], 2 MiB async-worker stacks,
+/// The defaults are [`CpuPolicy::auto`], 2 MiB async-worker stacks,
 /// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+/// use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 ///
 /// let runtime = Runtime::builder()
-///     .processor_count(ProcessorCount::at_most(4))
+///     .cpu_policy(CpuPolicy::at_most(4))
 ///     .blocking_pool_policy(BlockingPoolPolicy::shared(4))
 ///     .build()?;
 /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
@@ -42,20 +42,20 @@ impl RuntimeBuilder {
     /// Sets the processor policy for async workers.
     ///
     /// The runtime starts one async worker per selected processor.
-    /// The default is [`ProcessorCount::auto`]. This does not set blocking-pool
+    /// The default is [`CpuPolicy::auto`]. This does not set blocking-pool
     /// limits; use [`blocking_pool_policy`](Self::blocking_pool_policy) for those.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{ProcessorCount, Runtime};
+    /// use arty::runtime::{CpuPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().processor_count(ProcessorCount::at_most(4));
+    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(4));
     /// ```
     #[must_use]
-    pub const fn processor_count(mut self, count: ProcessorCount) -> Self {
-        self.processor_config.num_processors = count;
+    pub const fn cpu_policy(mut self, count: CpuPolicy) -> Self {
+        self.processor_config.cpu_policy = count;
         self
     }
 
@@ -169,7 +169,7 @@ impl RuntimeBuilder {
     /// # Errors
     ///
     /// Returns [`Error`] if the processor count is zero or the policy cannot be
-    /// satisfied, such as an [`exactly`](ProcessorCount::exactly) request exceeding
+    /// satisfied, such as an [`exactly`](CpuPolicy::exactly) request exceeding
     /// available processors.
     ///
     /// # Panics
@@ -231,13 +231,13 @@ mod tests {
     #[test]
     fn resource_limits_preserve_independent_settings() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(2))
+            .cpu_policy(CpuPolicy::exactly(2))
             .stack_size(1024 * 1024)
             .blocking_pool_policy(BlockingPoolPolicy::shared(1));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                num_processors: ProcessorCount::exactly(2),
+                cpu_policy: CpuPolicy::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
@@ -247,36 +247,32 @@ mod tests {
     #[test]
     fn maximum_processor_selection_replaces_exact_count() {
         let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(2))
-            .processor_count(ProcessorCount::at_most(1));
-        assert_eq!(builder.processor_config.num_processors, ProcessorCount::at_most(1),);
+            .cpu_policy(CpuPolicy::exactly(2))
+            .cpu_policy(CpuPolicy::at_most(1));
+        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::at_most(1),);
     }
 
     #[test]
-    fn zero_processor_counts_can_be_replaced_before_building() {
-        for policy in [ProcessorCount::exactly(0), ProcessorCount::at_most(0)] {
-            let builder = Runtime::builder().processor_count(policy);
-            assert_eq!(builder.processor_config.num_processors, policy);
+    fn zero_cpu_policys_can_be_replaced_before_building() {
+        for policy in [CpuPolicy::exactly(0), CpuPolicy::at_most(0)] {
+            let builder = Runtime::builder().cpu_policy(policy);
+            assert_eq!(builder.processor_config.cpu_policy, policy);
 
-            let builder = builder.processor_count(ProcessorCount::at_most(1));
-            assert_eq!(builder.processor_config.num_processors, ProcessorCount::at_most(1));
+            let builder = builder.cpu_policy(CpuPolicy::at_most(1));
+            assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::at_most(1));
         }
     }
 
     #[test]
     fn all_processors_selection_replaces_maximum_count() {
-        let builder = Runtime::builder()
-            .processor_count(ProcessorCount::at_most(1))
-            .processor_count(ProcessorCount::all());
-        assert_eq!(builder.processor_config.num_processors, ProcessorCount::all(),);
+        let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).cpu_policy(CpuPolicy::all());
+        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::all(),);
     }
 
     #[test]
     fn automatic_processor_selection_replaces_exact_count() {
-        let builder = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(2))
-            .processor_count(ProcessorCount::auto());
-        assert_eq!(builder.processor_config.num_processors, ProcessorCount::auto(),);
+        let builder = Runtime::builder().cpu_policy(CpuPolicy::exactly(2)).cpu_policy(CpuPolicy::auto());
+        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::auto(),);
     }
 
     #[test]
@@ -284,12 +280,12 @@ mod tests {
         let builder = Runtime::builder()
             .stack_size(1024 * 1024)
             .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-            .processor_count(ProcessorCount::at_most(1))
-            .processor_count(ProcessorCount::exactly(2));
+            .cpu_policy(CpuPolicy::at_most(1))
+            .cpu_policy(CpuPolicy::exactly(2));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                num_processors: ProcessorCount::exactly(2),
+                cpu_policy: CpuPolicy::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
@@ -306,7 +302,7 @@ mod tests {
     fn build_and_stop_inside_futures_executor() {
         testing_aids::execute_or_terminate_process(|| {
             futures::executor::block_on(async {
-                let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(1)).build().unwrap();
+                let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
                 assert!(runtime.shared_state.iter().all(|state| state.get().is_some()));
 
                 let (value, scheduler) = runtime

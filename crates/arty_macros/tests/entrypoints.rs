@@ -28,9 +28,9 @@ mod fixture {
     pub(super) struct Builtins(pub(super) usize, pub(super) usize, pub(super) Option<Clock>);
 
     #[derive(Debug, Clone, Copy)]
-    pub(super) struct ProcessorCount(usize);
+    pub(super) struct CpuPolicy(usize);
 
-    impl ProcessorCount {
+    impl CpuPolicy {
         pub(super) const fn at_most(count: usize) -> Self {
             Self(count)
         }
@@ -101,7 +101,7 @@ mod fixture {
             self
         }
 
-        pub(super) fn processor_count(mut self, count: ProcessorCount) -> Self {
+        pub(super) fn cpu_policy(mut self, count: CpuPolicy) -> Self {
             self.workers = count.0.min(2);
             self
         }

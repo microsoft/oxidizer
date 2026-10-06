@@ -5,7 +5,6 @@
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,7 +14,7 @@ use performables::sync::mutex::Mutex;
 use threadpool::ThreadPool;
 
 use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
-use crate::task::execution::{discard_panic, prepare_blocking};
+use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
@@ -79,9 +78,7 @@ impl BlockingWorker {
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
             if shutdown.load(Ordering::Acquire) {
-                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(task))) {
-                    discard_panic(panic);
-                }
+                drop(task);
                 return;
             }
             task();
@@ -382,12 +379,26 @@ pub(super) mod blocking_worker_tests {
         assert!(!pool.is_overloaded());
     }
 
+    #[test]
+    fn closed_pool_rejects_worker_submission_after_admission() {
+        let pool = BlockingPool::new(Some(1));
+        let worker = BlockingWorker::new(pool.clone(), Sink::noop());
+        pool.join();
+
+        let invoked = Arc::new(AtomicBool::new(false));
+        let captured = Arc::clone(&invoked);
+        let join = worker.spawn_blocking(move || captured.store(true, Ordering::Relaxed));
+
+        assert!(join.wait().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Relaxed));
+    }
+
     #[cfg(not(miri))]
     #[test]
     fn runtime_releases_pool_even_when_a_scheduler_is_retained() {
         execute_or_abandon(|| {
             let runtime = crate::runtime::Runtime::builder()
-                .processor_count(crate::runtime::ProcessorCount::exactly(1))
+                .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
                 .build()
                 .unwrap();
             let scheduler = runtime
@@ -485,7 +496,7 @@ pub(super) mod blocking_worker_tests {
     /// thread busy while `queued_task_count` further tasks are spawned, and returns
     /// the telemetry captured while the saturation guard was evaluated on each spawn.
     #[cfg_attr(test, mutants::skip)] // Test-only helper.
-    fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> Vec<CapturedEvent> {
+    fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> (Vec<CapturedEvent>, Vec<usize>) {
         let (sink, processor) = test_emitter(TEST_ID);
         let worker = BlockingWorker::new(BlockingPool::new(max_thread_count), sink);
 
@@ -514,8 +525,16 @@ pub(super) mod blocking_worker_tests {
         blocker_started_rx.recv().expect("the worker must run the blocker task");
 
         // Each spawn re-evaluates the saturation guard; capture whatever it emits.
+        let mut saturation_counts = Vec::with_capacity(queued_task_count);
         for _ in 0..queued_task_count {
             drop(worker.spawn_blocking(|| {}));
+            saturation_counts.push(
+                processor
+                    .events()
+                    .iter()
+                    .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
+                    .count(),
+            );
         }
 
         let events = processor.events();
@@ -525,13 +544,13 @@ pub(super) mod blocking_worker_tests {
         worker.shutdown();
         worker.join();
 
-        events
+        (events, saturation_counts)
     }
 
     #[test]
     fn spawn_blocking_reports_saturation_when_overloaded_pool_cannot_grow() {
         // A pool capped at one thread cannot grow, so overloading it must surface saturation.
-        let events = spawn_blocking_telemetry(Some(1), BlockingPool::MAX_TASKS_PER_THREAD + 1);
+        let (events, saturation_counts) = spawn_blocking_telemetry(Some(1), BlockingPool::MAX_TASKS_PER_THREAD + 1);
 
         let saturated: Vec<_> = events
             .iter()
@@ -540,9 +559,24 @@ pub(super) mod blocking_worker_tests {
         assert!(!saturated.is_empty(), "an overloaded pool that cannot grow must report saturation");
         assert_eq!(saturated.len(), 1, "one saturation episode emits one warning");
         assert_eq!(
+            saturation_counts[BlockingPool::MAX_TASKS_PER_THREAD - 1],
+            1,
+            "the first overloaded submission emits the warning, not a later submission"
+        );
+        assert_eq!(
             dimension(saturated[0], "blocking_worker_pool.max_threads"),
             Some("1".into()),
             "the saturation event reports the pool's maximum thread count"
+        );
+    }
+
+    #[test]
+    fn spawn_blocking_grows_pool_without_reporting_saturation() {
+        let (events, _) = spawn_blocking_telemetry(Some(2), BlockingPool::MAX_TASKS_PER_THREAD + 1);
+
+        assert!(
+            events.iter().all(|event| event.name() != "arty.rt.blocking_worker.pool_saturated"),
+            "an overloaded pool that can grow must not report saturation"
         );
     }
 
@@ -551,7 +585,7 @@ pub(super) mod blocking_worker_tests {
         // A pool at its maximum size that is not overloaded must stay quiet: saturation is
         // only reported when an overload coincides with an inability to grow, never on the
         // inability to grow alone.
-        let events = spawn_blocking_telemetry(Some(1), 1);
+        let (events, _) = spawn_blocking_telemetry(Some(1), 1);
 
         assert!(
             events.iter().all(|event| event.name() != "arty.rt.blocking_worker.pool_saturated"),

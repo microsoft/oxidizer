@@ -10,7 +10,7 @@ use std::thread;
 
 use arty::core::{Thread, ThreadAware};
 #[cfg(not(miri))]
-use arty::runtime::ProcessorCount;
+use arty::runtime::CpuPolicy;
 use arty::runtime::Runtime;
 use arty::task::Scheduler;
 #[cfg(not(miri))]
@@ -26,7 +26,7 @@ fn spawn_some_tasks() {
         let builder = Runtime::builder();
         // Keep cross-worker submission under Miri without repeating it over every fake processor.
         #[cfg(miri)]
-        let builder = builder.processor_count(arty::runtime::ProcessorCount::exactly(2));
+        let builder = builder.cpu_policy(arty::runtime::CpuPolicy::exactly(2));
         let runtime = builder.build().unwrap();
         let async_task = runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
             YieldFuture::default().await;
@@ -94,7 +94,7 @@ fn test_worker_affinity() {
         eprintln!("requires six processors; two-worker affinity is covered by runtime_contracts");
         return;
     }
-    let runtime = Runtime::builder().processor_count(ProcessorCount::exactly(6)).build().unwrap();
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(6)).build().unwrap();
     let (thread1, scheduler1) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
@@ -183,10 +183,7 @@ fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
 
     static_assertions::assert_impl_all!(ResultValue: Send);
     static_assertions::assert_not_impl_any!(ResultValue: Sync, ThreadAware);
-    let runtime = Runtime::builder()
-        .processor_count(arty::runtime::ProcessorCount::at_most(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cpu_policy(arty::runtime::CpuPolicy::at_most(1)).build().unwrap();
     let result = runtime
         .scheduler()
         .spawn_anywhere((), |_, ()| async { ResultValue(std::cell::Cell::new(42)) })
@@ -228,10 +225,7 @@ fn spawn_everywhere_relocates_one_clone_to_each_worker_despite_interleaving() {
     } else {
         many_cpus::SystemHardware::current().processors().len().min(2)
     };
-    let runtime = Runtime::builder()
-        .processor_count(arty::runtime::ProcessorCount::at_most(2))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cpu_policy(arty::runtime::CpuPolicy::at_most(2)).build().unwrap();
     let (home, results) = runtime
         .scheduler()
         .block_on(async |cx| {
@@ -278,10 +272,7 @@ fn spawn_everywhere_relocates_one_clone_to_each_worker_despite_interleaving() {
 
 #[test]
 fn spawn_everywhere_returns_shutdown_joins_without_invoking_factories() {
-    let runtime = Runtime::builder()
-        .processor_count(arty::runtime::ProcessorCount::at_most(2))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cpu_policy(arty::runtime::CpuPolicy::at_most(2)).build().unwrap();
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use arty::runtime::{BlockingPoolPolicy, ProcessorCount, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
 use panic_support::{isolated, runtime};
 use thread_aware::Unaware;
 
@@ -53,7 +53,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     isolated("every_worker_retires_self_waking_panics_before_reusing_task_storage", || {
         let repetitions = if cfg!(miri) { 2 } else { 32 };
         let runtime = Runtime::builder()
-            .processor_count(ProcessorCount::exactly(2))
+            .cpu_policy(CpuPolicy::exactly(2))
             .blocking_pool_policy(BlockingPoolPolicy::shared(1))
             .build()
             .unwrap();
