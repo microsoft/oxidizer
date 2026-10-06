@@ -120,6 +120,8 @@ Qualified paths ending in the service name are treated conservatively as the
 same boundary type because relocation changes their resolution context. Public
 inherent associated constants and types are also rejected because they cannot
 be represented on the wrapper.
+Macros inside inherent impl blocks are rejected because their generated public
+methods cannot be discovered and delegated before expansion.
 
 Trait impl paths are rejected when their generic arguments reference `Self` or
 the concrete service type, because those names resolve to the hidden real type

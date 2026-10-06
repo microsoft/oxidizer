@@ -542,6 +542,12 @@ fn generate_wrapper_impl(
                 }
                 delegation_methods.push(item.clone());
             }
+            syn::ImplItem::Macro(item_macro) => {
+                return Err(syn::Error::new_spanned(
+                    item_macro,
+                    "macros in inherent impl blocks are not supported because their generated public API cannot be delegated reliably",
+                ));
+            }
             syn::ImplItem::Const(item_const) if matches!(item_const.vis, syn::Visibility::Public(_) | syn::Visibility::Restricted(_)) => {
                 return Err(syn::Error::new_spanned(
                     item_const,

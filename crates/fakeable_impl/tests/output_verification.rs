@@ -972,6 +972,21 @@ fn fakeable_rejects_public_inherent_associated_items() {
 }
 
 #[test]
+fn fakeable_rejects_macros_in_inherent_impls() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! {},
+        quote! {
+            impl MyService {
+                service_methods!();
+            }
+        },
+    )
+    .to_string();
+
+    assert!(result.contains("macros in inherent impl blocks are not supported"));
+}
+
+#[test]
 fn fakeable_keeps_private_inherent_associated_items_hidden() {
     let result = fakeable_impl::fakeable_impl(quote! {}, quote! { impl MyService { const VERSION: u32 = 1; type Output = u32; } });
     let rendered = testing_aids::render_expansion(&result);
