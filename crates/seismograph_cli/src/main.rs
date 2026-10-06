@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+// CLI behavior remains tested, but interactive presentation is not a required coverage metric.
+#![cfg_attr(coverage_nightly, coverage(off))]
 #![deny(unsafe_code)]
 #![expect(
     clippy::renamed_function_params,

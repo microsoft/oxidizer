@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Native v4 allocator observations for Seismograph.
 //!
 //! [`native::Snapshot`] inventories persistent owners, including never-observed

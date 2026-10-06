@@ -20,6 +20,7 @@ coverage:
         threshold: "0"
         base: auto
 ignore:
+- "crates/seismograph_cli/**/*"
 - "crates/rest_over_grpc_examples/**/*"
 - "crates/rest_over_grpc_tests/**/*"
 # These packages use explicit reduced thresholds enforced by cargo-coverage-gate.

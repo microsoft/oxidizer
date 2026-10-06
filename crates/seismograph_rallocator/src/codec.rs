@@ -53,6 +53,7 @@ impl Error {
 }
 
 impl core::fmt::Display for Error {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Human-readable diagnostic decoration; rejection categories remain tested.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "native allocator payload: {:?}", self.kind)
     }
