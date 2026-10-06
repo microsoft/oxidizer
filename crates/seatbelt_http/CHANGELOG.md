@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.12.0` of `http_extensions`
+  - Now requires `0.10.0` of `seatbelt`
+  - Now requires `0.7.1` of `tick`
+
 ## [0.9.1] - 2026-09-16
 
 - 🔧 Maintenance

@@ -65,13 +65,13 @@ Its capture callback encodes borrowed stack rows into System-backed `SourceData`
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAXJgUeSXjZMbZaYTfsaEXvQbE_CfSnnGi2AbpPgIGakgPdthZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
- [__link0]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::Snapshot
- [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encoded_len
- [__link2]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encode
- [__link3]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=decode
- [__link4]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=MAX_OWNERS
- [__link5]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encoded_len_with_owners
- [__link6]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=encode_with_owners
- [__link7]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=events::callers
- [__link8]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::request_observation
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAXJgUeSXjZMbZaYTfsaEXvQbE_CfSnnGi2AbpPgIGakgPdthZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
+ [__link0]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::Snapshot
+ [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encoded_len
+ [__link2]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encode
+ [__link3]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=decode
+ [__link4]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=MAX_OWNERS
+ [__link5]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encoded_len_with_owners
+ [__link6]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encode_with_owners
+ [__link7]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=events::callers
+ [__link8]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::request_observation

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - The `metrics` feature now uses OpenTelemetry `0.33` instead of `0.32`.
+    `ResilienceContext::use_metrics` requires a `MeterProvider` from the new
+    version; providers implementing the `0.32` trait are no longer compatible
+    ([#784](https://github.com/microsoft/oxidizer/pull/784)).
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `tick`
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.9.0] - 2026-09-10
 
 ### Breaking

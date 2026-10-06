@@ -54,11 +54,11 @@ integrations to adapt task dispatch after relocation.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbdP7zL-Rj49Ybglp2cxGMPI4b-K3GVaoD2YQbQVf8GeDtMClhZIKCaGFueXNwYXduZTAuOS4wgmx0aHJlYWRfYXdhcmVmMC4xMi4w
- [__link0]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=SpawnCustom
- [__link2]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=CustomSpawnerBuilder
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbdP7zL-Rj49Ybglp2cxGMPI4b-K3GVaoD2YQbQVf8GeDtMClhZIKCaGFueXNwYXduZTAuOS4xgmx0aHJlYWRfYXdhcmVmMC4xMi4w
+ [__link0]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=SpawnCustom
+ [__link2]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=CustomSpawnerBuilder
  [__link3]: https://docs.rs/thread_aware/0.12.0/thread_aware/?search=ThreadAware
- [__link4]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner::new_tokio
- [__link6]: https://docs.rs/anyspawn/0.9.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__link4]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=SpawnCustom
+ [__link5]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=Spawner::new_tokio
+ [__link6]: https://docs.rs/anyspawn/0.9.1/anyspawn/?search=Spawner::new_tokio_with_handle
