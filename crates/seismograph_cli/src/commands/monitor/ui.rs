@@ -2674,7 +2674,6 @@ mod tests {
                 .collect();
             if text.contains("Inbox work") {
                 reached_remote = true;
-                break;
             }
         }
         assert!(reached_remote, "wrapped native detail scrolling must reach incoming queue state");
@@ -2984,6 +2983,49 @@ mod tests {
         app.handle_key(KeyCode::Char('e'));
         assert!(!app.allocation_view.events);
         assert_eq!(app.allocation_view.selected, 0);
+    }
+
+    #[test]
+    fn allocation_event_mode_without_records_shows_missing_evidence() {
+        use crossterm::event::KeyCode;
+        let mut snapshot = representative_capture();
+        snapshot.allocations.as_mut().unwrap().records.clear();
+        let mut app = App::offline("empty-allocation-events.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "empty-allocation-events.seismograph".into(),
+            tab: MonitorTab::Allocations,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::Char('e'));
+        let output = render(&app);
+        assert!(output.contains("No retained allocation or free records."), "{output}");
+        assert!(!output.contains("Captured operation stack:"), "{output}");
+    }
+
+    #[test]
+    fn allocation_event_without_a_captured_stack_shows_missing_backtrace_evidence() {
+        use crossterm::event::KeyCode;
+        let snapshot = representative_capture();
+        let selected = snapshot
+            .allocations
+            .as_ref()
+            .unwrap()
+            .records
+            .iter()
+            .position(|record| record.stack(AllocationStackFilter::All).is_empty())
+            .unwrap();
+        let mut app = App::offline("allocation-without-backtrace.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "allocation-without-backtrace.seismograph".into(),
+            tab: MonitorTab::Allocations,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::Char('e'));
+        app.allocation_view.selected = selected;
+        app.allocation_view.stack_filter = AllocationStackFilter::All;
+        let output = render(&app);
+        assert!(output.contains("Captured operation stack:"), "{output}");
+        assert!(output.contains("Backtraces were not captured for this operation."), "{output}");
     }
 
     #[test]

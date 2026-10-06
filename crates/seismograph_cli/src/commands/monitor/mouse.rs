@@ -340,6 +340,30 @@ mod tests {
     }
 
     #[test]
+    fn mouse_dispatch_rejects_stale_tabs_and_selects_runtime_histograms() {
+        let mut app = App::new();
+        app.screen = Screen::Offline {
+            path: "capture.seismograph".into(),
+            tab: MonitorTab::Runtime,
+            snapshot: None,
+        };
+        app.activate_mouse_row(ListTarget::InfoThreads, 7);
+        assert_eq!(app.info_thread_selected, 0);
+        app.activate_mouse_row(ListTarget::RuntimeActivity, 7);
+        assert_eq!(app.runtime_view.activity_scroll, 7);
+        app.activate_mouse_row(ListTarget::RuntimeHistogram(TaskHistogram::Poll), 0);
+        assert_eq!(app.runtime_view.task_histogram, TaskHistogram::Poll);
+        assert_eq!(app.runtime_view.focus, RuntimeFocus::Activity);
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Info;
+        }
+        app.activate_mouse_row(ListTarget::InfoThreads, usize::MAX);
+        assert_eq!(app.info_thread_selected, 0);
+        app.activate_selectable_mouse_row(ListTarget::HeapBuckets, 0);
+        assert_eq!(app.heap_view.focus, HeapFocus::Buckets);
+    }
+
+    #[test]
     fn passive_mouse_targets_do_not_change_selection() {
         let mut app = App::new();
         app.activate_mouse_row(ListTarget::Applications, 7);

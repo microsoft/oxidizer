@@ -823,6 +823,11 @@ mod tests {
         assert_eq!(nav.scroll, 5);
         nav.key(KeyCode::PageUp, Some(&snapshot));
         assert_eq!(nav.scroll, 0);
+        assert!(nav.key(KeyCode::Up, Some(&snapshot)));
+        assert!(nav.key(KeyCode::Down, Some(&snapshot)));
+        assert_eq!(nav.scroll, 1);
+        assert!(nav.key(KeyCode::Home, Some(&snapshot)));
+        assert_eq!(nav.scroll, 0);
         assert!(!nav.key(KeyCode::Char('x'), Some(&snapshot)));
         assert!(nav.key(KeyCode::Esc, Some(&snapshot)));
         assert_eq!(nav.depth, Depth::Memory);
@@ -834,6 +839,10 @@ mod tests {
         assert_eq!(nav.depth, Depth::Memory);
         nav.focus_list(ListTarget::Threads);
         assert_eq!(nav.depth, Depth::Memory);
+        nav.focus_list(ListTarget::HeapBuckets);
+        assert_eq!(nav.depth, Depth::Root);
+        nav.focus_list(ListTarget::NativeSubsystems);
+        assert_eq!(nav.depth, Depth::Subsystems);
         nav.click(ListTarget::HeapBuckets, 2);
         nav.click(ListTarget::NativeSubsystems, 1);
         assert_eq!((nav.subsystem, nav.depth), (1, Depth::Subsystems));
@@ -842,6 +851,18 @@ mod tests {
         assert_eq!(nav.depth, Depth::Detail);
         nav.click(ListTarget::NativeClasses, 43);
         assert_eq!((nav.class, nav.depth), (43, Depth::Classes));
+        assert_eq!(nav.help(), Context::NativeClasses);
+        let mut observation = snapshot.owners[0].observation.unwrap();
+        observation.remote.incoming_back = observation.remote.incoming_front;
+        assert!(remote_lines(&observation).iter().any(|line| line == "Inbox work         Unknown"));
+        nav.root = 2;
+        nav.subsystem = 5;
+        nav.depth = Depth::Detail;
+        assert_eq!(nav.help(), Context::NativeObservation);
+        let mut empty = snapshot.clone();
+        empty.global.reserved_bytes = 0;
+        empty.global.pagemap_reserved_bytes = 0;
+        assert_eq!(reservation_bar(&empty), "OS reserved  0 B");
     }
 
     #[test]
@@ -865,7 +886,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "writes local TestBackend screens into the ignored package target directory"]
     fn write_native_visual_acceptance_screens() -> std::io::Result<()> {
         let mut snapshot = crate::native_view::fixture::snapshot();
         snapshot.global.reserved_bytes = 64 * 1024 * 1024;
@@ -949,9 +969,40 @@ mod tests {
                 24,
             ),
         ] {
-            std::fs::write(directory.join(format!("{name}.txt")), render(Some(&snapshot), nav, width, height))?;
+            let screen = render(Some(&snapshot), nav, width, height);
+            assert_eq!(screen.lines().count(), usize::from(height), "{name}");
+            assert!(screen.lines().all(|line| line.chars().count() == usize::from(width)), "{name}");
+            assert!(!screen.contains("NaN"), "{name}");
+            std::fs::write(directory.join(format!("{name}.txt")), &screen)?;
+            assert_eq!(std::fs::read_to_string(directory.join(format!("{name}.txt")))?, screen);
         }
         Ok(())
+    }
+
+    #[test]
+    fn subsystem_details_preserve_unknown_and_complete_range_evidence() {
+        let mut snapshot = crate::native_view::fixture::snapshot();
+        let owner = &mut snapshot.owners[0];
+        for (selected, title) in [(1, "Large ranges"), (2, "Local ranges"), (3, "Metadata cache")] {
+            assert!(subsystem_lines(owner, selected)[0].contains(title));
+        }
+        let endpoint = subsystem_lines(owner, 5);
+        assert!(endpoint[0].contains(&format!("0x{:x}", owner.id)));
+        assert!(endpoint[1].contains("Active"));
+        owner.observation.as_mut().unwrap().thread_id = 0;
+        assert!(subsystem_lines(owner, 5)[2].contains('—'));
+        let mut range = Ranges {
+            complete: true,
+            ..Default::default()
+        };
+        range.counts[14] = 2;
+        let detail = ranges("Ranges", &range);
+        assert!(detail[0].contains("[Complete]"));
+        assert!(detail[1].contains("16.00 KiB"));
+        assert_eq!(detail[1].matches('█').count(), 12);
+        owner.observation = None;
+        assert_eq!(subsystem_lines(owner, 0), ["Unknown"]);
+        assert_eq!(subsystem_lines(owner, 5).len(), 2);
     }
 
     #[test]

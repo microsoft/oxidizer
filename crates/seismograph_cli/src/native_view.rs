@@ -265,3 +265,29 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_publication_is_unknown_and_empty_inventory_bars_are_unfilled() {
+        let mut snapshot = fixture::snapshot();
+        let owner = &mut snapshot.owners[0];
+        owner.source = ObservationSource::Unavailable;
+        owner.observation = None;
+        let lines = owner_lines(&snapshot, &snapshot.owners[0]);
+        assert!(lines[0].contains("UNAVAILABLE"));
+        assert!(lines[1].contains("System allocation failed"));
+        assert!(lines[1].contains("UNKNOWN, not zero"));
+        assert_eq!(bar(0, 0), "[....................]");
+        assert_eq!(bar(2, 4), "[##########..........]");
+        let mut snapshot = fixture::snapshot();
+        snapshot.owners[0].observation.as_mut().unwrap().thread_id = 0;
+        assert!(
+            owner_lines(&snapshot, &snapshot.owners[0])
+                .iter()
+                .any(|line| line.contains("Last contributor recorder thread unavailable"))
+        );
+    }
+}

@@ -392,6 +392,17 @@ mod tests {
     #[test]
     fn duplicate_or_malformed_native_source_is_not_silently_replaced() {
         let native = seismograph_rallocator::native::Snapshot::default();
+        let mut unsupported = allocator_source(&native);
+        unsupported.schema_version = 2;
+        assert_eq!(
+            prepare(DecodedSnapshot {
+                sources: vec![unsupported],
+                ..Default::default()
+            })
+            .err()
+            .unwrap(),
+            "unsupported allocator source schema 2"
+        );
         assert!(
             prepare(DecodedSnapshot {
                 sources: vec![allocator_source(&native), allocator_source(&native)],

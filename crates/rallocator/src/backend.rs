@@ -36,26 +36,28 @@ pub(crate) fn map() -> Option<Map> {
 }
 
 pub(crate) fn observe() -> seismograph_rallocator::native::GlobalState {
-    GLOBAL.with(|global| {
-        let mut budget = crate::observation::WALK_BUDGET;
-        let ranges = if let Some(map) = global.map {
-            // SAFETY: The combining lock protects the global buddy and its out-of-line nodes.
-            unsafe { global.ranges.observe(Nodes::Map(map), &mut budget) }
+    GLOBAL.with(|global| observe_global(global))
+}
+
+fn observe_global(global: &Global) -> seismograph_rallocator::native::GlobalState {
+    let mut budget = crate::observation::WALK_BUDGET;
+    let ranges = if let Some(map) = global.map {
+        // SAFETY: The combining lock or exclusive test ownership protects the buddy and its nodes.
+        unsafe { global.ranges.observe(Nodes::Map(map), &mut budget) }
+    } else {
+        seismograph_rallocator::native::Ranges::EMPTY
+    };
+    seismograph_rallocator::native::GlobalState {
+        reserved_bytes: global.requested as u64,
+        ranges,
+        pagemap_reserved_bytes: if global.map.is_some() {
+            crate::pagemap::RESERVED_BYTES as u64
         } else {
-            seismograph_rallocator::native::Ranges::EMPTY
-        };
-        seismograph_rallocator::native::GlobalState {
-            reserved_bytes: global.requested as u64,
-            ranges,
-            pagemap_reserved_bytes: if global.map.is_some() {
-                crate::pagemap::RESERVED_BYTES as u64
-            } else {
-                0
-            },
-            local_limit_bytes: 1u64 << LOCAL_BITS,
-            global_refill_bytes: GLOBAL_REFILL as u64,
-        }
-    })
+            0
+        },
+        local_limit_bytes: 1u64 << LOCAL_BITS,
+        global_refill_bytes: GLOBAL_REFILL as u64,
+    }
 }
 
 fn global_alloc_reserved(global: &mut Global, size: usize) -> usize {
@@ -294,6 +296,12 @@ mod tests {
             ranges: Buddy::new(),
             requested: 0,
         };
+        let empty = observe_global(&global);
+        assert_eq!(empty.reserved_bytes, 0);
+        assert_eq!(empty.pagemap_reserved_bytes, 0);
+        assert_eq!(empty.ranges, seismograph_rallocator::native::Ranges::EMPTY);
+        assert_eq!(empty.local_limit_bytes, 1u64 << LOCAL_BITS);
+        assert_eq!(empty.global_refill_bytes, GLOBAL_REFILL as u64);
         assert_eq!(global_alloc_reserved(&mut global, CHUNK), 0);
         global.map = Some(Map::reserve().unwrap());
         hal::fail_next(hal::Failure::Reserve);

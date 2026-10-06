@@ -354,6 +354,65 @@ mod tests {
     use crate::classes;
 
     #[test]
+    fn owner_creation_failure_preserves_empty_tls_and_pool() {
+        const CHILD: &str = "RALLOCATOR_OWNER_CREATION_FAILURE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // A fresh process isolates first-map failure from other tests' permanent owners.
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "thread::tests::owner_creation_failure_preserves_empty_tls_and_pool"])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        crate::hal::fail_next(crate::hal::Failure::Reserve);
+        {
+            let mut pool = lock_pool();
+            assert_eq!(create_owner(&mut pool), 0);
+            assert_eq!(pool.count, 0);
+            assert_eq!(pool.all, 0);
+            assert!(pool.metadata.is_none());
+        }
+
+        let called = Cell::new(false);
+        let action = |_: &mut crate::core::Core| {
+            called.set(true);
+            123
+        };
+        CURRENT.with(|current| {
+            assert_eq!(current.get(), 0);
+            crate::hal::fail_next(crate::hal::Failure::Reserve);
+            assert_eq!(with_owner_slow(current, -1, action), -1);
+            assert!(!called.get());
+            assert_eq!(current.get(), 0);
+            assert_eq!(lock_pool().count, 0);
+
+            assert_eq!(with_owner_slow(current, -1, action), 123);
+            assert!(called.get());
+            assert_ne!(current.get(), 0);
+            assert_eq!(lock_pool().count, 1);
+        });
+    }
+
+    #[test]
+    fn rejected_layouts_and_null_frees_do_not_acquire_an_owner() {
+        std::thread::spawn(|| {
+            assert_eq!(CURRENT.with(Cell::get), 0);
+            let layout = Layout::from_size_align(isize::MAX as usize, 1).unwrap();
+            assert!(allocate(layout).is_null());
+            assert!(allocate_zeroed(layout).is_null());
+            // SAFETY: Null is explicitly accepted as a no-op before looking up metadata.
+            unsafe { deallocate(std::ptr::null_mut()) };
+            flush();
+            assert_eq!(CURRENT.with(Cell::get), 0);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
     fn usable_size_without_a_thread_lease_reads_the_live_pagemap_entry() {
         let layout = Layout::from_size_align(513, 16).unwrap();
         let address = allocate(layout) as usize;
@@ -373,27 +432,31 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires RALLOCATOR_SIZECLASS_REFERENCE pointing to an independent snmalloc CSV"]
     fn upstream_sizeclass_oracle() {
-        let path = std::env::var_os("RALLOCATOR_SIZECLASS_REFERENCE").unwrap();
-        let reference = std::fs::read_to_string(path).unwrap();
-        let mut rows = 0;
-        for (index, line) in reference.lines().enumerate() {
-            let (requested, expected) = line.split_once(',').unwrap();
-            let requested = requested.parse::<usize>().unwrap();
+        // Independent snmalloc::round_size output from upstream commit
+        // 511e91a2de604ce716841f32f5e929a066c4a978, C++20, x64 defaults.
+        // Each row stores the inclusive end of a constant-result interval;
+        // the fixture was generated from snmalloc, not Rust class tables.
+        let reference = include_str!("../tests/fixtures/snmalloc-round-size.csv");
+        let mut first = 0;
+        for line in reference.lines() {
+            let (last, expected) = line.split_once(',').unwrap();
+            let last = last.parse::<usize>().unwrap();
             let expected = expected.parse::<usize>().unwrap();
-            assert_eq!(requested, index, "oracle must cover consecutive byte sizes");
-            let layout = Layout::from_size_align(requested.max(1), 1).unwrap();
-            let ptr = allocate(layout);
-            assert!(!ptr.is_null(), "allocation failed for {requested}");
-            // SAFETY: The checked pointer is the start of a live allocation.
-            let actual = unsafe { usable_size(ptr) };
-            // SAFETY: The allocation is returned once with its original layout.
-            unsafe { deallocate(ptr) };
-            assert_eq!(actual, expected, "snmalloc oracle mismatch for {requested}");
-            rows += 1;
+            assert!(last >= first, "oracle intervals must be ordered and nonempty");
+            for requested in first..=last {
+                let layout = Layout::from_size_align(requested.max(1), 1).unwrap();
+                let ptr = allocate(layout);
+                assert!(!ptr.is_null(), "allocation failed for {requested}");
+                // SAFETY: The checked pointer is the start of a live allocation.
+                let actual = unsafe { usable_size(ptr) };
+                // SAFETY: The allocation is returned once with its original layout.
+                unsafe { deallocate(ptr) };
+                assert_eq!(actual, expected, "snmalloc oracle mismatch for {requested}");
+            }
+            first = last + 1;
         }
-        assert_eq!(rows, 131_074);
+        assert_eq!(first, 131_074);
         flush();
     }
 

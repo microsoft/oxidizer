@@ -2216,6 +2216,59 @@ mod tests {
     use crate::allocator_view::Version;
 
     #[test]
+    fn legacy_reports_keep_unmatched_stacks_and_source_locations() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        let mut callers = Callers::default();
+        for (allocation_id, size, address) in [(1, 64, 0x1000), (2, 128, 0x2000)] {
+            let mut allocation = seismograph_rallocator::callers::Event::default();
+            allocation.allocation_id = allocation_id;
+            allocation.size = size;
+            allocation.call_stack = vec![address];
+            callers.events.push(allocation);
+        }
+        snapshot.callers = Some(callers);
+        snapshot.addresses.push(AddressLookup::from_fields(AddressLookupFields {
+            address: 0x1000,
+            symbol: Some("app::allocate".into()),
+            filename: Some("allocation.rs".into()),
+            line: Some(12),
+            column: Some(3),
+        }));
+        let html = render_html(&snapshot);
+        assert!(html.contains("Retained unmatched allocation candidates (showing 2 of 2)"));
+        assert!(html.contains("allocation.rs:12:3"));
+        assert!(html.contains("app::allocate"));
+        assert!(html.contains("64 B unmatched"));
+        assert!(html.contains("128 B unmatched"));
+        let lookup = AddressLookup::from_fields(AddressLookupFields {
+            address: 3,
+            symbol: None,
+            filename: Some("unknown.rs".into()),
+            line: None,
+            column: None,
+        });
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs)");
+        let mut lookup = lookup;
+        lookup.line = Some(12);
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12)");
+        lookup.column = Some(3);
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12:3)");
+        assert_eq!(format_count(1_234_567), "1,234,567");
+        assert_eq!(
+            escape_html("plain & <tag> \"quoted\""),
+            "plain &amp; &lt;tag&gt; &quot;quoted&quot;"
+        );
+        assert_eq!(
+            format_estimate_bytes(Estimate {
+                value: 32,
+                lower_bound: 16,
+                upper_bound: 64
+            }),
+            "32 B (16 B–64 B)"
+        );
+    }
+
+    #[test]
     fn legacy_domain_and_structure_fixtures_keep_classifications_distinct() {
         use crate::allocator_topology::Segment;
         use crate::allocator_view::SizeClass;
@@ -2319,12 +2372,28 @@ mod tests {
         ] {
             assert!(html.contains(text), "missing classified fixture output: {text}");
         }
+
         assert_eq!(slice_runs(&[0b0011_1111], 8), [(true, 0, 6), (false, 6, 2)]);
         assert!(slice_runs(&[], 0).is_empty());
         assert_eq!(grid_width(16384), 128);
         let mut empty = String::new();
         render_region(&mut empty, &TopologyRegion::default(), None);
         assert!(empty.contains("0.00%"));
+    }
+
+    #[test]
+    fn region_summary_remains_available_without_slice_topology() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.regions.push(crate::allocator_view::Region {
+            index: 23,
+            reserved_bytes: 4096,
+            used_slices: 3,
+            free_slices: 5,
+        });
+        let mut html = String::new();
+        render_physical_topology(&mut html, &snapshot);
+        assert!(html.contains("Detailed slice topology is unavailable"));
+        assert!(html.contains("<td>#23</td><td>4.00 KiB</td><td>3</td><td>5</td>"), "{html}");
     }
 
     #[test]

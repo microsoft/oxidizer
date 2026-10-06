@@ -3,13 +3,18 @@
 
 //! Optional, owner-published copies. Never inspect another leased core.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(not(test))]
+use std::alloc::System;
+use std::alloc::{GlobalAlloc, Layout};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Mutex, TryLockError};
 
 use seismograph::recorder::{RecordingSession, SuppressionGuard};
 use seismograph_rallocator::native::{Observation, ObservationSource};
+
+#[cfg(test)]
+use self::tests::FailingSystem as System;
 
 /// One visit budget bounds all slab, buddy and message walks in an observation.
 pub(crate) const WALK_BUDGET: usize = 4096;
@@ -242,4 +247,77 @@ pub(crate) fn publish(session: RecordingSession) {
             Err(TryLockError::Poisoned(_)) => std::process::abort(),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    thread_local! {
+        static FAIL_NEXT_ALLOCATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    pub(super) struct FailingSystem;
+
+    // SAFETY: Successful allocations and all deallocations delegate to System with unchanged layouts.
+    unsafe impl GlobalAlloc for FailingSystem {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if FAIL_NEXT_ALLOCATION.with(|fail| fail.replace(false)) {
+                std::ptr::null_mut()
+            } else {
+                // SAFETY: GlobalAlloc's caller supplies a valid layout.
+                unsafe { std::alloc::System.alloc(layout) }
+            }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            // SAFETY: Every nonnull allocation originated from System with this layout.
+            unsafe { std::alloc::System.dealloc(ptr, layout) };
+        }
+    }
+
+    #[test]
+    fn observation_storage_failure_stays_unavailable_and_can_retry() {
+        let metadata = Metadata::new();
+        FAIL_NEXT_ALLOCATION.with(|fail| fail.set(true));
+        // SAFETY: This test uniquely owns the metadata lease.
+        assert!(unsafe { metadata.slot() }.is_none());
+        assert!(metadata.slot.load(Ordering::Acquire).is_null());
+        assert_eq!(metadata.published(), (ObservationSource::Unavailable, None));
+        // SAFETY: The test retains the same unique metadata lease.
+        assert!(unsafe { metadata.slot() }.is_some());
+        assert_eq!(metadata.published(), (ObservationSource::Unobserved, None));
+        let pointer = metadata.slot.swap(std::ptr::null_mut(), Ordering::AcqRel);
+        // SAFETY: No publication reader or slot borrow remains; storage came from System.
+        unsafe { pointer.drop_in_place() };
+        // SAFETY: The slot's value was dropped above and its allocation has the original layout.
+        unsafe { System.dealloc(pointer.cast(), Layout::new::<Slot>()) };
+
+        FAIL_NEXT_ALLOCATION.with(|fail| fail.set(true));
+        let error = OwnerBuffer::new(1).err().unwrap();
+        assert!(error.to_string().contains("rallocator inventory storage allocation failed"));
+        drop(OwnerBuffer::new(1).unwrap());
+    }
+
+    #[test]
+    fn publication_distinguishes_missing_empty_busy_and_unavailable_slots() {
+        let metadata = Metadata::new();
+        assert_eq!(metadata.published(), (ObservationSource::Unobserved, None));
+        metadata.unavailable.store(true, Ordering::Relaxed);
+        assert_eq!(metadata.published(), (ObservationSource::Unavailable, None));
+        let mut slot = Box::new(Slot {
+            round: AtomicU64::new(0),
+            session: AtomicU64::new(0),
+            generation: AtomicU64::new(0),
+            value: Mutex::new(None),
+        });
+        metadata.slot.store(&raw mut *slot, Ordering::Release);
+        assert_eq!(metadata.published(), (ObservationSource::Unobserved, None));
+        let held = slot.value.lock().unwrap();
+        assert_eq!(metadata.published(), (ObservationSource::Busy, None));
+        drop(held);
+        *slot.value.lock().unwrap() = Some(Observation::default());
+        assert_eq!(metadata.published(), (ObservationSource::Published, Some(Observation::default())));
+        metadata.slot.store(std::ptr::null_mut(), Ordering::Release);
+    }
 }

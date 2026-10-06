@@ -420,6 +420,100 @@ mod tests {
     }
 
     #[test]
+    fn native_source_rejects_unsupported_schema_before_payload_decode() {
+        static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
+            seismograph_rallocator::source::ID,
+            "unsupported-native-schema",
+            2,
+            capture_allocator_source,
+        );
+        seismograph::snapshot::register_source(&SOURCE);
+        let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let error = decode_snapshot(recording.as_bytes()).unwrap_err();
+        assert!(matches!(error, Error::UnsupportedSchema(2)));
+        assert_eq!(error.to_string(), "unsupported allocator source schema 2");
+    }
+
+    #[test]
+    fn corrupt_native_source_payload_preserves_allocator_error() {
+        static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
+            seismograph_rallocator::source::ID,
+            "corrupt-native",
+            seismograph_rallocator::source::SCHEMA_VERSION,
+            capture_corrupt_source,
+        );
+        seismograph::snapshot::register_source(&SOURCE);
+        let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let error = decode_snapshot(recording.as_bytes()).unwrap_err();
+        assert!(matches!(error, Error::DecodeAllocator(_)));
+        assert!(error.to_string().starts_with("invalid allocator snapshot: "));
+        assert_eq!(
+            Error::DuplicateAllocatorSource.to_string(),
+            "multiple native allocator sources make the inventory ambiguous"
+        );
+    }
+
+    #[test]
+    fn corrupt_runtime_source_payload_preserves_runtime_error() {
+        static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
+            seismograph_runtime::snapshot::source::ID,
+            "corrupt-runtime",
+            6,
+            capture_corrupt_source,
+        );
+        seismograph::snapshot::register_source(&SOURCE);
+        let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let error = decode_snapshot(recording.as_bytes()).unwrap_err();
+        assert!(matches!(error, Error::DecodeRuntime(_)));
+        assert!(error.to_string().starts_with("invalid runtime snapshot: "));
+    }
+
+    fn capture_corrupt_source(
+        _context: seismograph::snapshot::SnapshotContext<'_>,
+    ) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+        seismograph::snapshot::SourceData::zeroed(8)
+    }
+
+    #[test]
+    fn runtime_source_projects_symbol_names_and_locations_into_report() {
+        static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
+            seismograph_runtime::snapshot::source::ID,
+            "runtime-symbol",
+            6,
+            capture_runtime_symbol,
+        );
+        seismograph::snapshot::register_source(&SOURCE);
+        let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let (snapshot, sources) = decode_snapshot(recording.as_bytes()).unwrap();
+        let fields = &snapshot.addresses[0];
+        assert_eq!(fields.address, 0x1234);
+        assert_eq!(fields.symbol.as_deref(), Some("task::poll"));
+        assert_eq!(fields.filename.as_deref(), Some("worker.rs"));
+        assert_eq!((fields.line, fields.column), (Some(42), Some(7)));
+        assert!(sources.iter().any(|source| source.id == seismograph_runtime::snapshot::source::ID));
+    }
+
+    fn capture_runtime_symbol(
+        _context: seismograph::snapshot::SnapshotContext<'_>,
+    ) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+        // Schema 6, no runtimes, one address lookup with symbol and source location.
+        let mut bytes = b"SEISRUNT".to_vec();
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&6_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x1234_u64.to_le_bytes());
+        bytes.extend_from_slice(&10_u32.to_le_bytes());
+        bytes.extend_from_slice(&9_u32.to_le_bytes());
+        bytes.extend_from_slice(&42_u32.to_le_bytes());
+        bytes.extend_from_slice(&7_u32.to_le_bytes());
+        bytes.extend_from_slice(b"task::pollworker.rs");
+        let mut data = seismograph::snapshot::SourceData::zeroed(bytes.len())?;
+        data.as_mut_bytes().copy_from_slice(&bytes);
+        Ok(data)
+    }
+
+    #[test]
     fn native_source_and_event_detection_require_the_expected_content() {
         let allocator = seismograph::snapshot::SourceSnapshot {
             id: seismograph_rallocator::source::ID,

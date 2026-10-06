@@ -141,6 +141,7 @@ mod tests {
         assert!(!ptr.is_null());
         // SAFETY: The test owns the entire unused reservation.
         unsafe { hal::release(ptr, RESERVE_MIN) };
+        assert!(reserve_with_page_size(usize::MAX & !(PAGE - 1), RESERVE_MIN, 4096).is_null());
     }
 
     #[test]

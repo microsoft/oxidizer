@@ -1055,6 +1055,63 @@ mod tests {
     }
 
     #[test]
+    fn misrouted_returns_are_forwarded_with_and_without_post_budget() {
+        for exhausted in [false, true] {
+            let target = fresh_owner();
+            let sender = fresh_owner();
+            let relay = fresh_owner();
+            // SAFETY: Each endpoint is fresh and remains persistent throughout the test.
+            let target_owner = unsafe { &*(target as *const Owner) };
+            // SAFETY: The test is the target core's sole lease holder.
+            let target_core = unsafe { &mut *target_owner.core_ptr() };
+            // SAFETY: The sender is a distinct fresh persistent endpoint.
+            let sender_owner = unsafe { &*(sender as *const Owner) };
+            // SAFETY: The test is the sender core's sole lease holder.
+            let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+            // SAFETY: The relay is a distinct fresh persistent endpoint.
+            let relay_owner = unsafe { &*(relay as *const Owner) };
+            // SAFETY: The test is the relay core's sole lease holder.
+            let relay_core = unsafe { &mut *relay_owner.core_ptr() };
+            for size in [32, 48, 80, 112] {
+                let request = Request::new(std::alloc::Layout::from_size_align(size, 16).unwrap()).unwrap();
+                let pointer = target_core.allocate(request);
+                assert!(!pointer.is_null());
+                // SAFETY: This live target allocation is transferred once to the sender.
+                unsafe { sender_core.deallocate(pointer.addr()) };
+            }
+            sender_core.flush();
+            let mut messages = Vec::new();
+            // SAFETY: This test is the target queue's only consumer. Its retained
+            // tail stays queued; relinquished messages keep their original slabs live.
+            unsafe {
+                target_owner.queue().drain(|message| {
+                    messages.push(message);
+                    true
+                });
+            }
+            assert_eq!(messages.len(), 3);
+            // Simulate the mixed-destination segment produced by a radix-bucket
+            // collision: all three initialized messages now belong to the relay.
+            // SAFETY: The dequeued segment is exclusively held and not queued elsewhere.
+            unsafe { relay_owner.queue().enqueue(messages[0], messages[2]) };
+            if exhausted {
+                relay_core.remote.clear_budget();
+            }
+            relay_core.drain();
+            assert_eq!(relay_owner.queue().retained_message(), Some(messages[2]));
+            let mut budget = crate::observation::WALK_BUDGET;
+            let observed = relay_core.remote.observe(relay_core.map, &mut budget);
+            assert_eq!(observed.messages, if exhausted { 0 } else { 2 });
+            assert_eq!(observed.message_objects, if exhausted { 0 } else { 2 });
+            relay_core.flush();
+            target_core.flush();
+            // One message remains retained by each queue until another
+            // publisher links a successor; forwarding must return the other two.
+            assert_eq!(target_core.outstanding_objects(), 2);
+        }
+    }
+
+    #[test]
     fn local_hint_arms_after_repeated_slab_observation_and_clears_on_miss() {
         let mut hint = LocalHint::EMPTY;
         let base = 0x40000;
