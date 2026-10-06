@@ -107,9 +107,7 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
 /// `address` is the base of an exclusively owned reservation with no users.
 pub(crate) unsafe fn release(address: *mut u8, _size: usize) {
     // SAFETY: Caller is surrendering the entire unused reservation.
-    if unsafe { VirtualFree(address.cast(), 0, 0x8000) } == 0 {
-        std::process::abort();
-    }
+    crate::abort::require(unsafe { VirtualFree(address.cast(), 0, 0x8000) } != 0);
 }
 
 #[cfg(test)]

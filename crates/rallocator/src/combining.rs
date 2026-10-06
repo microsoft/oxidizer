@@ -30,12 +30,16 @@ struct Work<T, F, R> {
 
 struct AbortOnUnwind;
 
+fn take_action<F>(action: &mut Option<F>) -> F {
+    action.take().unwrap_or_else(|| crate::abort::abort())
+}
+
 impl Drop for AbortOnUnwind {
     fn drop(&mut self) {
         if std::thread::panicking() {
             // An unwinding combiner must not leave pointers to departed stacks
             // in the queue. GlobalAlloc also forbids unwinding.
-            std::process::abort();
+            crate::abort::abort();
         }
     }
 }
@@ -65,9 +69,7 @@ impl<T: Send> Combining<T> {
             // SAFETY: repr(C) puts Node first; the caller keeps Work alive until DONE.
             let action = unsafe { (*work).action.get() };
             // SAFETY: Only this invocation takes the stored FnOnce.
-            let Some(action) = (unsafe { (*action).take() }) else {
-                std::process::abort();
-            };
+            let action = take_action(unsafe { &mut *action });
             // SAFETY: The same live Work owns its result cell.
             let result = unsafe { (*work).result.get() };
             // SAFETY: This invocation is the cell's only writer.
@@ -193,6 +195,23 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::*;
+
+    #[test]
+    fn unwinding_action_aborts_without_leaving_a_queue_owner() {
+        crate::abort::assert_aborts("combining::tests::unwinding_action_aborts_without_leaving_a_queue_owner", || {
+            Combining::new(0).with(|_| panic!("unwind a combining action"));
+        });
+    }
+
+    #[test]
+    fn consumed_action_aborts_instead_of_running_twice() {
+        crate::abort::assert_aborts("combining::tests::consumed_action_aborts_instead_of_running_twice", || {
+            take_action::<fn()>(&mut None);
+        });
+        let mut action = Some(|| 123);
+        assert_eq!(take_action(&mut action)(), 123);
+        assert!(action.is_none());
+    }
 
     #[test]
     fn contended_combining_executes_every_action_once() {

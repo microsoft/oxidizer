@@ -163,6 +163,7 @@
 )))]
 compile_error!("rallocator supports x86_64 and aarch64 Linux and Windows MSVC");
 
+mod abort;
 mod backend;
 mod buddy;
 mod classes;

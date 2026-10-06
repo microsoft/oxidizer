@@ -35,6 +35,10 @@ pub(crate) fn map() -> Option<Map> {
     })
 }
 
+pub(crate) fn initialized_map(map: Option<Map>) -> Map {
+    map.unwrap_or_else(|| crate::abort::abort())
+}
+
 pub(crate) fn observe() -> seismograph_rallocator::native::GlobalState {
     GLOBAL.with(|global| observe_global(global))
 }
@@ -120,9 +124,7 @@ fn global_free(address: usize, size: usize) {
     // storage; the next commit is idempotent and retries normal OS treatment.
     let _decommitted = unsafe { hal::decommit(address as *mut u8, size) };
     GLOBAL.with(|global| {
-        let Some(map) = global.map else {
-            std::process::abort();
-        };
+        let map = initialized_map(global.map);
         // SAFETY: The global lock transfers this registered, aligned block to its buddy.
         let overflow = unsafe { global.ranges.add(Nodes::Map(map), address, size.trailing_zeros() as usize) };
         debug_assert_eq!(overflow, 0);
@@ -288,6 +290,18 @@ impl Local {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_initialization_aborts_before_reading_range_metadata() {
+        crate::abort::assert_aborts(
+            "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
+            || {
+                initialized_map(None);
+            },
+        );
+        let map = Map::reserve().unwrap();
+        initialized_map(Some(map));
+    }
 
     #[test]
     fn reserved_refill_failures_do_not_publish_ranges_or_accounting() {

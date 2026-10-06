@@ -2198,6 +2198,27 @@ fn escape_html(value: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn frame_formatting_preserves_addresses_without_source_information() {
+        use super::*;
+        let mut lookup = AddressLookup::from_fields(AddressLookupFields {
+            address: 3,
+            symbol: None,
+            filename: None,
+            line: Some(12),
+            column: Some(3),
+        });
+        assert_eq!(format_frame(3, None), "0x0000000000000003");
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003");
+        lookup.symbol = Some("app::allocate".into());
+        assert_eq!(format_frame(3, Some(&lookup)), "app::allocate [0x0000000000000003]");
+        lookup.filename = Some("unknown.rs".into());
+        assert_eq!(
+            format_frame(3, Some(&lookup)),
+            "app::allocate (unknown.rs:12:3) [0x0000000000000003]"
+        );
+    }
+
+    #[test]
     fn event_only_report_does_not_present_fake_allocator_counters() {
         let snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));
         let html = super::render_html(&snapshot);
@@ -2253,6 +2274,8 @@ mod tests {
         assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12)");
         lookup.column = Some(3);
         assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12:3)");
+        lookup.line = None;
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs)");
         assert_eq!(format_count(1_234_567), "1,234,567");
         assert_eq!(
             escape_html("plain & <tag> \"quoted\""),

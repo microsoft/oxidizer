@@ -167,11 +167,7 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
     }
     writer.flag(snapshot.owners_complete)?;
     writer.flag(snapshot.publication_enabled)?;
-    writer.bytes(
-        &u32::try_from(owners.len())
-            .map_err(|_overflow| error(ErrorKind::LengthOverflow))?
-            .to_le_bytes(),
-    )?;
+    writer.owner_count(owners.len())?;
     for value in [
         snapshot.global.reserved_bytes,
         snapshot.global.pagemap_reserved_bytes,
@@ -185,22 +181,13 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
         writer.u64(owner.id)?;
         writer.u64(owner.generation)?;
         writer.flag(owner.leased)?;
-        writer.bytes(&[match owner.source {
-            ObservationSource::Unobserved => 0,
-            ObservationSource::Published => 1,
-            ObservationSource::IdleInspection => 2,
-            ObservationSource::Busy => 3,
-            ObservationSource::Unavailable => 4,
-        }])?;
+        writer.source(owner.source)?;
         writer.flag(owner.observation.is_some())?;
         if let Some(observation) = &owner.observation {
             writer.observation(observation)?;
         }
     }
-    if writer.position != len {
-        return Err(error(ErrorKind::LengthMismatch));
-    }
-    Ok(())
+    writer.finish(len)
 }
 
 struct Writer<'a> {
@@ -208,6 +195,26 @@ struct Writer<'a> {
     position: usize,
 }
 impl Writer<'_> {
+    fn owner_count(&mut self, count: usize) -> Result<(), Error> {
+        let count = u32::try_from(count).map_err(|_overflow| error(ErrorKind::LengthOverflow))?;
+        self.bytes(&count.to_le_bytes())
+    }
+    fn source(&mut self, source: ObservationSource) -> Result<(), Error> {
+        let value = match source {
+            ObservationSource::Unobserved => 0,
+            ObservationSource::Published => 1,
+            ObservationSource::IdleInspection => 2,
+            ObservationSource::Busy => 3,
+            ObservationSource::Unavailable => 4,
+        };
+        self.bytes(&[value])
+    }
+    fn finish(self, len: usize) -> Result<(), Error> {
+        if self.position != len {
+            return Err(error(ErrorKind::LengthMismatch));
+        }
+        Ok(())
+    }
     fn bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let end = self.position.checked_add(bytes.len()).ok_or(error(ErrorKind::LengthOverflow))?;
         self.output
@@ -425,6 +432,41 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inventory_fields_reject_overflow_and_truncation_without_advancing() {
+        let mut output = [0xa5; 3];
+        let mut writer = Writer {
+            output: &mut output,
+            position: 0,
+        };
+        assert_eq!(writer.owner_count(usize::MAX).unwrap_err().kind(), ErrorKind::LengthOverflow);
+        assert_eq!(writer.owner_count(1).unwrap_err().kind(), ErrorKind::Truncated);
+        assert_eq!(writer.position, 0);
+        writer.source(ObservationSource::Busy).unwrap();
+        assert_eq!(writer.finish(2).unwrap_err().kind(), ErrorKind::LengthMismatch);
+        assert_eq!(output, [3, 0xa5, 0xa5]);
+
+        let mut empty = [];
+        let mut writer = Writer {
+            output: &mut empty,
+            position: 0,
+        };
+        assert_eq!(
+            writer.source(ObservationSource::Unobserved).unwrap_err().kind(),
+            ErrorKind::Truncated
+        );
+        writer.finish(0).unwrap();
+
+        let mut output = [0; 4];
+        let mut writer = Writer {
+            output: &mut output,
+            position: 0,
+        };
+        writer.owner_count(u32::MAX as usize).unwrap();
+        writer.finish(4).unwrap();
+        assert_eq!(output, u32::MAX.to_le_bytes());
+    }
 
     #[test]
     fn writer_rejects_truncated_and_overflowing_positions_without_writing() {

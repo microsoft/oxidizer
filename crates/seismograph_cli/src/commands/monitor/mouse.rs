@@ -132,9 +132,9 @@ impl MouseRows {
 #[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
-        let tab = match self.screen {
-            Screen::Browse => None,
-            Screen::Connected { tab, .. } | Screen::Offline { tab, .. } => Some(tab),
+        let (tab, snapshot) = match &self.screen {
+            Screen::Browse => (None, None),
+            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => (Some(*tab), snapshot.as_deref()),
         };
         if target.tab() != tab {
             return;
@@ -154,21 +154,8 @@ impl App {
         if matches!(
             target,
             ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
-        ) && matches!(
-            self.screen,
-            Screen::Connected {
-                tab: MonitorTab::Heaps,
-                ..
-            } | Screen::Offline {
-                tab: MonitorTab::Heaps,
-                ..
-            }
         ) {
             self.heap_view.native.click(target, index);
-            let snapshot = match &self.screen {
-                Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot.as_deref(),
-                Screen::Browse => None,
-            };
             self.heap_view
                 .native
                 .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
@@ -347,6 +334,15 @@ mod tests {
             tab: MonitorTab::Runtime,
             snapshot: None,
         };
+        for target in [
+            ListTarget::HeapBuckets,
+            ListTarget::NativeSubsystems,
+            ListTarget::NativeClasses,
+            ListTarget::NativeMemory,
+        ] {
+            assert_eq!(target.tab(), Some(MonitorTab::Heaps));
+            app.activate_mouse_row(target, usize::MAX);
+        }
         app.activate_mouse_row(ListTarget::InfoThreads, 7);
         assert_eq!(app.info_thread_selected, 0);
         app.activate_mouse_row(ListTarget::RuntimeActivity, 7);

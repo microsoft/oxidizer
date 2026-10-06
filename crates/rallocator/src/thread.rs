@@ -94,7 +94,7 @@ static POOL: Mutex<Pool> = Mutex::new(Pool {
 fn lock_pool() -> std::sync::MutexGuard<'static, Pool> {
     match POOL.lock() {
         Ok(guard) => guard,
-        Err(_) => std::process::abort(),
+        Err(_) => crate::abort::abort(),
     }
 }
 
@@ -304,9 +304,7 @@ pub(crate) unsafe fn deallocate(ptr: *mut u8) {
     });
     // Deallocation cannot fail. An inability to acquire even allocator metadata
     // is fatal rather than silently leaking the allocation.
-    if !processed {
-        std::process::abort();
-    }
+    crate::abort::require(processed);
 }
 
 #[cfg(test)]
@@ -337,9 +335,7 @@ pub(crate) unsafe fn usable_size(ptr: *mut u8) -> usize {
             return unsafe { core.usable_size(ptr as usize) };
         }
         // A live allocation implies initialization succeeded already.
-        let Some(map) = backend::map() else {
-            std::process::abort();
-        };
+        let map = backend::initialized_map(backend::map());
         // Pair with a relaxed atomic pointer handoff before reading its entry.
         fence(Ordering::Acquire);
         // SAFETY: The caller guarantees immutable live frontend metadata.
@@ -352,6 +348,18 @@ pub(crate) unsafe fn usable_size(ptr: *mut u8) -> usize {
 mod tests {
     use super::*;
     use crate::classes;
+
+    #[test]
+    fn poisoned_pool_aborts_before_lending_an_owner() {
+        crate::abort::assert_aborts("thread::tests::poisoned_pool_aborts_before_lending_an_owner", || {
+            let poisoned = std::panic::catch_unwind(|| {
+                let _guard = POOL.lock().unwrap();
+                panic!("poison the exclusively locked empty pool");
+            });
+            assert!(poisoned.is_err());
+            drop(lock_pool());
+        });
+    }
 
     #[test]
     fn owner_creation_failure_preserves_empty_tls_and_pool() {

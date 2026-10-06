@@ -695,6 +695,14 @@ fn slab_geometry(slab_bytes: u64, capacity: u64) -> [String; 3] {
     ]
 }
 
+fn range_bar_width(count: u64, maximum: u64) -> usize {
+    if maximum == 0 {
+        0
+    } else {
+        (u128::from(count) * 12 / u128::from(maximum)) as usize
+    }
+}
+
 fn range_bins(ranges: &Ranges) -> Vec<String> {
     let maximum = ranges.counts.iter().copied().max().unwrap_or(0);
     ranges
@@ -703,11 +711,7 @@ fn range_bins(ranges: &Ranges) -> Vec<String> {
         .enumerate()
         .filter(|(_, count)| **count != 0)
         .map(|(exponent, count)| {
-            let filled = if maximum == 0 {
-                0
-            } else {
-                (u128::from(*count) * 12 / u128::from(maximum)) as usize
-            };
+            let filled = range_bar_width(*count, maximum);
             format!("{:>10}  {:>5}  {}", bytes(1_u128 << exponent), count, "█".repeat(filled))
         })
         .collect()
@@ -791,6 +795,15 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+
+    #[test]
+    fn range_bars_handle_empty_partial_and_maximum_counts_without_overflow() {
+        assert_eq!(range_bar_width(0, 0), 0);
+        assert_eq!(range_bar_width(0, 100), 0);
+        assert_eq!(range_bar_width(50, 100), 6);
+        assert_eq!(range_bar_width(u64::MAX, u64::MAX), 12);
+        assert_eq!(range_bar_width(u64::MAX / 2, u64::MAX), 5);
+    }
 
     pub(super) fn render(snapshot: Option<&Snapshot>, nav: Navigation, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();

@@ -28,6 +28,10 @@ pub(crate) struct Metadata {
     unavailable: AtomicBool,
 }
 
+fn next_generation(generation: u64) -> u64 {
+    generation.checked_add(1).unwrap_or_else(|| crate::abort::abort())
+}
+
 impl Metadata {
     pub(crate) const fn new() -> Self {
         Self {
@@ -65,7 +69,7 @@ impl Metadata {
         // SAFETY: The pool lock exclusively owns lease-state updates.
         let generation = unsafe { &mut *self.generation.get() };
         debug_assert_eq!(*generation & 1, 0);
-        *generation = generation.checked_add(1).unwrap_or_else(|| std::process::abort());
+        *generation = next_generation(*generation);
     }
 
     /// # Safety
@@ -75,7 +79,7 @@ impl Metadata {
         let generation = unsafe { &mut *self.generation.get() };
         // Isolated pool tests may return a freshly initialized, unleased owner.
         if *generation & 1 != 0 {
-            *generation = generation.checked_add(1).unwrap_or_else(|| std::process::abort());
+            *generation = next_generation(*generation);
         }
     }
 
@@ -104,7 +108,7 @@ impl Metadata {
                 *value,
             ),
             Err(TryLockError::WouldBlock) => (ObservationSource::Busy, None),
-            Err(TryLockError::Poisoned(_)) => std::process::abort(),
+            Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
         }
     }
 
@@ -244,7 +248,7 @@ pub(crate) fn publish(session: RecordingSession) {
                 slot.round.store(round, Ordering::Relaxed);
             }
             Err(TryLockError::WouldBlock) => {}
-            Err(TryLockError::Poisoned(_)) => std::process::abort(),
+            Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
         }
     });
 }
@@ -252,6 +256,106 @@ pub(crate) fn publish(session: RecordingSession) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contended_publisher_preserves_the_previous_round_and_retries_after_unlock() {
+        seismograph_rallocator::native::set_publication_enabled(true);
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy::all(true),
+            ..Default::default()
+        });
+        let layout = Layout::from_size_align(32, 16).unwrap();
+        let pointer = crate::recording::allocate(layout, false);
+        assert!(!pointer.is_null());
+        let session = seismograph::recorder::active_recording_session().unwrap();
+        let mut observed = false;
+        crate::thread::observe_current(|owner| {
+            observed = true;
+            // SAFETY: The existing current-thread lease remains live throughout
+            // this callback, which retains no core borrow across publication.
+            let slot = unsafe { owner.observation().slot() }.unwrap();
+            let previous = slot.value.lock().unwrap();
+            let round = slot.round.load(Ordering::Relaxed);
+            let generation = slot.generation.load(Ordering::Relaxed);
+            assert_eq!(previous.as_ref().unwrap().round, round);
+            seismograph_rallocator::native::request_observation();
+            publish(session);
+            assert_eq!(slot.round.load(Ordering::Relaxed), round);
+            assert_eq!(slot.generation.load(Ordering::Relaxed), generation);
+            assert_eq!(previous.as_ref().unwrap().round, round);
+            drop(previous);
+            publish(session);
+            assert_eq!(
+                slot.round.load(Ordering::Relaxed),
+                seismograph_rallocator::native::observation_round()
+            );
+            assert_ne!(slot.round.load(Ordering::Relaxed), round);
+            assert_eq!(
+                slot.value.lock().unwrap().as_ref().unwrap().round,
+                slot.round.load(Ordering::Relaxed)
+            );
+        });
+        assert!(observed);
+        // SAFETY: The allocation is exclusively owned and has no remaining accesses.
+        unsafe { crate::recording::deallocate(pointer, layout) };
+    }
+
+    fn poison_slot(slot: &Slot) {
+        let poisoned = std::panic::catch_unwind(|| {
+            let _guard = slot.value.lock().unwrap();
+            panic!("poison an exclusively owned publication slot");
+        });
+        assert!(poisoned.is_err());
+        assert!(slot.value.is_poisoned());
+    }
+
+    #[test]
+    fn poisoned_publication_copy_aborts_instead_of_reporting_empty_state() {
+        crate::abort::assert_aborts(
+            "observation::tests::poisoned_publication_copy_aborts_instead_of_reporting_empty_state",
+            || {
+                let metadata = Metadata::new();
+                // SAFETY: This subprocess exclusively owns the metadata and its slot through termination.
+                let slot = unsafe { metadata.slot() }.unwrap();
+                poison_slot(slot);
+                metadata.published();
+            },
+        );
+    }
+
+    #[test]
+    fn poisoned_publisher_aborts_instead_of_overwriting_failed_state() {
+        crate::abort::assert_aborts(
+            "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
+            || {
+                seismograph_rallocator::native::set_publication_enabled(true);
+                seismograph::recorder(seismograph::recorder::Configuration {
+                    allocations: seismograph::recorder::RecordingPolicy::all(true),
+                    ..Default::default()
+                });
+                let pointer = crate::recording::allocate(Layout::from_size_align(32, 16).unwrap(), false);
+                assert!(!pointer.is_null());
+                crate::thread::observe_current(|owner| {
+                    // SAFETY: The callback holds this existing owner's exclusive lease, outside its core action.
+                    let slot = unsafe { owner.observation().slot() }.unwrap();
+                    poison_slot(slot);
+                });
+                seismograph_rallocator::native::request_observation();
+                publish(seismograph::recorder::active_recording_session().unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn generation_overflow_aborts_instead_of_reusing_a_lease_identity() {
+        crate::abort::assert_aborts(
+            "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
+            || {
+                next_generation(u64::MAX);
+            },
+        );
+        assert_eq!(next_generation(u64::MAX - 1), u64::MAX);
+    }
 
     thread_local! {
         static FAIL_NEXT_ALLOCATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

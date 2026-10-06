@@ -44,14 +44,22 @@ fn reserve_with_page_size(size: usize, alignment: usize, page_size: libc::c_long
         return std::ptr::null_mut();
     }
     let base = mapping.addr();
-    let Some(rounded) = base.checked_add(alignment - 1) else {
+    let prefix = base.checked_add(alignment - 1).map(|rounded| (rounded & !(alignment - 1)) - base);
+    // SAFETY: This call owns the fresh mapping; a computed prefix is page-granular
+    // and leaves the requested size within the mapping.
+    unsafe { retain_mapping(mapping.cast(), mapped_size, size, prefix) }
+}
+
+/// # Safety
+/// The complete page-granular mapping is exclusively owned. A supplied prefix
+/// is page-granular and leaves `size` bytes inside that mapping.
+unsafe fn retain_mapping(mapping: *mut u8, mapped_size: usize, size: usize, prefix: Option<usize>) -> *mut u8 {
+    let Some(prefix) = prefix else {
         // SAFETY: The entire fresh mapping still belongs exclusively to this call.
-        unsafe { release(mapping.cast(), mapped_size) };
+        unsafe { release(mapping, mapped_size) };
         return std::ptr::null_mut();
     };
-    let prefix = (rounded & !(alignment - 1)) - base;
     let suffix = mapped_size - prefix - size;
-    let mapping = mapping.cast::<u8>();
     // SAFETY: prefix is within the fresh mapping; this aligned subrange is
     // retained while its disjoint, page-granular prefix and suffix are unmapped.
     let aligned = unsafe { mapping.add(prefix) };
@@ -89,9 +97,7 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
 /// The complete page-granular mapping is exclusively owned, with no remaining users.
 pub(crate) unsafe fn release(address: *mut u8, size: usize) {
     // SAFETY: The caller supplies the exact unused mapping extent.
-    if unsafe { libc::munmap(address.cast(), size) } != 0 {
-        std::process::abort();
-    }
+    crate::abort::require(unsafe { libc::munmap(address.cast(), size) } == 0);
 }
 
 pub(crate) fn wait(word: &AtomicU32, expected: u32) {
@@ -108,11 +114,8 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32) {
             )
         };
         if result == -1 {
-            match std::io::Error::last_os_error().raw_os_error() {
-                // A changed word or signal is not a failure: recheck the predicate.
-                Some(libc::EAGAIN | libc::EINTR) => {}
-                _ => std::process::abort(),
-            }
+            // A changed word or signal is not a failure: recheck the predicate.
+            check_wait_error(std::io::Error::last_os_error().raw_os_error());
         }
     }
 }
@@ -122,15 +125,54 @@ pub(crate) fn wake_one(address: *const u32) {
     // SAFETY: FUTEX_WAKE uses the aligned numeric address as a private wait key,
     // not a Rust reference. A waiter may depart after its release notification.
     let result = unsafe { libc::syscall(libc::SYS_futex, address, libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG, 1_i32) };
-    if result == -1 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EFAULT) {
-        std::process::abort();
-    }
+    crate::abort::require(result != -1 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EFAULT));
+}
+
+fn check_wait_error(error: Option<i32>) {
+    crate::abort::require(matches!(error, Some(libc::EAGAIN | libc::EINTR)));
 }
 
 #[cfg(test)]
 mod tests {
     use super::{PAGE, RESERVE_MIN, reserve_with_page_size};
     use crate::hal;
+
+    #[test]
+    fn rejected_alignment_releases_the_entire_owned_mapping() {
+        // SAFETY: Anonymous mapping with no file or backing-page commitment.
+        let mapping = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                PAGE,
+                libc::PROT_NONE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(mapping, libc::MAP_FAILED);
+        let mut residency = 0_u8;
+        // SAFETY: mincore only queries the mapping and writes one residency byte.
+        assert_eq!(unsafe { libc::mincore(mapping, PAGE, &raw mut residency) }, 0);
+        // SAFETY: This test owns the complete mapping; None rejects retention.
+        assert!(unsafe { super::retain_mapping(mapping.cast(), PAGE, PAGE, None) }.is_null());
+        // SAFETY: mincore accepts numeric virtual addresses, including unmapped ones,
+        // and writes only into the live residency byte if the query succeeds.
+        assert_eq!(unsafe { libc::mincore(mapping, PAGE, &raw mut residency) }, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ENOMEM));
+    }
+
+    #[test]
+    fn unexpected_wait_error_aborts_instead_of_retrying_forever() {
+        crate::abort::assert_aborts(
+            "hal::linux::tests::unexpected_wait_error_aborts_instead_of_retrying_forever",
+            || {
+                super::check_wait_error(Some(libc::EINVAL));
+            },
+        );
+        super::check_wait_error(Some(libc::EAGAIN));
+        super::check_wait_error(Some(libc::EINTR));
+    }
 
     #[test]
     fn unsupported_kernel_pages_fail_before_reserving_memory() {

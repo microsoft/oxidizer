@@ -9,6 +9,13 @@ use seismograph::recorder::event::{EventKind as RuntimeKind, Events};
 
 use crate::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 
+// Only these runtime heap kinds have a legacy caller-view representation.
+const LEGACY_HEAP_KINDS: [(seismograph::recorder::alloc::HeapKind, HeapKind); 3] = [
+    (seismograph::recorder::alloc::HeapKind::General, HeapKind::General),
+    (seismograph::recorder::alloc::HeapKind::Bump, HeapKind::Bump),
+    (seismograph::recorder::alloc::HeapKind::Thread, HeapKind::Thread),
+];
+
 /// Projects authoritative container events into the legacy caller-view model.
 ///
 /// Unmatched allocation records are not proof of live memory. Counterpart records
@@ -42,17 +49,16 @@ pub fn callers(events: &Events) -> Callers {
         log_indexes.insert(log.thread_log_id, result.threads.len());
         result.threads.push(log);
     }
-    for (index, event) in events.events.iter().enumerate() {
-        let Some(allocation) = event.allocation() else { continue };
+    let allocations = events.events.iter().enumerate().filter_map(|(index, event)| {
+        let allocation = event.allocation()?;
+        LEGACY_HEAP_KINDS
+            .iter()
+            .find_map(|(runtime, legacy)| (*runtime == allocation.heap_kind).then_some((index, event, allocation, *legacy)))
+    });
+    for (index, event, allocation, heap_kind) in allocations {
         if event.kind != RuntimeKind::Allocation && event.kind != RuntimeKind::Deallocation {
             continue;
         }
-        let heap_kind = match allocation.heap_kind {
-            seismograph::recorder::alloc::HeapKind::General => HeapKind::General,
-            seismograph::recorder::alloc::HeapKind::Bump => HeapKind::Bump,
-            seismograph::recorder::alloc::HeapKind::Thread => HeapKind::Thread,
-            _ => continue,
-        };
         let key = (allocation.allocation_id, allocation.address);
         let identity = (index as u64 + 1, event.thread_id.get());
         let ((allocation_id, thread_log_id), allocation_recorded) = if event.kind == RuntimeKind::Allocation {
