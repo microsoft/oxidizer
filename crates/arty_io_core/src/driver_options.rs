@@ -11,14 +11,18 @@ use crate::{DriverRole, SystemTaskSpawner};
 pub struct DriverOptions {
     thread: Thread,
     spawner: SystemTaskSpawner,
-    role: DriverRole,
+    allowed_roles: Vec<DriverRole>,
 }
 
 impl DriverOptions {
     /// Creates options for a driver on `thread`.
     #[must_use]
-    pub fn new(thread: Thread, spawner: SystemTaskSpawner, role: DriverRole) -> Self {
-        Self { thread, spawner, role }
+    pub fn new(thread: Thread, spawner: SystemTaskSpawner, allowed_roles: Vec<DriverRole>) -> Self {
+        Self {
+            thread,
+            spawner,
+            allowed_roles,
+        }
     }
 
     /// Returns the worker that will own the driver.
@@ -33,12 +37,13 @@ impl DriverOptions {
         &self.spawner
     }
 
-    /// Returns this driver's runtime-assigned waiting role.
+    /// Returns the waiting roles the runtime permits this driver to select.
     ///
-    /// The role is fixed for the driver's lifetime. See [`DriverRole`] for waiting rules.
+    /// The driver selects its actual role in the [`DriverInstance`](crate::DriverInstance)
+    /// returned by [`DriverProvider::create`](crate::DriverProvider::create).
     #[must_use]
-    pub const fn role(&self) -> DriverRole {
-        self.role
+    pub fn allowed_roles(&self) -> &[DriverRole] {
+        &self.allowed_roles
     }
 }
 
@@ -46,7 +51,7 @@ impl fmt::Debug for DriverOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DriverOptions")
             .field("thread", &self.thread)
-            .field("role", &self.role)
+            .field("allowed_roles", &self.allowed_roles)
             .finish_non_exhaustive()
     }
 }

@@ -21,8 +21,9 @@ Application code uses a handle rather than calling the worker's driver directly.
 | Part | What it is for |
 | --- | --- |
 | `IoContext` | The application's handle to the I/O library's operations. |
-| `DriverProvider` | Creates the library's driver and context on each worker. |
-| `Driver` | The worker-local part that processes submissions and completions. |
+| `DriverProvider` | Creates a `DriverInstance` on each worker. |
+| `DriverInstance` | Selects a primary or secondary worker-local driver and its context. |
+| `Driver` | The shared lifecycle base for both driver kinds. |
 | Runtime | Gives drivers turns and coordinates when the worker may wait or continue. |
 
 Contexts can outlive drivers. The runtime calls each driver with exclusive
@@ -35,21 +36,28 @@ Imagine a network driver and a file driver sharing a worker.
 
 ### Make each library ready before handing it to the application
 
-The first context request creates a driver/context pair on every active worker.
+The first context request creates a `DriverInstance` on every active worker.
 Before publishing it, the runtime runs a non-blocking initialization cycle.
 The request returns only when all workers are ready, so application code cannot
 see a half-initialized driver.
 
-Later requests reuse the registration. Concrete context types distinguish
-registrations, allowing different driver versions to coexist.
+The runtime passes `DriverOptions::allowed_roles()` as a role permission set to
+the provider.
+The returned `DriverInstance` variant is the driver's selected role; it is not
+a second runtime assignment. The runtime accepts only a selection permitted by
+the worker's capacity and the provider's permission. Later requests reuse the
+registration. Concrete context types distinguish registrations, allowing
+different driver versions to coexist.
 
 ### Give every driver a turn before sleeping
 
-A logical cycle is one coordinated pass across the drivers, with a shared time
-snapshot and wait bound. At registration, the runtime may select one eligible
-driver as **primary**. **Secondaries** run first without blocking the worker;
-the primary runs last and may wait up to the runtime's wait bound. A zero bound
-means no waiting. Without a primary, parking remains the runtime's responsibility.
+A logical cycle polls the primary driver with a mutable `Cycle` containing its
+wait bound. At registration, the runtime permits at most one driver to select
+**primary**. Secondary drivers do not receive cycle callbacks; they coordinate
+with the primary or use independent background execution. A zero bound means
+no waiting. Without a primary, parking remains the runtime's responsibility.
+`Cycle` is deliberately non-`Send` and non-`Sync` so it stays on the owning
+worker.
 
 Bounded batches keep one driver from monopolizing the worker. Immediately
 serviceable work requests another cycle; unfinished I/O alone does not, avoiding
@@ -57,29 +65,27 @@ a busy loop while waiting for the operating system.
 
 ### Let either library wake the worker
 
-Suppose the file driver has a background wait while the primary network driver
-waits on the worker. A file completion must end that network wait, rather than
-depend on an unrelated network event.
+Suppose the file driver has a completion while the primary network driver
+waits on the worker. The file driver must make that completion visible without
+depending on an unrelated network event.
 
-Before waiting, each driver registers an interruption waker through
-`Cycle::start_work` and receives a `PendingWork` handle. It keeps the handle
-until the work ends, publishes results, then completes or drops the handle.
-That notification interrupts other waits, including the primary's.
+The runtime obtains the primary driver's notification path from
+`PrimaryDriver::waker()`. A secondary can coordinate its completion source with
+the primary's native wait and use that path to wake the worker. Alternatively,
+it can continuously drain completions on independent driver-owned background
+execution. Secondary drivers do not participate in the runtime polling loop.
 
-After the primary returns, the runtime interrupts remaining waits and waits
-for all registered work to end before advancing. Asking a wait to stop is not
-proof that it has stopped; the handles provide that completion barrier.
-
-Signals also stay latched across wait entry. A completion arriving just before
-another driver sleeps must not be lost. Coordination starts before checking
-work and is never reset between driver calls. The exact wake-up protocol is
-specified in [R5](REQUIREMENTS.md#r5-reliable-wake-ups).
+Waking the worker does not itself drain a native completion queue. The driver
+retains ownership of the state needed to process completions, and its next
+worker-local invocation performs bounded completion processing. A notification
+racing wait entry or the final pre-wait check must remain observable rather than
+being discarded. The exact wake-up obligations are specified in
+[R5](REQUIREMENTS.md#r5-reliable-wake-ups).
 
 ### Keep scheduling decisions in the runtime
 
-The runtime implements `PendingWorkTracker` because it knows when the worker
-has other work and how it should park. Drivers supply native interruption;
-each side owns its synchronization.
+The runtime owns the worker's parking policy. Drivers supply their notification
+paths and own synchronization for native completion state.
 
 Blocking observers can use `SystemTaskSpawner` or provider-owned threads.
 These are not async application tasks: indefinitely blocked observers need
@@ -135,5 +141,5 @@ current API.
 ## What the example demonstrates
 
 The [single-thread example](../examples/single_thread_runtime/main.rs) demonstrates
-registration and driver roles only. Its drivers perform no I/O and its tracker
-is a no-op, not a reference implementation of completion coordination.
+registration and driver roles only. Its drivers perform no I/O and return no-op
+wakers, not a reference implementation of completion coordination.

@@ -15,36 +15,34 @@
 //! # How drivers work
 //!
 //! Applications access a driver's I/O operations through an [`IoContext`]. Its [`DriverProvider`]
-//! creates a context and a worker-local [`Driver`] for each runtime worker. The driver processes
-//! submissions and completions in bounded calls to [`Driver::execute_cycle`].
+//! creates a [`DriverInstance`] containing a context and either a worker-local
+//! [`PrimaryDriver`] or [`SecondaryDriver`] for each runtime worker. The runtime polls only the
+//! primary driver.
 //!
-//! Before entering or scheduling a native wait, the driver calls [`Cycle::start_work`] with an
-//! interruption waker whose signal remains latched until the wait observes it. It keeps the
-//! returned [`PendingWork`] until the work ends and publishes any results before completing or
-//! dropping the handle. Both actions notify the runtime.
+//! The runtime supplies role permissions through [`DriverOptions::allowed_roles`], and the
+//! provider selects the enum variant returned by [`DriverProvider::create`]. Primary drivers
+//! supply the notification path used to interrupt their waits through [`PrimaryDriver::waker`].
 //!
 //! ## Primary and secondary drivers
 //!
-//! A worker has at most one [`Primary`](DriverRole::Primary) driver, assigned only to a provider
-//! that opts in through [`DriverProvider::CAN_BE_PRIMARY`]. It may wait on the worker for up to
-//! [`Cycle::max_wait`]; a zero wait bound means no waiting.
+//! A worker has at most one [`Primary`](DriverRole::Primary) driver. The runtime polls it with a
+//! mutable [`Cycle`] and it may wait on the worker for up to [`Cycle::max_wait`]; a zero wait
+//! bound means no waiting.
 //!
-//! [`Secondary`](DriverRole::Secondary) drivers must not block the worker. They may schedule
-//! background waits represented by [`PendingWork`] within the same wait bound; indefinite waits
-//! require independent execution capacity.
+//! [`Secondary`](DriverRole::Secondary) drivers do not receive runtime cycle callbacks. They
+//! coordinate completion processing with the primary or continuously process completions on
+//! independent driver-owned background execution.
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime clones and relocates providers to their workers, assigns driver roles, and
-//! supplies [`DriverOptions`]. It completes a non-blocking, zero-wait initialization cycle
-//! before publishing a context.
+//! The runtime clones and relocates providers to their workers, supplies [`DriverOptions`], and
+//! validates each returned [`DriverInstance`]. It completes a non-blocking, zero-wait
+//! initialization cycle before publishing a context.
 //! It also supplies a [`SystemTaskSpawner`] for blocking system work.
 //!
-//! Each logical cycle uses a shared time snapshot and wait bound. The runtime invokes
-//! secondaries before the primary and implements [`PendingWorkTracker`] to register work,
-//! latch interruption, and track completion. After the primary returns, it interrupts remaining
-//! waits and waits for every pending-work handle before advancing. If there is no primary,
-//! the runtime retains responsibility for parking the worker.
+//! Each logical cycle passes a mutable [`Cycle`] containing only its wait bound to the primary.
+//! `Cycle` is not `Send` or `Sync`. If there is no primary, the runtime retains responsibility
+//! for parking the worker.
 //!
 //! # Shutdown
 //!
@@ -56,8 +54,8 @@
 //! # Example and reference
 //!
 //! The [single-thread runtime example] demonstrates registration and driver roles. Its sample
-//! drivers perform no I/O and use a no-op tracker; a runtime serving native I/O must implement
-//! the coordination described above.
+//! drivers perform no I/O; a runtime serving native I/O must implement the coordination described
+//! above.
 //!
 //! - [Requirements](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/REQUIREMENTS.md)
 //! - [Design](https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md)
@@ -67,24 +65,22 @@
 mod cycle;
 mod driver;
 mod driver_error;
+mod driver_instance;
 mod driver_options;
 mod driver_role;
 mod io_context;
-mod pending_work;
-mod pending_work_tracker;
 mod provider;
 mod provider_options;
 mod shutdown_error;
 mod system_task_spawner;
 
 pub use cycle::Cycle;
-pub use driver::Driver;
+pub use driver::{Driver, PrimaryDriver, SecondaryDriver};
 pub use driver_error::DriverError;
+pub use driver_instance::DriverInstance;
 pub use driver_options::DriverOptions;
 pub use driver_role::DriverRole;
 pub use io_context::IoContext;
-pub use pending_work::PendingWork;
-pub use pending_work_tracker::PendingWorkTracker;
 pub use provider::DriverProvider;
 pub use provider_options::ProviderOptions;
 pub use shutdown_error::ShutdownError;

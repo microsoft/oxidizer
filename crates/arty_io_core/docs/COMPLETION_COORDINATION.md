@@ -127,6 +127,13 @@ These patterns can be combined. Native compatibility, thread budgets, locality,
 and active-polling requirements determine which arrangements are practical.
 Sharing a waiting point does not require sharing operation representations.
 
+For `arty_io_core`, a secondary driver does not receive runtime cycle
+callbacks. It therefore either coordinates its completion source with the
+primary driver's wait and notification path, or continuously processes
+completions on independent driver-owned background execution. A notification
+only tells the runtime that service may be needed; it does not replace draining
+the source or provide ownership of completion state.
+
 ## Progress and parking
 
 Service includes the backend's required submission progress, completion
