@@ -69,7 +69,14 @@ fn timer_panic_cannot_unwind_past_live_executor_storage() {
                 .await;
             });
         let retained = received.recv_timeout(TEST_TIMEOUT).unwrap();
-        worker_exited.recv_timeout(TEST_TIMEOUT).unwrap();
+        if worker_exited.recv_timeout(TEST_TIMEOUT).is_err() {
+            // A hang is not the required fail-closed termination. Leak objects that
+            // may still reference the worker and let the child exit successfully so
+            // the parent rejects this outcome.
+            std::mem::forget(retained);
+            std::mem::forget(runtime);
+            return;
+        }
         // The boundary must terminate before TLS teardown. Do not dereference a stale waker.
         std::mem::forget(retained);
         std::mem::forget(runtime);
