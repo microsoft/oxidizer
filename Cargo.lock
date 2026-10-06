@@ -247,7 +247,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "arty"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arty_executor",
  "arty_io_core",
@@ -309,7 +309,7 @@ version = "0.2.0"
 
 [[package]]
 name = "arty_macros"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arty_macros_impl",
  "futures",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "arty_macros_impl"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "darling",
  "insta",
