@@ -88,6 +88,8 @@ impl RuntimeBuilder {
     /// The default shares one pool across async workers. Use
     /// [`BlockingPoolPolicy::shared`] to set a runtime-wide thread limit, or
     /// [`BlockingPoolPolicy::isolated`] to give each worker its own pool.
+    /// A zero shared-pool limit is rejected by [`build`](Self::build), not by
+    /// this setter.
     ///
     /// # Examples
     ///
@@ -168,9 +170,9 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the processor count is zero or the policy cannot be
-    /// satisfied, such as an [`exactly`](CpuPolicy::exactly) request exceeding
-    /// available processors.
+    /// Returns [`Error`] if the processor count or shared blocking-pool limit is
+    /// zero, or if the processor policy cannot be satisfied, such as an
+    /// [`exactly`](CpuPolicy::exactly) request exceeding available processors.
     ///
     /// # Panics
     ///

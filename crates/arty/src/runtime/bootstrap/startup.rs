@@ -68,7 +68,14 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shared_state: SharedState = (0..worker_count).map(|_| OnceLock::new()).collect();
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools();
+    let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
+        emit!(
+            &sink,
+            RuntimeStartFailed {
+                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
+            }
+        );
+    })?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         let (command_tx, command_rx) = channel::unbounded();

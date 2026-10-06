@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::runtime::bootstrap::pools::BlockingPools;
+use crate::runtime::error::Error;
 
 /// A sharing policy for blocking-task thread pools.
 ///
@@ -65,11 +66,8 @@ impl BlockingPoolPolicy {
     ///
     /// `max_workers` limits the pool's threads. Pass a positive count, or `None`
     /// to use the runtime's default limit. This limit is separate from the
-    /// async worker count.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `max_workers` is zero, including `Some(0)`.
+    /// async worker count. A zero count is retained in the policy and rejected
+    /// by [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
     ///
     /// # Examples
     ///
@@ -80,13 +78,9 @@ impl BlockingPoolPolicy {
     /// ```
     #[must_use]
     pub fn shared(max_workers: impl Into<Option<usize>>) -> Self {
-        let max_workers = max_workers.into();
-
-        assert_ne!(max_workers, Some(0), "max_workers must be non-zero");
-
         Self {
             mode: Mode::Shared,
-            max_workers,
+            max_workers: max_workers.into(),
         }
     }
 
@@ -100,10 +94,11 @@ impl BlockingPoolPolicy {
 
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(in crate::runtime) fn into_pools(self) -> BlockingPools {
+    pub(in crate::runtime) fn into_pools(self) -> Result<BlockingPools, Error> {
         match self.mode {
-            Mode::Isolated => BlockingPools::isolated(),
-            Mode::Shared => BlockingPools::shared(self.max_workers),
+            Mode::Isolated => Ok(BlockingPools::isolated()),
+            Mode::Shared if self.max_workers == Some(0) => Err(Error::new("blocking pool max_workers must be greater than zero")),
+            Mode::Shared => Ok(BlockingPools::shared(self.max_workers)),
         }
     }
 }
@@ -122,7 +117,7 @@ mod tests {
     #[test]
     fn isolated_into_pools_is_isolated() {
         assert!(
-            matches!(BlockingPoolPolicy::isolated().into_pools(), BlockingPools::Isolated),
+            matches!(BlockingPoolPolicy::isolated().into_pools().unwrap(), BlockingPools::Isolated),
             "expected Isolated variant"
         );
     }
@@ -130,7 +125,7 @@ mod tests {
     #[test]
     fn shared_into_pools_is_shared() {
         assert!(
-            matches!(BlockingPoolPolicy::shared(None).into_pools(), BlockingPools::Shared(_)),
+            matches!(BlockingPoolPolicy::shared(None).into_pools().unwrap(), BlockingPools::Shared(_)),
             "expected Shared variant"
         );
     }

@@ -49,12 +49,6 @@ fn public_policy_defaults_are_automatic_and_shared() {
 }
 
 #[test]
-#[should_panic(expected = "non-zero")]
-fn shared_zero_panics() {
-    let _ = BlockingPoolPolicy::shared(0);
-}
-
-#[test]
 fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
     for previous in [
         CpuPolicy::exactly(0),
@@ -78,12 +72,6 @@ fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
 #[should_panic(expected = "stack size must be greater than zero")]
 fn zero_stack_size_is_rejected_by_the_setter() {
     let _ = Runtime::builder().stack_size(0);
-}
-
-#[test]
-fn both_zero_blocking_limits_are_rejected() {
-    catch_unwind(|| BlockingPoolPolicy::shared(0)).unwrap_err();
-    catch_unwind(|| BlockingPoolPolicy::shared(Some(0))).unwrap_err();
 }
 
 #[test]

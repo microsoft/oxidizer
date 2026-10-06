@@ -10,7 +10,7 @@ testing_aids::init_tracing!();
 
 use std::error::Error as StdError;
 
-use arty::runtime::{CpuPolicy, Error, Runtime};
+use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Error, Runtime};
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
 #[test]
@@ -29,6 +29,36 @@ fn zero_counts_are_rejected_when_the_runtime_is_built() {
         let names: Vec<_> = events.iter().map(CapturedEvent::name).collect();
         assert_eq!(names, vec!["arty.rt.start_failed"]);
     }
+}
+
+#[test]
+fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
+    for policy in [BlockingPoolPolicy::shared(0), BlockingPoolPolicy::shared(Some(0))] {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let error: Error = Runtime::builder()
+            .cpu_policy(CpuPolicy::at_most(1))
+            .blocking_pool_policy(policy)
+            .sink(sink)
+            .build()
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "blocking pool max_workers must be greater than zero");
+        assert!(error.source().is_some());
+        let events = processor.events();
+        let names: Vec<_> = events.iter().map(CapturedEvent::name).collect();
+        assert_eq!(names, vec!["arty.rt.start_failed"]);
+    }
+}
+
+#[test]
+fn zero_shared_blocking_limit_can_be_replaced_before_building() {
+    let runtime = Runtime::builder()
+        .blocking_pool_policy(BlockingPoolPolicy::shared(0))
+        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+        .build()
+        .unwrap();
+
+    runtime.stop().unwrap();
 }
 
 #[test]
