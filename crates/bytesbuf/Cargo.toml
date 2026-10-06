@@ -120,12 +120,36 @@ harness = false
 required-features = ["std"]
 
 [[example]]
+name = "bb_basic"
+required-features = ["std"]
+
+[[example]]
+name = "bb_has_memory_global"
+required-features = ["std"]
+
+[[example]]
 name = "bb_has_memory_forwarding"
 required-features = ["test-util"]
 
 [[example]]
 name = "bb_has_memory_optimizing"
 required-features = ["test-util"]
+
+[[example]]
+name = "bb_optimal_path"
+required-features = ["std"]
+
+[[example]]
+name = "bb_reuse"
+required-features = ["std"]
+
+[[example]]
+name = "bb_slice_count_metric"
+required-features = ["std"]
+
+[[example]]
+name = "bb_slice_by_slice_write"
+required-features = ["std"]
 
 [[example]]
 name = "bb_static_data"
