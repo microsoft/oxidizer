@@ -1692,7 +1692,14 @@ mod tests {
         assert_eq!(encode_estimate(class.live_allocations).value, 3);
         assert_eq!(encode_size_class(&class).block_bytes, 64);
         assert_eq!(encode_stats(sample_stats()).allocations, 11);
-        assert_eq!(producer_version(), Version::new(0, 1, 0));
+        assert_eq!(
+            producer_version(),
+            Version::new(
+                env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+            )
+        );
 
         let kinds = [
             PhysicalSliceKind::Unknown,

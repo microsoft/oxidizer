@@ -330,14 +330,14 @@ allocations.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblIcUv1S6E1IbzmYxmhmKLHwbK3ye-aYO9XQbeaTcEdbPDsxhZIKCcGFsbG9jYXRpb25faGludHNlMC4xLjCCanJhbGxvY2F0b3JlMC4xLjA
- [__link0]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link1]: https://crates.io/crates/allocation_hints/0.1.0
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblIcUv1S6E1IbzmYxmhmKLHwbK3ye-aYO9XQbeaTcEdbPDsxhZIKCcGFsbG9jYXRpb25faGludHNlMC4yLjCCanJhbGxvY2F0b3JlMC4yLjA
+ [__link0]: https://docs.rs/rallocator/0.2.0/rallocator/?search=Rallocator::new
+ [__link1]: https://crates.io/crates/allocation_hints/0.2.0
  [__link2]: https://doc.rust-lang.org/stable/std/?search=alloc::GlobalAlloc::realloc
- [__link3]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link4]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::thread_heap
- [__link5]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link6]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
- [__link7]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::Heap
- [__link8]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link9]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__link3]: https://docs.rs/rallocator/0.2.0/rallocator/macro.rallocator.html
+ [__link4]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/?search=heaps::thread_heap
+ [__link5]: https://docs.rs/rallocator/0.2.0/rallocator/macro.rallocator.html
+ [__link6]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/?search=with_hint
+ [__link7]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/?search=heaps::Heap
+ [__link8]: https://docs.rs/rallocator/0.2.0/rallocator/?search=Rallocator::new
+ [__link9]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/?search=with_hint

@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph"
-version = "0.1.0"
+version = "0.2.0"
 description = "High-performance process telemetry with extensible snapshot sources."
 readme = "README.md"
 keywords = ["telemetry", "diagnostics", "profiling", "performance"]

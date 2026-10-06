@@ -373,7 +373,11 @@ function New-SyntheticWorkspace {
         $srcDir   = Join-Path $packageDir 'src'
         New-Item -ItemType Directory -Path $srcDir -Force | Out-Null
         Write-PackageCargoToml -Package $package -Path (Join-Path $packageDir 'Cargo.toml')
-        Set-Content -Path (Join-Path $srcDir 'lib.rs') -Value "// $($package.Name)" -NoNewline
+        if ($package.BinOnly) {
+            Set-Content -Path (Join-Path $srcDir 'main.rs') -Value 'fn main() {}' -NoNewline
+        } else {
+            Set-Content -Path (Join-Path $srcDir 'lib.rs') -Value "// $($package.Name)" -NoNewline
+        }
         Set-Content -Path (Join-Path $packageDir 'CHANGELOG.md') -Value "# Changelog`n`n## [Unreleased]" -NoNewline
     }
 

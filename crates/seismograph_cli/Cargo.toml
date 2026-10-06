@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Command-line tools for inspecting seismograph telemetry."
 readme = "README.md"
 keywords = ["allocator", "memory", "telemetry", "diagnostics"]
