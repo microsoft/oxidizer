@@ -319,6 +319,7 @@ fn fakeable_struct_with_expect() {
 fn fakeable_impl_with_expect() {
     let input = quote! {
         #[expect(dead_code)]
+        #[cfg_attr(test, expect(unused))]
         #[allow(whatever)]
         impl MyService {
             #[expect(unused_async)]

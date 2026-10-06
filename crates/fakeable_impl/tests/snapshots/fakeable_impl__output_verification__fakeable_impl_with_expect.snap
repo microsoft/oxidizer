@@ -3,6 +3,7 @@ source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "testing_aids :: render_expansion(&result)"
 ---
 #[expect(dead_code)]
+#[cfg_attr(test, expect(unused))]
 #[allow(whatever)]
 impl __fakeable__MyService::MyService {
     #[expect(unused_async)]
@@ -20,7 +21,8 @@ impl __fakeable__MyService::MyService {
         "value"
     }
 }
-#[expect(dead_code)]
+#[allow(dead_code)]
+#[cfg_attr(test, allow(unused))]
 #[allow(whatever)]
 impl MyService {
     #[allow(unused_async)]

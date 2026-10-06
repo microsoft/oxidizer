@@ -559,6 +559,7 @@ fn generate_wrapper_impl(
     }
 
     let mut fake_impl = original_impl.clone();
+    fake_impl.attrs = original_impl.attrs.iter().map(transform_expect_to_allow).collect();
     fake_impl.items = delegation_methods;
     Ok(quote! { #fake_impl })
 }
