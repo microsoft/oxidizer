@@ -23,7 +23,7 @@ use thread_aware::Unaware;
 testing_aids::init_tracing!();
 
 fn isolated_deadlock(name: &str, body: fn()) {
-    isolated_with_timeout(name, TEST_TIMEOUT + std::time::Duration::from_secs(5), body);
+    isolated_with_timeout(name, std::time::Duration::from_secs(5), body);
 }
 
 #[test]

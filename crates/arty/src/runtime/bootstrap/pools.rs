@@ -16,13 +16,13 @@ impl BlockingPools {
     }
 
     pub(in crate::runtime) fn shared(max_workers: Option<usize>) -> Self {
-        Self::Shared(BlockingPool::new(max_workers))
+        Self::Shared(BlockingPool::new_with_mode(max_workers, "shared"))
     }
 
     pub(super) fn build_worker(&self) -> BlockingPool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::Isolated => BlockingPool::new(None),
+            Self::Isolated => BlockingPool::new_with_mode(None, "isolated"),
         }
     }
 }

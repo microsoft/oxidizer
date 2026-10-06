@@ -232,6 +232,8 @@ pub(crate) struct BuiltinsThreadMismatch {
 #[warning("blocking worker pool is saturated and cannot grow")]
 #[counter(name = "arty.rt.blocking_worker.pool_saturated")]
 pub(crate) struct BlockingWorkerPoolSaturated {
+    #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]
+    pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
     #[dimension(log = "blocking_worker_pool.max_threads", metric = "blocking_worker_pool.max_threads")]
     pub max_threads: SystemMetricCount,
 }
@@ -548,6 +550,7 @@ mod tests {
         emit!(
             sink,
             BlockingWorkerPoolSaturated {
+                blocking_worker_pool_mode: BlockingWorkerPoolMode("isolated"),
                 max_threads: SystemMetricCount(64),
             }
         );
@@ -556,6 +559,7 @@ mod tests {
             processor.single_event(),
             ExpectedEvent::new("arty.rt.blocking_worker.pool_saturated", Severity::Warn)
                 .body("blocking worker pool is saturated and cannot grow")
+                .dimension("blocking_worker_pool.mode", "isolated")
                 .dimension("blocking_worker_pool.max_threads", "64")
                 .metric()
         );

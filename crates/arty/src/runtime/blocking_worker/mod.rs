@@ -18,7 +18,7 @@ use performables::sync::mutex::Mutex;
 use pin_project::pin_project;
 use threadpool::ThreadPool;
 
-use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
+use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
 
@@ -138,7 +138,7 @@ pub(crate) fn with_active_blocking_wait_pool<F: Future>(inner: F, pool: Option<A
 
 #[derive(Debug)]
 pub(crate) struct BlockingWaitContext {
-    parent: Option<PerformableWeak<Self>>,
+    parent: Option<Arc<Self>>,
     active_wait: Mutex<Option<BlockingWaitMarker>>,
     waker: AtomicWaker,
     children: Mutex<Vec<PerformableWeak<Self>>>,
@@ -147,7 +147,7 @@ pub(crate) struct BlockingWaitContext {
 impl BlockingWaitContext {
     pub(crate) fn new(parent: Option<Arc<Self>>) -> Arc<Self> {
         let context = Arc::new(Self {
-            parent: parent.as_ref().map(Arc::downgrade),
+            parent: parent.clone(),
             active_wait: Mutex::new(None),
             waker: AtomicWaker::new(),
             children: Mutex::new(Vec::new()),
@@ -188,8 +188,8 @@ impl BlockingWaitContext {
             return active;
         }
 
-        let mut parent = self.parent.as_ref().and_then(PerformableWeak::upgrade);
-        while let Some(context) = parent {
+        let mut parent = self.parent.clone();
+        while let Some(ref context) = parent {
             let active = context
                 .active_wait
                 .lock_result()
@@ -199,7 +199,8 @@ impl BlockingWaitContext {
             if active.is_some() {
                 return active;
             }
-            parent = context.parent.as_ref().and_then(PerformableWeak::upgrade);
+            let next = context.parent.clone();
+            parent = next;
         }
         None
     }
@@ -255,6 +256,17 @@ fn blocking_wait_context_prunes_expired_children_and_walks_deep_trees_iterativel
     assert_eq!(contexts[0].children.lock_result().unwrap().len(), 1);
     drop(active);
     assert!(deepest.active_pool().is_none());
+
+    let root = BlockingWaitContext::new(None);
+    let intermediate = BlockingWaitContext::new(Some(Arc::clone(&root)));
+    let descendant = BlockingWaitContext::new(Some(Arc::clone(&intermediate)));
+    drop(intermediate);
+    let pool = Arc::new(());
+    let active = BlockingWaitContext::activate_pool(&root, Arc::clone(&pool));
+    assert!(descendant.active_pool().is_some_and(|active| Arc::ptr_eq(&active, &pool)));
+    root.wake_descendants();
+    drop(active);
+    assert!(descendant.active_pool().is_none());
 }
 
 pub(crate) struct BlockingWaitActivation {
@@ -315,6 +327,7 @@ impl BlockingWorker {
             emit!(
                 &self.sink,
                 BlockingWorkerPoolSaturated {
+                    blocking_worker_pool_mode: BlockingWorkerPoolMode(self.pool.mode()),
                     max_threads: SystemMetricCount::from(self.pool.max_thread_count()),
                 }
             );
@@ -355,6 +368,7 @@ pub(in crate::runtime) struct BlockingPool {
     identity: Arc<()>,
     saturation_reported: Arc<AtomicBool>,
     max_thread_count: usize,
+    mode: &'static str,
 }
 
 impl BlockingPool {
@@ -374,7 +388,12 @@ impl BlockingPool {
     /// Default per-pool thread limit for blocking tasks.
     const MAX_THREAD_COUNT_DEFAULT: usize = 64;
 
+    #[cfg(test)]
     pub(in crate::runtime) fn new(max_thread_count: Option<usize>) -> Self {
+        Self::new_with_mode(max_thread_count, "shared")
+    }
+
+    pub(in crate::runtime) fn new_with_mode(max_thread_count: Option<usize>, mode: &'static str) -> Self {
         // Start with one thread and let the pool grow as needed.
         let thread_pool = ThreadPool::with_name("arty-blocking".to_string(), Self::INITIAL_THREAD_COUNT);
 
@@ -383,6 +402,7 @@ impl BlockingPool {
             identity: Arc::new(()),
             saturation_reported: Arc::new(AtomicBool::new(false)),
             max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
+            mode,
         }
     }
 
@@ -429,6 +449,10 @@ impl BlockingPool {
 
     fn max_thread_count(&self) -> usize {
         self.max_thread_count
+    }
+
+    fn mode(&self) -> &'static str {
+        self.mode
     }
 
     #[cfg(test)]
@@ -482,6 +506,7 @@ fn closed_pool_rejects_worker_submission_after_admission() {
 
     assert!(join.wait().unwrap_err().is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
+    assert!(!pool.record_saturation_transition());
 }
 
 #[cfg(test)]
@@ -894,6 +919,11 @@ pub(super) mod blocking_worker_tests {
             dimension(saturated[0], "blocking_worker_pool.max_threads"),
             Some("1".into()),
             "the saturation event reports the pool's maximum thread count"
+        );
+        assert_eq!(
+            dimension(saturated[0], "blocking_worker_pool.mode"),
+            Some("shared".into()),
+            "the saturation event reports the configured pool mode"
         );
     }
 
