@@ -23,142 +23,163 @@ use thread_aware::Unaware;
 testing_aids::init_tracing!();
 
 fn isolated_deadlock(name: &str, body: fn()) {
-    isolated_with_timeout(name, std::time::Duration::from_secs(5), body);
+    isolated_with_timeout(name, TEST_TIMEOUT + std::time::Duration::from_secs(5), body);
+}
+
+fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
+    let (completed, completion) = mpsc::channel();
+    std::thread::spawn(move || {
+        body();
+        _ = completed.send(());
+    });
+    completion
+        .recv_timeout(TEST_TIMEOUT)
+        .expect("the supported operation must complete without a same-pool deadlock");
 }
 
 #[test]
 fn blocking_join_future_rejects_its_current_pool() {
     isolated_deadlock("blocking_join_future_rejects_its_current_pool", || {
-        let runtime = shared_runtime();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let nested = scheduler.clone();
-        let rejected = scheduler
-            .spawn_blocking(move || {
-                let inner = nested.spawn_blocking(|| 42);
-                catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(inner))).is_err()
-            })
-            .wait()
-            .unwrap();
+        completes_without_deadlock(|| {
+            let runtime = shared_runtime();
+            let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+            let nested = scheduler.clone();
+            let rejected = scheduler
+                .spawn_blocking(move || {
+                    let inner = nested.spawn_blocking(|| 42);
+                    catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(inner))).is_err()
+                })
+                .wait()
+                .unwrap();
 
-        assert!(rejected);
-        runtime.stop().unwrap();
+            assert!(rejected);
+            runtime.stop().unwrap();
+        });
     });
 }
 
 #[test]
 fn blocking_block_on_rejects_an_async_dependency_on_its_pool() {
     isolated_deadlock("blocking_block_on_rejects_an_async_dependency_on_its_pool", || {
-        let runtime = shared_runtime();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let task = scheduler.spawn_blocking(move || {
-            runtime
-                .scheduler()
-                .block_on(async |cx| cx.scheduler().spawn_blocking(|| 42).await.unwrap())
-                .unwrap_err()
-                .source()
-                .and_then(|error| error.downcast_ref::<JoinError>())
-                .is_some_and(JoinError::is_panic)
-        });
+        completes_without_deadlock(|| {
+            let runtime = shared_runtime();
+            let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+            let task = scheduler.spawn_blocking(move || {
+                runtime
+                    .scheduler()
+                    .block_on(async |cx| cx.scheduler().spawn_blocking(|| 42).await.unwrap())
+                    .unwrap_err()
+                    .source()
+                    .and_then(|error| error.downcast_ref::<JoinError>())
+                    .is_some_and(JoinError::is_panic)
+            });
 
-        assert!(task.wait().unwrap());
+            assert!(task.wait().unwrap());
+        });
     });
 }
 
 #[test]
 fn blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool() {
     isolated_deadlock("blocking_block_on_rejects_an_async_dependency_on_its_isolated_pool", || {
-        let runtime = Runtime::builder()
-            .cpu_policy(CpuPolicy::exactly(1))
-            .blocking_pool_policy(BlockingPoolPolicy::isolated())
-            .build()
-            .unwrap();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let task = scheduler.spawn_blocking(move || {
-            runtime
-                .scheduler()
-                .block_on(async |cx| cx.scheduler().spawn_blocking(|| 42).await.unwrap())
-                .unwrap_err()
-                .source()
-                .and_then(|error| error.downcast_ref::<JoinError>())
-                .is_some_and(JoinError::is_panic)
-        });
+        completes_without_deadlock(|| {
+            let runtime = Runtime::builder()
+                .cpu_policy(CpuPolicy::exactly(1))
+                .blocking_pool_policy(BlockingPoolPolicy::isolated())
+                .build()
+                .unwrap();
+            let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+            let task = scheduler.spawn_blocking(move || {
+                runtime
+                    .scheduler()
+                    .block_on(async |cx| cx.scheduler().spawn_blocking(|| 42).await.unwrap())
+                    .unwrap_err()
+                    .source()
+                    .and_then(|error| error.downcast_ref::<JoinError>())
+                    .is_some_and(JoinError::is_panic)
+            });
 
-        assert!(task.wait().unwrap());
+            assert!(task.wait().unwrap());
+        });
     });
 }
 
 #[test]
 fn blocking_wait_rejects_an_async_dependency_on_its_pool() {
     isolated_deadlock("blocking_wait_rejects_an_async_dependency_on_its_pool", || {
-        let runtime = shared_runtime();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let nested = scheduler.clone();
-        let task = scheduler.spawn_blocking(move || {
-            nested
-                .spawn({
-                    let nested = nested.clone();
-                    async move |_| nested.spawn_blocking(|| 42).await.unwrap()
-                })
-                .wait()
-                .unwrap_err()
-                .is_panic()
-        });
+        completes_without_deadlock(|| {
+            let runtime = shared_runtime();
+            let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+            let nested = scheduler.clone();
+            let task = scheduler.spawn_blocking(move || {
+                nested
+                    .spawn({
+                        let nested = nested.clone();
+                        async move |_| nested.spawn_blocking(|| 42).await.unwrap()
+                    })
+                    .wait()
+                    .unwrap_err()
+                    .is_panic()
+            });
 
-        assert!(task.wait().unwrap());
-        runtime.stop().unwrap();
+            assert!(task.wait().unwrap());
+            runtime.stop().unwrap();
+        });
     });
 }
 
 #[test]
 fn blocking_wait_reaches_descendants_created_before_the_wait() {
     isolated_deadlock("blocking_wait_reaches_descendants_created_before_the_wait", || {
-        let runtime = shared_runtime();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let (release, released) = events_once::Event::boxed();
-        let (ready, child_ready) = mpsc::channel();
-        let (parked, child_parked) = mpsc::channel();
-        let parent = scheduler.spawn({
-            let scheduler = scheduler.clone();
-            async move |_| {
-                scheduler
-                    .spawn(async move |cx| {
-                        ready.send(()).unwrap();
-                        released.await.unwrap();
-                        let blocking = cx.scheduler().spawn_blocking(|| 42);
-                        let mut blocking = pin!(blocking);
-                        let mut parked = Some(parked);
-                        futures::future::poll_fn(move |context| match blocking.as_mut().poll(context) {
-                            Poll::Pending => {
-                                if let Some(parked) = parked.take() {
-                                    parked.send(()).unwrap();
+        completes_without_deadlock(|| {
+            let runtime = shared_runtime();
+            let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+            let (release, released) = events_once::Event::boxed();
+            let (ready, child_ready) = mpsc::channel();
+            let (parked, child_parked) = mpsc::channel();
+            let parent = scheduler.spawn({
+                let scheduler = scheduler.clone();
+                async move |_| {
+                    scheduler
+                        .spawn(async move |cx| {
+                            ready.send(()).unwrap();
+                            released.await.unwrap();
+                            let blocking = cx.scheduler().spawn_blocking(|| 42);
+                            let mut blocking = pin!(blocking);
+                            let mut parked = Some(parked);
+                            futures::future::poll_fn(move |context| match blocking.as_mut().poll(context) {
+                                Poll::Pending => {
+                                    if let Some(parked) = parked.take() {
+                                        parked.send(()).unwrap();
+                                    }
+                                    Poll::Pending
                                 }
-                                Poll::Pending
-                            }
-                            Poll::Ready(outcome) => Poll::Ready(outcome),
+                                Poll::Ready(outcome) => Poll::Ready(outcome),
+                            })
+                            .await
+                            .unwrap()
                         })
                         .await
                         .unwrap()
-                    })
-                    .await
-                    .unwrap()
-            }
-        });
-        child_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+                }
+            });
+            child_ready.recv_timeout(TEST_TIMEOUT).unwrap();
 
-        let (started, waiter_started) = mpsc::channel();
-        let (begin_wait, wait_permitted) = mpsc::channel();
-        let waiter = scheduler.spawn_blocking(move || {
-            started.send(()).unwrap();
-            wait_permitted.recv_timeout(TEST_TIMEOUT).unwrap();
-            parent.wait().unwrap_err().is_panic()
-        });
-        waiter_started.recv_timeout(TEST_TIMEOUT).unwrap();
-        release.send(());
-        child_parked.recv_timeout(TEST_TIMEOUT).unwrap();
-        begin_wait.send(()).unwrap();
+            let (started, waiter_started) = mpsc::channel();
+            let (begin_wait, wait_permitted) = mpsc::channel();
+            let waiter = scheduler.spawn_blocking(move || {
+                started.send(()).unwrap();
+                wait_permitted.recv_timeout(TEST_TIMEOUT).unwrap();
+                parent.wait().unwrap_err().is_panic()
+            });
+            waiter_started.recv_timeout(TEST_TIMEOUT).unwrap();
+            release.send(());
+            child_parked.recv_timeout(TEST_TIMEOUT).unwrap();
+            begin_wait.send(()).unwrap();
 
-        assert!(waiter.wait().unwrap());
-        runtime.stop().unwrap();
+            assert!(waiter.wait().unwrap());
+            runtime.stop().unwrap();
+        });
     });
 }
 
