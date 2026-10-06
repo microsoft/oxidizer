@@ -15,8 +15,12 @@
 testing_aids::init_tracing!();
 
 use arty::runtime::{CpuPolicy, Runtime};
+#[cfg(all(debug_assertions, not(miri)))]
+use many_cpus::SystemHardware;
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
+#[cfg(all(debug_assertions, not(miri)))]
+use thread_aware::ThreadAware;
 
 const PROCESSORS: usize = 2;
 const TASKS: usize = 5;
@@ -27,6 +31,89 @@ fn events_named<'a>(events: &'a [CapturedEvent], name: &str) -> Vec<&'a Captured
 
 fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
     event.dimensions().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
+#[cfg(all(debug_assertions, not(miri)))]
+#[test]
+fn validation_accepts_associated_worker() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    Runtime::builder()
+        .cpu_policy(CpuPolicy::exactly(1))
+        .sink(sink)
+        .build()
+        .unwrap()
+        .scheduler()
+        .block_on(async |cx| {
+            let _ = cx.thread();
+        })
+        .unwrap();
+
+    assert_eq!(
+        processor
+            .events()
+            .iter()
+            .filter(|event| { event.name() == "arty.rt.builtins.thread_mismatch" })
+            .count(),
+        0,
+    );
+}
+
+#[cfg(all(debug_assertions, not(miri)))]
+#[test]
+fn validation_follows_relocation_with_known_source() {
+    validation_follows_accepted_worker(true);
+}
+
+#[cfg(all(debug_assertions, not(miri)))]
+#[test]
+fn validation_follows_relocation_with_unknown_source() {
+    validation_follows_accepted_worker(false);
+}
+
+#[cfg(all(debug_assertions, not(miri)))]
+#[cfg_attr(test, mutants::skip)]
+fn validation_follows_accepted_worker(known_source: bool) {
+    if SystemHardware::current().processors().len() < 2 {
+        eprintln!("requires two runtime workers to exercise cross-worker validation");
+        return;
+    }
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder()
+        .cpu_policy(CpuPolicy::exactly(2))
+        .sink(sink)
+        .build()
+        .expect("two available processors are required to check cross-worker validation");
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
+                let thread = cx.thread().clone();
+                let scheduler = cx.scheduler().clone();
+                (cx, scheduler, thread)
+            })
+        })
+        .map(|handle| handle.wait().expect("each worker must return its services"))
+        .collect();
+    let mut builtins = workers[0].0.clone();
+    let source = workers[0].2.clone();
+    workers[1]
+        .1
+        .spawn(async move |cx| {
+            let _ = builtins.thread();
+            builtins.relocate(known_source.then_some(&source), cx.thread());
+            let _ = builtins.thread();
+        })
+        .wait()
+        .expect("relocation must complete on the destination worker");
+    runtime.stop().expect("workers must shut down after validation");
+
+    assert_eq!(
+        processor
+            .events()
+            .iter()
+            .filter(|event| { event.name() == "arty.rt.builtins.thread_mismatch" })
+            .count(),
+        1,
+    );
 }
 
 #[test]

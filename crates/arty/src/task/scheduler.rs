@@ -398,11 +398,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn assert_send_sync() {
-        static_assertions::assert_impl_all!(Scheduler: Send, Sync);
-    }
-
-    #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
             .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
@@ -450,37 +445,5 @@ mod tests {
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         runtime.stop().unwrap();
         assert!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
-        struct RelocationSource(Option<Thread>);
-
-        impl ThreadAware for RelocationSource {
-            fn relocate(&mut self, source: Option<&Thread>, _: &Thread) {
-                self.0 = source.cloned();
-            }
-        }
-
-        let runtime = crate::runtime::Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let (source, mut scheduler) = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx.scheduler().clone()) })
-            .wait()
-            .unwrap();
-        let foreign = thread_aware::ThreadBuilder::default().build(source.id());
-        assert_ne!(source.owner(), foreign.owner());
-
-        scheduler.relocate(None, &foreign);
-        let scheduler: &Scheduler = scheduler.as_ref();
-        let actual = scheduler
-            .spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 })
-            .wait()
-            .unwrap();
-        assert_eq!(actual, Some(source));
     }
 }

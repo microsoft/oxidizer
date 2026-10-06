@@ -144,30 +144,6 @@ mod tests {
     }
 
     #[test]
-    fn operations_are_cloneable_but_not_thread_aware() {
-        static_assertions::assert_impl_all!(RuntimeOperations: Clone, Send, Sync);
-        static_assertions::assert_not_impl_any!(RuntimeOperations: ThreadAware);
-    }
-
-    #[test]
-    fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
-        let (runtime, _) = runtime_with_coordinates(1);
-        let worker = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-            .wait()
-            .unwrap();
-        let foreign = ThreadBuilder::default().build(worker.id());
-        let operations = RuntimeOperations::from(&runtime);
-        assert!(
-            thread::spawn(move || operations.pin_current_thread_to(&foreign))
-                .join()
-                .unwrap()
-                .is_err()
-        );
-    }
-
-    #[test]
     fn pinning_rejects_an_unregistered_thread() {
         let (runtime, coordinates) = runtime_with_coordinates(1);
         let operations = RuntimeOperations::from(&runtime);

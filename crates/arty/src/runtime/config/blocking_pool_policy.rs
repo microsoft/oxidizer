@@ -120,11 +120,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shared_is_default() {
-        assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
-    }
-
-    #[test]
     fn isolated_into_pools_is_isolated() {
         assert!(
             matches!(BlockingPoolPolicy::isolated().into_pools(), BlockingPools::Isolated),
@@ -138,11 +133,5 @@ mod tests {
             matches!(BlockingPoolPolicy::shared(None).into_pools(), BlockingPools::Shared(_)),
             "expected Shared variant"
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "non-zero")]
-    fn shared_zero_panics() {
-        let _ = BlockingPoolPolicy::shared(0);
     }
 }

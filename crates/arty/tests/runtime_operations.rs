@@ -13,7 +13,7 @@ use std::thread;
 use arty::core::Thread;
 use arty::runtime::{CpuPolicy, Runtime, RuntimeOperations};
 use many_cpus::{ProcessorId, SystemHardware};
-use thread_aware::{ThreadAware, Unaware};
+use thread_aware::{ThreadAware, ThreadBuilder, Unaware};
 
 #[cfg(test)]
 fn pinned_processor(operations: RuntimeOperations, worker: Thread) -> ProcessorId {
@@ -25,6 +25,30 @@ fn pinned_processor(operations: RuntimeOperations, worker: Thread) -> ProcessorI
     })
     .join()
     .unwrap()
+}
+
+#[test]
+fn operations_are_cloneable_but_not_thread_aware() {
+    static_assertions::assert_impl_all!(RuntimeOperations: Clone, Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeOperations: ThreadAware);
+}
+
+#[test]
+fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let worker = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
+        .wait()
+        .unwrap();
+    let foreign = ThreadBuilder::default().build(worker.id());
+    let operations = RuntimeOperations::from(&runtime);
+    assert!(
+        thread::spawn(move || operations.pin_current_thread_to(&foreign))
+            .join()
+            .unwrap()
+            .is_err()
+    );
 }
 
 #[test]

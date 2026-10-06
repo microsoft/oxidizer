@@ -21,6 +21,11 @@ use thread_aware::Unaware;
 testing_aids::init_tracing!();
 
 #[test]
+fn assert_send_sync() {
+    static_assertions::assert_impl_all!(Scheduler: Send, Sync);
+}
+
+#[test]
 fn spawn_some_tasks() {
     execute_or_terminate_process(|| {
         let builder = Runtime::builder();

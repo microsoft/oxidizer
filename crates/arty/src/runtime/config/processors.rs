@@ -163,12 +163,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_count_is_automatic() {
-        const AUTOMATIC: CpuPolicy = CpuPolicy::auto();
-        assert_eq!(CpuPolicy::default(), AUTOMATIC);
-    }
-
-    #[test]
     fn default_runtime_shares_blocking_pool() {
         assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared(None));
     }

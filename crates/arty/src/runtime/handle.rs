@@ -240,49 +240,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
-    )]
-    fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
-        let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let scheduler = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
-            .unwrap();
-        // Check admission before moving the owner into code that would self-join if the guard failed.
-        assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
-        let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
-        assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
-    }
-
-    #[test]
-    fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
-        let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let scheduler = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
-            .unwrap();
-        let dispatcher = runtime.scheduler.dispatcher.clone();
-        assert!(
-            scheduler
-                .spawn_blocking(move || dispatcher.is_current_blocking_task())
-                .wait()
-                .unwrap()
-        );
-        let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
-        assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
-    }
-
-    #[test]
     fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
         let runtime = Runtime::builder()
             .cpu_policy(crate::runtime::CpuPolicy::exactly(1))

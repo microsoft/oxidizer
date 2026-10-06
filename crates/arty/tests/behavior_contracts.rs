@@ -17,6 +17,7 @@ use std::thread;
 use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
 use arty::task::{Builtins, Scheduler};
 use arty::time::Clock;
+use futures::future::join_all;
 use observed::Sink;
 use observed_testing::{TEST_ID, test_emitter};
 use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
@@ -42,8 +43,15 @@ fn count_workers(runtime: &Runtime) -> usize {
 
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
-    assert_eq!(CpuPolicy::default(), CpuPolicy::auto());
+    const AUTOMATIC: CpuPolicy = CpuPolicy::auto();
+    assert_eq!(CpuPolicy::default(), AUTOMATIC);
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
+}
+
+#[test]
+#[should_panic(expected = "non-zero")]
+fn shared_zero_panics() {
+    let _ = BlockingPoolPolicy::shared(0);
 }
 
 #[test]
@@ -138,6 +146,36 @@ fn construction_and_shutdown_work_inside_a_futures_executor() {
             assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
         });
     });
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
+)]
+fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
+    let runtime = runtime(1);
+    let scheduler = worker_scheduler(&runtime);
+    assert!(
+        scheduler
+            .spawn(async |cx| cx.thread().id() == thread::current().id())
+            .wait()
+            .unwrap()
+    );
+    let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
+    assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
+}
+
+#[test]
+fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
+    let runtime = runtime(1);
+    let scheduler = worker_scheduler(&runtime);
+    assert!(
+        scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap()
+            != scheduler.spawn(async |_| thread::current().id()).wait().unwrap()
+    );
+    let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
+    assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
 }
 
 #[test]
@@ -243,6 +281,75 @@ fn builtins_publish_the_same_services_on_every_worker() {
     assert_eq!(workers.len(), 2);
     assert!(builtins.local_scheduler().is_none());
     runtime.stop().unwrap();
+}
+
+#[cfg(not(miri))]
+#[test]
+fn worker_services_are_ready_before_spawning() {
+    let count = many_cpus::SystemHardware::current().processors().len().min(2);
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(2)).build().unwrap();
+    let (actual, expected) = runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            let scheduler = cx.scheduler();
+            let tasks: Vec<_> = (0..count)
+                .map(|_| {
+                    scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
+                        (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
+                    })
+                })
+                .collect();
+            let expected = vec![(true, true); tasks.len()];
+            (join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>(), expected)
+        })
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[cfg(not(miri))]
+#[test]
+fn emitter_is_available_by_default() {
+    let runtime = Runtime::builder().build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
+            assert!(cx.sink().is_noop());
+        })
+        .unwrap();
+}
+
+#[cfg(not(miri))]
+#[test]
+fn configured_emitter_is_available_from_builtins() {
+    use observed::metadata::EventDescription;
+    use observed::processing::{EventProcessor, EventView};
+
+    struct TestProcessor;
+
+    impl EventProcessor for TestProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            true
+        }
+
+        fn process(&self, _event: &EventView<'_>) {}
+
+        fn flush(&self) -> Result<(), observed::FlushError> {
+            Ok(())
+        }
+    }
+
+    let sink = Sink::new("test", vec![Arc::new(TestProcessor)], tick::SimpleClock::new_frozen());
+    let runtime = Runtime::builder().sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async move |cx: Builtins| {
+            assert!(!cx.sink().is_noop());
+            cx.sink().flush().unwrap();
+        })
+        .unwrap();
 }
 
 #[cfg(feature = "test-util")]

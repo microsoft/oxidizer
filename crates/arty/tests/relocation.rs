@@ -10,10 +10,39 @@ testing_aids::init_tracing!();
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
-use arty::task::Builtins;
+use arty::task::{Builtins, Scheduler};
 use futures::future::join_all;
 use testing_aids::execute_or_terminate_process;
-use thread_aware::ThreadAware;
+use thread_aware::{ThreadAware, ThreadBuilder};
+
+#[cfg(not(miri))]
+#[test]
+fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
+    struct RelocationSource(Option<arty::core::Thread>);
+
+    impl ThreadAware for RelocationSource {
+        fn relocate(&mut self, source: Option<&arty::core::Thread>, _: &arty::core::Thread) {
+            self.0 = source.cloned();
+        }
+    }
+
+    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let (source, mut scheduler) = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx.scheduler().clone()) })
+        .wait()
+        .unwrap();
+    let foreign = ThreadBuilder::default().build(source.id());
+    assert_ne!(source.owner(), foreign.owner());
+
+    scheduler.relocate(None, &foreign);
+    let scheduler: &Scheduler = scheduler.as_ref();
+    let actual = scheduler
+        .spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 })
+        .wait()
+        .unwrap();
+    assert_eq!(actual, Some(source));
+}
 
 /// Identifies which thread-aware handle a relocation scenario should move.
 #[derive(Clone, Copy)]

@@ -205,15 +205,11 @@ impl RuntimeBuilder {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    #[cfg(not(miri))]
-    use std::sync::Arc;
     use std::time::Duration;
 
     use tick::ClockControl;
 
     use super::*;
-    #[cfg(not(miri))]
-    use crate::task::Builtins;
 
     #[test]
     fn custom_clock_ok() {
@@ -293,12 +289,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "greater than zero")]
-    fn zero_stack_size_panics() {
-        let _ = Runtime::builder().stack_size(0);
-    }
-
-    #[test]
     fn build_and_stop_inside_futures_executor() {
         testing_aids::execute_or_terminate_process(|| {
             futures::executor::block_on(async {
@@ -316,51 +306,5 @@ mod tests {
                 assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
             });
         });
-    }
-
-    #[cfg(not(miri))] // can't call foreign function `CreateIoCompletionPort` on OS `windows`
-    #[test]
-    fn emitter_is_available_by_default() {
-        let runtime = Runtime::builder().build().expect("Failed to create runtime");
-
-        runtime
-            .scheduler()
-            .block_on(async move |cx: Builtins| {
-                assert!(cx.sink().is_noop());
-            })
-            .unwrap();
-    }
-
-    #[cfg(not(miri))] // can't call foreign function `CreateIoCompletionPort` on OS `windows`
-    #[test]
-    fn configured_emitter_is_available_from_builtins() {
-        use observed::Sink;
-        use observed::metadata::EventDescription;
-        use observed::processing::{EventProcessor, EventView};
-
-        struct TestProcessor;
-
-        impl EventProcessor for TestProcessor {
-            fn is_interested(&self, _description: &EventDescription) -> bool {
-                true
-            }
-
-            fn process(&self, _event: &EventView<'_>) {}
-
-            fn flush(&self) -> Result<(), observed::FlushError> {
-                Ok(())
-            }
-        }
-
-        let sink = Sink::new("test", vec![Arc::new(TestProcessor)], tick::SimpleClock::new_frozen());
-        let runtime = Runtime::builder().sink(sink).build().expect("Failed to create runtime");
-
-        runtime
-            .scheduler()
-            .block_on(async move |cx: Builtins| {
-                assert!(!cx.sink().is_noop());
-                cx.sink().flush().unwrap();
-            })
-            .unwrap();
     }
 }
