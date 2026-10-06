@@ -113,10 +113,7 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32) {
                 std::ptr::null::<libc::timespec>(),
             )
         };
-        if result == -1 {
-            // A changed word or signal is not a failure: recheck the predicate.
-            check_wait_error(std::io::Error::last_os_error().raw_os_error());
-        }
+        check_wait_result(result);
     }
 }
 
@@ -128,6 +125,13 @@ pub(crate) fn wake_one(address: *const u32) {
     crate::abort::require(result != -1 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EFAULT));
 }
 
+fn check_wait_result(result: libc::c_long) {
+    if result == -1 {
+        // A changed word or signal is not a failure: recheck the predicate.
+        check_wait_error(std::io::Error::last_os_error().raw_os_error());
+    }
+}
+
 fn check_wait_error(error: Option<i32>) {
     crate::abort::require(matches!(error, Some(libc::EAGAIN | libc::EINTR)));
 }
@@ -136,6 +140,27 @@ fn check_wait_error(error: Option<i32>) {
 mod tests {
     use super::{PAGE, RESERVE_MIN, reserve_with_page_size};
     use crate::hal;
+
+    #[test]
+    fn changed_futex_word_is_a_retryable_kernel_error() {
+        let word = std::sync::atomic::AtomicU32::new(1);
+        // SAFETY: The aligned atomic stays live through this call. Its value
+        // differs from the expected value, so the kernel must not block.
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_futex,
+                word.as_ptr(),
+                libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
+                0_u32,
+                std::ptr::null::<libc::timespec>(),
+            )
+        };
+        assert_eq!(result, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::EAGAIN));
+        super::check_wait_result(result);
+        super::check_wait_result(0);
+        super::wait(&word, 0);
+    }
 
     #[test]
     fn rejected_alignment_releases_the_entire_owned_mapping() {
@@ -167,7 +192,20 @@ mod tests {
         crate::abort::assert_aborts(
             "hal::linux::tests::unexpected_wait_error_aborts_instead_of_retrying_forever",
             || {
-                super::check_wait_error(Some(libc::EINVAL));
+                // SAFETY: The kernel rejects the null futex address; no Rust
+                // reference or memory access is formed from that address.
+                let result = unsafe {
+                    libc::syscall(
+                        libc::SYS_futex,
+                        std::ptr::null::<u32>(),
+                        libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
+                        0_u32,
+                        std::ptr::null::<libc::timespec>(),
+                    )
+                };
+                assert_eq!(result, -1);
+                assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::EFAULT));
+                super::check_wait_result(result);
             },
         );
         super::check_wait_error(Some(libc::EAGAIN));
