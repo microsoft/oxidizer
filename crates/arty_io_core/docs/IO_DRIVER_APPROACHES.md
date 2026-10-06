@@ -1,10 +1,10 @@
 # I/O driver coordination: sync brief
 
 **Preliminary findings, 2026-10-06.** The coordinated experiment delivered higher
-throughput in the extended runs, but both measurement batches failed the
-repeatability checks. Excess satellite kernel calls are **not** supported as the
-explanation. Discuss the coordination contract now; do not treat these numbers
-as a production performance guarantee.
+throughput, including +28.9% with disjoint VM-exposed core masks, but all three
+extended batches failed the repeatability gate. Excess satellite kernel calls
+are **not** supported as the explanation. Discuss the coordination contract now;
+do not treat these numbers as a production performance guarantee.
 
 ## The two approaches
 
@@ -90,31 +90,43 @@ coordination, **not thread removal, inline placement or the full historical API*
 Setup: Windows VM, Xeon Platinum 8370C, 16 logical processors, release binaries,
 local Axum server, HTTP/1.1 hello-world, two client workers and 64 concurrent
 requests per worker. Each batch used 12 pairs with balanced A/B and B/A order,
-15-second warmup per run, and no exclusions.
+15-second warmup per run, and no measured-run exclusions. Batches are analyzed
+separately, never pooled.
 
-| Measurement per run | Satellite mean | Coordinated mean | Paired advantage | Nominal 95% B/A interval |
+| Duration / placement | Satellite mean | Coordinated mean | Paired advantage | Nominal 95% B/A interval |
 | --- | ---: | ---: | ---: | --- |
-| 60 seconds | 18,598 requests/s | 23,398 requests/s | +26.0% | 1.216 to 1.306 |
-| 120 seconds | 19,138 requests/s | 25,060 requests/s | +30.9% | 1.241 to 1.381 |
+| 60 s / overlapping | 18,598 requests/s | 23,398 requests/s | +26.0% | 1.216 to 1.306 |
+| 120 s / overlapping | 19,138 requests/s | 25,060 requests/s | +30.9% | 1.241 to 1.381 |
+| 60 s / disjoint masks | 22,339 requests/s | 28,839 requests/s | +28.9% | 1.211 to 1.372 |
 
-All 48 runs succeeded with zero reported failures; B was faster in every pair.
+All 72 measured runs succeeded with zero reported failures; B was faster in every pair.
 Advantages use paired geometric throughput ratios, not ratios of the table's
 arithmetic means. Intervals are Student-t intervals on paired log ratios; they
 do not account for systematic host interference.
 
-**The magnitude is not stable.** Both batches failed the predeclared checks:
+**The magnitude is not stable.** All batches failed the predeclared gate:
 interval relative half-width at most 3%, and order/half-batch discrepancies at
-most 5%. Their interval half-widths were 3.58% and 5.35%; the second batch had
-13.07% temporal drift. Earlier short pilot runs even reversed the aggregate.
+most 5%. The overlapping batches had interval half-widths of 3.58% and 5.35%;
+the second had 13.07% temporal drift. Earlier short pilot runs even reversed
+the aggregate.
 
-A subsequent topology probe found client/server overlap on SMT siblings of one
-VM-exposed physical core. Server CPU also approached its one-processor capacity.
-A separately labeled disjoint-core comparison is in progress; its results are
-not included here. Longer sampling alone did not resolve the stability problem.
+The topology probe found that server mask `0x1` and client mask `0xE` share
+SMT siblings of one VM-exposed core. The third batch changed only the client
+mask to `0x1C`, preserving processor counts, binaries and workload. Process masks
+and exposed-core topology were verified, **not thread-level placement or host
+isolation**. One placement-probe failure before a valid timed row is preserved.
+
+With disjoint masks, order and half-batch discrepancies passed (2.92% and 1.36%),
+but interval half-width was 6.24%; maximum deviations from each variant's median
+were 13.7% for A and 27.2% for B. Mean client CPU time per request was
+97.9 versus 68.9 microseconds; mean per-run p99 latency was 8.602 versus 6.719 ms
+(not pooled percentiles). Mean server CPU was 78.0% versus 70.1% of its one
+affined logical processor, observed across each client run including warmup.
+The direction persisted, but removing the overlap did not eliminate variation.
 
 ### Native-call evidence
 
-A separate diagnostic pair found:
+A separate diagnostic pair with the original overlapping placement found:
 
 | Whole-process IOCP metric | Satellite | Coordinated |
 | --- | ---: | ---: |
@@ -130,7 +142,8 @@ advantage therefore cannot be explained by fewer dequeue calls.
 These count `GetQueuedCompletionStatusEx` returns with success or timeout,
 not every process syscall. Native counters include warmup/shutdown, unlike
 measured HTTP throughput: do not divide them by measured-phase request totals.
-No native counters were collected in the extended throughput batches.
+No native counters were collected in the extended throughput batches, including
+the disjoint-mask series; these counts must not be presented as its measurements.
 
 ## Decisions for the sync
 
@@ -138,16 +151,18 @@ No native counters were collected in the extended throughput batches.
    barrier, or should driver authors own progress and coordination entirely?
 2. **Trade-off:** is the additional runtime protocol justified by a reproducible
    throughput/latency benefit, despite its interruption overhead?
-3. **Evidence gate:** keep production defaults unchanged until disjoint-core
-   results pass repeatability checks, then confirm representative workloads and
-   server headroom. Track throughput, tail latency, CPU per request, native calls
+3. **Evidence gate:** keep production defaults unchanged. The disjoint-mask
+   series still failed the precision target; use a controlled host and verified
+   thread placement before further repetition, then confirm representative
+   workloads. Track throughput, tail latency, CPU per request, native calls
    per real completion and wake posts, rather than syscall count alone.
 
 Evidence is preserved privately: ox-sdk base commit
 `c217ab69d2830bb823fee41366c555e0e153ac10` plus the experimental patch;
-`pending-work-experiment-bundle`, `pending-work-extended-batch` and
-`pending-work-extended-batch-2` contain replay scripts, fixed protocols, binary
-hashes and all raw results. Private source and logs are not included here.
+`pending-work-experiment-bundle`, `pending-work-extended-batch`,
+`pending-work-extended-batch-2` and `pending-work-disjoint-affinity-batch` contain
+replay scripts, fixed protocols, binary hashes and all raw results.
+Private source and logs are not included here.
 The measurements cover this local IOCP client workload, not RIO or `io_uring`,
 and do not establish the cause of the original PR's performance concern.
 
