@@ -15,7 +15,7 @@
 
 An owner-return allocator implemented in Rust.
 
-Supported: **x86-64 and AArch64 Linux with 4-KiB kernel pages**, and
+Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
 **x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**.
 Linux hosts with larger kernel pages reject allocation requests rather than
 discarding neighboring live objects. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
@@ -172,7 +172,7 @@ untouched and are not build targets. Miri is not a v4 backend.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5V9fnEsT42UbOoGturtJ474bX4EGOwxbOhYb20SxHKprEOphZIKCanJhbGxvY2F0b3JlMC4xLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2Xu9cikYuoEbh2zQNKLDmm0bZ80icIaAgdkb8zMVs0ShNs9hZIKCanJhbGxvY2F0b3JlMC4xLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4xLjA
  [__link0]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::set_publication_enabled
  [__link1]: https://docs.rs/seismograph_rallocator/0.1.0/seismograph_rallocator/?search=native::request_observation
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/struct.Rallocator.html

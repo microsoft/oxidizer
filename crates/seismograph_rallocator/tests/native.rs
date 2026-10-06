@@ -10,6 +10,22 @@ use seismograph_rallocator::native::{
 };
 use seismograph_rallocator::{ErrorKind, decode, encode, encode_with_owners, encoded_len, encoded_len_with_owners};
 
+#[test]
+fn empty_observation_defaults_and_freshness_labels_preserve_unknown_state() {
+    assert_eq!(Observation::default(), Observation::EMPTY);
+    for (freshness, label) in [
+        (Freshness::Unknown, "unknown / unobserved"),
+        (Freshness::IdleInspection, "fresh idle inspection"),
+        (Freshness::Current, "contributed this round"),
+        (Freshness::PreviousLease, "stale lease"),
+        (Freshness::PreviousSession, "stale session"),
+        (Freshness::PreviousRound, "older round"),
+        (Freshness::NewerThanCapture, "newer than capture"),
+    ] {
+        assert_eq!(freshness.label(), label);
+    }
+}
+
 fn fixture() -> Snapshot {
     let ranges = Ranges {
         counts: core::array::from_fn(|index| index as u64 + 1),

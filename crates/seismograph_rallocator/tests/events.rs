@@ -28,6 +28,51 @@ fn event(kind: EventKind, id: u64, thread: u64, actor: u64) -> Event {
 }
 
 #[test]
+fn caller_projection_preserves_all_known_heap_kinds_and_ignores_nonallocation_kinds() {
+    let mut events = Vec::new();
+    for (id, kind) in [(1, HeapKind::General), (2, HeapKind::Bump), (3, HeapKind::Thread)] {
+        let mut event = event(EventKind::Allocation, id, 7, 0);
+        let EventPayload::Allocation(allocation) = &mut event.payload else {
+            unreachable!();
+        };
+        allocation.heap_kind = kind;
+        events.push(event);
+    }
+    let mut nonallocation = events[0].clone();
+    nonallocation.kind = EventKind::TaskSpawned;
+    events.push(nonallocation);
+    let projected = seismograph_rallocator::events::callers(&Events {
+        events,
+        ..Default::default()
+    });
+    assert_eq!(projected.events.len(), 3);
+    assert_eq!(projected.events[0].heap_kind, seismograph_rallocator::callers::HeapKind::General);
+    assert_eq!(projected.events[1].heap_kind, seismograph_rallocator::callers::HeapKind::Bump);
+    assert_eq!(projected.events[2].heap_kind, seismograph_rallocator::callers::HeapKind::Thread);
+}
+
+#[test]
+fn caller_field_constructors_preserve_log_and_actor_metadata() {
+    use seismograph_rallocator::callers::{ThreadLog as CallerLog, ThreadLogFields, ThreadName, ThreadNameFields};
+
+    let log = CallerLog::from_fields(ThreadLogFields {
+        thread_log_id: 7,
+        total_events: 9,
+        lost_events: 2,
+        allocated_histogram: vec![3, 4],
+        live_histogram: vec![1, 2],
+    });
+    assert_eq!((log.thread_log_id, log.total_events, log.lost_events), (7, 9, 2));
+    assert_eq!(log.allocated_histogram, [3, 4]);
+    assert_eq!(log.live_histogram, [1, 2]);
+    let name = ThreadName::from_fields(ThreadNameFields {
+        thread_id: 70,
+        name: "remote actor".into(),
+    });
+    assert_eq!((name.thread_id, name.name.as_str()), (70, "remote actor"));
+}
+
+#[test]
 fn caller_projection_matches_remote_frees_and_maps_allocator_actor_names() {
     let runtime = Events {
         total_events: 3,

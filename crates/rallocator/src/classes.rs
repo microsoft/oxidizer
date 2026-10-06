@@ -130,6 +130,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_table_generation_matches_compiled_tables() {
+        for (generated, compiled) in make_classes().iter().zip(CLASSES) {
+            assert_eq!(
+                (generated.size, generated.slab, generated.capacity, generated.waking),
+                (compiled.size, compiled.slab, compiled.capacity, compiled.waking)
+            );
+        }
+        assert_eq!(make_lookup(), SIZE_LOOKUP);
+    }
+
+    #[test]
     fn all_class_boundaries() {
         assert_eq!(CLASSES[COUNT - 1].size, SMALL_MAX);
         for n in 1..=SMALL_MAX {

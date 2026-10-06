@@ -1874,7 +1874,11 @@ fn render_thread_flow_diagram(html: &mut String, callers: &Callers, flows: &BTre
     for (&(source, destination), &(count, bytes)) in flows {
         let source_y = rows[&source];
         let destination_y = rows[&destination];
-        let width = 1.5 + 8.5 * (bytes as f64).ln_1p() / (maximum as f64).ln_1p();
+        let width = if maximum == 0 {
+            1.5
+        } else {
+            1.5 + 8.5 * (bytes as f64).ln_1p() / (maximum as f64).ln_1p()
+        };
         let class = if source == destination { "local" } else { "cross" };
         let label_y = f64::midpoint(source_y, destination_y) - 7.0;
         write!(
@@ -2210,6 +2214,191 @@ mod tests {
 
     use super::*;
     use crate::allocator_view::Version;
+
+    #[test]
+    fn legacy_domain_and_structure_fixtures_keep_classifications_distinct() {
+        use crate::allocator_topology::Segment;
+        use crate::allocator_view::SizeClass;
+
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.domains = vec![
+            Domain {
+                id: 9,
+                is_default: true,
+                region_indices: vec![3],
+                region_count: 1,
+                small_slices: 2,
+                medium_slices: 2,
+                bump_slices: 1,
+                unknown_slices: 1,
+                ..Default::default()
+            },
+            Domain {
+                id: 10,
+                ..Default::default()
+            },
+        ];
+        snapshot.size_classes.push(SizeClass {
+            class_index: 1,
+            block_bytes: 64,
+            requested_bytes: Estimate {
+                value: 30,
+                lower_bound: 20,
+                upper_bound: 40,
+            },
+            usable_bytes: Estimate {
+                value: 64,
+                lower_bound: 64,
+                upper_bound: 64,
+            },
+            ..Default::default()
+        });
+        snapshot.topology.push(TopologyRegion {
+            region_index: 3,
+            base_address: 0x10000,
+            region_bytes: 8 * 65536,
+            slice_bytes: 65536,
+            used_bitmap: vec![0b0011_1111],
+            slices: vec![
+                Slice {
+                    kind: SliceKind::Small,
+                    owner: 1,
+                    segments: vec![Segment {
+                        class_index: 1,
+                        live_blocks: 1,
+                        usable_blocks: 2,
+                        utilization_tracked: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                Slice {
+                    index: 1,
+                    kind: SliceKind::Small,
+                    segments: vec![Segment {
+                        class_index: 99,
+                        context: true,
+                        utilization_tracked: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                Slice {
+                    index: 2,
+                    kind: SliceKind::Medium,
+                    owner: 1,
+                    span_slices: 1,
+                    ..Default::default()
+                },
+                Slice {
+                    index: 3,
+                    kind: SliceKind::Medium,
+                    span_slices: 1,
+                    ..Default::default()
+                },
+                Slice {
+                    index: 4,
+                    kind: SliceKind::Bump,
+                    owner: 2,
+                    ..Default::default()
+                },
+            ],
+        });
+        let html = render_html(&snapshot);
+        for text in [
+            "domain #9 default",
+            "Small slab slice",
+            "Allocated / transitional",
+            "Context",
+            "Retained free span",
+            "Live allocation",
+            "Bump chunk",
+            "50.0%",
+            "30 B (20 B–40 B)",
+            "Unknown",
+        ] {
+            assert!(html.contains(text), "missing classified fixture output: {text}");
+        }
+        assert_eq!(slice_runs(&[0b0011_1111], 8), [(true, 0, 6), (false, 6, 2)]);
+        assert!(slice_runs(&[], 0).is_empty());
+        assert_eq!(grid_width(16384), 128);
+        let mut empty = String::new();
+        render_region(&mut empty, &TopologyRegion::default(), None);
+        assert!(empty.contains("0.00%"));
+    }
+
+    #[test]
+    fn event_report_matches_cross_thread_bump_frees_without_claiming_orphans_are_live() {
+        let mut callers = Callers::default();
+        for id in 1..=3 {
+            let mut allocation = seismograph_rallocator::callers::Event::default();
+            allocation.allocation_id = id;
+            allocation.thread_log_id = 7;
+            allocation.event_thread_id = 1;
+            allocation.size = id * 64;
+            allocation.call_stack = vec![0x1234];
+            let mut free = allocation.clone();
+            free.kind = EventKind::Deallocated;
+            free.event_thread_id = if id == 1 { 1 } else { 2 };
+            free.heap_kind = HeapKind::Bump;
+            free.freed_after_heap_release = true;
+            callers.events.extend([allocation, free]);
+        }
+        let mut orphan = seismograph_rallocator::callers::Event::default();
+        orphan.kind = EventKind::Deallocated;
+        orphan.allocation_id = 99;
+        orphan.allocation_recorded = false;
+        callers.events.push(orphan);
+        let mut unmatched = seismograph_rallocator::callers::Event::default();
+        unmatched.allocation_id = 100;
+        callers.events.push(unmatched);
+        let mut log = seismograph_rallocator::callers::ThreadLog::default();
+        log.thread_log_id = 7;
+        log.allocated_histogram = vec![1, 0, 2];
+        log.live_histogram = vec![0, 1];
+        callers.threads.push(log);
+        let mut name = seismograph_rallocator::callers::ThreadName::default();
+        name.thread_id = 1;
+        name.name = "<producer>".to_owned();
+        callers.thread_names.push(name);
+        let mut snapshot = Snapshot::event_only(Version::new(0, 1, 0));
+        snapshot.callers = Some(callers);
+        let html = render_html(&snapshot);
+        for text in [
+            "matched retained pair",
+            "orphan free",
+            "unmatched allocation evidence",
+            "&lt;producer&gt;",
+            "thread-flow-link local",
+            "thread-flow-link cross",
+            "320 B across 2 allocations",
+            "384 B across 3 allocations",
+        ] {
+            assert!(html.contains(text), "missing event evidence: {text}");
+        }
+        assert_eq!(histogram_height(0, 1).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(histogram_height(1, 0).to_bits(), 0.0_f64.to_bits());
+        assert!((histogram_height(2, 2) - 100.0).abs() < 1e-12);
+        assert_eq!(histogram_label(0), "0 B");
+        assert_eq!(histogram_label(100), format_bytes(u64::MAX));
+        assert_eq!(
+            format_estimate(Estimate {
+                value: 2,
+                lower_bound: 1,
+                upper_bound: 3
+            }),
+            "2 (1–3)"
+        );
+        assert_eq!(format!("{}", crate::allocator_view::PeakLiveBytesScope::Unavailable), "unavailable");
+        let mut zero_flow = String::new();
+        render_thread_flow_diagram(
+            &mut zero_flow,
+            snapshot.callers.as_ref().unwrap(),
+            &BTreeMap::from([((1, 2), (1, 0))]),
+        );
+        assert!(zero_flow.contains("stroke-width:1.5"));
+        assert!(!zero_flow.contains("NaN"));
+    }
 
     fn runtime_event(thread: u64, sequence: u64, kind: RuntimeEventKind, object: u64, stack: &[u64]) -> Event {
         Event {
