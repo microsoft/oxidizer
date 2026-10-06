@@ -164,6 +164,7 @@ fn abort_after_repeated_payload_panic(_panic: Panic) -> ! {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::future::pending;
     use std::pin::pin;
