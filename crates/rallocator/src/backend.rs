@@ -421,6 +421,9 @@ mod tests {
 
     #[test]
     fn metadata_refill_commit_failure_can_be_retried() {
+        if run_with_fresh_backend("metadata_refill_commit_failure_can_be_retried") {
+            return;
+        }
         let map = map().unwrap();
         // SAFETY: This handle comes from the backend's unique global map.
         let mut local = unsafe { Local::new(map) };
@@ -488,6 +491,9 @@ mod tests {
 
     #[test]
     fn commit_and_decommit_failures_leave_backend_reusable() {
+        if run_with_fresh_backend("commit_and_decommit_failures_leave_backend_reusable") {
+            return;
+        }
         let map = map().unwrap();
         // SAFETY: The handle comes from this backend's unique global map.
         let mut local = unsafe { Local::new(map) };
@@ -507,5 +513,27 @@ mod tests {
         assert_ne!(reused, 0);
         // SAFETY: The test retires its final unpublished block.
         unsafe { local.free(reused, size) };
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))] // Test subprocess orchestration; allocator behavior remains measured inside the child.
+    fn run_with_fresh_backend(name: &str) -> bool {
+        let name = format!("backend::tests::{name}");
+        if std::env::var("RALLOCATOR_BACKEND_FAILURE_TEST").as_deref() == Ok(name.as_str()) {
+            return false;
+        }
+        // A cached global range can bypass a commit and leave the injected
+        // failure pending. These tests require an empty backend, not test order.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &name, "--nocapture"])
+            .env("RALLOCATOR_BACKEND_FAILURE_TEST", &name)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
     }
 }

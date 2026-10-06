@@ -15,6 +15,26 @@ rallocator::rallocator!();
 
 static RECORDING: Mutex<()> = Mutex::new(());
 
+fn run_with_fresh_inventory(name: &str) -> bool {
+    if std::env::var("RALLOCATOR_STATE_TEST").as_deref() == Ok(name) {
+        return false;
+    }
+    // Published owners persist after a test's recorder is stopped. A mutex
+    // cannot give another test fresh inventory, so isolate the global state.
+    let output = std::process::Command::new(std::env::current_exe().expect("native test executable must be available for isolation"))
+        .args(["--exact", name, "--nocapture"])
+        .env("RALLOCATOR_STATE_TEST", name)
+        .output()
+        .expect("native test harness must be able to launch an isolated inventory test");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    true
+}
+
 fn capture() -> Snapshot {
     let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).expect("capture native snapshot");
     let _suppression = SuppressionGuard::enter();
@@ -36,6 +56,9 @@ fn wait_for(progress: &AtomicU8, value: u8) {
 
 #[test]
 fn owners_created_off_remain_visible_and_only_participants_publish() {
+    if run_with_fresh_inventory("owners_created_off_remain_visible_and_only_participants_publish") {
+        return;
+    }
     let _recording = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
     seismograph_rallocator::native::set_publication_enabled(true);
@@ -136,6 +159,9 @@ fn owners_created_off_remain_visible_and_only_participants_publish() {
 
 #[test]
 fn concurrent_collection_reads_published_copies_not_mutating_cores() {
+    if run_with_fresh_inventory("concurrent_collection_reads_published_copies_not_mutating_cores") {
+        return;
+    }
     let _recording = RECORDING.lock().unwrap();
     seismograph_rallocator::native::set_publication_enabled(true);
     seismograph::recorder(Configuration {

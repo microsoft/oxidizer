@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! An owner-return allocator implemented in Rust.
 //!
 //! Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
