@@ -45,7 +45,7 @@
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
 //! [arc]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
-//! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
+//! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
 //!
 //! Depend on this crate directly when all you need is the trait. It has no normal dependencies
 //! and works without `std`: with default features turned off, [`Thread`] loses its thread id
