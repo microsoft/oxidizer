@@ -39,7 +39,7 @@
 //!     scratch: String,
 //! }
 //!
-//! // A runtime hands `relocate` the worker the value came from and the one it is moving to.
+//! // The runtime calls this on the worker that now owns `c`; `to` describes that current thread.
 //! fn on_move(mut c: Connection, from: Option<&Thread>, to: &Thread) {
 //!     c.relocate(from, to);
 //! }
@@ -89,8 +89,10 @@
 //! ## Implementing the trait by hand
 //!
 //! Write the impl yourself when relocation means something specific - re-homing an allocation,
-//! swapping a per-core cache, reconnecting to a scheduler. The method receives the source worker
-//! (`None` if unknown) and the destination:
+//! swapping a per-core cache, reconnecting to a scheduler. The method runs on the destination
+//! worker and receives the source worker (`None` if unknown) plus a coordinate describing the
+//! current worker. The destination is descriptive; it is not a request to run the callback on
+//! another worker:
 //!
 //! ```rust
 //! use thread_aware::{Thread, ThreadAware};
@@ -102,8 +104,8 @@
 //! impl ThreadAware for PerCoreScratch {
 //!     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
 //!         // The scratch buffer belonged to the previous worker; drop it so the next use
-//!         // re-allocates fresh, letting the destination's allocator place it in local
-//!         // memory instead of carrying the old worker's buffer across.
+//!         // re-allocates fresh on the destination worker, letting its allocator place it in
+//!         // local memory instead of carrying the old worker's buffer across.
 //!         self.buffer = Vec::new();
 //!     }
 //! }
@@ -232,11 +234,11 @@
 //!     skipped: Tracker,
 //! }
 //!
-//! // Build two worker coordinates and relocate the value between them.
+//! // Build a coordinate for the worker the value came from and one for this worker.
 //! let builder = ThreadBuilder::default();
-//! let from = builder.build(thread::current().id());
 //! let other = thread::spawn(|| thread::current().id()).join().unwrap();
-//! let to = builder.build(other);
+//! let from = builder.build(other);
+//! let to = builder.build(thread::current().id());
 //!
 //! let mut value = UnderTest {
 //!     tracked: Tracker::default(),
