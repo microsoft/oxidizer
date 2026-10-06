@@ -9,7 +9,7 @@ use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
-use crate::runtime::blocking_worker::is_current_blocking_pool;
+use crate::runtime::blocking_worker::{BlockingWaitContext, is_current_blocking_pool};
 use crate::runtime::thread::assert_not_flagged;
 use crate::task::execution::TaskResult;
 
@@ -52,6 +52,8 @@ where
     #[pin]
     result_rx: Option<BoxedReceiver<TaskResult<R>>>,
     blocking_pool: Option<Arc<()>>,
+    #[debug(ignore)]
+    blocking_wait: Option<Arc<BlockingWaitContext>>,
     completed: bool,
 }
 
@@ -63,6 +65,7 @@ where
         Self {
             result_rx: Some(result_rx),
             blocking_pool: None,
+            blocking_wait: None,
             completed: false,
         }
     }
@@ -71,12 +74,18 @@ where
         Self {
             result_rx: None,
             blocking_pool: None,
+            blocking_wait: None,
             completed: false,
         }
     }
 
     pub(crate) fn with_blocking_pool(mut self, pool: Arc<()>) -> Self {
         self.blocking_pool = Some(pool);
+        self
+    }
+
+    pub(crate) fn with_blocking_wait_context(mut self, context: Arc<BlockingWaitContext>) -> Self {
+        self.blocking_wait = Some(context);
         self
     }
 
@@ -97,7 +106,12 @@ where
     /// Also panics if called from an async Arty worker or while waiting for a
     /// task belonging to the current blocking pool, even if the result is
     /// already ready. A blocking callback may wait for an async task, but not
-    /// for another task queued behind itself in the same pool.
+    /// for another task queued behind itself in the same pool, including
+    /// through async descendants.
+    ///
+    /// An async task waited by a blocking callback fails with a panic
+    /// [`JoinError`] if it or one of its descendants awaits blocking work from
+    /// that callback's pool.
     ///
     /// # Examples
     ///
@@ -115,6 +129,9 @@ where
             !self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
             "blocking JoinHandle::wait cannot wait for the current blocking pool"
         );
+        if let Some(blocking_wait) = &self.blocking_wait {
+            blocking_wait.inherit_current_pool();
+        }
 
         futures::executor::block_on(self)
     }

@@ -107,8 +107,9 @@ impl RuntimeScheduler {
     ///
     /// Calling this from a blocking callback is supported for async work that
     /// does not wait for another task from the same blocking pool. Same-pool
-    /// blocking joins are rejected whether they are awaited or waited
-    /// synchronously, preventing pool starvation.
+    /// blocking joins, including those reached through spawned async tasks, are
+    /// rejected whether they are awaited or waited synchronously, preventing
+    /// pool starvation.
     ///
     /// # Examples
     ///

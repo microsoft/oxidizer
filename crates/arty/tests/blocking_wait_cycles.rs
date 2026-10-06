@@ -99,3 +99,14 @@ fn blocking_wait_rejects_an_async_dependency_on_its_pool() {
         runtime.stop().unwrap();
     });
 }
+
+#[test]
+fn blocking_wait_allows_async_work_without_a_same_pool_dependency() {
+    let runtime = shared_runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let nested = scheduler.clone();
+    let task = scheduler.spawn_blocking(move || nested.spawn(async |_| 42).wait().unwrap());
+
+    assert_eq!(task.wait().unwrap(), 42);
+    runtime.stop().unwrap();
+}

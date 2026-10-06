@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
+use futures::task::AtomicWaker;
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
@@ -94,6 +95,55 @@ pub(crate) fn current_blocking_wait_pool() -> Option<Arc<()>> {
 
 pub(crate) fn with_blocking_wait_pool<F: Future>(inner: F, pool: Option<Arc<()>>) -> impl Future<Output = F::Output> {
     BlockingWaitFuture { inner, pool }
+}
+
+#[derive(Debug)]
+pub(crate) struct BlockingWaitContext {
+    pool: Mutex<Option<Arc<()>>>,
+    waker: AtomicWaker,
+}
+
+impl BlockingWaitContext {
+    pub(crate) fn new(pool: Option<Arc<()>>) -> Arc<Self> {
+        Arc::new(Self {
+            pool: Mutex::new(pool),
+            waker: AtomicWaker::new(),
+        })
+    }
+
+    pub(crate) fn inherit_current_pool(&self) {
+        let Some(pool) = current_blocking_pool() else {
+            return;
+        };
+        *self.pool.lock_result().expect(ERR_POISONED_LOCK) = Some(pool);
+        self.waker.wake();
+    }
+
+    fn enter(&self, waker: &std::task::Waker) -> BlockingWaitScope {
+        self.waker.register(waker);
+        BlockingWaitScope::enter(self.pool.lock_result().expect(ERR_POISONED_LOCK).clone())
+    }
+}
+
+#[pin_project]
+struct SharedBlockingWaitFuture<F> {
+    #[pin]
+    inner: F,
+    context: Arc<BlockingWaitContext>,
+}
+
+impl<F: Future> Future for SharedBlockingWaitFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _scope = this.context.enter(cx.waker());
+        this.inner.poll(cx)
+    }
+}
+
+pub(crate) fn with_blocking_wait_context<F: Future>(inner: F, context: Arc<BlockingWaitContext>) -> impl Future<Output = F::Output> {
+    SharedBlockingWaitFuture { inner, context }
 }
 
 /// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
