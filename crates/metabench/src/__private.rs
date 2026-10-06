@@ -12,6 +12,7 @@ pub use crate::perf::begin as begin_perf_measurement;
 pub use crate::runner::{EngineSet, run};
 pub use crate::vtune::begin as begin_vtune_measurement;
 
+#[cfg_attr(test, mutants::skip)] // Already calls the same Default implementation.
 #[must_use]
 pub fn default_criterion() -> criterion::Criterion {
     criterion::Criterion::default()

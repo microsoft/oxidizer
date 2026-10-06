@@ -35,7 +35,7 @@ use win64 as platform;
 mod faults {
     use std::cell::Cell;
 
-    pub(super) const MAP: u32 = 1 << 0;
+    pub(super) const MAP: u32 = 1;
     pub(super) const RESERVE: u32 = 1 << 1;
     pub(super) const COMMIT: u32 = 1 << 2;
     pub(super) const COMMIT_LOCALITY_SEGMENT: u32 = 1 << 3;

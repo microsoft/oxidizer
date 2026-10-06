@@ -24,6 +24,7 @@ impl EvictionPolicy {
     ///
     /// `TinyLFU` combines frequency and recency tracking to achieve high cache
     /// hit rates across a wide range of workloads.
+    #[cfg_attr(test, mutants::skip)] // The derived default also selects TinyLfu.
     #[must_use]
     pub fn tiny_lfu() -> Self {
         Self {

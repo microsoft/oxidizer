@@ -40,6 +40,10 @@ exclude_re = [
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
 
+    # WIRE_FORMAT_VERSION is 1; revisit this exclusion if it changes.
+    # Keep the distinct replacement with 0.
+    "^crates/seismograph_rallocator/src/wire/format\\.rs:.*replace wire_format_version -> u16 with 1$",
+
     # Windows host only.
     # File identity has only a constant fallback on Windows.
     "^crates/metabench/src/arguments\\.rs:.*\\bmetadata_identifies_same_file\\b",

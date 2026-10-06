@@ -77,6 +77,18 @@ file-identity and allocator alignment implementations remain mutation
 candidates. Helpers enabled by `cfg(any(test, ...))` remain mutation candidates
 on every test host.
 
+Equivalent mutations are excluded only when the replacement compiles and can
+be shown to preserve behavior; a surviving mutant alone is not such proof.
+Prefer `#[cfg_attr(test, mutants::skip)]` with a local explanation when every
+candidate in a function is equivalent. For mixed candidates, exclude only the
+equivalent replacement in all three configurations. The wire-format version's
+replacement with `1` is excluded while its replacement with `0` remains; revisit
+the exclusion when `WIRE_FORMAT_VERSION` changes. Cargo-mutants 27.1.0 ignores
+skip attributes on constants, so the allocator's first fault flag uses `1`
+instead of the equivalent `1 << 0` expression. Other fault shifts remain
+mutation candidates. Unviable replacements are not equivalent survivors and
+are left for cargo-mutants to report.
+
 The `http_headers` and `http_headers_simd` crates are excluded from mutation
 testing through all three configurations. Their ordinary tests, coverage
 checks, and Miri checks remain enabled.
