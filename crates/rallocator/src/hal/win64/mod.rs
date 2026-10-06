@@ -111,3 +111,16 @@ pub(crate) unsafe fn release(address: *mut u8, _size: usize) {
         std::process::abort();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_rejects_invalid_reservation_requests() {
+        for (size, alignment) in [(0, RESERVE_MIN), (1, RESERVE_MIN), (RESERVE_MIN, 0), (RESERVE_MIN, 3)] {
+            assert!(reserve(size, alignment).is_null());
+            assert!(crate::hal::reserve(size, alignment).is_null());
+        }
+    }
+}

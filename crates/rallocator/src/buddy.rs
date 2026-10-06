@@ -357,11 +357,22 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
     /// # Safety
     /// The caller excludes mutation of this buddy and all of its owned nodes.
     pub(crate) unsafe fn observe(&self, nodes: Nodes, budget: &mut usize) -> seismograph_rallocator::native::Ranges {
+        // SAFETY: The caller excludes mutation for this bounded traversal.
+        unsafe { self.observe_with_pending::<64>(nodes, budget) }
+    }
+
+    /// # Safety
+    /// The caller excludes mutation of this buddy and all of its owned nodes.
+    unsafe fn observe_with_pending<const CAPACITY: usize>(
+        &self,
+        nodes: Nodes,
+        budget: &mut usize,
+    ) -> seismograph_rallocator::native::Ranges {
         let mut result = seismograph_rallocator::native::Ranges::EMPTY;
         for bits in MIN..self.empty_above.min(MAX) {
             let entry = &self.entries[bits];
             result.counts[bits] = entry.cache.iter().filter(|address| **address != 0).count() as u64;
-            let mut pending = [0usize; 64];
+            let mut pending = [0usize; CAPACITY];
             let mut length = usize::from(entry.root != 0);
             pending[0] = entry.root;
             while length != 0 {
@@ -559,6 +570,12 @@ mod tests {
         let observed = unsafe { buddy.observe(Nodes::Inline, &mut budget) };
         assert!(observed.complete);
         assert_eq!(observed.counts[4], 6);
+        let mut limited_budget = 16;
+        // SAFETY: The same valid tree stays immutable; a smaller worklist tests bounded traversal.
+        let limited = unsafe { buddy.observe_with_pending::<1>(Nodes::Inline, &mut limited_budget) };
+        assert!(!limited.complete);
+        assert_eq!(limited.counts[4], 4);
+        assert_eq!(limited_budget, 15);
         let mut exhausted = 0;
         // SAFETY: The unchanged buddy still exclusively owns every initialized node.
         let partial = unsafe { buddy.observe(Nodes::Inline, &mut exhausted) };
