@@ -26,7 +26,9 @@ use crate::task::execution::TaskResult;
 ///
 /// # Panics
 ///
-/// Panics if polled again after its result has been received.
+/// Panics if polled again after its result has been received. A blocking
+/// handle also panics if it is polled from its own blocking callback or from
+/// async work that a callback in the same pool is synchronously waiting for.
 ///
 /// # Examples
 ///
@@ -127,6 +129,10 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         assert!(!*this.completed, "JoinHandle polled after completion");
+        assert!(
+            !this.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
+            "blocking JoinHandle cannot be polled while the current blocking pool waits for it"
+        );
         let Some(result_rx) = this.result_rx.as_mut().as_pin_mut() else {
             *this.completed = true;
             return Poll::Ready(Err(JoinError::shutdown()));

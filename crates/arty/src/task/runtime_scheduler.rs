@@ -10,6 +10,7 @@ use pin_project::pin_project;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;
+use crate::runtime::blocking_worker::{current_blocking_pool, with_blocking_wait_pool};
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::thread::is_flagged;
 use crate::task::{Builtins, JoinHandle};
@@ -105,9 +106,9 @@ impl RuntimeScheduler {
     /// inside an already-running `futures` executor, before submitting the task.
     ///
     /// Calling this from a blocking callback is supported for async work that
-    /// does not wait for another task from the same blocking pool. A blocking
-    /// callback must not wait on a same-pool blocking join; [`JoinHandle::wait`]
-    /// rejects that case to prevent pool starvation.
+    /// does not wait for another task from the same blocking pool. Same-pool
+    /// blocking joins are rejected whether they are awaited or waited
+    /// synchronously, preventing pool starvation.
     ///
     /// # Examples
     ///
@@ -131,6 +132,7 @@ impl RuntimeScheduler {
         if is_flagged() {
             return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
+        let blocking_pool = current_blocking_pool();
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
         let (completion, destroyed) = channel::unbounded();
@@ -139,7 +141,8 @@ impl RuntimeScheduler {
             inner: future_factory,
             completion,
         };
-        let factory: BoxedFutureFactory<'a, R> = Box::new(move |cx| storage.into_future(cx).boxed_local());
+        let factory: BoxedFutureFactory<'a, R> =
+            Box::new(move |cx| with_blocking_wait_pool(storage.into_future(cx), blocking_pool).boxed_local());
         // SAFETY: ScopedJoin cannot return or unwind until the borrowing factory/future
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.

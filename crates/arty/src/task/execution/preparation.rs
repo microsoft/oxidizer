@@ -10,6 +10,7 @@ use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
 
+use crate::runtime::blocking_worker::{current_blocking_wait_pool, with_blocking_wait_pool};
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
 use crate::task::execution::local::LocalTaskFuture;
@@ -41,6 +42,7 @@ where
     R: 'static,
 {
     let (result_tx, result_rx) = LocalEvent::boxed();
+    let future = with_blocking_wait_pool(future, current_blocking_wait_pool());
     let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
     (future, LocalJoinHandle::new(result_rx))
 }
@@ -57,11 +59,12 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
+    let blocking_wait_pool = current_blocking_wait_pool();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
-        let inner = async move { future_factory(cx).await };
+        let inner = with_blocking_wait_pool(async move { future_factory(cx).await }, blocking_wait_pool);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
@@ -84,7 +87,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let inner = async move { future_factory(builtins).await };
+    let inner = with_blocking_wait_pool(async move { future_factory(builtins).await }, current_blocking_wait_pool());
     drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
         inner,
         result_tx,

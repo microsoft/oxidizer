@@ -5,12 +5,15 @@
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
+use pin_project::pin_project;
 use threadpool::ThreadPool;
 
 use crate::runtime::telemetry::events::{BlockingWorkerPoolSaturated, SystemMetricCount};
@@ -21,6 +24,7 @@ const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution becau
 
 thread_local! {
     static CURRENT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
+    static BLOCKING_WAIT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
 }
 
 struct BlockingTaskScope {
@@ -41,6 +45,55 @@ impl Drop for BlockingTaskScope {
     fn drop(&mut self) {
         CURRENT_POOL.set(self.previous.take());
     }
+}
+
+struct BlockingWaitScope {
+    previous: Option<Arc<()>>,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl BlockingWaitScope {
+    fn enter(pool: Option<Arc<()>>) -> Self {
+        Self {
+            previous: BLOCKING_WAIT_POOL.replace(pool),
+            _not_send: PhantomData,
+        }
+    }
+}
+
+impl Drop for BlockingWaitScope {
+    fn drop(&mut self) {
+        BLOCKING_WAIT_POOL.set(self.previous.take());
+    }
+}
+
+#[pin_project]
+struct BlockingWaitFuture<F> {
+    #[pin]
+    inner: F,
+    pool: Option<Arc<()>>,
+}
+
+impl<F: Future> Future for BlockingWaitFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _scope = BlockingWaitScope::enter(this.pool.clone());
+        this.inner.poll(cx)
+    }
+}
+
+pub(crate) fn current_blocking_pool() -> Option<Arc<()>> {
+    CURRENT_POOL.with_borrow(Clone::clone)
+}
+
+pub(crate) fn current_blocking_wait_pool() -> Option<Arc<()>> {
+    BLOCKING_WAIT_POOL.with_borrow(Clone::clone)
+}
+
+pub(crate) fn with_blocking_wait_pool<F: Future>(inner: F, pool: Option<Arc<()>>) -> impl Future<Output = F::Output> {
+    BlockingWaitFuture { inner, pool }
 }
 
 /// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
@@ -120,6 +173,7 @@ impl BlockingWorker {
 
 pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
     CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
+        || BLOCKING_WAIT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
 }
 
 #[derive(Debug, Clone)]

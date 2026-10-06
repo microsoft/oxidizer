@@ -244,8 +244,9 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
                 let mut value = 40;
                 let on_worker = captured
                     .scheduler()
-                    .block_on(async |_| {
-                        let local = Rc::new(2);
+                    .block_on(async |cx| {
+                        let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
+                        let local = Rc::new(child);
                         value += *local;
                         captured.scheduler().is_on_worker()
                     })

@@ -73,6 +73,81 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
 }
 
 #[test]
+fn blocking_callback_block_on_rejects_same_pool_blocking_await() {
+    execute_or_terminate_process(|| {
+        let runtime = Arc::new(runtime());
+        let captured = Arc::clone(&runtime);
+        let outcome = runtime
+            .scheduler()
+            .spawn_blocking(move || captured.scheduler().block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await))
+            .wait()
+            .unwrap();
+
+        assert!(
+            outcome
+                .unwrap_err()
+                .source()
+                .unwrap()
+                .downcast_ref::<JoinError>()
+                .unwrap()
+                .is_panic()
+        );
+        Arc::try_unwrap(runtime).unwrap().stop().unwrap();
+    });
+}
+
+#[test]
+fn blocking_callback_block_on_propagates_same_pool_rejection_to_async_children() {
+    execute_or_terminate_process(|| {
+        let runtime = Arc::new(runtime());
+        let captured = Arc::clone(&runtime);
+        let outcome = runtime
+            .scheduler()
+            .spawn_blocking(move || {
+                captured.scheduler().block_on(async |cx| {
+                    cx.scheduler()
+                        .spawn(async |child| child.scheduler().spawn_blocking(|| 7).await)
+                        .await
+                        .unwrap()
+                })
+            })
+            .wait()
+            .unwrap();
+
+        assert!(
+            outcome
+                .unwrap_err()
+                .source()
+                .unwrap()
+                .downcast_ref::<JoinError>()
+                .unwrap()
+                .is_panic()
+        );
+        Arc::try_unwrap(runtime).unwrap().stop().unwrap();
+    });
+}
+
+#[test]
+fn blocking_callback_block_on_can_await_another_pools_blocking_task() {
+    let caller = runtime();
+    let target = Arc::new(runtime());
+    let captured = Arc::clone(&target);
+    let outcome = caller
+        .scheduler()
+        .spawn_blocking(move || {
+            captured
+                .scheduler()
+                .block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await.unwrap())
+        })
+        .wait()
+        .unwrap();
+
+    assert_eq!(outcome.unwrap(), 7);
+    caller.stop().unwrap();
+    Arc::try_unwrap(target).unwrap().stop().unwrap();
+}
+
+#[test]
 fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
     let runtime = runtime();
     let invoked = Arc::new(AtomicBool::new(false));
