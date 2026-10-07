@@ -15,7 +15,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
 use arty::time::Clock;
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -66,16 +66,12 @@ impl Drop for CancellationTimer {
 
 #[test]
 fn final_timer_panic_reports_worker_failure_after_joining_blocking_work() {
-    isolated("final_timer_panic_reports_worker_failure_after_joining_blocking_work", || {
-        timer_case(true);
-    });
+    timer_case(true);
 }
 
 #[test]
 fn final_timer_without_escaped_task_waker_reports_joined_worker_failure() {
-    isolated("final_timer_without_escaped_task_waker_reports_joined_worker_failure", || {
-        timer_case(false);
-    });
+    timer_case(false);
 }
 
 fn timer_case(retain_waker: bool) {

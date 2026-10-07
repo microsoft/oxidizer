@@ -9,7 +9,7 @@
 //!
 //! # Async workers
 //!
-//! [`CpuPolicy`](crate::runtime::CpuPolicy) selects processors, with
+//! [`WorkersPolicy`](crate::runtime::WorkersPolicy) selects processors, with
 //! one async worker per selected processor:
 //!
 //! | Policy | Meaning |
@@ -22,13 +22,13 @@
 //! The runtime rejects a count of zero when it is built.
 //!
 //! ```
-//! use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeBuilder};
+//! use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 //! use arty::task::Builtins;
 //!
 //! fn app_builder() -> RuntimeBuilder {
 //!     Runtime::builder()
-//!         .cpu_policy(CpuPolicy::at_most(2))
-//!         .blocking_pool_policy(BlockingPoolPolicy::shared(4))
+//!         .workers(WorkersPolicy::at_most(2))
+//!         .blocking_pool(BlockingPoolPolicy::shared(4))
 //! }
 //!
 //! #[arty::main(builder = app_builder())]

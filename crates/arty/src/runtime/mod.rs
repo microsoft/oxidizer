@@ -51,7 +51,7 @@ mod worker;
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, CpuPolicy};
+pub use config::{BlockingPoolPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]

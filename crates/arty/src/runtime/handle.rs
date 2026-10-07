@@ -92,7 +92,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
     /// ```
     #[must_use]
     pub fn builder() -> RuntimeBuilder {
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn blocking_callback_is_detected_before_waiting_for_shutdown() {
         let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
         let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn dropping_the_owner_on_an_async_worker_does_not_wait_for_shutdown() {
         let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();
@@ -299,11 +299,11 @@ mod tests {
     #[test]
     fn dropping_another_runtime_on_a_worker_does_not_wait_for_blocking_work() {
         let runtime = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let caller = Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let dispatcher = runtime.scheduler.dispatcher.clone();

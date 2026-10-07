@@ -3,68 +3,12 @@
 
 #![cfg(test)]
 
-use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 
 pub(crate) fn runtime() -> Runtime {
     Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
-}
-
-pub(crate) fn isolated(name: &str, body: fn()) {
-    isolated_with_timeout(name, testing_aids::TEST_TIMEOUT * 3, body);
-}
-
-pub(crate) fn isolated_with_timeout(name: &str, timeout: std::time::Duration, body: fn()) {
-    #[cfg(miri)]
-    {
-        let _ = name;
-        let _ = timeout;
-        body();
-    }
-    #[cfg(not(miri))]
-    {
-        use std::process::{Command, Stdio};
-        use std::time::Instant;
-
-        const CHILD: &str = "ARTY_PANIC_CONTRACT_CHILD";
-        if std::env::var(CHILD).as_deref() == Ok(name) {
-            body();
-            return;
-        }
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", name, "--nocapture"])
-            .env(CHILD, name)
-            .env("RUST_BACKTRACE", "0")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + timeout;
-        loop {
-            if child.try_wait().unwrap().is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                child.kill().unwrap();
-                let output = child.wait_with_output().unwrap();
-                panic!(
-                    "{name} exceeded its child-process deadline\nstdout: {}\nstderr: {}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "{name} failed in its child: {}\nstdout: {}\nstderr: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
 }

@@ -8,11 +8,11 @@ use many_cpus::ProcessorSet;
 use crate::runtime::config::BlockingPoolPolicy;
 use crate::runtime::error::Error;
 
-/// A processor-count policy for async runtime workers.
+/// A worker-count policy for the async runtime.
 ///
 /// The runtime starts one async worker per selected processor. Pass a
 /// policy to
-/// [`RuntimeBuilder::cpu_policy`](crate::runtime::RuntimeBuilder::cpu_policy).
+/// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
 /// The default, [`auto`](Self::auto), lets Arty choose the count. Use
 /// [`at_most`](Self::at_most) for an upper bound, [`exactly`](Self::exactly) when
 /// fewer workers would be an error, or [`all`](Self::all) to require all available
@@ -24,15 +24,15 @@ use crate::runtime::error::Error;
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{CpuPolicy, Runtime};
+/// use arty::runtime::{Runtime, WorkersPolicy};
 ///
-/// let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(4));
+/// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CpuPolicy(CpuPolicyKind);
+pub struct WorkersPolicy(WorkersPolicyKind);
 
-impl CpuPolicy {
-    /// Creates a policy requiring exactly `count` processors.
+impl WorkersPolicy {
+    /// Creates a policy requiring exactly `count` workers.
     ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
     /// [`Error`] if `count` is zero or fewer processors are available. Creating
@@ -42,16 +42,16 @@ impl CpuPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{CpuPolicy, Runtime};
+    /// use arty::runtime::{Runtime, WorkersPolicy};
     ///
-    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::exactly(4));
+    /// let builder = Runtime::builder().workers(WorkersPolicy::exactly(4));
     /// ```
     #[must_use]
     pub const fn exactly(count: usize) -> Self {
-        Self(CpuPolicyKind::Exactly(count))
+        Self(WorkersPolicyKind::Exactly(count))
     }
 
-    /// Creates a policy using at most `count` available processors.
+    /// Creates a policy using at most `count` workers.
     ///
     /// Fewer available processors means fewer workers, not a construction error.
     /// A zero count is rejected by
@@ -61,13 +61,13 @@ impl CpuPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{CpuPolicy, Runtime};
+    /// use arty::runtime::{Runtime, WorkersPolicy};
     ///
-    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(4));
+    /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
     /// ```
     #[must_use]
     pub const fn at_most(count: usize) -> Self {
-        Self(CpuPolicyKind::AtMost(count))
+        Self(WorkersPolicyKind::AtMost(count))
     }
 
     /// Creates a policy using all available processors.
@@ -78,42 +78,42 @@ impl CpuPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{CpuPolicy, Runtime};
+    /// use arty::runtime::{Runtime, WorkersPolicy};
     ///
-    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::all());
+    /// let builder = Runtime::builder().workers(WorkersPolicy::all());
     /// ```
     #[must_use]
     pub const fn all() -> Self {
-        Self(CpuPolicyKind::All)
+        Self(WorkersPolicyKind::All)
     }
 
-    /// Creates the default policy, allowing Arty to choose the processor count.
+    /// Creates the default policy, allowing Arty to choose the worker count.
     ///
     /// The selection policy may evolve. It currently uses all available processors.
-    /// Use an explicit policy when the processor count matters to the application.
+    /// Use an explicit policy when the worker count matters to the application.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{CpuPolicy, Runtime};
+    /// use arty::runtime::{Runtime, WorkersPolicy};
     ///
-    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::auto());
+    /// let builder = Runtime::builder().workers(WorkersPolicy::auto());
     /// ```
     #[must_use]
     pub const fn auto() -> Self {
-        Self(CpuPolicyKind::Auto)
+        Self(WorkersPolicyKind::Auto)
     }
 
     pub(crate) fn select(&self, available: &ProcessorSet) -> Result<ProcessorSet, Error> {
         let count = match self.0 {
-            CpuPolicyKind::Exactly(0) | CpuPolicyKind::AtMost(0) => {
-                return Err(Error::new("processor count must be greater than zero"));
+            WorkersPolicyKind::Exactly(0) | WorkersPolicyKind::AtMost(0) => {
+                return Err(Error::new("worker count must be greater than zero"));
             }
-            CpuPolicyKind::Exactly(count) if count > available.len() => {
+            WorkersPolicyKind::Exactly(count) if count > available.len() => {
                 return Err(Error::insufficient_processors(count, available.len()));
             }
-            CpuPolicyKind::Exactly(count) | CpuPolicyKind::AtMost(count) => count.min(available.len()),
-            CpuPolicyKind::Auto | CpuPolicyKind::All => {
+            WorkersPolicyKind::Exactly(count) | WorkersPolicyKind::AtMost(count) => count.min(available.len()),
+            WorkersPolicyKind::Auto | WorkersPolicyKind::All => {
                 return Ok(available.to_builder().take_all().expect("available processor sets are nonempty"));
             }
         };
@@ -126,7 +126,7 @@ impl CpuPolicy {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum CpuPolicyKind {
+enum WorkersPolicyKind {
     #[default]
     Auto,
     Exactly(usize),
@@ -137,7 +137,7 @@ enum CpuPolicyKind {
 /// Resource settings validated during runtime construction.
 #[derive(Debug, PartialEq)]
 pub(crate) struct RuntimeConfig {
-    pub(crate) cpu_policy: CpuPolicy,
+    pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: usize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
 }
@@ -145,7 +145,7 @@ pub(crate) struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            cpu_policy: CpuPolicy::default(),
+            workers_policy: WorkersPolicy::default(),
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: 2 * 1024 * 1024,
@@ -170,7 +170,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn exact_count_selects_requested_processors() {
-        const COUNT: CpuPolicy = CpuPolicy::exactly(1);
+        const COUNT: WorkersPolicy = WorkersPolicy::exactly(1);
         let available = SystemHardware::current().processors();
         let selected = COUNT.select(&available).unwrap();
         assert_eq!(selected.len(), 1);
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn exact_count_accepts_all_available_processors() {
         let available = SystemHardware::current().processors().take(NonZero::new(1).unwrap()).unwrap();
-        let selected = CpuPolicy::exactly(available.len()).select(&available).unwrap();
+        let selected = WorkersPolicy::exactly(available.len()).select(&available).unwrap();
 
         assert_eq!(selected.len(), available.len());
     }
@@ -189,21 +189,21 @@ mod tests {
     #[test]
     fn unavailable_exact_count_returns_error() {
         let available = SystemHardware::current().processors().take(NonZero::new(1).unwrap()).unwrap();
-        CpuPolicy::exactly(2).select(&available).unwrap_err();
+        WorkersPolicy::exactly(2).select(&available).unwrap_err();
     }
 
     #[cfg(not(miri))]
     #[test]
     fn maximum_count_clamps_to_available_processors() {
         let available = SystemHardware::current().processors();
-        let selected = CpuPolicy::at_most(usize::MAX).select(&available).unwrap();
+        let selected = WorkersPolicy::at_most(usize::MAX).select(&available).unwrap();
         assert_eq!(selected.len(), available.len());
     }
 
     #[cfg(not(miri))]
     #[test]
     fn maximum_count_caps_processor_selection() {
-        const COUNT: CpuPolicy = CpuPolicy::at_most(1);
+        const COUNT: WorkersPolicy = WorkersPolicy::at_most(1);
         let available = SystemHardware::current().processors();
         let selected = COUNT.select(&available).unwrap();
         assert_eq!(selected.len(), 1);
@@ -213,13 +213,13 @@ mod tests {
     #[test]
     fn automatic_count_uses_all_available_processors() {
         let available = SystemHardware::current().processors();
-        assert_eq!(CpuPolicy::auto().select(&available).unwrap().len(), available.len(),);
+        assert_eq!(WorkersPolicy::auto().select(&available).unwrap().len(), available.len(),);
     }
 
     #[cfg(not(miri))]
     #[test]
     fn all_processors_uses_all_available_processors() {
-        const COUNT: CpuPolicy = CpuPolicy::all();
+        const COUNT: WorkersPolicy = WorkersPolicy::all();
         let available = SystemHardware::current().processors();
         assert_eq!(COUNT.select(&available).unwrap().len(), available.len());
     }

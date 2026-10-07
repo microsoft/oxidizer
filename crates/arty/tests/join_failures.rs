@@ -16,45 +16,49 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
-use arty::task::{JoinError, JoinHandle};
-use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, RuntimeOperations, WorkersPolicy};
+use arty::task::JoinError;
+#[cfg(feature = "macros")]
+use arty::task::{Builtins, JoinHandle};
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
 #[cfg(test)]
-fn runtime() -> Runtime {
+fn runtime_builder() -> RuntimeBuilder {
     Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-        .build()
-        .unwrap()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
 }
 
-#[test]
-fn async_and_blocking_panics_do_not_unwind_the_joiner() {
-    let runtime = runtime();
-    let scheduler = runtime.scheduler();
+#[cfg(test)]
+fn runtime() -> Runtime {
+    runtime_builder().build().unwrap()
+}
+
+#[cfg(feature = "macros")]
+#[arty::test(builder = runtime_builder())]
+async fn async_and_blocking_panics_are_join_errors(cx: Builtins) {
+    let scheduler = cx.scheduler();
     let handles: [JoinHandle<()>; 3] = [
-        scheduler.spawn_anywhere((), |_, ()| -> std::future::Ready<()> { panic!("factory panic") }),
-        scheduler.spawn_anywhere((), |_, ()| async { panic!("poll panic") }),
+        scheduler.spawn(|_| -> std::future::Ready<()> { panic!("factory panic") }),
+        scheduler.spawn(async |_| panic!("poll panic")),
         scheduler.spawn_blocking(|| panic!("blocking panic")),
     ];
     for handle in handles {
-        let result = catch_unwind(AssertUnwindSafe(|| handle.wait())).unwrap();
-        let error = result.unwrap_err();
+        let error = handle.await.unwrap_err();
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
     }
-    assert_eq!(scheduler.spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
+    assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[test]
 fn blocking_callback_cannot_wait_for_blocking_work() {
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(2))
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared(2))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -74,57 +78,53 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
 
 #[test]
 fn blocking_callback_block_on_rejects_same_pool_blocking_await() {
-    execute_or_terminate_process(|| {
-        let runtime = Arc::new(runtime());
-        let captured = Arc::clone(&runtime);
-        let outcome = runtime
-            .scheduler()
-            .spawn_blocking(move || captured.scheduler().block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await))
-            .wait()
-            .unwrap();
+    let runtime = Arc::new(runtime());
+    let captured = Arc::clone(&runtime);
+    let outcome = runtime
+        .scheduler()
+        .spawn_blocking(move || captured.scheduler().block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await))
+        .wait()
+        .unwrap();
 
-        assert!(
-            outcome
-                .unwrap_err()
-                .source()
-                .unwrap()
-                .downcast_ref::<JoinError>()
-                .unwrap()
-                .is_panic()
-        );
-        Arc::try_unwrap(runtime).unwrap().stop().unwrap();
-    });
+    assert!(
+        outcome
+            .unwrap_err()
+            .source()
+            .unwrap()
+            .downcast_ref::<JoinError>()
+            .unwrap()
+            .is_panic()
+    );
+    Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
 fn blocking_callback_block_on_propagates_same_pool_rejection_to_async_children() {
-    execute_or_terminate_process(|| {
-        let runtime = Arc::new(runtime());
-        let captured = Arc::clone(&runtime);
-        let outcome = runtime
-            .scheduler()
-            .spawn_blocking(move || {
-                captured.scheduler().block_on(async |cx| {
-                    cx.scheduler()
-                        .spawn(async |child| child.scheduler().spawn_blocking(|| 7).await)
-                        .await
-                        .unwrap()
-                })
+    let runtime = Arc::new(runtime());
+    let captured = Arc::clone(&runtime);
+    let outcome = runtime
+        .scheduler()
+        .spawn_blocking(move || {
+            captured.scheduler().block_on(async |cx| {
+                cx.scheduler()
+                    .spawn(async |child| child.scheduler().spawn_blocking(|| 7).await)
+                    .await
+                    .unwrap()
             })
-            .wait()
-            .unwrap();
+        })
+        .wait()
+        .unwrap();
 
-        assert!(
-            outcome
-                .unwrap_err()
-                .source()
-                .unwrap()
-                .downcast_ref::<JoinError>()
-                .unwrap()
-                .is_panic()
-        );
-        Arc::try_unwrap(runtime).unwrap().stop().unwrap();
-    });
+    assert!(
+        outcome
+            .unwrap_err()
+            .source()
+            .unwrap()
+            .downcast_ref::<JoinError>()
+            .unwrap()
+            .is_panic()
+    );
+    Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
@@ -169,22 +169,18 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
     assert!(!invoked.load(Ordering::Acquire));
 }
 
-#[test]
-fn local_factory_and_poll_panics_are_join_errors() {
-    runtime()
-        .scheduler()
-        .block_on(async |cx| {
-            let scheduler = cx.local_scheduler().unwrap();
-            let factory = catch_unwind(AssertUnwindSafe(|| {
-                scheduler.spawn(|| -> std::future::Ready<()> { panic!("local factory panic") })
-            }))
-            .unwrap();
-            assert!(factory.await.unwrap_err().is_panic());
-            assert!(scheduler.spawn(async || panic!("local poll panic")).await.unwrap_err().is_panic());
-            let value = scheduler.spawn(async || Rc::new(42)).await.unwrap();
-            assert_eq!(*value, 42);
-        })
-        .unwrap();
+#[cfg(feature = "macros")]
+#[arty::test(builder = runtime_builder())]
+async fn local_factory_and_poll_panics_are_join_errors(cx: Builtins) {
+    let scheduler = cx.local_scheduler().unwrap();
+    let factory = catch_unwind(AssertUnwindSafe(|| {
+        scheduler.spawn(|| -> std::future::Ready<()> { panic!("local factory panic") })
+    }))
+    .unwrap();
+    assert!(factory.await.unwrap_err().is_panic());
+    assert!(scheduler.spawn(async || panic!("local poll panic")).await.unwrap_err().is_panic());
+    let value = scheduler.spawn(async || Rc::new(42)).await.unwrap();
+    assert_eq!(*value, 42);
 }
 
 #[test]
@@ -209,37 +205,35 @@ fn local_future_destructor_panic_preserves_runtime_usability() {
         }
     }
 
-    execute_or_terminate_process(|| {
-        let runtime = runtime();
-        runtime
-            .scheduler()
-            .block_on(async |cx| {
-                let scheduler = cx.local_scheduler().unwrap();
-                let invoked = Rc::new(Cell::new(false));
-                let dropped = Rc::new(Cell::new(false));
-                let task = scheduler.spawn({
-                    let invoked = Rc::clone(&invoked);
-                    let dropped = Rc::clone(&dropped);
-                    move || {
-                        invoked.set(true);
-                        ReadyDropPanic {
-                            dropped,
-                            _pinned: PhantomPinned,
-                        }
+    let runtime = runtime();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let scheduler = cx.local_scheduler().unwrap();
+            let invoked = Rc::new(Cell::new(false));
+            let dropped = Rc::new(Cell::new(false));
+            let task = scheduler.spawn({
+                let invoked = Rc::clone(&invoked);
+                let dropped = Rc::clone(&dropped);
+                move || {
+                    invoked.set(true);
+                    ReadyDropPanic {
+                        dropped,
+                        _pinned: PhantomPinned,
                     }
-                });
-                assert!(invoked.get());
-                let error = task.await.unwrap_err();
-                assert!(error.is_panic());
-                assert!(!error.is_shutdown());
-                assert!(dropped.get());
-                let value = scheduler.spawn(async || Rc::new(7)).await.unwrap();
-                assert_eq!(*value, 7);
-            })
-            .unwrap();
-        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
-        runtime.stop().unwrap();
-    });
+                }
+            });
+            assert!(invoked.get());
+            let error = task.await.unwrap_err();
+            assert!(error.is_panic());
+            assert!(!error.is_shutdown());
+            assert!(dropped.get());
+            let value = scheduler.spawn(async || Rc::new(7)).await.unwrap();
+            assert_eq!(*value, 7);
+        })
+        .unwrap();
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
+    runtime.stop().unwrap();
 }
 
 #[test]
@@ -296,52 +290,48 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
         }
     }
 
-    execute_or_terminate_process(|| {
-        let runtime = runtime();
-        let (started, receive_start) = mpsc::channel();
-        let (dropped, receive_drop) = mpsc::channel();
-        let task = runtime
-            .scheduler()
-            .spawn_anywhere(Unaware((started, dropped)), |_, Unaware((started, dropped))| async move {
-                let guard = Dropped(dropped);
-                started.send(()).unwrap();
-                pending::<()>().await;
-                drop(guard);
-            });
-        receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop().unwrap();
-        assert!(task.wait().unwrap_err().is_shutdown());
-        receive_drop.recv_timeout(TEST_TIMEOUT).unwrap();
-    });
+    let runtime = runtime();
+    let (started, receive_start) = mpsc::channel();
+    let (dropped, receive_drop) = mpsc::channel();
+    let task = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((started, dropped)), |_, Unaware((started, dropped))| async move {
+            let guard = Dropped(dropped);
+            started.send(()).unwrap();
+            pending::<()>().await;
+            drop(guard);
+        });
+    receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
+    runtime.stop().unwrap();
+    assert!(task.wait().unwrap_err().is_shutdown());
+    receive_drop.recv_timeout(TEST_TIMEOUT).unwrap();
 }
 
 #[test]
 fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
-    execute_or_terminate_process(|| {
-        let runtime = runtime();
-        let operations = RuntimeOperations::from(&runtime);
-        let scheduler = runtime.scheduler();
-        let (started, receive_start) = mpsc::channel();
-        let (release, receive_release) = mpsc::channel();
-        let running = scheduler.spawn_blocking(move || {
-            started.send(()).unwrap();
-            receive_release.recv().unwrap();
-            42
-        });
-        receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
-        let invoked = Arc::new(AtomicBool::new(false));
-        let queued = scheduler.spawn_blocking({
-            let invoked = Arc::clone(&invoked);
-            move || invoked.store(true, Ordering::Relaxed)
-        });
-        operations.request_stop();
-        assert!(scheduler.spawn_blocking(|| 7).wait().unwrap_err().is_shutdown());
-        release.send(()).unwrap();
-        assert_eq!(running.wait().unwrap(), 42);
-        assert!(queued.wait().unwrap_err().is_shutdown());
-        assert!(!invoked.load(Ordering::Relaxed));
-        runtime.stop().unwrap();
+    let runtime = runtime();
+    let operations = RuntimeOperations::from(&runtime);
+    let scheduler = runtime.scheduler();
+    let (started, receive_start) = mpsc::channel();
+    let (release, receive_release) = mpsc::channel();
+    let running = scheduler.spawn_blocking(move || {
+        started.send(()).unwrap();
+        receive_release.recv().unwrap();
+        42
     });
+    receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let queued = scheduler.spawn_blocking({
+        let invoked = Arc::clone(&invoked);
+        move || invoked.store(true, Ordering::Relaxed)
+    });
+    operations.request_stop();
+    assert!(scheduler.spawn_blocking(|| 7).wait().unwrap_err().is_shutdown());
+    release.send(()).unwrap();
+    assert_eq!(running.wait().unwrap(), 42);
+    assert!(queued.wait().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Relaxed));
+    runtime.stop().unwrap();
 }
 
 #[test]
@@ -403,25 +393,23 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
 
 #[test]
 fn cancelling_the_root_returns_a_shutdown_error() {
-    execute_or_terminate_process(|| {
-        let result = runtime().scheduler().block_on(async |cx| {
-            RuntimeOperations::from(&cx).request_stop();
-            pending::<()>().await;
-        });
-        assert!(
-            result
-                .unwrap_err()
-                .source()
-                .unwrap()
-                .downcast_ref::<JoinError>()
-                .unwrap()
-                .is_shutdown()
-        );
+    let result = runtime().scheduler().block_on(async |cx| {
+        RuntimeOperations::from(&cx).request_stop();
+        pending::<()>().await;
     });
+    assert!(
+        result
+            .unwrap_err()
+            .source()
+            .unwrap()
+            .downcast_ref::<JoinError>()
+            .unwrap()
+            .is_shutdown()
+    );
 }
 
 #[cfg(feature = "macros")]
-#[arty::test(workers = 1)]
+#[arty::test]
 #[should_panic(expected = "runtime is shutting down")]
 async fn macro_boundary_reports_root_cancellation(cx: arty::task::Builtins) {
     RuntimeOperations::from(&cx).request_stop();

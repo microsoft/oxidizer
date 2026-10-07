@@ -11,7 +11,7 @@ testing_aids::init_tracing!();
 use std::thread;
 
 use arty::core::Thread;
-use arty::runtime::{CpuPolicy, Runtime, RuntimeOperations};
+use arty::runtime::{Runtime, RuntimeOperations, WorkersPolicy};
 use many_cpus::{ProcessorId, SystemHardware};
 use thread_aware::{ThreadAware, ThreadBuilder, Unaware};
 
@@ -35,7 +35,7 @@ fn operations_are_cloneable_but_not_thread_aware() {
 
 #[test]
 fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let worker = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
@@ -53,7 +53,7 @@ fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
 
 #[test]
 fn runtime_operations_are_available_off_worker() {
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::at_most(1)).build().unwrap();
     let (worker, builtins, expected) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move {
@@ -81,7 +81,7 @@ fn explicit_targets_select_workers_without_relocating_operations() {
         eprintln!("requires two processors to exercise cross-worker relocation");
         return;
     }
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| {
             runtime
@@ -111,8 +111,8 @@ fn explicit_targets_select_workers_without_relocating_operations() {
 
 #[test]
 fn operations_reject_foreign_workers_without_changing_runtime_identity() {
-    let source_runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).build().unwrap();
-    let other_runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).build().unwrap();
+    let source_runtime = Runtime::builder().workers(WorkersPolicy::at_most(1)).build().unwrap();
+    let other_runtime = Runtime::builder().workers(WorkersPolicy::at_most(1)).build().unwrap();
     let (Unaware(operations), source, processor) = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move {
@@ -138,7 +138,7 @@ fn operations_reject_foreign_workers_without_changing_runtime_identity() {
 #[test]
 fn captured_processor_snapshot_pins_after_runtime_shutdown() {
     let (operations, worker, processor) = Runtime::builder()
-        .cpu_policy(CpuPolicy::at_most(1))
+        .workers(WorkersPolicy::at_most(1))
         .build()
         .unwrap()
         .scheduler()
@@ -162,7 +162,7 @@ fn captured_processor_snapshot_pins_after_runtime_shutdown() {
 
 #[test]
 fn runtime_and_builtin_conversions_use_the_same_affinity_information() {
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let operations = RuntimeOperations::from(&runtime);
     let (builtins, worker, processor) = runtime
         .scheduler()
@@ -186,7 +186,7 @@ fn runtime_and_builtin_conversions_use_the_same_affinity_information() {
 #[test]
 fn maximum_processors_clamps_to_available_processors() {
     let available = SystemHardware::current().processors().len();
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(usize::MAX)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::at_most(usize::MAX)).build().unwrap();
     let workers: std::collections::HashSet<_> = (0..available)
         .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async { thread::current().id() }))
         .map(|handle| handle.wait().unwrap())

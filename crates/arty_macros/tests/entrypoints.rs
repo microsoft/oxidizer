@@ -28,9 +28,9 @@ mod fixture {
     pub(super) struct Builtins(pub(super) usize, pub(super) usize, pub(super) Option<Clock>);
 
     #[derive(Debug, Clone, Copy)]
-    pub(super) struct CpuPolicy(usize);
+    pub(super) struct WorkersPolicy(usize);
 
-    impl CpuPolicy {
+    impl WorkersPolicy {
         pub(super) const fn at_most(count: usize) -> Self {
             Self(count)
         }
@@ -101,7 +101,7 @@ mod fixture {
             self
         }
 
-        pub(super) fn cpu_policy(mut self, count: CpuPolicy) -> Self {
+        pub(super) fn workers(mut self, count: WorkersPolicy) -> Self {
             self.workers = count.0.min(2);
             self
         }
@@ -115,7 +115,7 @@ mod fixture {
             if FAIL_CONSTRUCTION.replace(false) {
                 Err("forced construction failure")
             } else if self.workers == 0 {
-                Err("processor count must be greater than zero")
+                Err("worker count must be greater than zero")
             } else {
                 Ok(Runtime {
                     scheduler: RuntimeScheduler {
@@ -198,7 +198,7 @@ async fn zero_worker_entrypoint(_cx: fixture::Builtins) {
 }
 
 #[test]
-#[should_panic(expected = "processor count must be greater than zero")]
+#[should_panic(expected = "worker count must be greater than zero")]
 fn zero_worker_count_is_validated_by_runtime_construction() {
     fixture::ENTRYPOINT_BODY_RAN.set(false);
     let error = std::panic::catch_unwind(zero_worker_entrypoint).unwrap_err();

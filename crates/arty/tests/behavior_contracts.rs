@@ -14,19 +14,20 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
 use arty::task::{Builtins, Scheduler};
 use arty::time::Clock;
+#[cfg(feature = "macros")]
 use futures::future::join_all;
 use observed::Sink;
 use observed_testing::{TEST_ID, test_emitter};
-use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
 fn runtime(workers: usize) -> Runtime {
-    Runtime::builder().cpu_policy(CpuPolicy::exactly(workers)).build().unwrap()
+    Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
 fn worker_scheduler(runtime: &Runtime) -> Scheduler {
@@ -56,24 +57,24 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
 
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
-    const AUTOMATIC: CpuPolicy = CpuPolicy::auto();
-    assert_eq!(CpuPolicy::default(), AUTOMATIC);
+    const AUTOMATIC: WorkersPolicy = WorkersPolicy::auto();
+    assert_eq!(WorkersPolicy::default(), AUTOMATIC);
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
 }
 
 #[test]
 fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
     for previous in [
-        CpuPolicy::exactly(0),
-        CpuPolicy::at_most(0),
-        CpuPolicy::exactly(usize::MAX),
-        CpuPolicy::exactly(2),
-        CpuPolicy::all(),
-        CpuPolicy::auto(),
+        WorkersPolicy::exactly(0),
+        WorkersPolicy::at_most(0),
+        WorkersPolicy::exactly(usize::MAX),
+        WorkersPolicy::exactly(2),
+        WorkersPolicy::all(),
+        WorkersPolicy::auto(),
     ] {
         let runtime = Runtime::builder()
-            .cpu_policy(previous)
-            .cpu_policy(CpuPolicy::at_most(1))
+            .workers(previous)
+            .workers(WorkersPolicy::at_most(1))
             .build()
             .unwrap();
         assert_eq!(count_workers(&runtime), 1);
@@ -93,10 +94,10 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
     let (sink, processor) = test_emitter(TEST_ID);
     let runtime = Runtime::builder()
         .stack_size(STACK)
-        .blocking_pool_policy(BlockingPoolPolicy::isolated())
-        .cpu_policy(CpuPolicy::at_most(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-        .cpu_policy(CpuPolicy::exactly(2))
+        .blocking_pool(BlockingPoolPolicy::isolated())
+        .workers(WorkersPolicy::at_most(1))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .workers(WorkersPolicy::exactly(2))
         .sink(sink)
         .build()
         .unwrap();
@@ -130,22 +131,20 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
 
 #[test]
 fn construction_and_shutdown_work_inside_a_futures_executor() {
-    execute_or_terminate_process(|| {
-        futures::executor::block_on(async {
-            let runtime = runtime(1);
-            let (answer, scheduler) = runtime
-                .scheduler()
-                .spawn_anywhere((), |cx, ()| async move {
-                    assert!(cx.local_scheduler().is_some());
-                    assert_eq!(cx.thread().id(), thread::current().id());
-                    (42, cx.scheduler().clone())
-                })
-                .await
-                .unwrap();
-            assert_eq!(answer, 42);
-            runtime.stop().unwrap();
-            assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
-        });
+    futures::executor::block_on(async {
+        let runtime = runtime(1);
+        let (answer, scheduler) = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move {
+                assert!(cx.local_scheduler().is_some());
+                assert_eq!(cx.thread().id(), thread::current().id());
+                (42, cx.scheduler().clone())
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer, 42);
+        runtime.stop().unwrap();
+        assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
     });
 }
 
@@ -201,8 +200,8 @@ fn nested_block_on_rejects_the_factory_before_submission() {
 fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
     completes_without_deadlock(|| {
         let first = Runtime::builder()
-            .cpu_policy(CpuPolicy::exactly(1))
-            .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+            .workers(WorkersPolicy::exactly(1))
+            .blocking_pool(BlockingPoolPolicy::shared(1))
             .build()
             .unwrap();
         let second = runtime(1);
@@ -239,30 +238,28 @@ fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
 
 #[test]
 fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
-    execute_or_terminate_process(|| {
-        let runtime = Arc::new(runtime(1));
-        let captured = Arc::clone(&runtime);
-        let (on_worker, value) = runtime
-            .scheduler()
-            .spawn_blocking(move || {
-                assert!(!captured.scheduler().is_on_worker());
-                let mut value = 40;
-                let on_worker = captured
-                    .scheduler()
-                    .block_on(async |cx| {
-                        let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
-                        let local = Rc::new(child);
-                        value += *local;
-                        captured.scheduler().is_on_worker()
-                    })
-                    .unwrap();
-                (on_worker, value)
-            })
-            .wait()
-            .unwrap();
-        assert_eq!((on_worker, value), (true, 42));
-        Arc::try_unwrap(runtime).unwrap().stop().unwrap();
-    });
+    let runtime = Arc::new(runtime(1));
+    let captured = Arc::clone(&runtime);
+    let (on_worker, value) = runtime
+        .scheduler()
+        .spawn_blocking(move || {
+            assert!(!captured.scheduler().is_on_worker());
+            let mut value = 40;
+            let on_worker = captured
+                .scheduler()
+                .block_on(async |cx| {
+                    let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
+                    let local = Rc::new(child);
+                    value += *local;
+                    captured.scheduler().is_on_worker()
+                })
+                .unwrap();
+            (on_worker, value)
+        })
+        .wait()
+        .unwrap();
+    assert_eq!((on_worker, value), (true, 42));
+    Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
@@ -289,41 +286,28 @@ fn builtins_publish_the_same_services_on_every_worker() {
     runtime.stop().unwrap();
 }
 
-#[cfg(not(miri))]
-#[test]
-fn worker_services_are_ready_before_spawning() {
+#[cfg(all(feature = "macros", not(miri)))]
+#[arty::test(workers = 2)]
+async fn worker_services_are_ready_before_spawning(cx: Builtins) {
     let count = many_cpus::SystemHardware::current().processors().len().min(2);
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::at_most(2)).build().unwrap();
-    let (actual, expected) = runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let scheduler = cx.scheduler();
-            let tasks: Vec<_> = (0..count)
-                .map(|_| {
-                    scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
-                        (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
-                    })
-                })
-                .collect();
-            let expected = vec![(true, true); tasks.len()];
-            (join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>(), expected)
+    let scheduler = cx.scheduler();
+    let tasks: Vec<_> = (0..count)
+        .map(|_| {
+            scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
+                (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
+            })
         })
-        .unwrap();
+        .collect();
+    let expected = vec![(true, true); tasks.len()];
+    let actual = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
 
     assert_eq!(actual, expected);
 }
 
-#[cfg(not(miri))]
-#[test]
-fn emitter_is_available_by_default() {
-    let runtime = Runtime::builder().build().unwrap();
-
-    runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            assert!(cx.sink().is_noop());
-        })
-        .unwrap();
+#[cfg(all(feature = "macros", not(miri)))]
+#[arty::test]
+async fn emitter_is_available_by_default(cx: Builtins) {
+    assert!(cx.sink().is_noop());
 }
 
 #[cfg(not(miri))]
@@ -367,7 +351,7 @@ fn configured_clock_control_remains_the_worker_time_source() {
 
     let control = ClockControl::new();
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
+        .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()
         .unwrap();
@@ -414,58 +398,47 @@ fn stopping_one_runtime_does_not_stop_another() {
 
 #[test]
 fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callback() {
-    execute_or_terminate_process(|| {
-        let target = runtime(1);
-        let caller = runtime(1);
-        let retained = worker_scheduler(&target);
-        let (started, ready) = mpsc::channel();
-        let (release, gate) = mpsc::channel();
-        let callback = target.scheduler().spawn_blocking(move || {
-            started.send(()).unwrap();
-            gate.recv_timeout(TEST_TIMEOUT).unwrap();
-            42
-        });
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        caller
-            .scheduler()
-            .spawn_anywhere(Unaware(target), |_, Unaware(target)| async move { drop(target) })
-            .wait()
-            .unwrap();
-        assert!(retained.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
-        release.send(()).unwrap();
-        assert_eq!(callback.wait().unwrap(), 42);
-        caller.stop().unwrap();
+    let target = runtime(1);
+    let caller = runtime(1);
+    let retained = worker_scheduler(&target);
+    let (started, ready) = mpsc::channel();
+    let (release, gate) = mpsc::channel();
+    let callback = target.scheduler().spawn_blocking(move || {
+        started.send(()).unwrap();
+        gate.recv_timeout(TEST_TIMEOUT).unwrap();
+        42
     });
+    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    caller
+        .scheduler()
+        .spawn_anywhere(Unaware(target), |_, Unaware(target)| async move { drop(target) })
+        .wait()
+        .unwrap();
+    assert!(retained.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+    release.send(()).unwrap();
+    assert_eq!(callback.wait().unwrap(), 42);
+    caller.stop().unwrap();
 }
 
-#[test]
-fn application_errors_remain_results_for_async_local_and_blocking_tasks() {
-    let runtime = runtime(1);
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn application_errors_remain_results_for_async_local_and_blocking_tasks(cx: Builtins) {
     assert_eq!(
-        runtime
-            .scheduler()
-            .spawn_anywhere((), |_, ()| async { Err::<(), _>("application") })
-            .wait()
+        cx.scheduler().spawn(async |_| Err::<(), _>("application")).await.unwrap(),
+        Err("application")
+    );
+    assert_eq!(
+        cx.scheduler().spawn_blocking(|| Err::<(), _>("application")).await.unwrap(),
+        Err("application")
+    );
+    assert_eq!(
+        cx.local_scheduler()
+            .unwrap()
+            .spawn(async || Err::<(), _>("application"))
+            .await
             .unwrap(),
         Err("application")
     );
-    assert_eq!(
-        runtime.scheduler().spawn_blocking(|| Err::<(), _>("application")).wait().unwrap(),
-        Err("application")
-    );
-    assert_eq!(
-        runtime
-            .scheduler()
-            .block_on(async |cx| cx
-                .local_scheduler()
-                .unwrap()
-                .spawn(async || Err::<(), _>("application"))
-                .await
-                .unwrap())
-            .unwrap(),
-        Err("application")
-    );
-    runtime.stop().unwrap();
 }
 
 #[test]
@@ -507,21 +480,15 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     runtime.stop().unwrap();
 }
 
-#[test]
-fn local_join_keeps_non_send_results_and_rejects_repolling() {
-    let runtime = runtime(1);
-    runtime
-        .scheduler()
-        .block_on(async |cx| {
-            let result = Rc::new(42);
-            let captured = Rc::clone(&result);
-            let mut task = Box::pin(cx.local_scheduler().unwrap().spawn(async move || captured));
-            let returned = task.as_mut().await.unwrap();
-            assert!(Rc::ptr_eq(&returned, &result));
-            catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
-        })
-        .unwrap();
-    runtime.stop().unwrap();
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn local_join_keeps_non_send_results_and_rejects_repolling(cx: Builtins) {
+    let result = Rc::new(42);
+    let captured = Rc::clone(&result);
+    let mut task = Box::pin(cx.local_scheduler().unwrap().spawn(async move || captured));
+    let returned = task.as_mut().await.unwrap();
+    assert!(Rc::ptr_eq(&returned, &result));
+    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
 }
 
 #[cfg(feature = "macros")]

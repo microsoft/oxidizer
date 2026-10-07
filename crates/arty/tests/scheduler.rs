@@ -3,18 +3,20 @@
 
 //! Schedulers remain usable when stored in application and thread-local state.
 
-#![cfg(feature = "rt")]
+#![cfg(all(feature = "rt", feature = "macros"))]
 
 testing_aids::init_tracing!();
 
 use std::cell::RefCell;
 
-use arty::runtime::Runtime;
-use arty::task::Scheduler;
-use testing_aids::execute_or_terminate_process;
+use arty::task::{Builtins, Scheduler};
 
-#[test]
-fn stash_scheduler() {
+#[arty::test]
+#[expect(
+    clippy::float_cmp,
+    reason = "fake logic for tests, no computation involved - direct comparison is fine"
+)]
+async fn stash_scheduler(cx: Builtins) {
     // We store a scheduler in some object that can schedule tasks without having knowledge of the
     // exact type of the task or task context.
 
@@ -28,74 +30,60 @@ fn stash_scheduler() {
         }
     }
 
-    let builder = Runtime::builder();
-    // One worker retains all local-scheduling transitions without interpreter idle-worker overhead.
-    #[cfg(miri)]
-    let builder = builder.cpu_policy(arty::runtime::CpuPolicy::exactly(1));
-    let runtime = builder.build().unwrap();
+    cx.scheduler()
+        .spawn(async move |cx| {
+            // We store the scheduler in a thingy and try to use it from the thingy
+            // without having direct access to the task context.
+            let thingy = Thingy {
+                scheduler: cx.scheduler().clone(),
+            };
 
-    #[expect(
-        clippy::float_cmp,
-        reason = "fake logic for tests, no computation involved - direct comparison is fine"
-    )]
-    execute_or_terminate_process(move || {
-        runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move {
-                // We store the scheduler in a thingy and try to use it from the thingy
-                // without having direct access to the task context.
-                let thingy = Thingy {
-                    scheduler: cx.scheduler().clone(),
-                };
+            let pi = thingy.calculate_pi().await;
 
-                let pi = thingy.calculate_pi().await;
+            assert_eq!(pi, 3.0);
 
-                assert_eq!(pi, 3.0);
+            // The stored worker-bound scheduler also works from a different task.
+            let thingy = Thingy {
+                scheduler: cx.scheduler().clone(),
+            };
 
-                // The stored worker-bound scheduler also works from a different task.
-                let thingy = Thingy {
-                    scheduler: cx.scheduler().clone(),
-                };
+            cx.local_scheduler()
+                .expect("On the same thread")
+                .spawn(async move || {
+                    let pi = thingy.calculate_pi().await;
 
-                cx.local_scheduler()
-                    .expect("On the same thread")
-                    .spawn(async move || {
-                        let pi = thingy.calculate_pi().await;
+                    assert_eq!(pi, 3.0);
+                })
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
 
-                        assert_eq!(pi, 3.0);
-                    })
-                    .await
-                    .unwrap();
-            })
-            .wait()
-            .unwrap();
+    cx.scheduler()
+        .spawn(async move |cx| {
+            // We store the scheduler in a thread-local variable.
+            THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
+                *stash = Some(cx.scheduler().clone());
+            });
 
-        runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move {
-                // We store the scheduler in a thread-local variable.
-                THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
-                    *stash = Some(cx.scheduler().clone());
-                });
+            // And we try to use it from another task on the same thread.
+            let result = cx
+                .local_scheduler()
+                .expect("On the same thread as cx")
+                .spawn(async move || {
+                    let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
 
-                // And we try to use it from another task on the same thread.
-                let result = cx
-                    .local_scheduler()
-                    .expect("On the same thread as cx")
-                    .spawn(async move || {
-                        let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
+                    // It works, right? Right.
+                    scheduler.spawn(async move |_| 49).await.unwrap()
+                })
+                .await
+                .unwrap();
 
-                        // It works, right? Right.
-                        scheduler.spawn(async move |_| 49).await.unwrap()
-                    })
-                    .await
-                    .unwrap();
-
-                assert_eq!(result, 49);
-            })
-            .wait()
-            .unwrap();
-    });
+            assert_eq!(result, 49);
+        })
+        .await
+        .unwrap();
 }
 
 thread_local! {

@@ -8,7 +8,7 @@
 
 mod panic_support;
 
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 
 testing_aids::init_tracing!();
 
@@ -18,14 +18,12 @@ testing_aids::init_tracing!();
     ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
 )]
 fn async_worker_stop_returns_without_self_joining() {
-    isolated("async_worker_stop_returns_without_self_joining", || {
-        let runtime = runtime();
-        let scheduler = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
-            .unwrap();
-        let result = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
-        assert!(result.is_err());
-    });
+    let runtime = runtime();
+    let scheduler = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+        .wait()
+        .unwrap();
+    let result = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
+    assert!(result.is_err());
 }

@@ -9,6 +9,7 @@
 testing_aids::init_tracing!();
 
 use arty::runtime::Runtime;
+#[cfg(feature = "macros")]
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink};
@@ -29,10 +30,12 @@ impl RequestCtx {
 }
 
 #[derive(Enrichment)]
+#[cfg(feature = "macros")]
 struct OuterCtx {
     outer: UnclassifiedI64,
 }
 
+#[cfg(feature = "macros")]
 impl OuterCtx {
     fn new(outer: i64) -> Self {
         Self { outer: outer.into() }
@@ -40,10 +43,12 @@ impl OuterCtx {
 }
 
 #[derive(Enrichment)]
+#[cfg(feature = "macros")]
 struct InnerCtx {
     inner: UnclassifiedI64,
 }
 
+#[cfg(feature = "macros")]
 impl InnerCtx {
     fn new(inner: i64) -> Self {
         Self { inner: inner.into() }
@@ -75,6 +80,7 @@ fn runtime_with_emitter(sink: &Sink) -> Runtime {
     Runtime::builder().sink(sink.clone()).build().expect("Failed to create runtime")
 }
 
+#[cfg(feature = "macros")]
 fn collect_enrichment_keys(sink: &Sink) -> Vec<String> {
     sink.current_enrichments()
         .into_iter()
@@ -83,130 +89,100 @@ fn collect_enrichment_keys(sink: &Sink) -> Vec<String> {
 }
 
 /// Enrichment propagates through `Scheduler::spawn`.
-#[test]
-fn enrichment_propagates_via_scheduler_spawn() {
-    let sink = Sink::noop();
-    let runtime = runtime_with_emitter(&sink);
-
-    let result = runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            async {
-                let handle = cx.scheduler().spawn({
-                    let e = sink.clone();
-                    async move |_cx: Builtins| collect_enrichment_keys(&e)
-                });
-                handle.await.unwrap()
-            }
-            .enrich(&sink, RequestCtx::new(42))
-            .await
-        })
-        .unwrap();
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn enrichment_propagates_via_scheduler_spawn(cx: Builtins) {
+    let sink = cx.sink().clone();
+    let result = async {
+        let handle = cx.scheduler().spawn({
+            let sink = sink.clone();
+            async move |_cx: Builtins| collect_enrichment_keys(&sink)
+        });
+        handle.await.unwrap()
+    }
+    .enrich(&sink, RequestCtx::new(42))
+    .await;
 
     assert_eq!(result, ["request.id"]);
 }
 
 /// Enrichment propagates through `Scheduler::spawn_anywhere`.
-#[test]
-fn enrichment_propagates_via_spawn_anywhere() {
-    let sink = Sink::noop();
-    let runtime = runtime_with_emitter(&sink);
-
-    let result = runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            async {
-                let handle = cx
-                    .scheduler()
-                    .spawn_anywhere(sink.clone(), |e: Sink| async move { collect_enrichment_keys(&e) });
-                handle.await.unwrap()
-            }
-            .enrich(&sink, RequestCtx::new(99))
-            .await
-        })
-        .unwrap();
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn enrichment_propagates_via_spawn_anywhere(cx: Builtins) {
+    let sink = cx.sink().clone();
+    let result = async {
+        let handle = cx
+            .scheduler()
+            .spawn_anywhere(sink.clone(), |sink: Sink| async move { collect_enrichment_keys(&sink) });
+        handle.await.unwrap()
+    }
+    .enrich(&sink, RequestCtx::new(99))
+    .await;
 
     assert_eq!(result, ["request.id"]);
 }
 
 /// Enrichment propagates through `LocalScheduler::spawn`.
-#[test]
-fn enrichment_propagates_via_local_scheduler_spawn() {
-    let sink = Sink::noop();
-    let runtime = runtime_with_emitter(&sink);
-
-    let result = runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            async {
-                let local = cx.local_scheduler().expect("should be on the correct thread");
-                let handle = local.spawn({
-                    let e = sink.clone();
-                    async move || collect_enrichment_keys(&e)
-                });
-                handle.await.unwrap()
-            }
-            .enrich(&sink, RequestCtx::new(1))
-            .await
-        })
-        .unwrap();
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn enrichment_propagates_via_local_scheduler_spawn(cx: Builtins) {
+    let sink = cx.sink().clone();
+    let result = async {
+        let local = cx.local_scheduler().expect("should be on the correct thread");
+        let handle = local.spawn({
+            let sink = sink.clone();
+            async move || collect_enrichment_keys(&sink)
+        });
+        handle.await.unwrap()
+    }
+    .enrich(&sink, RequestCtx::new(1))
+    .await;
 
     assert_eq!(result, ["request.id"]);
 }
 
 /// No enrichments leak when none are set at the spawn site.
-#[test]
-fn no_enrichment_leak_without_context() {
-    let sink = Sink::noop();
-    let runtime = runtime_with_emitter(&sink);
-
-    let result = runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            // No .enrich() here — spawn directly.
-            let handle = cx.scheduler().spawn({
-                let e = sink.clone();
-                async move |_cx: Builtins| collect_enrichment_keys(&e)
-            });
-            handle.await.unwrap()
-        })
-        .unwrap();
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn no_enrichment_leak_without_context(cx: Builtins) {
+    let sink = cx.sink().clone();
+    // No .enrich() here — spawn directly.
+    let handle = cx.scheduler().spawn({
+        let sink = sink.clone();
+        async move |_cx: Builtins| collect_enrichment_keys(&sink)
+    });
+    let result = handle.await.unwrap();
 
     assert!(result.is_empty());
 }
 
 /// Nested spawn preserves the full enrichment chain.
-#[test]
-fn nested_spawn_preserves_enrichment_chain() {
-    let sink = Sink::noop();
-    let runtime = runtime_with_emitter(&sink);
-
-    let mut result = runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            async {
-                // Spawn level-1 task.
-                let handle = cx.scheduler().spawn({
-                    let e1 = sink.clone();
-                    async move |cx2: Builtins| {
-                        // Level-1 adds its own enrichment and spawns level-2.
-                        async {
-                            let handle = cx2.scheduler().spawn({
-                                let e2 = e1.clone();
-                                async move |_cx3: Builtins| collect_enrichment_keys(&e2)
-                            });
-                            handle.await.unwrap()
-                        }
-                        .enrich(&e1, InnerCtx::new(2))
-                        .await
-                    }
-                });
-                handle.await.unwrap()
+#[cfg(feature = "macros")]
+#[arty::test]
+async fn nested_spawn_preserves_enrichment_chain(cx: Builtins) {
+    let sink = cx.sink().clone();
+    let mut result = async {
+        // Spawn level-1 task.
+        let handle = cx.scheduler().spawn({
+            let level_one_sink = sink.clone();
+            async move |cx: Builtins| {
+                // Level-1 adds its own enrichment and spawns level-2.
+                async {
+                    let handle = cx.scheduler().spawn({
+                        let level_two_sink = level_one_sink.clone();
+                        async move |_cx: Builtins| collect_enrichment_keys(&level_two_sink)
+                    });
+                    handle.await.unwrap()
+                }
+                .enrich(&level_one_sink, InnerCtx::new(2))
+                .await
             }
-            .enrich(&sink, OuterCtx::new(1))
-            .await
-        })
-        .unwrap();
+        });
+        handle.await.unwrap()
+    }
+    .enrich(&sink, OuterCtx::new(1))
+    .await;
 
     // Level-2 should see both outer and inner enrichments.
     result.sort();

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
 
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 
 testing_aids::init_tracing!();
@@ -54,41 +54,39 @@ impl Drop for Borrowed<'_> {
 
 #[test]
 fn scoped_wakers_remain_valid_after_caller_storage_is_destroyed() {
-    isolated("scoped_wakers_remain_valid_after_caller_storage_is_destroyed", || {
-        for panic_poll in [false, true] {
-            let runtime = runtime();
-            let retained = {
-                let text = String::from("caller-owned storage");
-                let drops = AtomicUsize::new(0);
-                let (sent, received) = mpsc::channel();
-                let result = runtime.scheduler().block_on(|_| Borrowed {
-                    text: &text,
-                    drops: &drops,
-                    sent: Cell::new(Some(sent)),
-                    address: Cell::new(None),
-                    panic_poll,
-                    _local: Rc::new(()),
-                    _pinned: PhantomPinned,
-                });
-                if panic_poll {
-                    assert!(result.is_err());
-                } else {
-                    assert_eq!(result.unwrap(), text.len());
-                }
-                assert_eq!(drops.load(Ordering::SeqCst), 1);
-                received.recv_timeout(TEST_TIMEOUT).unwrap()
-            };
-            std::thread::spawn(move || {
-                for _ in 0..8 {
-                    retained.wake_by_ref();
-                    let consuming = retained.clone();
-                    consuming.wake();
-                }
-            })
-            .join()
-            .unwrap();
-            assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-            runtime.stop().unwrap();
-        }
-    });
+    for panic_poll in [false, true] {
+        let runtime = runtime();
+        let retained = {
+            let text = String::from("caller-owned storage");
+            let drops = AtomicUsize::new(0);
+            let (sent, received) = mpsc::channel();
+            let result = runtime.scheduler().block_on(|_| Borrowed {
+                text: &text,
+                drops: &drops,
+                sent: Cell::new(Some(sent)),
+                address: Cell::new(None),
+                panic_poll,
+                _local: Rc::new(()),
+                _pinned: PhantomPinned,
+            });
+            if panic_poll {
+                assert!(result.is_err());
+            } else {
+                assert_eq!(result.unwrap(), text.len());
+            }
+            assert_eq!(drops.load(Ordering::SeqCst), 1);
+            received.recv_timeout(TEST_TIMEOUT).unwrap()
+        };
+        std::thread::spawn(move || {
+            for _ in 0..8 {
+                retained.wake_by_ref();
+                let consuming = retained.clone();
+                consuming.wake();
+            }
+        })
+        .join()
+        .unwrap();
+        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
+        runtime.stop().unwrap();
+    }
 }

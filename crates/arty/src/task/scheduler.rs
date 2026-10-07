@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let registered = runtime
@@ -431,7 +431,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let (started_tx, started_rx) = mpsc::channel();

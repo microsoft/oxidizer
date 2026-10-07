@@ -11,7 +11,7 @@ mod panic_support;
 use std::cell::RefCell;
 use std::sync::mpsc;
 
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -78,14 +78,10 @@ fn owner_unwind(blocking: bool) {
 
 #[test]
 fn async_owner_drop_during_user_panic_requests_independent_shutdown() {
-    isolated("async_owner_drop_during_user_panic_requests_independent_shutdown", || {
-        owner_unwind(false);
-    });
+    owner_unwind(false);
 }
 
 #[test]
 fn blocking_owner_drop_during_user_panic_requests_independent_shutdown() {
-    isolated("blocking_owner_drop_during_user_panic_requests_independent_shutdown", || {
-        owner_unwind(true);
-    });
+    owner_unwind(true);
 }

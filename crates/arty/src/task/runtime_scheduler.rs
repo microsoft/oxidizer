@@ -250,7 +250,7 @@ mod tests {
     use std::task::Waker;
     use std::thread::{self, ThreadId};
 
-    use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
+    use testing_aids::TEST_TIMEOUT;
 
     use super::*;
     use crate::runtime::Runtime;
@@ -391,83 +391,79 @@ mod tests {
 
     #[test]
     fn scoped_join_waits_for_storage_destruction_during_caller_unwind() {
-        execute_or_terminate_process(|| {
-            let (completion, destroyed) = channel::unbounded();
-            let record = Mutex::new(None);
-            let payload = Arc::new(());
-            let expected = Arc::clone(&payload);
-            thread::scope(|scope| {
-                let (unwinding, unwind_started) = channel::unbounded();
-                let storage = ScopedStorage {
-                    inner: DropAction(|| *record.lock().unwrap() = Some(thread::current().id())),
-                    completion,
-                };
-                let worker = scope.spawn(move || {
-                    unwind_started.recv_timeout(TEST_TIMEOUT).unwrap();
-                    drop(storage);
-                });
-                let worker_id = worker.thread().id();
-                let outcome = catch_unwind(AssertUnwindSafe(|| {
-                    let _join = ScopedJoin(destroyed);
-                    let _unwind = DropAction(|| unwinding.send(()).unwrap());
-                    panic_any(payload);
-                }));
-                let actual = outcome.unwrap_err().downcast::<Arc<()>>().unwrap();
-                assert_eq!((Arc::ptr_eq(&actual, &expected), *record.lock().unwrap()), (true, Some(worker_id)));
-                worker.join().unwrap();
+        let (completion, destroyed) = channel::unbounded();
+        let record = Mutex::new(None);
+        let payload = Arc::new(());
+        let expected = Arc::clone(&payload);
+        thread::scope(|scope| {
+            let (unwinding, unwind_started) = channel::unbounded();
+            let storage = ScopedStorage {
+                inner: DropAction(|| *record.lock().unwrap() = Some(thread::current().id())),
+                completion,
+            };
+            let worker = scope.spawn(move || {
+                unwind_started.recv_timeout(TEST_TIMEOUT).unwrap();
+                drop(storage);
             });
+            let worker_id = worker.thread().id();
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                let _join = ScopedJoin(destroyed);
+                let _unwind = DropAction(|| unwinding.send(()).unwrap());
+                panic_any(payload);
+            }));
+            let actual = outcome.unwrap_err().downcast::<Arc<()>>().unwrap();
+            assert_eq!((Arc::ptr_eq(&actual, &expected), *record.lock().unwrap()), (true, Some(worker_id)));
+            worker.join().unwrap();
         });
     }
 
     #[cfg(not(miri))]
     fn check_borrowed_future_completion(panics: bool) {
-        execute_or_terminate_process(|| {
-            let runtime = Runtime::builder()
-                .cpu_policy(crate::runtime::CpuPolicy::exactly(1))
-                .build()
-                .unwrap();
-            let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();
-            let expected = Arc::new(());
-            let payload = panics.then(|| Arc::clone(&expected));
-            let mut record = DropRecord::default();
-            let outcome = catch_unwind(AssertUnwindSafe(|| {
-                runtime.scheduler().block_on(async |_| {
-                    BorrowingFuture {
-                        record: &mut record,
-                        panic: payload,
-                        _local: Rc::new(()),
-                    }
-                    .await
-                })
-            }))
+        let runtime = Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
             .unwrap();
-            match outcome {
-                Ok(value) => {
-                    assert!(!panics);
-                    assert_eq!(value, SendOnlyResult);
+        let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();
+        let expected = Arc::new(());
+        let payload = panics.then(|| Arc::clone(&expected));
+        let mut record = DropRecord::default();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            runtime.scheduler().block_on(async |_| {
+                BorrowingFuture {
+                    record: &mut record,
+                    panic: payload,
+                    _local: Rc::new(()),
                 }
-                Err(error) => {
-                    assert!(panics);
-                    let error = error.into_source().downcast::<JoinError>().unwrap();
-                    assert!(error.is_panic());
-                    #[cfg(feature = "macros")]
-                    {
-                        let payload = catch_unwind(AssertUnwindSafe(|| -> () { error.resume() })).unwrap_err();
-                        assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
-                    }
+                .await
+            })
+        }))
+        .unwrap();
+        match outcome {
+            Ok(value) => {
+                assert!(!panics);
+                assert_eq!(value, SendOnlyResult);
+            }
+            Err(error) => {
+                assert!(panics);
+                let error = error.into_source().downcast::<JoinError>().unwrap();
+                assert!(error.is_panic());
+                #[cfg(feature = "macros")]
+                {
+                    let payload = catch_unwind(AssertUnwindSafe(|| -> () { error.resume() })).unwrap_err();
+                    assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
                 }
             }
-            assert_eq!(
-                (record, runtime.scheduler().block_on(async |_| 23).unwrap()),
-                (
-                    DropRecord {
-                        text: "dropped".to_owned(),
-                        thread: Some(worker)
-                    },
-                    23
-                ),
-            );
-        });
+        }
+        assert_eq!(
+            (record, runtime.scheduler().block_on(async |_| 23).unwrap()),
+            (
+                DropRecord {
+                    text: "dropped".to_owned(),
+                    thread: Some(worker)
+                },
+                23
+            ),
+        );
     }
 
     #[cfg(not(miri))]

@@ -43,7 +43,7 @@ pub(in crate::runtime) fn build(
 ) -> Result<Runtime, Error> {
     let pool_mode = processor_config.blocking_pool_policy.mode_label();
     let available = available_processors();
-    let processors = processor_config.cpu_policy.select(&available).inspect_err(|_| {
+    let processors = processor_config.workers_policy.select(&available).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {

@@ -6,7 +6,7 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, CpuPolicy, RuntimeConfig};
+use crate::runtime::config::{BlockingPoolPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
@@ -16,17 +16,17 @@ use crate::runtime::handle::Runtime;
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
-/// The defaults are [`CpuPolicy::auto`], 2 MiB async-worker stacks,
+/// The defaults are [`WorkersPolicy::auto`], 2 MiB async-worker stacks,
 /// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
+/// use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 ///
 /// let runtime = Runtime::builder()
-///     .cpu_policy(CpuPolicy::at_most(4))
-///     .blocking_pool_policy(BlockingPoolPolicy::shared(4))
+///     .workers(WorkersPolicy::at_most(4))
+///     .blocking_pool(BlockingPoolPolicy::shared(4))
 ///     .build()?;
 /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -39,23 +39,23 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets the processor policy for async workers.
+    /// Sets the worker-count policy.
     ///
     /// The runtime starts one async worker per selected processor.
-    /// The default is [`CpuPolicy::auto`]. This does not set blocking-pool
-    /// limits; use [`blocking_pool_policy`](Self::blocking_pool_policy) for those.
+    /// The default is [`WorkersPolicy::auto`]. This does not set blocking-pool
+    /// limits; use [`blocking_pool`](Self::blocking_pool) for those.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{CpuPolicy, Runtime};
+    /// use arty::runtime::{Runtime, WorkersPolicy};
     ///
-    /// let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(4));
+    /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
     /// ```
     #[must_use]
-    pub const fn cpu_policy(mut self, count: CpuPolicy) -> Self {
-        self.processor_config.cpu_policy = count;
+    pub const fn workers(mut self, count: WorkersPolicy) -> Self {
+        self.processor_config.workers_policy = count;
         self
     }
 
@@ -96,10 +96,10 @@ impl RuntimeBuilder {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
     /// ```
     #[must_use]
-    pub const fn blocking_pool_policy(mut self, policy: BlockingPoolPolicy) -> Self {
+    pub const fn blocking_pool(mut self, policy: BlockingPoolPolicy) -> Self {
         self.processor_config.blocking_pool_policy = policy;
         self
     }
@@ -170,9 +170,9 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the processor count or shared blocking-pool limit is
-    /// zero, or if the processor policy cannot be satisfied, such as an
-    /// [`exactly`](CpuPolicy::exactly) request exceeding available processors.
+    /// Returns [`Error`] if the worker count or shared blocking-pool limit is
+    /// zero, or if the worker policy cannot be satisfied, such as an
+    /// [`exactly`](WorkersPolicy::exactly) request exceeding available processors.
     ///
     /// # Panics
     ///
@@ -229,13 +229,13 @@ mod tests {
     #[test]
     fn resource_limits_preserve_independent_settings() {
         let builder = Runtime::builder()
-            .cpu_policy(CpuPolicy::exactly(2))
+            .workers(WorkersPolicy::exactly(2))
             .stack_size(1024 * 1024)
-            .blocking_pool_policy(BlockingPoolPolicy::shared(1));
+            .blocking_pool(BlockingPoolPolicy::shared(1));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                cpu_policy: CpuPolicy::exactly(2),
+                workers_policy: WorkersPolicy::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
@@ -243,47 +243,47 @@ mod tests {
     }
 
     #[test]
-    fn maximum_processor_selection_replaces_exact_count() {
+    fn maximum_worker_count_replaces_exact_count() {
         let builder = Runtime::builder()
-            .cpu_policy(CpuPolicy::exactly(2))
-            .cpu_policy(CpuPolicy::at_most(1));
-        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::at_most(1),);
+            .workers(WorkersPolicy::exactly(2))
+            .workers(WorkersPolicy::at_most(1));
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1),);
     }
 
     #[test]
-    fn zero_cpu_policys_can_be_replaced_before_building() {
-        for policy in [CpuPolicy::exactly(0), CpuPolicy::at_most(0)] {
-            let builder = Runtime::builder().cpu_policy(policy);
-            assert_eq!(builder.processor_config.cpu_policy, policy);
+    fn zero_worker_policies_can_be_replaced_before_building() {
+        for policy in [WorkersPolicy::exactly(0), WorkersPolicy::at_most(0)] {
+            let builder = Runtime::builder().workers(policy);
+            assert_eq!(builder.processor_config.workers_policy, policy);
 
-            let builder = builder.cpu_policy(CpuPolicy::at_most(1));
-            assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::at_most(1));
+            let builder = builder.workers(WorkersPolicy::at_most(1));
+            assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1));
         }
     }
 
     #[test]
-    fn all_processors_selection_replaces_maximum_count() {
-        let builder = Runtime::builder().cpu_policy(CpuPolicy::at_most(1)).cpu_policy(CpuPolicy::all());
-        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::all(),);
+    fn all_workers_policy_replaces_maximum_count() {
+        let builder = Runtime::builder().workers(WorkersPolicy::at_most(1)).workers(WorkersPolicy::all());
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::all(),);
     }
 
     #[test]
-    fn automatic_processor_selection_replaces_exact_count() {
-        let builder = Runtime::builder().cpu_policy(CpuPolicy::exactly(2)).cpu_policy(CpuPolicy::auto());
-        assert_eq!(builder.processor_config.cpu_policy, CpuPolicy::auto(),);
+    fn automatic_worker_selection_replaces_exact_count() {
+        let builder = Runtime::builder().workers(WorkersPolicy::exactly(2)).workers(WorkersPolicy::auto());
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::auto(),);
     }
 
     #[test]
     fn exact_processor_selection_preserves_other_resource_settings() {
         let builder = Runtime::builder()
             .stack_size(1024 * 1024)
-            .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-            .cpu_policy(CpuPolicy::at_most(1))
-            .cpu_policy(CpuPolicy::exactly(2));
+            .blocking_pool(BlockingPoolPolicy::shared(1))
+            .workers(WorkersPolicy::at_most(1))
+            .workers(WorkersPolicy::exactly(2));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
-                cpu_policy: CpuPolicy::exactly(2),
+                workers_policy: WorkersPolicy::exactly(2),
                 stack_size: 1024 * 1024,
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
@@ -292,21 +292,19 @@ mod tests {
 
     #[test]
     fn build_and_stop_inside_futures_executor() {
-        testing_aids::execute_or_terminate_process(|| {
-            futures::executor::block_on(async {
-                let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
-                assert!(runtime.shared_state.iter().all(|state| state.get().is_some()));
+        futures::executor::block_on(async {
+            let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+            assert!(runtime.shared_state.iter().all(|state| state.get().is_some()));
 
-                let (value, scheduler) = runtime
-                    .scheduler()
-                    .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
-                    .await
-                    .unwrap();
-                assert_eq!(value, 42);
+            let (value, scheduler) = runtime
+                .scheduler()
+                .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
+                .await
+                .unwrap();
+            assert_eq!(value, 42);
 
-                runtime.stop().unwrap();
-                assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
-            });
+            runtime.stop().unwrap();
+            assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
         });
     }
 }

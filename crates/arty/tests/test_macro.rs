@@ -34,7 +34,7 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-#[test(workers = 1)]
+#[test]
 async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
     let worker = std::thread::current().id();
     assert_eq!(cx.thread().id(), worker);
@@ -64,11 +64,11 @@ async fn zero_workers_fail_during_construction(_cx: Builtins) {
 }
 
 fn custom_builder() -> arty::runtime::RuntimeBuilder {
-    use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime};
+    use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 
     Runtime::builder()
-        .cpu_policy(CpuPolicy::at_most(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+        .workers(WorkersPolicy::at_most(1))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
 }
 
 #[test(builder = custom_builder())]
@@ -105,7 +105,7 @@ mod controlled_time {
         type Control = ClockControl;
     }
 
-    #[arty::test(workers = 1)]
+    #[arty::test]
     async fn clock_starts_frozen(cx: Builtins, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let before = cx.clock().instant();
@@ -114,7 +114,7 @@ mod controlled_time {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(42));
     }
 
-    #[arty::test(workers = 1)]
+    #[arty::test]
     async fn manual_advance_wakes_only_due_timers(cx: Builtins, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let mut delay = std::pin::pin!(cx.clock().delay(Duration::from_secs(10)));
@@ -137,7 +137,7 @@ mod controlled_time {
         assert_eq!(watch.elapsed(), Duration::from_secs(35));
     }
 
-    #[arty::test(workers = 1)]
+    #[arty::test]
     async fn child_uses_the_same_control(cx: Builtins, control: ClockControl) {
         let child_control = control.clone();
         let now = cx
@@ -159,7 +159,7 @@ mod controlled_time {
         manual_advance_wakes_only_due_timers();
     }
 
-    #[arty::test(workers = 1)]
+    #[arty::test]
     #[should_panic(expected = "controlled test panic")]
     async fn controlled_test_preserves_panic_payload(cx: Builtins, control: ClockControl) {
         control.advance(Duration::from_secs(1));

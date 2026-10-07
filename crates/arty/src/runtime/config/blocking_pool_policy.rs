@@ -7,7 +7,7 @@ use crate::runtime::error::Error;
 /// A sharing policy for blocking-task thread pools.
 ///
 /// Pass a policy to
-/// [`RuntimeBuilder::blocking_pool_policy`](crate::runtime::RuntimeBuilder::blocking_pool_policy).
+/// [`RuntimeBuilder::blocking_pool`](crate::runtime::RuntimeBuilder::blocking_pool).
 /// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
 /// callbacks separately from async workers.
 ///
@@ -27,7 +27,7 @@ use crate::runtime::error::Error;
 /// ```
 /// use arty::runtime::{BlockingPoolPolicy, Runtime};
 ///
-/// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+/// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockingPoolPolicy {
@@ -52,7 +52,7 @@ impl BlockingPoolPolicy {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::isolated());
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::isolated());
     /// ```
     #[must_use]
     pub const fn isolated() -> Self {
@@ -74,7 +74,7 @@ impl BlockingPoolPolicy {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool_policy(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
     /// ```
     #[must_use]
     pub fn shared(max_workers: impl Into<Option<usize>>) -> Self {

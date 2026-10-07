@@ -4,8 +4,8 @@
 //! Resource limits and worker-pool policy, independent of live runtime state.
 
 mod blocking_pool_policy;
-mod processors;
+mod workers_policy;
 
 pub use blocking_pool_policy::BlockingPoolPolicy;
-pub use processors::CpuPolicy;
-pub(crate) use processors::RuntimeConfig;
+pub(crate) use workers_policy::RuntimeConfig;
+pub use workers_policy::WorkersPolicy;

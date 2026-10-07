@@ -14,7 +14,7 @@
 
 testing_aids::init_tracing!();
 
-use arty::runtime::{CpuPolicy, Runtime};
+use arty::runtime::{Runtime, WorkersPolicy};
 #[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
 use observed::Value;
@@ -38,7 +38,7 @@ fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
 fn validation_accepts_associated_worker() {
     let (sink, processor) = test_emitter(TEST_ID);
     Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
+        .workers(WorkersPolicy::exactly(1))
         .sink(sink)
         .build()
         .unwrap()
@@ -79,7 +79,7 @@ fn validation_follows_accepted_worker(known_source: bool) {
     }
     let (sink, processor) = test_emitter(TEST_ID);
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(2))
+        .workers(WorkersPolicy::exactly(2))
         .sink(sink)
         .build()
         .expect("two available processors are required to check cross-worker validation");
@@ -117,11 +117,11 @@ fn validation_follows_accepted_worker(known_source: bool) {
 }
 
 #[test]
-fn started_event_reports_cpu_policys() {
+fn started_event_reports_worker_policy() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -146,7 +146,7 @@ fn each_async_worker_starts_and_stops() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -166,7 +166,7 @@ fn async_worker_os_threads_report_lifecycle() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -202,7 +202,7 @@ fn spawned_task_emits_spawned_and_completed() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -229,7 +229,7 @@ fn panicking_task_emits_panicked_event() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -251,7 +251,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -273,7 +273,7 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();
@@ -306,7 +306,7 @@ fn tasks_discarded_on_shutdown_do_not_emit_terminal_events() {
     let (sink, processor) = test_emitter(TEST_ID);
 
     let runtime = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(PROCESSORS))
+        .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
         .build()
         .unwrap();

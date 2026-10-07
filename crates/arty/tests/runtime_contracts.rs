@@ -16,53 +16,56 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, CpuPolicy, Runtime, RuntimeOperations};
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+#[cfg(all(feature = "macros", feature = "test-util"))]
+use arty::task::Builtins;
 use arty::task::JoinError;
-use testing_aids::{TEST_TIMEOUT, execute_or_terminate_process};
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::{ThreadAware, Unaware};
-use tick::{ClockControl, FutureExt};
+#[cfg(all(feature = "macros", feature = "test-util"))]
+use tick::ClockControl;
+#[cfg(all(feature = "macros", feature = "test-util"))]
+use tick::FutureExt;
 
 testing_aids::init_tracing!();
 
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(workers))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+        .workers(WorkersPolicy::exactly(workers))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
         .build()
         .unwrap()
 }
 
 #[test]
 fn borrowed_runtime_scheduler_shares_round_robin_but_bound_handles_retain_affinity() {
-    execute_or_terminate_process(|| {
-        let runtime = runtime(2);
-        let first = runtime.scheduler();
-        let another = runtime.scheduler();
-        assert!(std::ptr::eq(first, another));
-        let (a, bound) = first
-            .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
-            .wait()
-            .unwrap();
-        let b = another.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap();
-        let a_again = runtime
-            .scheduler()
-            .spawn_anywhere((), |_, ()| async { thread::current().id() })
-            .wait()
-            .unwrap();
-        assert_ne!(a, b);
-        assert_eq!(a, a_again);
-        let bound_clone = bound.clone();
-        let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).wait().unwrap())
-            .join()
-            .unwrap();
-        assert_eq!(cloned_result, a);
-        assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), a);
-        assert_eq!(
-            first.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap(),
-            b
-        );
-    });
+    let runtime = runtime(2);
+    let first = runtime.scheduler();
+    let another = runtime.scheduler();
+    assert!(std::ptr::eq(first, another));
+    let (a, bound) = first
+        .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
+        .wait()
+        .unwrap();
+    let b = another.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap();
+    let a_again = runtime
+        .scheduler()
+        .spawn_anywhere((), |_, ()| async { thread::current().id() })
+        .wait()
+        .unwrap();
+    assert_ne!(a, b);
+    assert_eq!(a, a_again);
+    let bound_clone = bound.clone();
+    let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).wait().unwrap())
+        .join()
+        .unwrap();
+    assert_eq!(cloned_result, a);
+    assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), a);
+    assert_eq!(
+        first.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap(),
+        b
+    );
 }
 
 #[test]
@@ -89,33 +92,31 @@ fn relocation_rebinds_only_the_notified_worker_scheduler_clone() {
 
 #[test]
 fn concurrent_schedulers_share_selection_without_losing_submissions() {
-    execute_or_terminate_process(|| {
-        let tasks_per_producer = if cfg!(miri) { 2 } else { 25 };
-        let runtime = runtime(2);
-        let scheduler = runtime.scheduler();
-        let results = thread::scope(|scope| {
-            let producers = std::array::from_fn::<_, 4, _>(|_| {
-                scope.spawn(move || {
-                    (0..tasks_per_producer)
-                        .map(|_| {
-                            scheduler
-                                .spawn_anywhere((), |_, ()| async { thread::current().id() })
-                                .wait()
-                                .unwrap()
-                        })
-                        .collect::<Vec<_>>()
-                })
-            });
-            producers
-                .into_iter()
-                .flat_map(|producer| producer.join().unwrap())
-                .collect::<Vec<_>>()
+    let tasks_per_producer = if cfg!(miri) { 2 } else { 25 };
+    let runtime = runtime(2);
+    let scheduler = runtime.scheduler();
+    let results = thread::scope(|scope| {
+        let producers = std::array::from_fn::<_, 4, _>(|_| {
+            scope.spawn(move || {
+                (0..tasks_per_producer)
+                    .map(|_| {
+                        scheduler
+                            .spawn_anywhere((), |_, ()| async { thread::current().id() })
+                            .wait()
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>()
+            })
         });
-        let first = results[0];
-        assert_eq!(results.len(), 4 * tasks_per_producer);
-        assert_eq!(results.iter().filter(|id| **id == first).count(), 2 * tasks_per_producer);
-        assert_eq!(results.into_iter().collect::<std::collections::HashSet<_>>().len(), 2);
+        producers
+            .into_iter()
+            .flat_map(|producer| producer.join().unwrap())
+            .collect::<Vec<_>>()
     });
+    let first = results[0];
+    assert_eq!(results.len(), 4 * tasks_per_producer);
+    assert_eq!(results.iter().filter(|id| **id == first).count(), 2 * tasks_per_producer);
+    assert_eq!(results.into_iter().collect::<std::collections::HashSet<_>>().len(), 2);
 }
 
 #[test]
@@ -128,77 +129,75 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
         }
     }
 
-    execute_or_terminate_process(|| {
-        let producer_count = if cfg!(miri) { 2 } else { 4 };
-        let capacity = if cfg!(miri) { 4 } else { 1024 };
-        let runtime = runtime(1);
-        let running = Arc::new(AtomicBool::new(true));
-        let in_flight = Arc::new(AtomicUsize::new(0));
-        let submissions = Arc::new(AtomicUsize::new(0));
-        let (task_go, task_gate) = events_once::Event::boxed();
-        let (timer_go, timer_gate) = events_once::Event::boxed();
-        let (finished, observed) = mpsc::channel();
-        let task_finished = finished.clone();
-        let task_running = Arc::clone(&running);
-        let timer_running = Arc::clone(&running);
-        let task = runtime.scheduler().spawn_anywhere(
-            Unaware((task_gate, task_finished, task_running)),
-            |_, Unaware((task_gate, task_finished, task_running))| async move {
-                task_gate.await.unwrap();
-                task_finished.send(task_running.load(Ordering::Acquire)).unwrap();
-            },
-        );
-        let timer = runtime.scheduler().spawn_anywhere(
-            Unaware((timer_gate, finished, timer_running)),
-            |cx, Unaware((timer_gate, finished, timer_running))| async move {
-                timer_gate.await.unwrap();
-                cx.clock().delay(Duration::from_millis(1)).await;
-                finished.send(timer_running.load(Ordering::Acquire)).unwrap();
-            },
-        );
+    let producer_count = if cfg!(miri) { 2 } else { 4 };
+    let capacity = if cfg!(miri) { 4 } else { 1024 };
+    let runtime = runtime(1);
+    let running = Arc::new(AtomicBool::new(true));
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let submissions = Arc::new(AtomicUsize::new(0));
+    let (task_go, task_gate) = events_once::Event::boxed();
+    let (timer_go, timer_gate) = events_once::Event::boxed();
+    let (finished, observed) = mpsc::channel();
+    let task_finished = finished.clone();
+    let task_running = Arc::clone(&running);
+    let timer_running = Arc::clone(&running);
+    let task = runtime.scheduler().spawn_anywhere(
+        Unaware((task_gate, task_finished, task_running)),
+        |_, Unaware((task_gate, task_finished, task_running))| async move {
+            task_gate.await.unwrap();
+            task_finished.send(task_running.load(Ordering::Acquire)).unwrap();
+        },
+    );
+    let timer = runtime.scheduler().spawn_anywhere(
+        Unaware((timer_gate, finished, timer_running)),
+        |cx, Unaware((timer_gate, finished, timer_running))| async move {
+            timer_gate.await.unwrap();
+            cx.clock().delay(Duration::from_millis(1)).await;
+            finished.send(timer_running.load(Ordering::Acquire)).unwrap();
+        },
+    );
 
-        thread::scope(|scope| {
-            let _stop = scopeguard::guard(Arc::clone(&running), |running| running.store(false, Ordering::Release));
-            let (started, producers_ready) = mpsc::channel();
-            for _ in 0..producer_count {
-                let scheduler = runtime.scheduler();
-                let running = Arc::clone(&running);
-                let in_flight = Arc::clone(&in_flight);
-                let submissions = Arc::clone(&submissions);
-                let started = started.clone();
-                scope.spawn(move || {
-                    started.send(()).unwrap();
-                    while running.load(Ordering::Acquire) {
-                        if in_flight
-                            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
-                            .is_err()
-                        {
-                            thread::yield_now();
-                            continue;
-                        }
-                        let submission = InFlight(Arc::clone(&in_flight));
-                        drop(scheduler.spawn_anywhere(Unaware(submission), |_, Unaware(submission)| async move { drop(submission) }));
-                        submissions.fetch_add(1, Ordering::Relaxed);
+    thread::scope(|scope| {
+        let _stop = scopeguard::guard(Arc::clone(&running), |running| running.store(false, Ordering::Release));
+        let (started, producers_ready) = mpsc::channel();
+        for _ in 0..producer_count {
+            let scheduler = runtime.scheduler();
+            let running = Arc::clone(&running);
+            let in_flight = Arc::clone(&in_flight);
+            let submissions = Arc::clone(&submissions);
+            let started = started.clone();
+            scope.spawn(move || {
+                started.send(()).unwrap();
+                while running.load(Ordering::Acquire) {
+                    if in_flight
+                        .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
+                        .is_err()
+                    {
+                        thread::yield_now();
+                        continue;
                     }
-                });
-            }
-            for _ in 0..producer_count {
-                producers_ready.recv_timeout(TEST_TIMEOUT).unwrap();
-            }
-            while submissions.load(Ordering::Acquire) < producer_count {
-                thread::yield_now();
-            }
-            task_go.send(());
-            timer_go.send(());
-            assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
-            assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
-        });
-
-        task.wait().unwrap();
-        timer.wait().unwrap();
-        runtime.stop().unwrap();
-        assert_eq!(in_flight.load(Ordering::Acquire), 0);
+                    let submission = InFlight(Arc::clone(&in_flight));
+                    drop(scheduler.spawn_anywhere(Unaware(submission), |_, Unaware(submission)| async move { drop(submission) }));
+                    submissions.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        }
+        for _ in 0..producer_count {
+            producers_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        }
+        while submissions.load(Ordering::Acquire) < producer_count {
+            thread::yield_now();
+        }
+        task_go.send(());
+        timer_go.send(());
+        assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
+        assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
     });
+
+    task.wait().unwrap();
+    timer.wait().unwrap();
+    runtime.stop().unwrap();
+    assert_eq!(in_flight.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -226,71 +225,60 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
 
 #[test]
 fn blocking_tasks_leave_the_async_worker_responsive() {
-    execute_or_terminate_process(|| {
-        let runtime = runtime(1);
-        let (started, ready) = mpsc::channel();
-        let (release, wait) = mpsc::channel();
-        let blocking = runtime.scheduler().spawn_blocking(move || {
-            started.send(()).unwrap();
-            wait.recv().unwrap();
-            42
-        });
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17 }).wait().unwrap(), 17);
-        release.send(()).unwrap();
-        assert_eq!(blocking.wait().unwrap(), 42);
+    let runtime = runtime(1);
+    let (started, ready) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let blocking = runtime.scheduler().spawn_blocking(move || {
+        started.send(()).unwrap();
+        wait.recv().unwrap();
+        42
     });
+    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17 }).wait().unwrap(), 17);
+    release.send(()).unwrap();
+    assert_eq!(blocking.wait().unwrap(), 42);
 }
 
 #[test]
 fn pending_future_is_woken_from_an_unrelated_thread() {
-    execute_or_terminate_process(|| {
-        let runtime = runtime(1);
-        let (send, receive) = mpsc::channel();
-        let ready = Arc::new(AtomicBool::new(false));
-        let ready_task = Arc::clone(&ready);
-        let task = runtime
-            .scheduler()
-            .spawn_anywhere(Unaware((send, ready_task)), |_, Unaware((send, ready_task))| async move {
-                let mut send = Some(send);
-                poll_fn(move |cx| {
-                    if ready_task.load(Ordering::Acquire) {
-                        Poll::Ready(42)
-                    } else {
-                        if let Some(send) = send.take() {
-                            send.send(cx.waker().clone()).unwrap();
-                        }
-                        Poll::Pending
+    let runtime = runtime(1);
+    let (send, receive) = mpsc::channel();
+    let ready = Arc::new(AtomicBool::new(false));
+    let ready_task = Arc::clone(&ready);
+    let task = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((send, ready_task)), |_, Unaware((send, ready_task))| async move {
+            let mut send = Some(send);
+            poll_fn(move |cx| {
+                if ready_task.load(Ordering::Acquire) {
+                    Poll::Ready(42)
+                } else {
+                    if let Some(send) = send.take() {
+                        send.send(cx.waker().clone()).unwrap();
                     }
-                })
-                .await
-            });
-        let waker = receive.recv_timeout(TEST_TIMEOUT).unwrap();
-        thread::spawn(move || {
-            ready.store(true, Ordering::Release);
-            waker.wake();
-        })
-        .join()
-        .unwrap();
-        assert_eq!(task.wait().unwrap(), 42);
-    });
+                    Poll::Pending
+                }
+            })
+            .await
+        });
+    let waker = receive.recv_timeout(TEST_TIMEOUT).unwrap();
+    thread::spawn(move || {
+        ready.store(true, Ordering::Release);
+        waker.wake();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(task.wait().unwrap(), 42);
 }
 
-#[test]
-fn worker_can_drive_a_controlled_clock_without_io() {
-    execute_or_terminate_process(|| {
-        let control = ClockControl::new().auto_advance_timers(true);
-        let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).clock(control).build().unwrap();
-        runtime
-            .scheduler()
-            .block_on(async |cx| {
-                let watch = cx.clock().stopwatch();
-                cx.clock().delay(Duration::from_secs(5)).await;
-                assert!(watch.elapsed() >= Duration::from_secs(5));
-                assert!(pending::<()>().timeout(cx.clock(), Duration::from_secs(1)).await.is_err());
-            })
-            .unwrap();
-    });
+#[cfg(all(feature = "macros", feature = "test-util"))]
+#[arty::test]
+async fn worker_can_drive_a_controlled_clock_without_io(cx: Builtins, control: ClockControl) {
+    let _control = control.auto_advance_timers(true);
+    let watch = cx.clock().stopwatch();
+    cx.clock().delay(Duration::from_secs(5)).await;
+    assert!(watch.elapsed() >= Duration::from_secs(5));
+    assert!(pending::<()>().timeout(cx.clock(), Duration::from_secs(1)).await.is_err());
 }
 
 #[test]
@@ -404,57 +392,53 @@ fn cancellation_cleanup_cannot_reenter_the_local_executor() {
         }
     }
 
-    execute_or_terminate_process(|| {
-        let runtime = runtime(1);
-        let (started, start) = mpsc::channel();
-        let (dropped, drop_result) = mpsc::channel();
-        let handle = runtime
-            .scheduler()
-            .spawn_anywhere(Unaware((started, dropped)), |cx, Unaware((started, dropped))| async move {
-                let cleanup = Cleanup {
-                    scheduler: cx.local_scheduler().unwrap(),
-                    dropped,
-                };
-                started.send(()).unwrap();
-                pending::<()>().await;
-                drop(cleanup);
-            });
-        start.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop().unwrap();
-        assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
-        drop(handle);
-    });
+    let runtime = runtime(1);
+    let (started, start) = mpsc::channel();
+    let (dropped, drop_result) = mpsc::channel();
+    let handle = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((started, dropped)), |cx, Unaware((started, dropped))| async move {
+            let cleanup = Cleanup {
+                scheduler: cx.local_scheduler().unwrap(),
+                dropped,
+            };
+            started.send(()).unwrap();
+            pending::<()>().await;
+            drop(cleanup);
+        });
+    start.recv_timeout(TEST_TIMEOUT).unwrap();
+    runtime.stop().unwrap();
+    assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
+    drop(handle);
 }
 
 #[test]
 fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
-    execute_or_terminate_process(|| {
-        for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
-            let runtime = Runtime::builder()
-                .cpu_policy(CpuPolicy::exactly(1))
-                .blocking_pool_policy(policy)
-                .build()
-                .unwrap();
-            let scheduler = runtime
-                .scheduler()
-                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-                .wait()
-                .unwrap();
-            let (finished, receive) = mpsc::channel();
-            let task = scheduler.spawn_blocking(move || {
-                drop(runtime);
-                finished.send(()).unwrap();
-            });
-            receive.recv_timeout(TEST_TIMEOUT).unwrap();
-            task.wait().unwrap();
-        }
-    });
+    for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
+        let runtime = Runtime::builder()
+            .workers(WorkersPolicy::exactly(1))
+            .blocking_pool(policy)
+            .build()
+            .unwrap();
+        let scheduler = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+            .wait()
+            .unwrap();
+        let (finished, receive) = mpsc::channel();
+        let task = scheduler.spawn_blocking(move || {
+            drop(runtime);
+            finished.send(()).unwrap();
+        });
+        receive.recv_timeout(TEST_TIMEOUT).unwrap();
+        task.wait().unwrap();
+    }
 }
 
 #[test]
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
-    let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).sink(sink).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
     let operations = RuntimeOperations::from(&runtime);
     operations.request_stop();
     operations.request_stop();

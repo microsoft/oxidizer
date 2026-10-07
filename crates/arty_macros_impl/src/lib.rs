@@ -49,7 +49,7 @@ impl Args {
         }
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
         let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
-        let workers = workers.map(|count| quote!(.cpu_policy(#runtime_path::CpuPolicy::at_most(#count))));
+        let workers = workers.map(|count| quote!(.workers(#runtime_path::WorkersPolicy::at_most(#count))));
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::Runtime::builder() #workers #clock .build()))
     }
@@ -274,7 +274,7 @@ mod tests {
         #[::core::prelude::v1::test]
         fn fails() {
             let __arty_runtime = ::renamed::Runtime::builder()
-                .cpu_policy(::renamed::CpuPolicy::at_most(1))
+                .workers(::renamed::WorkersPolicy::at_most(1))
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -303,7 +303,7 @@ mod tests {
         let expected = quote! {
             pub fn run() -> AppResult {
                 let __arty_runtime = ::renamed::Runtime::builder()
-                    .cpu_policy(::renamed::CpuPolicy::at_most(4usize))
+                    .workers(::renamed::WorkersPolicy::at_most(4usize))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -363,7 +363,7 @@ mod tests {
             fn run() {
                 let __arty_clock_control = crate::renamed::__private::ClockControl::new();
                 let __arty_runtime = crate::renamed::Runtime::builder()
-                    .cpu_policy(crate::renamed::CpuPolicy::at_most(1))
+                    .workers(crate::renamed::WorkersPolicy::at_most(1))
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -397,8 +397,8 @@ mod tests {
         let expansion = expansion.to_string();
         assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
         assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
-        assert!(expansion.contains("cpu_policy"));
-        assert!(expansion.contains("CpuPolicy :: at_most (1)"));
+        assert!(expansion.contains("workers"));
+        assert!(expansion.contains("WorkersPolicy :: at_most (1)"));
     }
 
     #[test]
@@ -462,7 +462,7 @@ mod tests {
             quote!(true),
             quote!(COUNT),
             quote!(1 + 1),
-            quote!(CpuPolicy::all()),
+            quote!(WorkersPolicy::all()),
         ] {
             for expand in [main, test] {
                 let expansion = expand(

@@ -17,7 +17,7 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
-use arty::runtime::{CpuPolicy, Runtime};
+use arty::runtime::{Runtime, WorkersPolicy};
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -47,7 +47,7 @@ thread_local! {
 #[test]
 fn timer_panic_cannot_unwind_past_live_executor_storage() {
     if std::env::var_os(CHILD).is_some() {
-        let runtime = Runtime::builder().cpu_policy(CpuPolicy::exactly(1)).build().unwrap();
+        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
         let (sent, received) = mpsc::channel();
         let (exited, worker_exited) = mpsc::channel();
         let _task = runtime

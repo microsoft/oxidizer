@@ -17,7 +17,7 @@ use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context, Poll, Waker};
 
 use arty::runtime::RuntimeOperations;
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -59,49 +59,47 @@ impl Drop for RacingPanic {
 
 #[test]
 fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
-    isolated("poll_panic_racing_repeated_stop_always_completes_one_join_and_drop", || {
-        let repetitions = if cfg!(miri) { 2 } else { 24 };
-        for _ in 0..repetitions {
-            let runtime = runtime();
-            let operations = RuntimeOperations::from(&runtime);
-            let (first, received) = mpsc::channel();
-            let ready = Arc::new(AtomicBool::new(false));
-            let drops = Arc::new(AtomicUsize::new(0));
-            let task = runtime.scheduler().spawn_anywhere(
-                Unaware((first, Arc::clone(&ready), Arc::clone(&drops))),
-                |_, Unaware((first, ready, drops))| RacingPanic {
-                    first: Cell::new(Some(first)),
-                    ready,
-                    drops,
-                    address: Cell::new(None),
-                    owner: std::thread::current().id(),
-                    _local: Rc::new(()),
-                    _pinned: PhantomPinned,
-                },
-            );
-            let retained = received.recv_timeout(TEST_TIMEOUT).unwrap();
-            let barrier = Arc::new(Barrier::new(3));
-            let stop_barrier = Arc::clone(&barrier);
-            let stopper = std::thread::spawn(move || {
-                stop_barrier.wait();
-                for _ in 0..8 {
-                    operations.request_stop();
-                }
-            });
-            let panic_barrier = Arc::clone(&barrier);
-            let panicker = std::thread::spawn(move || {
-                panic_barrier.wait();
-                ready.store(true, Ordering::SeqCst);
-                retained.wake();
-            });
-            barrier.wait();
-            stopper.join().unwrap();
-            panicker.join().unwrap();
-            runtime.stop().unwrap();
-            let error = task.wait().unwrap_err();
-            assert!(error.is_panic() || error.is_shutdown());
-            assert_ne!(error.is_panic(), error.is_shutdown());
-            assert_eq!(drops.load(Ordering::SeqCst), 1);
-        }
-    });
+    let repetitions = if cfg!(miri) { 2 } else { 24 };
+    for _ in 0..repetitions {
+        let runtime = runtime();
+        let operations = RuntimeOperations::from(&runtime);
+        let (first, received) = mpsc::channel();
+        let ready = Arc::new(AtomicBool::new(false));
+        let drops = Arc::new(AtomicUsize::new(0));
+        let task = runtime.scheduler().spawn_anywhere(
+            Unaware((first, Arc::clone(&ready), Arc::clone(&drops))),
+            |_, Unaware((first, ready, drops))| RacingPanic {
+                first: Cell::new(Some(first)),
+                ready,
+                drops,
+                address: Cell::new(None),
+                owner: std::thread::current().id(),
+                _local: Rc::new(()),
+                _pinned: PhantomPinned,
+            },
+        );
+        let retained = received.recv_timeout(TEST_TIMEOUT).unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+        let stop_barrier = Arc::clone(&barrier);
+        let stopper = std::thread::spawn(move || {
+            stop_barrier.wait();
+            for _ in 0..8 {
+                operations.request_stop();
+            }
+        });
+        let panic_barrier = Arc::clone(&barrier);
+        let panicker = std::thread::spawn(move || {
+            panic_barrier.wait();
+            ready.store(true, Ordering::SeqCst);
+            retained.wake();
+        });
+        barrier.wait();
+        stopper.join().unwrap();
+        panicker.join().unwrap();
+        runtime.stop().unwrap();
+        let error = task.wait().unwrap_err();
+        assert!(error.is_panic() || error.is_shutdown());
+        assert_ne!(error.is_panic(), error.is_shutdown());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
 }

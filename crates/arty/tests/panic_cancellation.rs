@@ -17,7 +17,7 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll};
 
 use arty::runtime::RuntimeOperations;
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -71,84 +71,78 @@ fn pending_drop(started: mpsc::Sender<()>, dropped: mpsc::Sender<()>, drops: Arc
 
 #[test]
 fn remote_cancellation_drop_panic_completes_shutdown() {
-    isolated("remote_cancellation_drop_panic_completes_shutdown", || {
-        let runtime = runtime();
-        let (started, ready) = mpsc::channel();
-        let (dropped, received) = mpsc::channel();
-        let drops = Arc::new(AtomicUsize::new(0));
-        let task = runtime.scheduler().spawn_anywhere(
-            Unaware((started, dropped, Arc::clone(&drops))),
-            |_, Unaware((started, dropped, drops))| pending_drop(started, dropped, drops),
-        );
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop().unwrap();
-        received.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-        assert!(task.wait().unwrap_err().is_shutdown());
-    });
+    let runtime = runtime();
+    let (started, ready) = mpsc::channel();
+    let (dropped, received) = mpsc::channel();
+    let drops = Arc::new(AtomicUsize::new(0));
+    let task = runtime.scheduler().spawn_anywhere(
+        Unaware((started, dropped, Arc::clone(&drops))),
+        |_, Unaware((started, dropped, drops))| pending_drop(started, dropped, drops),
+    );
+    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    runtime.stop().unwrap();
+    received.recv_timeout(TEST_TIMEOUT).unwrap();
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert!(task.wait().unwrap_err().is_shutdown());
 }
 
 #[test]
 fn local_cancellation_drop_panic_completes_shutdown() {
-    isolated("local_cancellation_drop_panic_completes_shutdown", || {
-        let runtime = runtime();
-        let (started, ready) = mpsc::channel();
-        let (dropped, received) = mpsc::channel();
-        let drops = Arc::new(AtomicUsize::new(0));
-        runtime
-            .scheduler()
-            .spawn_anywhere(
-                Unaware((started, dropped, Arc::clone(&drops))),
-                |cx, Unaware((started, dropped, drops))| async move {
-                    let task = cx.local_scheduler().unwrap().spawn(move || pending_drop(started, dropped, drops));
-                    drop(task);
-                },
-            )
-            .wait()
-            .unwrap();
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
-        runtime.stop().unwrap();
-        received.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-    });
+    let runtime = runtime();
+    let (started, ready) = mpsc::channel();
+    let (dropped, received) = mpsc::channel();
+    let drops = Arc::new(AtomicUsize::new(0));
+    runtime
+        .scheduler()
+        .spawn_anywhere(
+            Unaware((started, dropped, Arc::clone(&drops))),
+            |cx, Unaware((started, dropped, drops))| async move {
+                let task = cx.local_scheduler().unwrap().spawn(move || pending_drop(started, dropped, drops));
+                drop(task);
+            },
+        )
+        .wait()
+        .unwrap();
+    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    runtime.stop().unwrap();
+    received.recv_timeout(TEST_TIMEOUT).unwrap();
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn borrowing_cancellation_drop_panic_releases_caller_storage() {
-    isolated("borrowing_cancellation_drop_panic_releases_caller_storage", || {
-        use std::error::Error as _;
+    use std::error::Error as _;
 
-        struct Borrowed<'a>(&'a AtomicUsize);
+    struct Borrowed<'a>(&'a AtomicUsize);
 
-        impl Drop for Borrowed<'_> {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                assert!(!std::thread::panicking());
-                panic!("borrowed cancellation destructor");
-            }
+    impl Drop for Borrowed<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            assert!(!std::thread::panicking());
+            panic!("borrowed cancellation destructor");
         }
+    }
 
-        let runtime = runtime();
-        let drops = AtomicUsize::new(0);
-        let borrowed = Borrowed(&drops);
-        let error = runtime
-            .scheduler()
-            .block_on(async move |cx| {
-                let guard = borrowed;
-                RuntimeOperations::from(&cx).request_stop();
-                std::future::pending::<()>().await;
-                drop(guard);
-            })
-            .unwrap_err();
-        assert!(
-            error
-                .source()
-                .unwrap()
-                .downcast_ref::<arty::task::JoinError>()
-                .unwrap()
-                .is_shutdown()
-        );
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-        runtime.stop().unwrap();
-    });
+    let runtime = runtime();
+    let drops = AtomicUsize::new(0);
+    let borrowed = Borrowed(&drops);
+    let error = runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            let guard = borrowed;
+            RuntimeOperations::from(&cx).request_stop();
+            std::future::pending::<()>().await;
+            drop(guard);
+        })
+        .unwrap_err();
+    assert!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<arty::task::JoinError>()
+            .unwrap()
+            .is_shutdown()
+    );
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    runtime.stop().unwrap();
 }

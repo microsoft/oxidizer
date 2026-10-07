@@ -11,8 +11,6 @@ mod panic_support;
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use panic_support::isolated;
-
 testing_aids::init_tracing!();
 
 static DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -43,10 +41,8 @@ async fn root(cx: arty::task::Builtins) {
 
 #[test]
 fn macro_original_payload_is_resumed_after_local_child_teardown() {
-    isolated("macro_original_payload_is_resumed_after_local_child_teardown", || {
-        let panic = catch_unwind(AssertUnwindSafe(root)).unwrap_err();
-        assert_eq!(panic.downcast_ref::<RootPayload>().unwrap().0, 42);
-        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
-        panic_support::runtime().stop().unwrap();
-    });
+    let panic = catch_unwind(AssertUnwindSafe(root)).unwrap_err();
+    assert_eq!(panic.downcast_ref::<RootPayload>().unwrap().0, 42);
+    assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+    panic_support::runtime().stop().unwrap();
 }

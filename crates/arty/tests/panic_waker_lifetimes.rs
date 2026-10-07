@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use panic_support::{isolated, runtime};
+use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -96,17 +96,17 @@ fn wake_after_retirement(waker: Waker) {
 
 #[test]
 fn remote_retained_wakers_after_success() {
-    isolated("remote_retained_wakers_after_success", || remote_case(Finish::Success));
+    remote_case(Finish::Success);
 }
 
 #[test]
 fn remote_retained_wakers_after_panic() {
-    isolated("remote_retained_wakers_after_panic", || remote_case(Finish::Panic));
+    remote_case(Finish::Panic);
 }
 
 #[test]
 fn remote_retained_wakers_after_cancellation() {
-    isolated("remote_retained_wakers_after_cancellation", || remote_case(Finish::Pending));
+    remote_case(Finish::Pending);
 }
 
 fn remote_case(finish: Finish) {
@@ -151,17 +151,17 @@ fn remote_case(finish: Finish) {
 
 #[test]
 fn local_retained_wakers_after_success() {
-    isolated("local_retained_wakers_after_success", || local_case(Finish::Success));
+    local_case(Finish::Success);
 }
 
 #[test]
 fn local_retained_wakers_after_panic() {
-    isolated("local_retained_wakers_after_panic", || local_case(Finish::Panic));
+    local_case(Finish::Panic);
 }
 
 #[test]
 fn local_retained_wakers_after_cancellation() {
-    isolated("local_retained_wakers_after_cancellation", || local_case(Finish::Pending));
+    local_case(Finish::Pending);
 }
 
 fn local_case(finish: Finish) {
@@ -198,73 +198,71 @@ fn local_case(finish: Finish) {
 
 #[test]
 fn completion_racing_stop_destroys_each_future_once() {
-    isolated("completion_racing_stop_destroys_each_future_once", || {
-        let repetitions = if cfg!(miri) { 2 } else { 32 };
-        for _ in 0..repetitions {
-            struct RacingTask {
-                started: Option<mpsc::Sender<Waker>>,
-                finish: Arc<AtomicBool>,
-                drops: Arc<AtomicUsize>,
-            }
-
-            impl Future for RacingTask {
-                type Output = u32;
-
-                fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
-                    if let Some(started) = self.started.take() {
-                        started.send(cx.waker().clone()).unwrap();
-                    }
-                    if self.finish.load(Ordering::SeqCst) {
-                        Poll::Ready(42)
-                    } else {
-                        Poll::Pending
-                    }
-                }
-            }
-
-            impl Drop for RacingTask {
-                fn drop(&mut self) {
-                    self.drops.fetch_add(1, Ordering::SeqCst);
-                }
-            }
-
-            let runtime = runtime();
-            let operations = arty::runtime::RuntimeOperations::from(&runtime);
-            let (started, received) = mpsc::channel();
-            let finish = Arc::new(AtomicBool::new(false));
-            let drops = Arc::new(AtomicUsize::new(0));
-            let task = runtime.scheduler().spawn_anywhere(
-                Unaware((started, Arc::clone(&finish), Arc::clone(&drops))),
-                |_, Unaware((started, finish, drops))| RacingTask {
-                    started: Some(started),
-                    finish,
-                    drops,
-                },
-            );
-            let waker = received.recv_timeout(TEST_TIMEOUT).unwrap();
-            let barrier = Arc::new(std::sync::Barrier::new(3));
-            let stop_barrier = Arc::clone(&barrier);
-            let stopper = std::thread::spawn(move || {
-                stop_barrier.wait();
-                for _ in 0..8 {
-                    operations.request_stop();
-                }
-            });
-            let finish_barrier = Arc::clone(&barrier);
-            let completer = std::thread::spawn(move || {
-                finish_barrier.wait();
-                finish.store(true, Ordering::SeqCst);
-                waker.wake();
-            });
-            barrier.wait();
-            stopper.join().unwrap();
-            completer.join().unwrap();
-            runtime.stop().unwrap();
-            match task.wait() {
-                Ok(value) => assert_eq!(value, 42),
-                Err(error) => assert!(error.is_shutdown()),
-            }
-            assert_eq!(drops.load(Ordering::SeqCst), 1);
+    let repetitions = if cfg!(miri) { 2 } else { 32 };
+    for _ in 0..repetitions {
+        struct RacingTask {
+            started: Option<mpsc::Sender<Waker>>,
+            finish: Arc<AtomicBool>,
+            drops: Arc<AtomicUsize>,
         }
-    });
+
+        impl Future for RacingTask {
+            type Output = u32;
+
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
+                if let Some(started) = self.started.take() {
+                    started.send(cx.waker().clone()).unwrap();
+                }
+                if self.finish.load(Ordering::SeqCst) {
+                    Poll::Ready(42)
+                } else {
+                    Poll::Pending
+                }
+            }
+        }
+
+        impl Drop for RacingTask {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let runtime = runtime();
+        let operations = arty::runtime::RuntimeOperations::from(&runtime);
+        let (started, received) = mpsc::channel();
+        let finish = Arc::new(AtomicBool::new(false));
+        let drops = Arc::new(AtomicUsize::new(0));
+        let task = runtime.scheduler().spawn_anywhere(
+            Unaware((started, Arc::clone(&finish), Arc::clone(&drops))),
+            |_, Unaware((started, finish, drops))| RacingTask {
+                started: Some(started),
+                finish,
+                drops,
+            },
+        );
+        let waker = received.recv_timeout(TEST_TIMEOUT).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let stop_barrier = Arc::clone(&barrier);
+        let stopper = std::thread::spawn(move || {
+            stop_barrier.wait();
+            for _ in 0..8 {
+                operations.request_stop();
+            }
+        });
+        let finish_barrier = Arc::clone(&barrier);
+        let completer = std::thread::spawn(move || {
+            finish_barrier.wait();
+            finish.store(true, Ordering::SeqCst);
+            waker.wake();
+        });
+        barrier.wait();
+        stopper.join().unwrap();
+        completer.join().unwrap();
+        runtime.stop().unwrap();
+        match task.wait() {
+            Ok(value) => assert_eq!(value, 42),
+            Err(error) => assert!(error.is_shutdown()),
+        }
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
 }

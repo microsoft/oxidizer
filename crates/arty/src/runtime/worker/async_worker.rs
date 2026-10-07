@@ -310,7 +310,7 @@ mod tests {
 
     use events_once::{Event, IntoValueError};
     use observed::Sink;
-    use testing_aids::{async_test, execute_or_terminate_process};
+    use testing_aids::async_test;
     use tick::ClockControl;
 
     use super::*;
@@ -345,58 +345,56 @@ mod tests {
 
     #[test]
     fn a_never_empty_command_queue_allows_registered_tasks_and_timers_to_progress() {
-        execute_or_terminate_process(|| {
-            let (command_tx, command_rx) = channel::unbounded();
-            let (ready_tx, ready_rx) = channel::unbounded();
-            let (proceed, progress) = Event::boxed();
-            let control = ClockControl::new();
-            let task_done = Arc::new(AtomicBool::new(false));
-            let timer_done = Arc::new(AtomicBool::new(false));
-            let processed = Arc::new(AtomicUsize::new(0));
-            let task_observer = Arc::clone(&task_done);
-            let timer_observer = Arc::clone(&timer_done);
-            let shutdown = command_tx.clone();
+        let (command_tx, command_rx) = channel::unbounded();
+        let (ready_tx, ready_rx) = channel::unbounded();
+        let (proceed, progress) = Event::boxed();
+        let control = ClockControl::new();
+        let task_done = Arc::new(AtomicBool::new(false));
+        let timer_done = Arc::new(AtomicBool::new(false));
+        let processed = Arc::new(AtomicUsize::new(0));
+        let task_observer = Arc::clone(&task_done);
+        let timer_observer = Arc::clone(&timer_done);
+        let shutdown = command_tx.clone();
 
-            // SAFETY: run drives this worker to complete shutdown before it is dropped.
-            let worker = unsafe {
-                AsyncWorker::new(
-                    command_rx,
-                    async move |tasks, clock| {
-                        drop(tasks.add(async move {
-                            progress.await.unwrap();
-                            task_observer.store(true, Ordering::Relaxed);
-                        }));
-                        drop(tasks.add(async move {
-                            clock.delay(Duration::from_secs(1)).await;
-                            timer_observer.store(true, Ordering::Relaxed);
-                            shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
-                        }));
-                    },
-                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                    control.clone().into(),
-                    Arc::new(WorkerSignal::default()),
-                    Arc::new(AtomicBool::new(false)),
-                    ready_tx,
-                )
-            };
-            let executor = worker.executor.as_ref().unwrap();
-            let _ = executor.execute_cycle();
-            ready_rx.recv().unwrap();
-            let _ = executor.execute_cycle();
-            assert!(!task_done.load(Ordering::Relaxed));
-            assert!(!timer_done.load(Ordering::Relaxed));
+        // SAFETY: run drives this worker to complete shutdown before it is dropped.
+        let worker = unsafe {
+            AsyncWorker::new(
+                command_rx,
+                async move |tasks, clock| {
+                    drop(tasks.add(async move {
+                        progress.await.unwrap();
+                        task_observer.store(true, Ordering::Relaxed);
+                    }));
+                    drop(tasks.add(async move {
+                        clock.delay(Duration::from_secs(1)).await;
+                        timer_observer.store(true, Ordering::Relaxed);
+                        shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
+                    }));
+                },
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                control.clone().into(),
+                Arc::new(WorkerSignal::default()),
+                Arc::new(AtomicBool::new(false)),
+                ready_tx,
+            )
+        };
+        let executor = worker.executor.as_ref().unwrap();
+        let _ = executor.execute_cycle();
+        ready_rx.recv().unwrap();
+        let _ = executor.execute_cycle();
+        assert!(!task_done.load(Ordering::Relaxed));
+        assert!(!timer_done.load(Ordering::Relaxed));
 
-            command_tx
-                .send(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
-                .unwrap();
-            proceed.send(());
-            control.advance(Duration::from_secs(1));
-            worker.run();
+        command_tx
+            .send(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
+            .unwrap();
+        proceed.send(());
+        control.advance(Duration::from_secs(1));
+        worker.run();
 
-            assert!(task_done.load(Ordering::Relaxed));
-            assert!(timer_done.load(Ordering::Relaxed));
-            assert!((COMMANDS_PER_CYCLE..=2 * COMMANDS_PER_CYCLE + 1).contains(&processed.load(Ordering::Relaxed)));
-        });
+        assert!(task_done.load(Ordering::Relaxed));
+        assert!(timer_done.load(Ordering::Relaxed));
+        assert!((COMMANDS_PER_CYCLE..=2 * COMMANDS_PER_CYCLE + 1).contains(&processed.load(Ordering::Relaxed)));
     }
 
     #[cfg(not(miri))]
@@ -465,7 +463,7 @@ mod tests {
                         channel::unbounded().0,
                     )
                 };
-                execute_or_terminate_process(move || worker.run());
+                worker.run();
 
                 // The async worker owns the blocking worker in our current implementation,
                 // so we verify that we properly terminated it together with the async worker.
@@ -542,7 +540,7 @@ mod tests {
                     )
                 };
 
-                execute_or_terminate_process(move || worker.run());
+                worker.run();
             });
 
             command_tx
@@ -598,7 +596,7 @@ mod tests {
                     channel::unbounded().0,
                 )
             };
-            execute_or_terminate_process(move || worker.run());
+            worker.run();
         });
 
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
@@ -617,7 +615,7 @@ mod tests {
         });
 
         // This waits for the worker to shut down.
-        execute_or_terminate_process(move || async_worker_thread.join()).unwrap();
+        async_worker_thread.join().unwrap();
 
         let completed_result = completed_rx.into_value();
         assert!(matches!(completed_result, Err(IntoValueError::Disconnected)));
