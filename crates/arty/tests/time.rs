@@ -90,7 +90,10 @@ fn many_timers_ensure_advanced() {
 #[test]
 fn timer_with_relocated_builtins() {
     execute_or_terminate_process(|| {
-        let runtime = Runtime::new().unwrap();
+        let builder = Runtime::builder();
+        #[cfg(miri)]
+        let builder = builder.cpu_policy(arty::runtime::CpuPolicy::exactly(workers()));
+        let runtime = builder.build().unwrap();
         runtime
             .scheduler()
             .block_on(async |builtins: Builtins| {

@@ -21,6 +21,7 @@ pub(crate) fn isolated_with_timeout(name: &str, timeout: std::time::Duration, bo
     #[cfg(miri)]
     {
         let _ = name;
+        let _ = timeout;
         body();
     }
     #[cfg(not(miri))]

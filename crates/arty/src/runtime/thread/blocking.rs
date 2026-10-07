@@ -10,6 +10,8 @@
 
 use std::cell::Cell;
 
+use crate::task::Scheduler;
+
 /// Flags the current thread so public APIs reject waits that would stall a worker.
 pub(in crate::runtime) fn flag_current_thread() {
     IS_FLAGGED.with(|x| {
@@ -18,16 +20,18 @@ pub(in crate::runtime) fn flag_current_thread() {
 }
 
 pub(crate) fn assert_not_flagged() {
-    IS_FLAGGED.with(|x| {
-        assert!(
-            !x.get(),
-            "blocking Arty runtime APIs must not be called from threads owned by Arty runtime"
-        );
-    });
+    assert!(
+        !is_async_worker_thread(),
+        "blocking Arty runtime APIs must not be called from threads owned by Arty runtime"
+    );
 }
 
 pub(crate) fn is_flagged() -> bool {
     IS_FLAGGED.with(Cell::get)
+}
+
+pub(crate) fn is_async_worker_thread() -> bool {
+    is_flagged() || Scheduler::is_current_worker_thread()
 }
 
 thread_local! {

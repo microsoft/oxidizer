@@ -41,6 +41,17 @@ fn count_workers(runtime: &Runtime) -> usize {
     count
 }
 
+fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
+    let (completed, completion) = mpsc::channel();
+    thread::spawn(move || {
+        body();
+        _ = completed.send(());
+    });
+    completion
+        .recv_timeout(TEST_TIMEOUT)
+        .expect("the worker wait guard must reject the operation instead of deadlocking");
+}
+
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
     const AUTOMATIC: CpuPolicy = CpuPolicy::auto();
@@ -142,16 +153,18 @@ fn construction_and_shutdown_work_inside_a_futures_executor() {
     ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
 )]
 fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
-    let runtime = runtime(1);
-    let scheduler = worker_scheduler(&runtime);
-    assert!(
-        scheduler
-            .spawn(async |cx| cx.thread().id() == thread::current().id())
-            .wait()
-            .unwrap()
-    );
-    let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
-    assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
+    completes_without_deadlock(|| {
+        let runtime = runtime(1);
+        let scheduler = worker_scheduler(&runtime);
+        assert!(
+            scheduler
+                .spawn(async |cx| cx.thread().id() == thread::current().id())
+                .wait()
+                .unwrap()
+        );
+        let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
+        assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
+    });
 }
 
 #[test]
@@ -184,40 +197,42 @@ fn nested_block_on_rejects_the_factory_before_submission() {
 
 #[test]
 fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
-    let first = Runtime::builder()
-        .cpu_policy(CpuPolicy::exactly(1))
-        .blocking_pool_policy(BlockingPoolPolicy::shared(1))
-        .build()
-        .unwrap();
-    let second = runtime(1);
-    let first_scheduler = first.scheduler();
-    let second_scheduler = second.scheduler();
-    assert!(!first_scheduler.is_on_worker());
-    assert!(!second_scheduler.is_on_worker());
-    let ready = first_scheduler.spawn_blocking(|| 42);
-    first_scheduler.spawn_blocking(|| ()).wait().unwrap();
-    first_scheduler
-        .block_on(async |_| {
-            assert!(first_scheduler.is_on_worker());
-            assert!(!second_scheduler.is_on_worker());
-            // The single blocking pool has already delivered this result.
-            // Prove the worker wait guard before attempting a nested borrowing wait.
-            catch_unwind(AssertUnwindSafe(|| ready.wait())).unwrap_err();
-            let invoked = AtomicBool::new(false);
-            for scheduler in [first_scheduler, second_scheduler] {
-                scheduler
-                    .block_on(|_| {
-                        invoked.store(true, Ordering::Relaxed);
-                        async { 42 }
-                    })
-                    .unwrap_err();
-            }
-            assert!(!invoked.load(Ordering::Relaxed));
-        })
-        .unwrap();
-    assert_eq!(second_scheduler.block_on(async |_| 42).unwrap(), 42);
-    first.stop().unwrap();
-    second.stop().unwrap();
+    completes_without_deadlock(|| {
+        let first = Runtime::builder()
+            .cpu_policy(CpuPolicy::exactly(1))
+            .blocking_pool_policy(BlockingPoolPolicy::shared(1))
+            .build()
+            .unwrap();
+        let second = runtime(1);
+        let first_scheduler = first.scheduler();
+        let second_scheduler = second.scheduler();
+        assert!(!first_scheduler.is_on_worker());
+        assert!(!second_scheduler.is_on_worker());
+        let ready = first_scheduler.spawn_blocking(|| 42);
+        first_scheduler.spawn_blocking(|| ()).wait().unwrap();
+        first_scheduler
+            .block_on(async |_| {
+                assert!(first_scheduler.is_on_worker());
+                assert!(!second_scheduler.is_on_worker());
+                // The single blocking pool has already delivered this result.
+                // Prove the worker wait guard before attempting a nested borrowing wait.
+                catch_unwind(AssertUnwindSafe(|| ready.wait())).unwrap_err();
+                let invoked = AtomicBool::new(false);
+                for scheduler in [first_scheduler, second_scheduler] {
+                    scheduler
+                        .block_on(|_| {
+                            invoked.store(true, Ordering::Relaxed);
+                            async { 42 }
+                        })
+                        .unwrap_err();
+                }
+                assert!(!invoked.load(Ordering::Relaxed));
+            })
+            .unwrap();
+        assert_eq!(second_scheduler.block_on(async |_| 42).unwrap(), 42);
+        first.stop().unwrap();
+        second.stop().unwrap();
+    });
 }
 
 #[test]

@@ -5,7 +5,7 @@ use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::context::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-use crate::runtime::thread::is_flagged;
+use crate::runtime::thread::is_async_worker_thread;
 use crate::task::RuntimeScheduler;
 
 /// Owns an Arty runtime's workers and their shutdown.
@@ -173,7 +173,7 @@ impl Runtime {
     }
 
     fn wait(&self) -> Result<(), Error> {
-        if is_flagged() {
+        if is_async_worker_thread() {
             return Err(Error::new("an async Arty worker cannot wait for runtime shutdown"));
         }
         if self.scheduler.dispatcher.is_current_blocking_task() {
@@ -270,7 +270,7 @@ mod tests {
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .wait()
             .unwrap();
-        assert!(scheduler.spawn(async |_| is_flagged()).wait().unwrap());
+        assert!(scheduler.spawn(async |_| is_async_worker_thread()).wait().unwrap());
 
         scheduler.spawn(async move |_| drop(runtime)).wait().unwrap();
 
@@ -318,7 +318,7 @@ mod tests {
         assert!(
             caller
                 .scheduler()
-                .spawn_anywhere((), |_, ()| async { is_flagged() })
+                .spawn_anywhere((), |_, ()| async { is_async_worker_thread() })
                 .wait()
                 .unwrap()
         );

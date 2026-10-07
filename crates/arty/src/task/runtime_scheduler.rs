@@ -12,7 +12,7 @@ use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::{current_blocking_pool, with_active_blocking_wait_pool};
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::thread::is_flagged;
+use crate::runtime::thread::is_async_worker_thread;
 use crate::task::{Builtins, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -130,7 +130,7 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'a,
         R: Send + 'static,
     {
-        if is_flagged() {
+        if is_async_worker_thread() {
             return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
         let blocking_pool = current_blocking_pool();

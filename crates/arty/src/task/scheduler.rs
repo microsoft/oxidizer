@@ -74,6 +74,10 @@ struct Binding {
 }
 
 impl Scheduler {
+    pub(crate) fn is_current_worker_thread() -> bool {
+        CURRENT_WORKER.with_borrow(Option::is_some)
+    }
+
     pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
         CURRENT_WORKER.with_borrow_mut(|current| {
             assert!(current.is_none(), "a worker already owns this scheduler context");
