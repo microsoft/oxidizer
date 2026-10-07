@@ -361,6 +361,36 @@ mod tests {
     }
 
     #[test]
+    fn reserved_suffix_contains_one_aligned_block_per_size() {
+        for refill in [hal::RESERVE_MIN, 2 * hal::RESERVE_MIN, GLOBAL_REFILL] {
+            let mut global = Global {
+                map: Some(Map::reserve().unwrap()),
+                ranges: Buddy::new(),
+                requested: refill,
+            };
+            let base = global_alloc_reserved(&mut global, CHUNK);
+            assert_ne!(base, 0);
+            assert_eq!(base % refill, 0);
+            assert_eq!(global.requested, 2 * refill);
+            let state = observe_global(&global);
+            assert!(state.ranges.complete);
+            for (bits, count) in state.ranges.counts.iter().enumerate() {
+                assert_eq!(*count, u64::from((CHUNK..refill).contains(&(1usize << bits))));
+            }
+            let mut size = CHUNK;
+            while size < refill {
+                assert_eq!(global_alloc_reserved(&mut global, size), base + size);
+                assert_eq!(global.requested, 2 * refill);
+                size *= 2;
+            }
+            assert_eq!(observe_global(&global).ranges, seismograph_rallocator::native::Ranges::EMPTY);
+            // SAFETY: All disjoint suffix blocks and the initial chunk are
+            // exclusively test-owned, unpublished, and removed from the buddy.
+            unsafe { hal::release(base as *mut u8, refill) };
+        }
+    }
+
+    #[test]
     fn globally_retired_block_is_observable_and_reused_without_reserving() {
         const CHILD: &str = "RALLOCATOR_GLOBAL_REUSE_CHILD";
         if std::env::var_os(CHILD).is_none() {
@@ -469,6 +499,39 @@ mod tests {
             // SAFETY: Each remaining unpublished chunk is retired exactly once.
             unsafe { local.free(address, CHUNK) };
         }
+    }
+
+    #[test]
+    fn local_suffix_exhausts_the_refill_without_crossing_its_boundary() {
+        if run_with_fresh_backend("local_suffix_exhausts_the_refill_without_crossing_its_boundary") {
+            return;
+        }
+        let map = map().unwrap();
+        // SAFETY: The handle comes from this backend's unique global map.
+        let mut local = unsafe { Local::new(map) };
+        let refill = 1 << LOCAL_BITS;
+        local.requested = refill;
+        let base = local.alloc(CHUNK);
+        assert_ne!(base, 0);
+        assert_eq!(base % refill, 0);
+        let reserved = observe().reserved_bytes;
+        let mut budget = usize::MAX;
+        let state = local.observe(&mut budget);
+        assert!(state.ranges.complete);
+        for (bits, count) in state.ranges.counts.iter().enumerate() {
+            assert_eq!(*count, u64::from((CHUNK..refill).contains(&(1usize << bits))));
+        }
+        let mut size = CHUNK;
+        while size < refill {
+            assert_eq!(local.alloc(size), base + size);
+            assert_eq!(local.requested, 2 * refill);
+            assert_eq!(observe().reserved_bytes, reserved);
+            size *= 2;
+        }
+        assert_eq!(local.observe(&mut budget).ranges, seismograph_rallocator::native::Ranges::EMPTY);
+        // SAFETY: The initial chunk and every disjoint suffix block are
+        // unpublished and exclusively owned; together they exhaust this refill.
+        unsafe { local.free(base, refill) };
     }
 
     #[test]

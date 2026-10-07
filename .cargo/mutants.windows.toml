@@ -49,6 +49,25 @@ exclude_re = [
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
 
+    # Equivalent suffix caps: a power-of-two-aligned refill ends on a multiple
+    # of the cursor's low bit, so alignment already bounds every suffix block.
+    # These replacements only raise the redundant cap (division precedence
+    # matters: BITS - 1 / zeros, not (BITS - 1) / zeros).
+    'crates/rallocator/src/backend.rs:95:(76|80): replace - with (\+|/) in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:95:87: replace - with \+ in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:187:(80|84): replace - with (\+|/) in Local::alloc$',
+    'crates/rallocator/src/backend.rs:187:91: replace - with \+ in Local::alloc$',
+    # At i=4 both size formulas give 80; (i+4)%4 == (i-4)%4.
+    # At the slab/waking thresholds both arms return CHUNK/32 respectively.
+    'crates/rallocator/src/classes.rs:31:25: replace < with <= in make_classes$',
+    'crates/rallocator/src/classes.rs:35:31: replace - with \+ in make_classes$',
+    'crates/rallocator/src/classes.rs:38:32: replace < with <= in make_classes$',
+    'crates/rallocator/src/classes.rs:45:37: replace < with <= in make_classes$',
+    # end/cursor division is NOT equivalent: it creates sub-CHUNK suffix
+    # blocks. Both exact mutants hang on Linux ARM64 and local Ubuntu x64.
+    'crates/rallocator/src/backend.rs:95:87: replace - with / in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:187:91: replace - with / in Local::alloc$',
+
     # Known hanging mutations from PR #764. Keep other mutations in these functions.
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',

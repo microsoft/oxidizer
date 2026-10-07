@@ -141,6 +141,30 @@ mod tests {
     }
 
     #[test]
+    fn generated_classes_cover_each_octave_with_increasing_aligned_steps() {
+        let classes = std::hint::black_box(make_classes)();
+        let mut previous = 0;
+        for class in &classes {
+            assert!(class.size > previous);
+            assert!(class.slab.is_power_of_two());
+            assert!(class.slab >= CHUNK);
+            assert!(usize::from(class.capacity) >= 4);
+            assert!(class.waking > 0);
+            assert!(class.waking <= class.capacity / 4);
+            previous = class.size;
+        }
+        assert_eq!(previous, SMALL_MAX);
+        for octave in classes[4..].chunks_exact(4) {
+            let step = octave[3].size / 8;
+            assert!(step.is_power_of_two());
+            for pair in octave.windows(2) {
+                assert_eq!(pair[1].size - pair[0].size, step);
+                assert_eq!(pair[0].size % step, 0);
+            }
+        }
+    }
+
+    #[test]
     fn slab_geometry_and_waking_policy_match_quarter_capacity() {
         for class in CLASSES {
             assert_eq!(class.slab, (class.size * 4).next_power_of_two().max(CHUNK));
