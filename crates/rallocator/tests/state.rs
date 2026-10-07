@@ -6,6 +6,7 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rallocator::Rallocator;
 use seismograph::recorder::{Configuration, RecordingPolicy, SuppressionGuard};
@@ -49,8 +50,30 @@ fn capture() -> Snapshot {
 }
 
 fn wait_for(progress: &AtomicU8, value: u8) {
-    while progress.load(Ordering::Acquire) < value {
-        std::hint::spin_loop();
+    let started = Instant::now();
+    loop {
+        let observed = progress.load(Ordering::Acquire);
+        assert_ne!(
+            observed,
+            u8::MAX,
+            "inventory worker exited before completing the requested operation"
+        );
+        if observed >= value {
+            return;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "inventory worker did not report progress"
+        );
+        std::thread::yield_now();
+    }
+}
+
+struct SignalOnDrop<'a>(&'a AtomicU8, u8);
+
+impl Drop for SignalOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(self.1, Ordering::Release);
     }
 }
 
@@ -67,6 +90,7 @@ fn owners_created_off_remain_visible_and_only_participants_publish() {
     let worker_command = Arc::clone(&command);
     let worker_progress = Arc::clone(&progress);
     let worker = std::thread::spawn(move || {
+        let _exited = SignalOnDrop(&worker_progress, u8::MAX);
         let layout = Layout::from_size_align(17023, 128).unwrap();
         // SAFETY: The nonzero allocation is checked and freed once with its layout.
         let pointer = unsafe { Rallocator.alloc(layout) };
@@ -94,6 +118,7 @@ fn owners_created_off_remain_visible_and_only_participants_publish() {
         // SAFETY: The original allocation remains live throughout the worker.
         unsafe { Rallocator.dealloc(pointer, layout) };
     });
+    let _stop_worker = SignalOnDrop(&command, 3);
     wait_for(&progress, 1);
     let before = capture();
     assert!(before.owners_complete);
@@ -170,9 +195,12 @@ fn concurrent_collection_reads_published_copies_not_mutating_cores() {
     });
     let stop = Arc::new(AtomicU8::new(0));
     std::thread::scope(|scope| {
+        // This guard must unwind before the scope waits for its workers.
+        let _stop_workers = SignalOnDrop(&stop, 1);
         for lane in 0..4 {
             let stop = Arc::clone(&stop);
             scope.spawn(move || {
+                let _exited = SignalOnDrop(&stop, 1);
                 let mut iteration = 0;
                 while stop.load(Ordering::Acquire) == 0 {
                     let layout = Layout::from_size_align(17 + ((iteration + lane) % 8) * 513, 16).unwrap();
