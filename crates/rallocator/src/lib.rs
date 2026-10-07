@@ -99,17 +99,22 @@
 //! The general heap never sets the event contract's bump-only
 //! `freed_after_heap_release` flag.
 //!
-//! Every free while recording is enabled emits an event, including allocations
-//! made while recording was stopped or suppressed. Address reuse, recording
+//! Frees are eligible for recording even when the allocation was made while
+//! recording was stopped or suppressed, but an event is emitted only when the
+//! current recorder policy accepts it. Address reuse, recording
 //! gaps, concurrent operation completion, sampling, recorder TLS teardown and
 //! bounded-buffer overwrites prevent definitive lifetime reconstruction. The
-//! plugin pairs retained events in order and assigns view-local identities;
+//! plugin pairs retained events by timestamp, recorder thread and sequence,
+//! and assigns view-local identities;
 //! unmatched records are not a live-memory census. Sampling uses the address,
 //! so repeated reuse of the same address receives the same sampling decision.
 //! Recorder-internal allocations and snapshot source storage remain suppressed.
 //!
-//! Recording does not change native realloc behavior: same-class resizing keeps
-//! the pointer, and different-class resizing uses the original native path.
+//! Recording preserves native realloc pointer and payload behavior: same-class
+//! resizing keeps the pointer, and different-class resizing allocates a
+//! replacement and copies the retained payload. On the recorded path, the old
+//! free event precedes release of the old span so its address cannot be reused
+//! before its timestamp is recorded.
 //! A successful size change emits a free with the old layout and an allocation
 //! with the new layout, including in-place resizing. An unchanged size or failed
 //! replacement emits neither; failure leaves the original pointer and bytes intact.
