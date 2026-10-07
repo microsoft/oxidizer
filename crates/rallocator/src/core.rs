@@ -757,8 +757,8 @@ impl Core {
             // SAFETY: The dequeued message's initialized ring is exclusively owned.
             let (first, count) = unsafe { remote::open(message) };
             let amount = classes::size(encoded & 127) * usize::from(count);
+            bytes += amount;
             if encoded & !255 == self.owner {
-                bytes += amount;
                 // SAFETY: The owner matches and the exact ring transfers once.
                 unsafe { self.return_local(meta, first, message, count) };
             } else {
@@ -1052,6 +1052,56 @@ mod tests {
         assert_eq!(sender_core.observe(&mut second_budget).remote, observed.remote);
         sender_core.flush();
         target_core.flush();
+    }
+
+    #[test]
+    fn forwarded_returns_leave_work_queued_at_the_drain_budget() {
+        let target = fresh_owner();
+        let sender = fresh_owner();
+        let relay = fresh_owner();
+        // SAFETY: Each fresh endpoint remains persistent for this regression.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The test holds this fresh core's sole lease.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: This is a distinct fresh persistent endpoint.
+        let sender_owner = unsafe { &*(sender as *const Owner) };
+        // SAFETY: The test holds this fresh core's sole lease.
+        let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+        // SAFETY: This is a distinct fresh persistent endpoint.
+        let relay_owner = unsafe { &*(relay as *const Owner) };
+        // SAFETY: The test holds this fresh core's sole lease.
+        let relay_core = unsafe { &mut *relay_owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(remote::DRAIN_LIMIT / 2, 16).unwrap()).unwrap();
+        let mut pointers = Vec::new();
+        for _ in 0..6 {
+            let pointer = target_core.allocate(request);
+            assert!(!pointer.is_null());
+            pointers.push(pointer);
+        }
+        for pointer in pointers {
+            // SAFETY: The live allocation is transferred once for remote destruction.
+            unsafe { sender_core.deallocate(pointer.addr()) };
+        }
+        sender_core.flush();
+        let mut messages = Vec::new();
+        // SAFETY: The test is the sole consumer; relinquished messages retain their slabs.
+        unsafe {
+            target_owner.queue().drain(|message| {
+                messages.push(message);
+                true
+            });
+        }
+        assert_eq!(messages.len(), 5);
+        // SAFETY: The initialized segment is no longer queued and is exclusively owned.
+        unsafe { relay_owner.queue().enqueue(messages[0], messages[4]) };
+        relay_core.drain();
+        assert_eq!(relay_owner.queue().retained_message(), Some(messages[2]));
+        relay_core.drain();
+        assert_eq!(relay_owner.queue().retained_message(), Some(messages[4]));
+        relay_core.flush();
+        target_core.flush();
+        target_core.flush();
+        assert_eq!(target_core.outstanding_objects(), 2);
     }
 
     #[test]
