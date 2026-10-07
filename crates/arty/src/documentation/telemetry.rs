@@ -19,5 +19,7 @@
 //! context automatically. A task cancelled at shutdown need not emit an outcome
 //! event, so task events are not an exactly-once completion record.
 //!
-//! Classified runtime fields use the `arty` / `SystemMetadata` identifier
-//! when configuring redaction.
+//! Routine classified runtime fields use the `arty` / `SystemMetadata`
+//! identifier when configuring redaction. Panic diagnostics use the separate
+//! `arty` / `PanicMessage` identifier, so configure both classes when panic
+//! text should remain visible.

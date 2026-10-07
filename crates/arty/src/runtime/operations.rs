@@ -8,7 +8,7 @@ use thread_aware::Thread;
 use crate::runtime::context::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::{Error, Runtime};
-use crate::task::Builtins;
+use crate::task::{Builtins, Scheduler};
 
 /// A handle for requesting shutdown and pinning external threads.
 ///
@@ -37,8 +37,9 @@ impl RuntimeOperations {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if `worker` belongs to another runtime, is not
-    /// registered, or its processor services are unavailable.
+    /// Returns an [`Error`] if called from an async Arty worker or blocking
+    /// callback, or if `worker` belongs to another runtime, is not registered,
+    /// or its processor services are unavailable.
     ///
     /// # Examples
     ///
@@ -58,6 +59,12 @@ impl RuntimeOperations {
     /// ```
     #[inline]
     pub fn pin_current_thread_to(&self, worker: &Thread) -> Result<(), Error> {
+        if Scheduler::is_current_worker_thread() {
+            return Err(Error::pin_from_async_worker());
+        }
+        if self.dispatcher.is_current_blocking_task() {
+            return Err(Error::pin_from_blocking_callback());
+        }
         if !self.dispatcher.owns(worker) {
             return Err(Error::foreign_worker());
         }

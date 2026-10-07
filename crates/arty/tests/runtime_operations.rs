@@ -79,6 +79,35 @@ fn runtime_operations_are_available_off_worker() {
 }
 
 #[test]
+fn runtime_workers_cannot_change_their_processor_affinity() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::at_most(1)).build().unwrap();
+
+    let async_error = runtime
+        .scheduler()
+        .block_on(async |cx| RuntimeOperations::from(&cx).pin_current_thread_to(cx.thread()))
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(async_error.to_string(), "an async Arty worker cannot change its processor affinity");
+
+    let (operations, worker) = runtime
+        .scheduler()
+        .block_on(async |cx| (RuntimeOperations::from(&cx), cx.thread().clone()))
+        .unwrap();
+    let blocking_error = runtime
+        .scheduler()
+        .spawn_blocking(move || operations.pin_current_thread_to(&worker))
+        .join()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(
+        blocking_error.to_string(),
+        "an Arty blocking callback cannot change its processor affinity"
+    );
+
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn explicit_targets_select_workers_without_relocating_operations() {
     if SystemHardware::current().processors().len() < 2 {
         eprintln!("requires two processors to exercise cross-worker relocation");

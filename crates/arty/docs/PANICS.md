@@ -43,7 +43,8 @@ callback, dropping the owner requests shutdown without waiting or panicking.
 Workers finish their cleanup independently, so `drop` in those contexts does
 not guarantee that shutdown has completed.
 
-`JoinHandle::wait` still panics on an asynchronous Arty worker. Polling a join
+Polling a blocking join from a callback running in the same blocking pool
+panics instead of allowing a direct pool-starvation cycle. Polling any join
 again after receiving its result, or using a local scheduler outside its
 worker's local context, is also a programming error that can panic.
 
