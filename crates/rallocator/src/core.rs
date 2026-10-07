@@ -458,7 +458,8 @@ impl Core {
         // SAFETY: The initialized slab and registered object range share this owner.
         unsafe { self.map.assign(base, size, meta, self.owner | tag) };
         self.local_hint.observe(base, size, meta);
-        self.realloc_map().insert(base, size, meta);
+        let indexed_size = if tag >= SMALL_TAG { size } else { classes::CHUNK };
+        self.realloc_map().insert(base, indexed_size, meta);
         // SAFETY: This owner-exclusive slab is not yet linked in another list.
         unsafe { self.laden.insert(meta) };
         base
@@ -718,7 +719,8 @@ impl Core {
         if self.local_hint.meta == meta {
             self.local_hint = LocalHint::EMPTY;
         }
-        self.realloc_map().remove(base, size, meta);
+        let indexed_size = if tag >= SMALL_TAG { size } else { classes::CHUNK };
+        self.realloc_map().remove(base, indexed_size, meta);
         // SAFETY: No frontend reader remains for these registered entries.
         unsafe { self.map.assign(base, size, 0, BACKEND) };
         // SAFETY: The slab is unlinked and its metadata is no longer used.
@@ -1173,6 +1175,31 @@ mod tests {
         assert_eq!(hint.lookup(base + 32), Some(meta));
         assert_eq!(hint.lookup(base + size), None);
         assert_eq!(hint.lookup(base + 32), None);
+    }
+
+    #[test]
+    fn large_realloc_index_retains_only_the_object_base() {
+        let address = fresh_owner();
+        // SAFETY: This fresh endpoint remains persistent throughout the test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: The test retains the core's sole lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let size = 8 << 20;
+        let request = Request::new(std::alloc::Layout::from_size_align(size, 16).unwrap()).unwrap();
+        let pointer = core.allocate(request);
+        assert!(!pointer.is_null());
+        let base = pointer.addr();
+        // SAFETY: Both addresses lie in the checked live range.
+        let (meta, encoded) = unsafe { core.map.lookup(base) };
+        assert_eq!(encoded, address | request.tag());
+        assert_eq!(core.realloc_map().lookup(base), Some(meta));
+        assert_eq!(core.realloc_map().lookup(base + classes::CHUNK), None);
+        // SAFETY: The entire large range must retain its frontend routing entry.
+        assert_eq!(unsafe { core.map.lookup(base + size - 1) }, (meta, encoded));
+        // SAFETY: The unique live allocation is retired once.
+        unsafe { core.deallocate(base) };
+        assert_eq!(core.realloc_map().lookup(base), None);
+        assert!(core.is_empty());
     }
 
     #[test]
