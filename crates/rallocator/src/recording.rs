@@ -85,10 +85,38 @@ pub(crate) unsafe fn reallocate(address: *mut u8, layout: Layout, new_size: usiz
 
 #[inline(never)]
 unsafe fn reallocate_recorded(address: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-    // SAFETY: The caller's live allocation and resize contract are forwarded.
-    let replacement = unsafe { crate::reallocate_core(address, layout, new_size) };
+    let release = |pointer| {
+        // SAFETY: Successful replacement transfers the still-live old allocation.
+        unsafe { crate::thread::deallocate(pointer) };
+    };
+    // SAFETY: The caller supplies a live allocation, retired once by the callback.
+    unsafe { reallocate_recorded_with_release(address, layout, new_size, release) }
+}
+
+unsafe fn reallocate_recorded_with_release(address: *mut u8, layout: Layout, new_size: usize, release: impl FnOnce(*mut u8)) -> *mut u8 {
+    let Some(request) = crate::classes::Request::with_size(layout, new_size) else {
+        return std::ptr::null_mut();
+    };
+    let retained = crate::classes::Request::new(layout) == Some(request);
+    let replacement = if retained {
+        address
+    } else {
+        // Match the core's acquisition of a possibly cross-thread pointer before
+        // copying, but keep the original live until recording leaves its borrow.
+        std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+        let replacement = crate::thread::allocate_request(request);
+        if replacement.is_null() {
+            return replacement;
+        }
+        // SAFETY: Both allocations are live, disjoint, and cover the copy bound.
+        unsafe { std::ptr::copy_nonoverlapping(address, replacement, layout.size().min(new_size)) };
+        replacement
+    };
     if !replacement.is_null() && new_size != layout.size() {
         let freed = emit(address, layout.size(), layout.align(), true);
+        if !retained {
+            release(address);
+        }
         let allocated = emit(replacement, new_size, layout.align(), false);
         if let Some(session) = allocated.or(freed) {
             crate::observation::publish(session);
@@ -150,4 +178,93 @@ fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismo
     // Existing monitor/snapshot polling supplies the next cooperative round.
     seismograph_rallocator::native::request_observation();
     Ok(data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moved_realloc_records_free_before_cross_thread_address_reuse() {
+        const NAME: &str = "recording::tests::moved_realloc_records_free_before_cross_thread_address_reuse";
+        if std::env::var("RALLOCATOR_REALLOC_RECORDING_TEST").as_deref() != Ok("1") {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--nocapture"])
+                .env("RALLOCATOR_REALLOC_RECORDING_TEST", "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        seismograph::recorder(seismograph::recorder::Configuration {
+            allocations: seismograph::recorder::RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let layout = Layout::from_size_align(2 << 20, 16).unwrap();
+        let left = allocate(layout, false);
+        let original = allocate(layout, false);
+        let right = allocate(layout, false);
+        assert!(!left.is_null() && !original.is_null() && !right.is_null());
+        let (request, requests) = std::sync::mpsc::channel();
+        let (ready, responses) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            // Warm this owner's metadata before it can consume the returned span.
+            let warm_layout = Layout::from_size_align(32, 16).unwrap();
+            let warm = allocate(warm_layout, false);
+            assert!(!warm.is_null());
+            // SAFETY: The warm allocation is still live with its original layout.
+            unsafe { deallocate(warm, warm_layout) };
+            ready.send(0).unwrap();
+            let expected = requests.recv().unwrap();
+            let reused = allocate(layout, false);
+            assert_eq!(reused.addr(), expected);
+            ready.send(reused.addr()).unwrap();
+            requests.recv().unwrap();
+            // SAFETY: The worker owns this replacement for its entire lifetime.
+            unsafe { deallocate(reused, layout) };
+        });
+        responses.recv().unwrap();
+        let release = |pointer: *mut u8| {
+            let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+            let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+            assert!(decoded.events.events.iter().any(|event| {
+                event.kind == seismograph::recorder::event::EventKind::Deallocation
+                    && event
+                        .allocation()
+                        .is_some_and(|allocation| allocation.address.get() == pointer.addr() as u64)
+            }));
+            // SAFETY: The callback receives the still-live old allocation once.
+            unsafe { crate::thread::deallocate(pointer) };
+            request.send(pointer.addr()).unwrap();
+            responses.recv().unwrap();
+        };
+        // SAFETY: The original is live; the callback retires it once after its
+        // free is recorded and leaves the reused allocation live for capture.
+        let replacement = unsafe { reallocate_recorded_with_release(original, layout, 4 << 20, release) };
+        assert!(!replacement.is_null());
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let callers = seismograph_rallocator::events::callers(&decoded.events);
+        let matching = callers
+            .events
+            .iter()
+            .filter(|event| event.address == original.addr() as u64)
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 3);
+        let free = matching
+            .iter()
+            .find(|event| event.kind == seismograph_rallocator::callers::EventKind::Deallocated)
+            .unwrap();
+        assert!(free.allocation_recorded);
+        assert_eq!(matching.iter().filter(|event| event.allocation_id == free.allocation_id).count(), 2);
+        request.send(0).unwrap();
+        worker.join().unwrap();
+        // SAFETY: These three allocations remain live and are retired once.
+        unsafe { deallocate(left, layout) };
+        // SAFETY: The right guard allocation remains live with its original layout.
+        unsafe { deallocate(right, layout) };
+        // SAFETY: A successful moved realloc owns the new layout.
+        unsafe { deallocate(replacement, Layout::from_size_align(4 << 20, 16).unwrap()) };
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
 }
