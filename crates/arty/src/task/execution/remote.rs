@@ -36,7 +36,7 @@ where
     /// Becomes `None` once a result has been sent.
     result_tx: Option<BoxedSender<TaskResult<R>>>,
 
-    /// Direct worker registration checks shutdown again before invoking its factory.
+    /// Task wrappers check shutdown again before invoking their deferred factory.
     shutdown_signal: Option<Arc<AtomicBool>>,
 }
 
@@ -54,6 +54,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
+    #[cfg(test)]
     pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
         Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None)
     }

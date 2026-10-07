@@ -49,6 +49,7 @@ pub(crate) fn prepare_remote<C, FF, F, R>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
     sink: Sink,
+    shutdown_signal: Arc<AtomicBool>,
 ) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
 where
     C: 'static,
@@ -65,7 +66,13 @@ where
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
+        drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
+            inner,
+            result_tx,
+            parent_task_enrichment,
+            sink,
+            Some(shutdown_signal),
+        )));
     });
     (future_factory, JoinHandle::new(result_rx))
 }
@@ -173,6 +180,7 @@ mod tests {
     use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;
     use futures::future::join;
+    use performables::arc::Arc as PArc;
 
     use super::*;
 
@@ -181,6 +189,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
+        let shutdown_signal = PArc::new(AtomicBool::new(false));
         let (factory, handle) = prepare_remote(
             move |()| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
@@ -194,6 +203,7 @@ mod tests {
             },
             sink.transfer_context(),
             sink,
+            shutdown_signal,
         );
 
         let executor = new_guarded_executor(Waker::noop().clone());
@@ -203,6 +213,33 @@ mod tests {
         let result = block_on(handle).unwrap();
 
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
+    }
+
+    #[test]
+    fn remote_factory_is_not_invoked_if_shutdown_starts_after_registration() {
+        let invoked = Arc::new(AtomicBool::new(false));
+        let shutdown_signal = PArc::new(AtomicBool::new(false));
+        let sink = Sink::noop();
+        let (factory, handle) = prepare_remote(
+            {
+                let invoked = Arc::clone(&invoked);
+                move |()| {
+                    invoked.store(true, Ordering::Relaxed);
+                    std::future::ready(())
+                }
+            },
+            sink.transfer_context(),
+            sink,
+            PArc::clone(&shutdown_signal),
+        );
+        let executor = new_guarded_executor(Waker::noop().clone());
+        factory((), &executor.tasks());
+
+        shutdown_signal.store(true, Ordering::Release);
+        run_to_completion(&executor);
+
+        assert!(!invoked.load(Ordering::Relaxed));
+        assert!(block_on(handle).unwrap_err().is_shutdown());
     }
 
     /// Drives the executor until it reports that no further progress can be made.
@@ -290,10 +327,12 @@ mod tests {
         struct Payload(u32);
 
         let sink = Sink::noop();
+        let shutdown_signal = PArc::new(AtomicBool::new(false));
         let (factory, handle) = prepare_remote(
             |()| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             sink,
+            shutdown_signal,
         );
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());

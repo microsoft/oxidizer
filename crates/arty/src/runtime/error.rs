@@ -55,10 +55,6 @@ impl Error {
         Self::new(RuntimeValidation::PinFromAsyncWorker)
     }
 
-    pub(crate) fn pin_from_blocking_callback() -> Self {
-        Self::new(RuntimeValidation::PinFromBlockingCallback)
-    }
-
     pub(crate) fn block_on_from_worker() -> Self {
         Self::new(RuntimeValidation::BlockOnFromWorker)
     }
@@ -115,7 +111,6 @@ pub(crate) enum RuntimeValidation {
     UnregisteredWorker,
     UnavailableWorkerServices,
     PinFromAsyncWorker,
-    PinFromBlockingCallback,
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
     ShutdownWaitFromBlockingCallback,
@@ -130,7 +125,6 @@ impl Display for RuntimeValidation {
             Self::UnregisteredWorker => "the worker passed to pin_current_thread_to must be a registered runtime worker",
             Self::UnavailableWorkerServices => "processor services for the worker passed to pin_current_thread_to are unavailable",
             Self::PinFromAsyncWorker => "an async Arty worker cannot change its processor affinity",
-            Self::PinFromBlockingCallback => "an Arty blocking callback cannot change its processor affinity",
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
             Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
@@ -211,11 +205,6 @@ mod tests {
                 Error::pin_from_async_worker(),
                 RuntimeValidation::PinFromAsyncWorker,
                 "an async Arty worker cannot change its processor affinity",
-            ),
-            (
-                Error::pin_from_blocking_callback(),
-                RuntimeValidation::PinFromBlockingCallback,
-                "an Arty blocking callback cannot change its processor affinity",
             ),
             (
                 Error::block_on_from_worker(),

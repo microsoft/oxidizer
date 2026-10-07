@@ -217,7 +217,12 @@ impl<WFS> DispatcherCore<WFS> {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(future_factory, parent_task_enrichment, self.sink.clone());
+        let (future_factory, join_handle) = prepare_remote(
+            future_factory,
+            parent_task_enrichment,
+            self.sink.clone(),
+            Arc::clone(&self.shutdown_started),
+        );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
