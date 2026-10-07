@@ -26,7 +26,7 @@ pub(in crate::runtime) struct ThreadWaiter {
 #[derive(Debug)]
 enum State {
     Ready(Vec<thread::JoinHandle<()>>),
-    Joining,
+    Joining(Vec<ThreadId>),
     Completed(Option<ThreadId>),
 }
 
@@ -65,15 +65,15 @@ impl ThreadWaiter {
 
     fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) -> Result<(), Error> {
         let (state, completed) = &*self.shared;
+        let current_thread = thread::current().id();
         loop {
             match &mut *state_guard {
                 State::Ready(threads) => {
-                    let current_thread = thread::current().id();
                     if threads.iter().any(|worker| worker.thread().id() == current_thread) {
                         return Err(Error::new(SelfJoin(current_thread)));
                     }
                     let threads = std::mem::take(threads);
-                    *state_guard = State::Joining;
+                    *state_guard = State::Joining(threads.iter().map(|worker| worker.thread().id()).collect());
                     drop(state_guard);
                     let mut failed_worker = None;
                     for worker in threads {
@@ -90,7 +90,10 @@ impl ThreadWaiter {
                     completed.notify_all();
                     return completion_result(failed_worker);
                 }
-                State::Joining => {
+                State::Joining(worker_ids) => {
+                    if worker_ids.contains(&current_thread) {
+                        return Err(Error::new(SelfJoin(current_thread)));
+                    }
                     state_guard = completed.wait(state_guard);
                 }
                 State::Completed(failed_worker) => return completion_result(*failed_worker),
@@ -128,13 +131,13 @@ mod tests {
         let waiter = ThreadWaiter::new(Vec::new());
         let (state, _) = &*waiter.shared;
         let mut state_guard = state.lock();
-        *state_guard = State::Joining;
+        *state_guard = State::Joining(Vec::new());
 
         let shared = Arc::clone(&waiter.shared);
         let completing = thread::spawn(move || {
             let (state, completed) = &*shared;
             let mut state_guard = state.lock();
-            assert!(matches!(*state_guard, State::Joining));
+            assert!(matches!(*state_guard, State::Joining(_)));
             *state_guard = State::Completed(None);
             completed.notify_all();
         });
@@ -192,6 +195,41 @@ mod tests {
         waiter_tx.send(Arc::clone(&waiter)).unwrap();
 
         assert!(outcome_rx.recv_timeout(TEST_TIMEOUT).unwrap().contains("cannot join itself"));
+        waiter.wait().unwrap();
+    }
+
+    #[test]
+    fn worker_cannot_wait_after_an_external_join_has_started() {
+        let (waiter_tx, waiter_rx) = mpsc::channel();
+        let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
+        let (begin_wait_tx, begin_wait_rx) = mpsc::channel();
+        let (outcome_tx, outcome_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let waiter: Arc<ThreadWaiter> = waiter_rx.recv().unwrap();
+            worker_ready_tx.send(()).unwrap();
+            begin_wait_rx.recv().unwrap();
+            outcome_tx.send(waiter.wait().unwrap_err().to_string()).unwrap();
+        });
+        let waiter = Arc::new(ThreadWaiter::new(vec![worker]));
+        waiter_tx.send(Arc::clone(&waiter)).unwrap();
+        worker_ready_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        let joining = {
+            let waiter = Arc::clone(&waiter);
+            thread::spawn(move || waiter.wait().unwrap())
+        };
+        let deadline = std::time::Instant::now() + TEST_TIMEOUT;
+        loop {
+            if matches!(*waiter.shared.0.lock(), State::Joining(_)) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "external caller must begin joining");
+            thread::yield_now();
+        }
+
+        begin_wait_tx.send(()).unwrap();
+        assert!(outcome_rx.recv_timeout(TEST_TIMEOUT).unwrap().contains("cannot join itself"));
+        joining.join().unwrap();
         waiter.wait().unwrap();
     }
 

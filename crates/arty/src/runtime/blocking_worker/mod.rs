@@ -525,6 +525,7 @@ pub(super) mod blocking_worker_tests {
 
     use crate::runtime::blocking_worker::{
         BLOCKING_WAIT_CONTEXT, BlockingPool, BlockingTaskScope, BlockingWaitContext, BlockingWaitScope, BlockingWorker, CURRENT_POOL,
+        is_current_blocking_pool,
     };
 
     #[cfg_attr(test, mutants::skip)]
@@ -553,6 +554,16 @@ pub(super) mod blocking_worker_tests {
             });
         }
         assert!(CURRENT_POOL.with_borrow(Option::is_none));
+    }
+
+    #[test]
+    fn current_blocking_pool_detects_direct_task_scope() {
+        let current = Arc::new(());
+        let other = Arc::new(());
+        assert!(!is_current_blocking_pool(&current));
+        let _scope = BlockingTaskScope::enter(Arc::clone(&current));
+        assert!(is_current_blocking_pool(&current));
+        assert!(!is_current_blocking_pool(&other));
     }
 
     #[test]
