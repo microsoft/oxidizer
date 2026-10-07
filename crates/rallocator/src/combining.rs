@@ -48,6 +48,8 @@ pub(crate) struct Combining<T> {
     flag: AtomicBool,
     last: AtomicPtr<Node<T>>,
     value: UnsafeCell<T>,
+    #[cfg(test)]
+    successor_wait: Option<std::sync::mpsc::Sender<()>>,
 }
 
 // SAFETY: Exactly one flag holder or handed-off queue head accesses value.
@@ -60,6 +62,8 @@ impl<T: Send> Combining<T> {
             flag: AtomicBool::new(false),
             last: AtomicPtr::new(std::ptr::null_mut()),
             value: UnsafeCell::new(value),
+            #[cfg(test)]
+            successor_wait: None,
         }
     }
 
@@ -176,6 +180,10 @@ impl<T: Send> Combining<T> {
             self.flag.store(false, Ordering::Release);
             return;
         }
+        #[cfg(test)]
+        if let Some(waiting) = &self.successor_wait {
+            waiting.send(()).unwrap();
+        }
         // SAFETY: A stalled publisher still owns current's successor link.
         while unsafe { (*current).next.load(Ordering::Relaxed) }.is_null() {
             crate::hal::pause();
@@ -281,6 +289,7 @@ mod tests {
             state.published.send(()).unwrap();
         }
         let (published, ready) = std::sync::mpsc::channel();
+        let (waiting, release) = std::sync::mpsc::channel();
         let mut successor = Node {
             status: AtomicU32::new(WAITING),
             next: AtomicPtr::new(std::ptr::null_mut()),
@@ -292,6 +301,7 @@ mod tests {
             published,
             invocations: 0,
         });
+        shared.successor_wait = Some(waiting);
         shared.value.get_mut().last = &raw const shared.last;
         let head = Node {
             status: AtomicU32::new(WAITING),
@@ -303,9 +313,7 @@ mod tests {
             let successor_address = (&raw const successor) as usize;
             scope.spawn(move || {
                 ready.recv().unwrap();
-                // Hold the publication gap open while attach reaches its
-                // successor-link wait, rather than relying on random contention.
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                release.recv().unwrap();
                 head_next.store(successor_address as *mut Node<State>, Ordering::Release);
             });
             // SAFETY: The scope keeps the publisher and both stationary nodes
