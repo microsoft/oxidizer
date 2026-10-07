@@ -59,13 +59,11 @@ Await child work before returning; shutdown cancels pending async tasks.
 * [`Builtins`][__link6] gives each task its scheduler, clock,
   and worker. [`RuntimeScheduler`][__link7] lets the
   runtime place new work.
-* [`Scheduler`][__link8] keeps child work on its
-  worker; [`LocalScheduler`][__link9] lets tasks
-  share non-`Send` state there.
-* [`Clock`][__link10] provides timers and timeouts;
-  [`ClockControl`][__link11] controls time in tests.
-* [`Thread`][__link12] describes a worker, and
-  [`ThreadAware`][__link13] values can relocate between workers.
+* [`Scheduler`][__link8] keeps child work on its worker.
+* [`Clock`][__link9] provides timers and timeouts;
+  [`ClockControl`][__link10] controls time in tests.
+* [`Thread`][__link11] describes a worker, and
+  [`ThreadAware`][__link12] values can relocate between workers.
 
 ## Why Arty?
 
@@ -94,31 +92,31 @@ async fn main(cx: arty::task::Builtins) {
 }
 ```
 
-[`RuntimeScheduler::block_on`][__link14] is
+[`RuntimeScheduler::block_on`][__link13] is
 the narrow blocking entry point for running async work from synchronous
 code. It rejects calls from async workers. For synchronous I/O or library
 calls, use
-[`Scheduler::spawn_blocking`][__link15] or
-[`RuntimeScheduler::spawn_blocking`][__link16]
+[`Scheduler::spawn_blocking`][__link14] or
+[`RuntimeScheduler::spawn_blocking`][__link15]
 and await the join. The callback runs in a blocking pool instead of on an
 async worker.
 
 ## Detailed documentation
 
-The [guides][__link17] explain Arty’s capabilities in more detail:
+The [guides][__link16] explain Arty’s capabilities in more detail:
 
-* [Scheduling][__link18] explains where tasks run,
+* [Scheduling][__link17] explains where tasks run,
   local non-`Send` work, and blocking pools.
-* [Configuration][__link19] explains worker counts,
+* [Configuration][__link18] explains worker counts,
   blocking-pool policies, clocks, and telemetry sinks.
-* [Shutdown][__link20] explains runtime ownership,
+* [Shutdown][__link19] explains runtime ownership,
   task cancellation, and what stopping the workers waits for.
-* [Thread awareness][__link21] explains
+* [Thread awareness][__link20] explains
   stable task placement and explicit relocation of values.
-* [Time][__link22] explains worker-driven timers, timeouts,
+* [Time][__link21] explains worker-driven timers, timeouts,
   and controlled time in tests.
-* [Telemetry][__link23] explains runtime events
-  and links to [`observed`][__link24] for further details.
+* [Telemetry][__link22] explains runtime events
+  and links to [`observed`][__link23] for further details.
 
 The `documentation` module is included only for docs.rs builds and
 doc-test collection with all documentation features, including `test-util`;
@@ -129,9 +127,9 @@ it is not part of the public API available to applications.
 The default feature set enables `rt` and `macros`.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
-* **`macros`** - Enables [`main`][__link25] and [`test`][__link26], and implies `rt`.
+* **`macros`** - Enables [`main`][__link24] and [`test`][__link25], and implies `rt`.
 * **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link27] with `time`.
+* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link26] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -140,32 +138,31 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbSdlyKkRW6FIbGthtl0Z6NnwbEGgdHEU70Ykb9hcyjhJYykdhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGTvrvo-fV-8bX71dk0Y2kEQby4ruQUuQ1Kgb3ChN6fCifzRhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
- [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::Clock
- [__link11]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
- [__link12]: https://docs.rs/arty/0.4.0/arty/?search=core::Thread
- [__link13]: https://docs.rs/arty/0.4.0/arty/?search=core::ThreadAware
- [__link14]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler::block_on
- [__link15]: https://docs.rs/arty/0.4.0/arty/?search=task::Scheduler::spawn_blocking
- [__link16]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler::spawn_blocking
- [__link17]: https://docs.rs/arty/0.4.0/arty/?search=documentation
- [__link18]: https://docs.rs/arty/0.4.0/arty/?search=documentation::scheduling
- [__link19]: https://docs.rs/arty/0.4.0/arty/?search=documentation::configuration
+ [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
+ [__link11]: https://docs.rs/arty/0.4.0/arty/?search=core::Thread
+ [__link12]: https://docs.rs/arty/0.4.0/arty/?search=core::ThreadAware
+ [__link13]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler::block_on
+ [__link14]: https://docs.rs/arty/0.4.0/arty/?search=task::Scheduler::spawn_blocking
+ [__link15]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler::spawn_blocking
+ [__link16]: https://docs.rs/arty/0.4.0/arty/?search=documentation
+ [__link17]: https://docs.rs/arty/0.4.0/arty/?search=documentation::scheduling
+ [__link18]: https://docs.rs/arty/0.4.0/arty/?search=documentation::configuration
+ [__link19]: https://docs.rs/arty/0.4.0/arty/?search=documentation::shutdown
  [__link2]: https://docs.rs/arty/0.4.0/arty/?search=task::JoinError
- [__link20]: https://docs.rs/arty/0.4.0/arty/?search=documentation::shutdown
- [__link21]: https://docs.rs/arty/0.4.0/arty/?search=documentation::thread_awareness
- [__link22]: https://docs.rs/arty/0.4.0/arty/?search=documentation::time
- [__link23]: https://docs.rs/arty/0.4.0/arty/?search=documentation::telemetry
- [__link24]: https://crates.io/crates/observed/0.27.0
- [__link25]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
- [__link26]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
- [__link27]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
+ [__link20]: https://docs.rs/arty/0.4.0/arty/?search=documentation::thread_awareness
+ [__link21]: https://docs.rs/arty/0.4.0/arty/?search=documentation::time
+ [__link22]: https://docs.rs/arty/0.4.0/arty/?search=documentation::telemetry
+ [__link23]: https://crates.io/crates/observed/0.27.0
+ [__link24]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
+ [__link25]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
+ [__link26]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
  [__link3]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link4]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
  [__link5]: https://docs.rs/arty/0.4.0/arty/?search=runtime::Runtime
  [__link6]: https://docs.rs/arty/0.4.0/arty/?search=task::Builtins
  [__link7]: https://docs.rs/arty/0.4.0/arty/?search=task::RuntimeScheduler
  [__link8]: https://docs.rs/arty/0.4.0/arty/?search=task::Scheduler
- [__link9]: https://docs.rs/arty/0.4.0/arty/?search=task::LocalScheduler
+ [__link9]: https://docs.rs/arty/0.4.0/arty/?search=time::Clock

@@ -35,9 +35,7 @@ struct CurrentWorker {
 ///
 /// [`spawn`](Self::spawn) creates its future on the worker, so the future can
 /// keep non-[`Send`] state across awaits. Factory captures and results must
-/// still be `Send`, even when called on the same worker. Use
-/// [`LocalScheduler`](crate::task::LocalScheduler) for non-`Send` captures
-/// or results already on a worker.
+/// still be `Send`, even when called on the same worker.
 ///
 /// [`spawn_anywhere`](Self::spawn_anywhere) lets the runtime place new work and
 /// relocates a [`ThreadAware`] value there. If this scheduler is itself
@@ -106,10 +104,6 @@ impl Scheduler {
                 blocking_worker,
             },
         }
-    }
-
-    pub(crate) fn current_worker_index(&self) -> WorkerIndex {
-        self.binding.worker_index
     }
 
     pub(crate) fn resolve_worker_index(&self, thread: &Thread) -> Option<WorkerIndex> {
@@ -235,7 +229,6 @@ impl Scheduler {
     ///     .scheduler()
     ///     .spawn_anywhere(cx.clone(), |moved| async move {
     ///         assert_eq!(moved.thread().id(), std::thread::current().id());
-    ///         assert!(moved.local_scheduler().is_some());
     ///         42
     ///     })
     ///     .await?;

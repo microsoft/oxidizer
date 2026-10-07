@@ -41,7 +41,7 @@ fn blocking_pool_reports_distinct_saturation_episodes() {
     let (sink, processor) = test_emitter(TEST_ID);
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::at_most(1))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .sink(sink)
         .build()
         .unwrap();
@@ -304,39 +304,6 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
 
     let events = processor.events();
     assert!(events_named(&events, "arty.rt.task.spawned").len() >= PROCESSORS);
-}
-
-#[test]
-fn local_task_emits_spawned_and_completed_with_local_placement() {
-    let (sink, processor) = test_emitter(TEST_ID);
-
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(PROCESSORS))
-        .sink(sink)
-        .build()
-        .unwrap();
-
-    runtime
-        .scheduler()
-        .spawn_anywhere((), |cx, ()| async move {
-            cx.local_scheduler()
-                .expect("on the same thread as cx")
-                .spawn(async move || ())
-                .await
-                .unwrap();
-        })
-        .join()
-        .unwrap();
-    runtime.stop().unwrap();
-
-    let events = processor.events();
-    let spawned = events_named(&events, "arty.rt.task.spawned");
-    assert!(
-        spawned.iter().any(|e| dimension(e, "placement") == Some("local".into())),
-        "a local task should report placement=local"
-    );
-    // The remote outer task plus the local inner task both succeed.
-    assert!(events_named(&events, "arty.rt.task.succeeded").len() >= 2);
 }
 
 #[test]

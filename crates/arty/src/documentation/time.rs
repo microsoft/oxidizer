@@ -18,7 +18,7 @@
 //! use std::time::Duration;
 //!
 //! use arty::task::Builtins;
-//! use arty::time::FutureExt;
+//! use tick::FutureExt;
 //!
 //! # #[arty::main]
 //! # async fn main(cx: Builtins) {
@@ -74,9 +74,8 @@
 //! Advance time explicitly when ordering matters. `auto_advance(duration)`
 //! instead advances time on reads.
 //!
-//! `ClockControl` can be combined with `workers`, but not `builder` on the
-//! `test` attribute. For a custom builder, create the control in a synchronous
-//! test and pass a clone to
+//! `ClockControl` can be combined with `workers`. For a custom runtime builder,
+//! create the control in a synchronous test and pass a clone to
 //! [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock).
 //!
 //! # Without an Arty runtime

@@ -7,11 +7,9 @@
 
 mod support;
 
-use std::cell::Cell;
 use std::error::Error as _;
 use std::future::{pending, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
@@ -36,7 +34,7 @@ testing_aids::init_tracing!();
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(workers))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()
         .unwrap()
 }
@@ -334,90 +332,8 @@ fn scoped_borrowed_storage_is_destroyed_before_success_or_error() {
 }
 
 #[test]
-fn local_non_send_state_is_destroyed_on_its_worker() {
-    struct LocalDrop {
-        owner: thread::ThreadId,
-        dropped: Rc<Cell<bool>>,
-    }
-
-    impl Drop for LocalDrop {
-        fn drop(&mut self) {
-            assert_eq!(thread::current().id(), self.owner);
-            self.dropped.set(true);
-        }
-    }
-
-    let runtime = runtime(1);
-    let portable = runtime
-        .scheduler()
-        .spawn_anywhere((), |cx, ()| async move {
-            let dropped = Rc::new(Cell::new(false));
-            let value = LocalDrop {
-                owner: thread::current().id(),
-                dropped: Rc::clone(&dropped),
-            };
-            cx.local_scheduler().unwrap().spawn(async move || drop(value)).await.unwrap();
-            assert!(dropped.get());
-            cx.clone()
-        })
-        .join()
-        .unwrap();
-    thread::spawn({
-        let portable = portable.clone();
-        move || {
-            assert!(portable.local_scheduler().is_none());
-            drop(portable);
-        }
-    })
-    .join()
-    .unwrap();
-    drop(runtime);
-    thread::spawn(move || drop(portable)).join().unwrap();
-}
-
-#[test]
-fn cancellation_cleanup_cannot_reenter_the_local_executor() {
-    struct Cleanup {
-        scheduler: arty::task::LocalScheduler,
-        dropped: mpsc::Sender<bool>,
-    }
-
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let invoked = Rc::new(Cell::new(false));
-            let captured = Rc::clone(&invoked);
-            let handle = self.scheduler.spawn(move || {
-                captured.set(true);
-                async {}
-            });
-            drop(handle);
-            self.dropped.send(invoked.get()).unwrap();
-        }
-    }
-
-    let runtime = runtime(1);
-    let (started, start) = mpsc::channel();
-    let (dropped, drop_result) = mpsc::channel();
-    let handle = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((started, dropped)), |cx, Unaware((started, dropped))| async move {
-            let cleanup = Cleanup {
-                scheduler: cx.local_scheduler().unwrap(),
-                dropped,
-            };
-            started.send(()).unwrap();
-            pending::<()>().await;
-            drop(cleanup);
-        });
-    start.recv_timeout(TEST_TIMEOUT).unwrap();
-    runtime.stop().unwrap();
-    assert!(!drop_result.recv_timeout(TEST_TIMEOUT).unwrap());
-    drop(handle);
-}
-
-#[test]
 fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
-    for policy in [BlockingPoolPolicy::isolated(), BlockingPoolPolicy::shared(1)] {
+    for policy in [BlockingPoolPolicy::per_worker(), BlockingPoolPolicy::shared().max(1)] {
         let runtime = Runtime::builder()
             .workers(WorkersPolicy::exactly(1))
             .blocking_pool(policy)

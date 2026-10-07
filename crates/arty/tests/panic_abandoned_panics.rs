@@ -72,35 +72,3 @@ fn abandoned_remote_factory_and_poll_panics_dispose_opaque_payloads_once() {
         runtime.stop().unwrap();
     }
 }
-
-#[test]
-fn abandoned_local_panic_disposes_opaque_payload_on_its_worker() {
-    let runtime = runtime();
-    let (dropped, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    let captured = Arc::clone(&drops);
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let (release, gate) = events_once::Event::boxed();
-            let (started, ready) = events_once::Event::boxed();
-            let task: arty::task::LocalJoinHandle<()> = cx.local_scheduler().unwrap().spawn(async move || {
-                let payload = Payload {
-                    value: Cell::new(42),
-                    drops: captured,
-                    dropped,
-                };
-                started.send(());
-                gate.await.unwrap();
-                panic_any(payload);
-            });
-            drop(task);
-            ready.await.unwrap();
-            release.send(());
-            cx.scheduler().spawn(async |_| {}).await.unwrap();
-        })
-        .unwrap();
-    received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-    runtime.stop().unwrap();
-}

@@ -56,33 +56,6 @@ fn abandoned_remote_result_drop_is_contained() {
 }
 
 #[test]
-fn abandoned_local_result_drop_is_contained() {
-    let runtime = runtime();
-    let (dropped, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    let captured = Arc::clone(&drops);
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let (release, gate) = events_once::Event::boxed();
-            let (done, completed) = events_once::Event::boxed();
-            let task = cx.local_scheduler().unwrap().spawn(async move || {
-                gate.await.unwrap();
-                done.send(());
-                ResultDropPanic { drops: captured, dropped }
-            });
-            drop(task);
-            release.send(());
-            completed.await.unwrap();
-            assert_eq!(*cx.local_scheduler().unwrap().spawn(async || std::rc::Rc::new(7)).await.unwrap(), 7);
-        })
-        .unwrap();
-    received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-    runtime.stop().unwrap();
-}
-
-#[test]
 fn abandoned_blocking_result_drop_is_contained() {
     let runtime = runtime();
     let (started, ready) = mpsc::channel();

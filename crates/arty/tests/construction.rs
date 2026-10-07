@@ -33,7 +33,7 @@ fn zero_counts_are_rejected_when_the_runtime_is_built() {
 
 #[test]
 fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
-    for policy in [BlockingPoolPolicy::shared(0), BlockingPoolPolicy::shared(Some(0))] {
+    for policy in [BlockingPoolPolicy::shared().max(0), BlockingPoolPolicy::per_worker().max(0)] {
         let (sink, processor) = test_emitter(TEST_ID);
         let error: Error = Runtime::builder()
             .workers(WorkersPolicy::at_most(1))
@@ -53,8 +53,8 @@ fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
 #[test]
 fn zero_shared_blocking_limit_can_be_replaced_before_building() {
     let runtime = Runtime::builder()
-        .blocking_pool(BlockingPoolPolicy::shared(0))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(0))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()
         .unwrap();
 

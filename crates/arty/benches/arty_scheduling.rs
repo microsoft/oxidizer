@@ -5,8 +5,9 @@
 //!
 //! Use `--criterion --allocations`. Threaded workloads are not isolated instruction costs.
 //! Runtimes, reusable vectors, and the external waking thread are prepared before measurement.
-//! Both runtimes use the same external join driver. From-task/local wall-clock samples measure
-//! inside the async entry; allocation measurement also includes that entry and its setup.
+//! Both runtimes use the same external join driver. From-task wall-clock
+//! samples measure inside the async entry; allocation measurement also includes
+//! that entry and its setup.
 //!
 //! The `timeout` workload runs one task per worker, concurrently. Each task arms and cancels
 //! `count` request timeouts per iteration, the common pattern of a deadline that almost never
@@ -29,7 +30,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use thread_aware::Unaware;
-use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
+use tokio::task::JoinHandle as TokioJoinHandle;
 
 const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 20];
@@ -48,19 +49,17 @@ enum Workload {
     Timer,
     Timeout,
     FromTask,
-    Local,
     Blocking,
 }
 
 impl Workload {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 7] = [
         Self::Spawn,
         Self::Yield,
         Self::RemoteWake,
         Self::Timer,
         Self::Timeout,
         Self::FromTask,
-        Self::Local,
         Self::Blocking,
     ];
 
@@ -72,7 +71,6 @@ impl Workload {
             Self::Timer => "timer",
             Self::Timeout => "timeout",
             Self::FromTask => "nested",
-            Self::Local => "local",
             Self::Blocking => "blocking",
         }
     }
@@ -92,7 +90,7 @@ impl ArtyCase {
     fn new(workers: usize, count: usize, workload: Workload) -> Self {
         let runtime = Runtime::builder()
             .workers(WorkersPolicy::exactly(workers))
-            .blocking_pool(BlockingPoolPolicy::shared(BLOCKING_THREADS))
+            .blocking_pool(BlockingPoolPolicy::shared().max(BLOCKING_THREADS))
             .build()
             .expect("benchmark requires the selected number of available processors");
         let mut case = Self {
@@ -176,23 +174,6 @@ impl ArtyCase {
                     for _ in 0..iterations {
                         handles.clear();
                         handles.extend((0..count).map(|_| cx.scheduler().spawn(async |_| black_box(()))));
-                        for handle in &mut handles {
-                            black_box(handle).await.expect("benchmark tasks finish before shutdown");
-                        }
-                    }
-                    start.elapsed()
-                },
-            ))
-            .expect("benchmark parent finishes before shutdown"),
-            Workload::Local => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
-                (iterations, count),
-                |cx, (iterations, count)| async move {
-                    let scheduler = cx.local_scheduler().expect("local benchmark runs on its associated worker");
-                    let mut handles = Vec::with_capacity(count);
-                    let start = Instant::now();
-                    for _ in 0..iterations {
-                        handles.clear();
-                        handles.extend((0..count).map(|_| scheduler.spawn(async || black_box(()))));
                         for handle in &mut handles {
                             black_box(handle).await.expect("benchmark tasks finish before shutdown");
                         }
@@ -304,18 +285,6 @@ impl TokioCase {
                 start.elapsed()
             }))
             .expect("benchmark parent task does not panic"),
-            Workload::Local => self.runtime.block_on(LocalSet::new().run_until(async {
-                let mut handles = Vec::with_capacity(count);
-                let start = Instant::now();
-                for _ in 0..iterations {
-                    handles.clear();
-                    handles.extend((0..count).map(|_| tokio::task::spawn_local(async { black_box(()) })));
-                    for handle in &mut handles {
-                        black_box(handle).await.expect("benchmark tasks do not panic");
-                    }
-                }
-                start.elapsed()
-            })),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
@@ -513,10 +482,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::nested_w1_n20(&mut ArtyCase::new(1, 20, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut ArtyCase::new(4, 1, Workload::FromTask), 1)]
 #[bench::nested_w4_n20(&mut ArtyCase::new(4, 20, Workload::FromTask), 1)]
-#[bench::local_w1_n1(&mut ArtyCase::new(1, 1, Workload::Local), 1)]
-#[bench::local_w1_n20(&mut ArtyCase::new(1, 20, Workload::Local), 1)]
-#[bench::local_w4_n1(&mut ArtyCase::new(4, 1, Workload::Local), 1)]
-#[bench::local_w4_n20(&mut ArtyCase::new(4, 20, Workload::Local), 1)]
 #[bench::blocking_w1_n1(&mut ArtyCase::new(1, 1, Workload::Blocking), 1)]
 #[bench::blocking_w1_n20(&mut ArtyCase::new(1, 20, Workload::Blocking), 1)]
 #[bench::blocking_w4_n1(&mut ArtyCase::new(4, 1, Workload::Blocking), 1)]
@@ -550,10 +515,6 @@ fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
 #[bench::nested_w1_n20(&mut TokioCase::new(1, 20, Workload::FromTask), 1)]
 #[bench::nested_w4_n1(&mut TokioCase::new(4, 1, Workload::FromTask), 1)]
 #[bench::nested_w4_n20(&mut TokioCase::new(4, 20, Workload::FromTask), 1)]
-#[bench::local_w1_n1(&mut TokioCase::new(1, 1, Workload::Local), 1)]
-#[bench::local_w1_n20(&mut TokioCase::new(1, 20, Workload::Local), 1)]
-#[bench::local_w4_n1(&mut TokioCase::new(4, 1, Workload::Local), 1)]
-#[bench::local_w4_n20(&mut TokioCase::new(4, 20, Workload::Local), 1)]
 #[bench::blocking_w1_n1(&mut TokioCase::new(1, 1, Workload::Blocking), 1)]
 #[bench::blocking_w1_n20(&mut TokioCase::new(1, 20, Workload::Blocking), 1)]
 #[bench::blocking_w4_n1(&mut TokioCase::new(4, 1, Workload::Blocking), 1)]

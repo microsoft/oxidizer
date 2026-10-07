@@ -10,7 +10,6 @@ mod panic_support;
 
 mod support;
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -60,11 +59,10 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
 }
 
 #[test]
-fn remote_and_local_factory_capture_drop_panics_are_join_errors() {
+fn remote_factory_capture_drop_panic_is_a_join_error() {
     let runtime = runtime();
     let drops = Arc::new(AtomicUsize::new(0));
     let remote_capture = CaptureDropPanic(Arc::clone(&drops));
-    let local_capture = CaptureDropPanic(Arc::clone(&drops));
     runtime
         .scheduler()
         .block_on(async move |cx| {
@@ -73,16 +71,9 @@ fn remote_and_local_factory_capture_drop_panics_are_join_errors() {
                 std::future::ready(())
             });
             assert!(remote.await.unwrap_err().is_panic());
-            let value = Rc::new(42);
-            let local = cx.local_scheduler().unwrap().spawn(move || {
-                assert_eq!(*value, 42);
-                drop(local_capture);
-                std::future::ready(())
-            });
-            assert!(local.await.unwrap_err().is_panic());
             assert_eq!(cx.scheduler().spawn(async |_| 7).await.unwrap(), 7);
         })
         .unwrap();
-    assert_eq!(drops.load(Ordering::SeqCst), 2);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }

@@ -5,18 +5,17 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicBool;
 
 use arty_executor::TaskSet;
-use events_once::{BoxedSender, Event, LocalEvent};
+use events_once::{BoxedSender, Event};
 use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
 
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
-use crate::task::execution::local::LocalTaskFuture;
 use crate::task::execution::remote::RemoteTaskFuture;
 use crate::task::execution::result::TaskResult;
 use crate::task::execution::storage::TaskFactory;
-use crate::task::join::{JoinHandle, LocalJoinHandle};
+use crate::task::join::JoinHandle;
 
 /// A future factory for a remote future scheduled from a different thread. The future factory
 /// itself must be `Send` to deliver it to the thread where the task is to be scheduled but this
@@ -30,20 +29,6 @@ use crate::task::join::{JoinHandle, LocalJoinHandle};
 /// store the future inline in its task storage pool. Returning the future would require erasing its
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
 pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet) + Send + 'static>;
-
-pub(in crate::task) fn prepare_local<F, R>(
-    future: F,
-    parent_task_enrichment: Transfer,
-    sink: Sink,
-) -> (impl Future<Output = ()>, LocalJoinHandle<R>)
-where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-{
-    let (result_tx, result_rx) = LocalEvent::boxed();
-    let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
-    (future, LocalJoinHandle::new(result_rx))
-}
 
 pub(crate) fn prepare_remote<C, FF, F, R>(
     future_factory: FF,
@@ -167,8 +152,6 @@ impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::cell::Cell;
-    use std::future::pending;
     use std::panic::panic_any;
     use std::pin::pin;
     use std::rc::Rc;
@@ -179,7 +162,6 @@ mod tests {
     use arty_executor::testing::new_guarded_executor;
     use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;
-    use futures::future::join;
     use performables::arc::Arc as PArc;
 
     use super::*;
@@ -247,62 +229,12 @@ mod tests {
         while executor.execute_cycle() == CycleOutcome::Continue {}
     }
 
-    #[test]
-    fn local_preparation_preserves_non_send_results() {
-        let value = Rc::new(Cell::new(42));
-        let expected = Rc::clone(&value);
-        let sink = Sink::noop();
-        let (task, handle) = prepare_local(async move { value }, sink.transfer_context(), sink);
-        let ((), actual) = block_on(join(task, handle));
-
-        assert!(Rc::ptr_eq(&actual.unwrap(), &expected));
-    }
-
-    #[test]
-    fn local_preparation_reports_a_panic_without_unwinding_the_joiner() {
-        #[derive(Debug, Eq, PartialEq)]
-        struct PanicPayload(u32);
-
-        let sink = Sink::noop();
-        let (task, handle) = prepare_local::<_, ()>(async { panic_any(PanicPayload(42)) }, sink.transfer_context(), sink);
-        block_on(task);
-
-        let outcome = catch_unwind(AssertUnwindSafe(|| block_on(handle))).unwrap();
-        assert!(outcome.unwrap_err().is_panic());
-    }
-
-    #[test]
-    fn discarded_local_preparation_reports_shutdown() {
-        let sink = Sink::noop();
-        let (task, handle) = prepare_local(pending::<()>(), sink.transfer_context(), sink);
-        drop(task);
-        let mut handle = pin!(handle);
-        let mut context = Context::from_waker(Waker::noop());
-
-        let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut context) else {
-            panic!("discarded local work must report shutdown");
-        };
-        assert!(error.is_shutdown());
-    }
-
     struct PanicWake;
 
     impl Wake for PanicWake {
         fn wake(self: Arc<Self>) {
             panic!("join receiver notification");
         }
-    }
-
-    #[test]
-    fn local_cancellation_contains_join_waker_panics() {
-        let sink = Sink::noop();
-        let (task, handle) = prepare_local(pending::<()>(), sink.transfer_context(), sink);
-        let mut handle = pin!(handle);
-        let waker = Waker::from(Arc::new(PanicWake));
-        let mut context = Context::from_waker(&waker);
-        assert!(handle.as_mut().poll(&mut context).is_pending());
-
-        catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     }
 
     #[test]

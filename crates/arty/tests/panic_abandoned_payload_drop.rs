@@ -80,25 +80,6 @@ fn abandoned_remote_poll_payload_drop_is_contained() {
 }
 
 #[test]
-fn abandoned_local_poll_payload_drop_is_contained() {
-    let runtime = runtime();
-    let (dropped, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    let payload = Payload {
-        drops: Arc::clone(&drops),
-        dropped,
-    };
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let join: arty::task::LocalJoinHandle<()> = cx.local_scheduler().unwrap().spawn(async move || panic_any(payload));
-            drop(join);
-        })
-        .unwrap();
-    check(runtime, &drops, &received);
-}
-
-#[test]
 fn abandoned_blocking_payload_drop_is_contained() {
     let runtime = runtime();
     let (started, ready) = mpsc::channel();

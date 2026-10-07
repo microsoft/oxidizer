@@ -222,7 +222,7 @@ impl BlockingPool {
         true
     }
 
-    fn max_thread_count(&self) -> usize {
+    pub(in crate::runtime) fn max_thread_count(&self) -> usize {
         self.max_thread_count.get()
     }
 

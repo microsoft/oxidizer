@@ -60,9 +60,7 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
 
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
-    const AUTOMATIC: WorkersPolicy = WorkersPolicy::auto();
-    assert_eq!(WorkersPolicy::default(), AUTOMATIC);
-    assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared(None));
+    assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared());
 }
 
 #[test]
@@ -73,7 +71,7 @@ fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
         WorkersPolicy::exactly(usize::MAX),
         WorkersPolicy::exactly(2),
         WorkersPolicy::all(),
-        WorkersPolicy::auto(),
+        WorkersPolicy::default(),
     ] {
         let runtime = Runtime::builder()
             .workers(previous)
@@ -97,9 +95,9 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
     let (sink, processor) = test_emitter(TEST_ID);
     let runtime = Runtime::builder()
         .stack_size(STACK)
-        .blocking_pool(BlockingPoolPolicy::isolated())
+        .blocking_pool(BlockingPoolPolicy::per_worker())
         .workers(WorkersPolicy::at_most(1))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .workers(WorkersPolicy::exactly(2))
         .sink(sink)
         .build()
@@ -139,7 +137,6 @@ fn construction_and_shutdown_work_inside_a_futures_executor() {
         let (answer, scheduler) = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move {
-                assert!(cx.local_scheduler().is_some());
                 assert_eq!(cx.thread().id(), thread::current().id());
                 (42, cx.scheduler().clone())
             })
@@ -204,7 +201,7 @@ fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
     completes_without_deadlock(|| {
         let first = Runtime::builder()
             .workers(WorkersPolicy::exactly(1))
-            .blocking_pool(BlockingPoolPolicy::shared(1))
+            .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .build()
             .unwrap();
         let second = runtime(1);
@@ -272,7 +269,6 @@ fn builtins_publish_the_same_services_on_every_worker() {
         assert!(std::ptr::eq(clock, cx.clock()));
         assert!(std::ptr::eq(sink, cx.sink()));
         assert!(sink.is_noop());
-        assert!(cx.local_scheduler().is_some());
         assert_eq!(cx.thread().id(), thread::current().id());
         assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
         cx.thread().id()
@@ -280,7 +276,6 @@ fn builtins_publish_the_same_services_on_every_worker() {
     assert_eq!(tasks.len(), 2);
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), 2);
-    assert!(builtins.local_scheduler().is_none());
     runtime.stop().unwrap();
 }
 
@@ -292,11 +287,11 @@ async fn worker_services_are_ready_before_spawning(cx: Builtins) {
     let tasks: Vec<_> = (0..count)
         .map(|_| {
             scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
-                (worker.thread().id() == thread::current().id(), worker.local_scheduler().is_some())
+                worker.thread().id() == thread::current().id()
             })
         })
         .collect();
-    let expected = vec![(true, true); tasks.len()];
+    let expected = vec![true; tasks.len()];
     let actual = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
 
     assert_eq!(actual, expected);
@@ -420,21 +415,13 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
 
 #[cfg(feature = "macros")]
 #[arty::test]
-async fn application_errors_remain_results_for_async_local_and_blocking_tasks(cx: Builtins) {
+async fn application_errors_remain_results_for_async_and_blocking_tasks(cx: Builtins) {
     assert_eq!(
         cx.scheduler().spawn(async |_| Err::<(), _>("application")).await.unwrap(),
         Err("application")
     );
     assert_eq!(
         cx.scheduler().spawn_blocking(|| Err::<(), _>("application")).await.unwrap(),
-        Err("application")
-    );
-    assert_eq!(
-        cx.local_scheduler()
-            .unwrap()
-            .spawn(async || Err::<(), _>("application"))
-            .await
-            .unwrap(),
         Err("application")
     );
 }
@@ -476,17 +463,6 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     assert!(!error.is_panic());
     catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
     runtime.stop().unwrap();
-}
-
-#[cfg(feature = "macros")]
-#[arty::test]
-async fn local_join_keeps_non_send_results_and_rejects_repolling(cx: Builtins) {
-    let result = Rc::new(42);
-    let captured = Rc::clone(&result);
-    let mut task = Box::pin(cx.local_scheduler().unwrap().spawn(async move || captured));
-    let returned = task.as_mut().await.unwrap();
-    assert!(Rc::ptr_eq(&returned, &result));
-    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
 }
 
 #[cfg(feature = "macros")]

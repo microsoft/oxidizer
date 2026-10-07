@@ -63,25 +63,9 @@ async fn zero_workers_fail_during_construction(_cx: Builtins) {
     panic!("the test body must not run");
 }
 
-fn custom_builder() -> arty::runtime::RuntimeBuilder {
-    use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-
-    Runtime::builder()
-        .workers(WorkersPolicy::at_most(1))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
-}
-
-#[test(builder = custom_builder())]
-async fn custom_runtime_keeps_owned_builtins(cx: Builtins) {
-    assert_eq!(
-        cx.local_scheduler()
-            .unwrap()
-            .spawn(async || std::rc::Rc::new(42))
-            .await
-            .unwrap()
-            .as_ref(),
-        &42,
-    );
+#[test(workers = 1)]
+async fn worker_configuration_keeps_owned_builtins(cx: Builtins) {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[cfg(feature = "test-util")]
@@ -126,7 +110,7 @@ mod controlled_time {
         assert!(delay.as_mut().now_or_never().is_some());
     }
 
-    #[renamed_arty::test(workers = 1, runtime_path = renamed_arty::runtime)]
+    #[renamed_arty::test(workers = 1)]
     async fn aliases_and_eager_advancement(cx: <Types as TestTypes>::Context, control: <Types as TestTypes>::Control) {
         let control = control.auto_advance_timers(true);
         let watch = cx.clock().stopwatch();
@@ -165,13 +149,5 @@ mod controlled_time {
         control.advance(Duration::from_secs(1));
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(1));
         panic!("controlled test panic");
-    }
-
-    #[arty::test(
-        builder = super::custom_builder()
-            .clock(ClockControl::new_at(UNIX_EPOCH + Duration::from_secs(123)))
-    )]
-    async fn custom_builder_clock_remains_in_effect(cx: Builtins) {
-        assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(123));
     }
 }

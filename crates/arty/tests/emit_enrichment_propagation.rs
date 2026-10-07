@@ -126,25 +126,6 @@ async fn enrichment_propagates_via_spawn_anywhere(cx: Builtins) {
     assert_eq!(result, ["request.id"]);
 }
 
-/// Enrichment propagates through `LocalScheduler::spawn`.
-#[cfg(feature = "macros")]
-#[arty::test]
-async fn enrichment_propagates_via_local_scheduler_spawn(cx: Builtins) {
-    let sink = cx.sink().clone();
-    let result = async {
-        let local = cx.local_scheduler().expect("should be on the correct thread");
-        let handle = local.spawn({
-            let sink = sink.clone();
-            async move || collect_enrichment_keys(&sink)
-        });
-        handle.await.unwrap()
-    }
-    .enrich(&sink, RequestCtx::new(1))
-    .await;
-
-    assert_eq!(result, ["request.id"]);
-}
-
 /// No enrichments leak when none are set at the spawn site.
 #[cfg(feature = "macros")]
 #[arty::test]
@@ -194,57 +175,45 @@ async fn nested_spawn_preserves_enrichment_chain(cx: Builtins) {
 
 #[test]
 fn task_outcomes_keep_the_submission_context() {
-    for local in [false, true] {
-        for panics in [false, true] {
-            let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
-            let runtime = runtime_with_emitter(&sink);
-            let outcome = runtime
-                .scheduler()
-                .spawn_anywhere(
-                    Unaware((sink.clone(), local, panics)),
-                    |cx, Unaware((sink, local, panics))| async move {
-                        async {
-                            if local {
-                                let task = cx.local_scheduler().unwrap().spawn(async move || {
-                                    assert!(!panics, "local task panic");
-                                });
-                                task.await
-                            } else {
-                                let task = cx.scheduler().spawn(async move |_| {
-                                    assert!(!panics, "remote task panic");
-                                });
-                                task.await
-                            }
-                        }
-                        .enrich(&sink, RequestCtx::new(42))
-                        .await
-                        .map_err(Unaware)
-                    },
-                )
-                .join()
-                .unwrap();
-            assert_eq!(outcome.is_err(), panics);
-            if let Err(Unaware(error)) = outcome {
-                assert!(error.is_panic());
-            }
-            drop(runtime);
-            let expected_name = if panics {
-                "arty.rt.task.panicked"
-            } else {
-                "arty.rt.task.succeeded"
-            };
-            let correlated = processor
-                .events()
-                .into_iter()
-                .filter(|event| {
-                    event.name() == expected_name
-                        && event
-                            .dimensions()
-                            .iter()
-                            .any(|(key, value)| key == "request.id" && value == &observed::Value::from("42"))
-                })
-                .count();
-            assert_eq!(correlated, 1);
+    for panics in [false, true] {
+        let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
+        let runtime = runtime_with_emitter(&sink);
+        let outcome = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((sink.clone(), panics)), |cx, Unaware((sink, panics))| async move {
+                async {
+                    let task = cx.scheduler().spawn(async move |_| {
+                        assert!(!panics, "remote task panic");
+                    });
+                    task.await
+                }
+                .enrich(&sink, RequestCtx::new(42))
+                .await
+                .map_err(Unaware)
+            })
+            .join()
+            .unwrap();
+        assert_eq!(outcome.is_err(), panics);
+        if let Err(Unaware(error)) = outcome {
+            assert!(error.is_panic());
         }
+        drop(runtime);
+        let expected_name = if panics {
+            "arty.rt.task.panicked"
+        } else {
+            "arty.rt.task.succeeded"
+        };
+        let correlated = processor
+            .events()
+            .into_iter()
+            .filter(|event| {
+                event.name() == expected_name
+                    && event
+                        .dimensions()
+                        .iter()
+                        .any(|(key, value)| key == "request.id" && value == &observed::Value::from("42"))
+            })
+            .count();
+        assert_eq!(correlated, 1);
     }
 }

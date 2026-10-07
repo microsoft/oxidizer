@@ -13,14 +13,13 @@ use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::channel::{OneshotReceiver, Sender};
-use performables::sync::once::OnceLock;
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
-use crate::runtime::context::{CoreRuntimeBuiltins, RuntimeBuiltins, SharedState};
+use crate::runtime::context::RuntimeBuiltins;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
@@ -69,7 +68,6 @@ pub(in crate::runtime) fn build(
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
     let worker_count = processors.len();
-    let shared_state: SharedState = (0..worker_count).map(|_| OnceLock::new()).collect();
     let shutdown_started = Arc::new(AtomicBool::new(false));
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
@@ -95,7 +93,6 @@ pub(in crate::runtime) fn build(
                 start_rx,
                 success_tx,
                 inactive_clock: clock.clone(),
-                shared_state: Arc::clone(&shared_state),
                 processor,
                 worker_index,
                 worker_endpoint_tx,
@@ -152,7 +149,7 @@ pub(in crate::runtime) fn build(
         }
     );
 
-    Ok(Runtime::with_dispatcher(dispatcher_client, shared_state))
+    Ok(Runtime::with_dispatcher(dispatcher_client))
 }
 
 /// The data set required to start one async worker (the message channels and associated data).
@@ -163,7 +160,6 @@ struct AsyncWorkerStartInfo {
     stack_size: usize,
     start_rx: OneshotReceiver<StartWorker>,
     success_tx: Sender<()>,
-    shared_state: SharedState,
     inactive_clock: InactiveClock,
     processor: ProcessorSet,
     worker_index: usize,
@@ -191,7 +187,6 @@ impl AsyncWorkerStartInfo {
             stack_size: _stack_size,
             start_rx,
             success_tx,
-            shared_state,
             inactive_clock,
             processor,
             worker_index,
@@ -236,9 +231,7 @@ impl AsyncWorkerStartInfo {
 
         let thread_state_constructor = {
             async move |tasks: TaskSet, clock| {
-                let core_builtins = CoreRuntimeBuiltins::new(tasks.clone(), dispatcher.as_ref(), current.clone(), processor, sink);
-
-                let builtins = Builtins::sync_init(&shared_state, RuntimeBuiltins::new(&dispatcher, core_builtins, clock, current));
+                let builtins = Builtins::sync_init(RuntimeBuiltins::new(&dispatcher, clock, current, sink));
                 Scheduler::register_current(builtins.clone(), tasks);
                 builtins
             }

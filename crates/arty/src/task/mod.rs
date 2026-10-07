@@ -9,15 +9,15 @@
 //! [`Builtins::scheduler`] keeps child tasks on the same worker.
 //!
 //! Pass a factory, not an already-created future. Arty creates the future on
-//! its worker, where it can retain non-[`Send`] state. Use [`LocalScheduler`]
-//! when captures or results also need to be non-`Send`; use
+//! its worker, where it can retain non-[`Send`] state. Factory captures and
+//! results cross the submission boundary and must be `Send`. Use
 //! [`ThreadAware`](crate::core::ThreadAware) data with `spawn_anywhere` when
 //! the runtime should choose a worker.
 //!
-//! Await a [`JoinHandle`] or [`LocalJoinHandle`] to receive a task's result.
-//! Panics and shutdown cancellation return [`JoinError`] to the caller, rather
-//! than unwinding it. A task returning `Result<T, E>` has two error layers:
-//! joining it returns `Result<Result<T, E>, JoinError>`.
+//! Await a [`JoinHandle`] to receive a task's result. Panics and shutdown
+//! cancellation return [`JoinError`] to the caller, rather than unwinding it.
+//! A task returning `Result<T, E>` has two error layers: joining it returns
+//! `Result<Result<T, E>, JoinError>`.
 //!
 //! # Examples
 //!
@@ -41,16 +41,13 @@
 pub(crate) mod builtins;
 pub(crate) mod execution;
 pub(crate) mod join;
-pub(crate) mod local;
 mod runtime_scheduler;
 pub(crate) mod scheduler;
 
 #[doc(inline)]
 pub use builtins::Builtins;
 #[doc(inline)]
-pub use join::{JoinError, JoinHandle, LocalJoinHandle};
-#[doc(inline)]
-pub use local::LocalScheduler;
+pub use join::{JoinError, JoinHandle};
 #[doc(inline)]
 pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]

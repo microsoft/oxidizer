@@ -72,37 +72,3 @@ fn remote_secondary_payload_drop_cannot_escape_result_disposal() {
     assert_eq!(result_drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }
-
-#[test]
-fn local_secondary_payload_drop_cannot_escape_result_disposal() {
-    let runtime = runtime();
-    let (dropped, received) = mpsc::channel();
-    let result_drops = Arc::new(AtomicUsize::new(0));
-    let captured = Arc::clone(&result_drops);
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let (release, gate) = events_once::Event::boxed();
-            let (finished, completed) = events_once::Event::boxed();
-            let join = cx.local_scheduler().unwrap().spawn(async move || {
-                gate.await.unwrap();
-                finished.send(());
-                DropChain {
-                    depth: 0,
-                    result_drops: captured,
-                    dropped,
-                }
-            });
-            drop(join);
-            release.send(());
-            completed.await.unwrap();
-            assert_eq!(
-                *cx.local_scheduler().unwrap().spawn(async || std::rc::Rc::new(42)).await.unwrap(),
-                42
-            );
-        })
-        .unwrap();
-    received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(result_drops.load(Ordering::SeqCst), 1);
-    runtime.stop().unwrap();
-}

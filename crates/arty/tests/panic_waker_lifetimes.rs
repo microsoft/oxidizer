@@ -153,53 +153,6 @@ fn remote_case(finish: Finish) {
 }
 
 #[test]
-fn local_retained_wakers_after_success() {
-    local_case(Finish::Success);
-}
-
-#[test]
-fn local_retained_wakers_after_panic() {
-    local_case(Finish::Panic);
-}
-
-#[test]
-fn local_retained_wakers_after_cancellation() {
-    local_case(Finish::Pending);
-}
-
-fn local_case(finish: Finish) {
-    eprintln!("local {finish:?}: constructing runtime");
-    let runtime = runtime();
-    let (sent, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    let captured = Arc::clone(&drops);
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            let task = cx.local_scheduler().unwrap().spawn(move || PinnedTask::new(finish, sent, captured));
-            match finish {
-                Finish::Success => assert_eq!(task.await.unwrap(), 42),
-                Finish::Panic => assert!(task.await.unwrap_err().is_panic()),
-                Finish::Pending => {
-                    drop(task);
-                    cx.scheduler().spawn(async |_| {}).await.unwrap();
-                }
-            }
-        })
-        .unwrap();
-    eprintln!("local {finish:?}: root joined");
-    let retained = received.recv_timeout(TEST_TIMEOUT).unwrap();
-    if matches!(finish, Finish::Success | Finish::Panic) {
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-    }
-    eprintln!("local {finish:?}: retained waker received; stopping runtime");
-    runtime.stop().unwrap();
-    eprintln!("local {finish:?}: stopped");
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-    wake_after_retirement(retained);
-}
-
-#[test]
 fn completion_racing_stop_destroys_each_future_once() {
     let repetitions = if cfg!(miri) { 2 } else { 32 };
     for _ in 0..repetitions {

@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-mod panic_support;
-
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,7 +13,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-use panic_support::runtime;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -53,7 +50,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     let repetitions = if cfg!(miri) { 2 } else { 32 };
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()
         .unwrap();
     let polls = Arc::new(AtomicUsize::new(0));
@@ -87,36 +84,4 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     runtime.stop().unwrap();
     assert_eq!(polls.load(Ordering::SeqCst), 2 * repetitions);
     assert_eq!(drops.load(Ordering::SeqCst), 2 * repetitions);
-}
-
-#[test]
-fn local_self_waking_panics_do_not_repoll_or_corrupt_later_tasks() {
-    let repetitions = if cfg!(miri) { 2 } else { 32 };
-    let runtime = runtime();
-    let polls = Arc::new(AtomicUsize::new(0));
-    let drops = Arc::new(AtomicUsize::new(0));
-    runtime
-        .scheduler()
-        .block_on({
-            let polls = Arc::clone(&polls);
-            let drops = Arc::clone(&drops);
-            async move |cx| {
-                for _ in 0..repetitions {
-                    let polls = Arc::clone(&polls);
-                    let drops = Arc::clone(&drops);
-                    let task = cx.local_scheduler().unwrap().spawn(move || SelfWakePanic {
-                        polls,
-                        drops,
-                        owner: std::thread::current().id(),
-                        _local: Rc::new(()),
-                    });
-                    assert!(task.await.unwrap_err().is_panic());
-                    assert_eq!(*cx.local_scheduler().unwrap().spawn(async || Rc::new(42)).await.unwrap(), 42);
-                }
-            }
-        })
-        .unwrap();
-    runtime.stop().unwrap();
-    assert_eq!(polls.load(Ordering::SeqCst), repetitions);
-    assert_eq!(drops.load(Ordering::SeqCst), repetitions);
 }

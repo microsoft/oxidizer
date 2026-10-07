@@ -18,7 +18,7 @@ use crate::runtime::handle::Runtime;
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
-/// The defaults are [`WorkersPolicy::auto`], 2 MiB async-worker stacks,
+/// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
 /// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
 ///
 /// # Examples
@@ -28,7 +28,7 @@ use crate::runtime::handle::Runtime;
 ///
 /// let runtime = Runtime::builder()
 ///     .workers(WorkersPolicy::at_most(4))
-///     .blocking_pool(BlockingPoolPolicy::shared(4))
+///     .blocking_pool(BlockingPoolPolicy::shared().max(4))
 ///     .build()?;
 /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -44,7 +44,7 @@ impl RuntimeBuilder {
     /// Sets the worker-count policy.
     ///
     /// The runtime starts one async worker per selected processor.
-    /// The default is [`WorkersPolicy::auto`]. This does not set blocking-pool
+    /// The default is [`WorkersPolicy::default`]. This does not set blocking-pool
     /// limits; use [`blocking_pool`](Self::blocking_pool) for those.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
     ///
@@ -88,8 +88,9 @@ impl RuntimeBuilder {
     /// Sets whether async workers share their blocking-task pool.
     ///
     /// The default shares one pool across async workers. Use
-    /// [`BlockingPoolPolicy::shared`] to set a runtime-wide thread limit, or
-    /// [`BlockingPoolPolicy::isolated`] to give each worker its own pool.
+    /// [`BlockingPoolPolicy::shared`] for one runtime-wide pool, or
+    /// [`BlockingPoolPolicy::per_worker`] to give each worker its own pool.
+    /// Chain [`BlockingPoolPolicy::max`] to set the thread limit.
     /// A zero shared-pool limit is rejected by [`build`](Self::build), not by
     /// this setter.
     ///
@@ -98,7 +99,7 @@ impl RuntimeBuilder {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```
     #[must_use]
     pub const fn blocking_pool(mut self, policy: BlockingPoolPolicy) -> Self {
@@ -117,17 +118,22 @@ impl RuntimeBuilder {
     /// Enable `test-util` in dev-dependencies to test sequential delays without
     /// waiting for real time:
     ///
-    /// ```test_harness
-    /// # #[cfg(all(feature = "macros", feature = "rt", feature = "test-util"))]
-    /// #[arty::test(builder = arty::runtime::Runtime::builder().clock(
-    ///     arty::time::ClockControl::new().auto_advance_timers(true)
-    /// ))]
-    /// async fn sequential_delay(cx: arty::task::Builtins) {
+    /// ```
+    /// # #[cfg(all(feature = "rt", feature = "test-util"))]
+    /// # fn sequential_delay() -> Result<(), Box<dyn std::error::Error>> {
+    /// let control = arty::time::ClockControl::new().auto_advance_timers(true);
+    /// let runtime = arty::runtime::Runtime::builder().clock(control).build()?;
+    /// runtime.scheduler().block_on(async |cx| {
     ///     let duration = std::time::Duration::from_secs(30);
     ///     let watch = cx.clock().stopwatch();
     ///     cx.clock().delay(duration).await;
     ///     assert_eq!(watch.elapsed(), duration);
-    /// }
+    /// })?;
+    /// runtime.stop()?;
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(all(feature = "rt", feature = "test-util"))] sequential_delay()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// Automatic timer advancement occurs eagerly on timer registration or time
@@ -233,13 +239,13 @@ mod tests {
         let builder = Runtime::builder()
             .workers(WorkersPolicy::exactly(2))
             .stack_size(1024 * 1024)
-            .blocking_pool(BlockingPoolPolicy::shared(1));
+            .blocking_pool(BlockingPoolPolicy::shared().max(1));
         assert_eq!(
             builder.processor_config,
             RuntimeConfig {
                 workers_policy: WorkersPolicy::exactly(2),
                 stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
-                blocking_pool_policy: BlockingPoolPolicy::shared(1),
+                blocking_pool_policy: BlockingPoolPolicy::shared().max(1),
             }
         );
     }
@@ -271,15 +277,17 @@ mod tests {
 
     #[test]
     fn automatic_worker_selection_replaces_exact_count() {
-        let builder = Runtime::builder().workers(WorkersPolicy::exactly(2)).workers(WorkersPolicy::auto());
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::auto(),);
+        let builder = Runtime::builder()
+            .workers(WorkersPolicy::exactly(2))
+            .workers(WorkersPolicy::default());
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::default());
     }
 
     #[test]
     fn exact_processor_selection_preserves_other_resource_settings() {
         let builder = Runtime::builder()
             .stack_size(1024 * 1024)
-            .blocking_pool(BlockingPoolPolicy::shared(1))
+            .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .workers(WorkersPolicy::at_most(1))
             .workers(WorkersPolicy::exactly(2));
         assert_eq!(
@@ -287,7 +295,7 @@ mod tests {
             RuntimeConfig {
                 workers_policy: WorkersPolicy::exactly(2),
                 stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
-                blocking_pool_policy: BlockingPoolPolicy::shared(1),
+                blocking_pool_policy: BlockingPoolPolicy::shared().max(1),
             }
         );
     }
@@ -296,7 +304,6 @@ mod tests {
     fn build_and_stop_inside_futures_executor() {
         futures::executor::block_on(async {
             let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-            assert!(runtime.shared_state.iter().all(|state| state.get().is_some()));
 
             let (value, scheduler) = runtime
                 .scheduler()

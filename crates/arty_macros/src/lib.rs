@@ -9,8 +9,8 @@
 //! You do not need to depend on this companion crate directly.
 //!
 //! Both attributes start a runtime, pass its worker capabilities to an
-//! async function, and shut down when that function returns. Options
-//! select a worker limit, a custom runtime builder, or a renamed runtime module.
+//! async function, and shut down when that function returns. The optional
+//! `workers = N` argument caps the runtime's async worker count.
 //!
 //! The application-facing references are
 //! [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) and

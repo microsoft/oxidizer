@@ -39,22 +39,6 @@ impl Error {
         Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
     }
 
-    pub(crate) fn foreign_worker() -> Self {
-        Self::new(RuntimeValidation::ForeignWorker)
-    }
-
-    pub(crate) fn unregistered_worker() -> Self {
-        Self::new(RuntimeValidation::UnregisteredWorker)
-    }
-
-    pub(crate) fn unavailable_worker_services() -> Self {
-        Self::new(RuntimeValidation::UnavailableWorkerServices)
-    }
-
-    pub(crate) fn pin_from_async_worker() -> Self {
-        Self::new(RuntimeValidation::PinFromAsyncWorker)
-    }
-
     pub(crate) fn block_on_from_worker() -> Self {
         Self::new(RuntimeValidation::BlockOnFromWorker)
     }
@@ -107,10 +91,6 @@ impl StdError for InsufficientProcessors {}
 pub(crate) enum RuntimeValidation {
     InvalidWorkerCount,
     InvalidBlockingPoolLimit,
-    ForeignWorker,
-    UnregisteredWorker,
-    UnavailableWorkerServices,
-    PinFromAsyncWorker,
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
     ShutdownWaitFromBlockingCallback,
@@ -121,10 +101,6 @@ impl Display for RuntimeValidation {
         f.write_str(match self {
             Self::InvalidWorkerCount => "worker count must be greater than zero",
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
-            Self::ForeignWorker => "the worker passed to pin_current_thread_to must belong to this runtime",
-            Self::UnregisteredWorker => "the worker passed to pin_current_thread_to must be a registered runtime worker",
-            Self::UnavailableWorkerServices => "processor services for the worker passed to pin_current_thread_to are unavailable",
-            Self::PinFromAsyncWorker => "an async Arty worker cannot change its processor affinity",
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
             Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
@@ -185,26 +161,6 @@ mod tests {
                 Error::invalid_blocking_pool_limit(),
                 RuntimeValidation::InvalidBlockingPoolLimit,
                 "blocking pool max_workers must be greater than zero",
-            ),
-            (
-                Error::foreign_worker(),
-                RuntimeValidation::ForeignWorker,
-                "the worker passed to pin_current_thread_to must belong to this runtime",
-            ),
-            (
-                Error::unregistered_worker(),
-                RuntimeValidation::UnregisteredWorker,
-                "the worker passed to pin_current_thread_to must be a registered runtime worker",
-            ),
-            (
-                Error::unavailable_worker_services(),
-                RuntimeValidation::UnavailableWorkerServices,
-                "processor services for the worker passed to pin_current_thread_to are unavailable",
-            ),
-            (
-                Error::pin_from_async_worker(),
-                RuntimeValidation::PinFromAsyncWorker,
-                "an async Arty worker cannot change its processor affinity",
             ),
             (
                 Error::block_on_from_worker(),

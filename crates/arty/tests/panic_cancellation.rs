@@ -90,29 +90,6 @@ fn remote_cancellation_drop_panic_completes_shutdown() {
 }
 
 #[test]
-fn local_cancellation_drop_panic_completes_shutdown() {
-    let runtime = runtime();
-    let (started, ready) = mpsc::channel();
-    let (dropped, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    runtime
-        .scheduler()
-        .spawn_anywhere(
-            Unaware((started, dropped, Arc::clone(&drops))),
-            |cx, Unaware((started, dropped, drops))| async move {
-                let task = cx.local_scheduler().unwrap().spawn(move || pending_drop(started, dropped, drops));
-                drop(task);
-            },
-        )
-        .join()
-        .unwrap();
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    runtime.stop().unwrap();
-    received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-}
-
-#[test]
 fn borrowing_cancellation_drop_panic_releases_caller_storage() {
     use std::error::Error as _;
 

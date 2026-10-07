@@ -9,10 +9,10 @@ use performables::sync::mutex::Mutex;
 
 /// A task failed to return its result.
 ///
-/// Returned by [`JoinHandle`](super::JoinHandle),
-/// [`LocalJoinHandle`](super::LocalJoinHandle), and as the source of a scheduler's
-/// `block_on` error. Use [`is_panic`](Self::is_panic) to identify a task panic
-/// or [`is_shutdown`](Self::is_shutdown) to identify cancellation or rejection.
+/// Returned by [`JoinHandle`](super::JoinHandle) and as the source of a
+/// scheduler's `block_on` error. Use [`is_panic`](Self::is_panic) to identify a
+/// task panic or [`is_shutdown`](Self::is_shutdown) to identify cancellation or
+/// rejection.
 ///
 /// This is separate from an error returned by the task's own code. Joining a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.

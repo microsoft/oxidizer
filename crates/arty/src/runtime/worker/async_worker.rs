@@ -18,8 +18,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
-use crate::task::Builtins;
-use crate::task::local::LocalTaskScope;
+use crate::task::{Builtins, Scheduler};
 
 /// If we have nothing to do, we wait for something to happen for this long before executing
 /// another executor cycle (just in case something has showed up that we did not notice).
@@ -97,8 +96,6 @@ where
     clock_driver: ClockDriver,
 
     signal: Arc<WorkerSignal>,
-    _local_scope: LocalTaskScope,
-
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -125,7 +122,6 @@ where
         TSFF: FnOnce(TaskSet, Clock) -> TSF + 'static,
         TSF: Future<Output = TS>,
     {
-        let local_scope = LocalTaskScope::new();
         let (clock, clock_driver) = clock.activate();
 
         // SAFETY: We must go through the proper shutdown process before dropping this.
@@ -165,7 +161,6 @@ where
             clock_driver,
             blocking_worker,
             signal,
-            _local_scope: local_scope,
             _single_threaded: PhantomData,
         }
     }
@@ -266,9 +261,7 @@ where
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
-        // Destructors of cancelled tasks may try to submit local cleanup work.
-        // Close admission before executor cancellation borrows its task storage.
-        LocalTaskScope::close();
+        Scheduler::clear_current();
         // Drop the thread state, as it may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).
         self.thread_state = None;
@@ -323,21 +316,13 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
-    use crate::task::local::{LocalScheduler, LocalTaskBinding};
-
     #[derive(Clone, Debug)]
-    struct TestTaskContext {
-        local_task_scheduler: LocalScheduler,
-    }
+    struct TestTaskContext;
 
     impl TestTaskContext {
         #[cfg_attr(test, mutants::skip)]
-        fn new(tasks: TaskSet) -> Self {
-            Self {
-                local_task_scheduler: LocalTaskBinding::new(tasks, Sink::noop(), Arc::new(std::sync::atomic::AtomicBool::new(false)))
-                    .local_scheduler()
-                    .unwrap(),
-            }
+        fn new(_: TaskSet) -> Self {
+            Self
         }
     }
 
@@ -722,7 +707,7 @@ mod tests {
     #[test]
     fn smoke_test() {
         async_test(async || {
-            // Run worker, execute one remote task which executes and awaits one local task, shut down.
+            // Run worker, execute one remote task which awaits a nested task, then shut down.
             let (command_tx, command_rx) = channel::unbounded();
 
             let async_worker_thread = thread::spawn(move || {
@@ -753,21 +738,18 @@ mod tests {
             // We set this to signal that the outer task (the remote one) has successfully completed.
             let (outer_completed_tx, outer_completed_rx) = Event::boxed();
 
-            // We set this to signal that the inner task (the local one) has successfully completed.
+            // We set this to signal that the nested task has successfully completed.
             let (inner_completed_tx, inner_completed_rx) = Event::boxed();
 
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Some(Box::new({
-                        move |cx: TestTaskContext, tasks: &TaskSet| {
+                        move |_: TestTaskContext, tasks: &TaskSet| {
                             drop(tasks.add(async move {
-                                cx.local_task_scheduler
-                                    .spawn(async move || {
-                                        inner_completed_tx.send(());
-                                    })
-                                    .await
-                                    .unwrap();
-
+                                inner_completed_tx.send(());
+                            }));
+                            drop(tasks.add(async move {
+                                inner_completed_rx.await.unwrap();
                                 outer_completed_tx.send(());
                             }));
                         }
@@ -777,7 +759,6 @@ mod tests {
 
             // Command sent! Now wait for something to happen.
             outer_completed_rx.await.unwrap();
-            inner_completed_rx.into_value().unwrap();
 
             // Test body completed. Now let's shut it down.
             command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();

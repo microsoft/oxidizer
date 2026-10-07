@@ -12,12 +12,9 @@ blocking worker. Bootstrap collects every endpoint before constructing the
 dispatcher, then distributes a `DispatcherClient` back to every worker through
 its start channel.
 
-A worker publishes its immutable service bundle into the corresponding
-`SharedState` slot during initialization. The slot ordering matches dispatcher
-worker indexes; [`runtime/context.rs`](../src/runtime/context.rs) documents this
-write-once relationship. Bootstrap waits for every worker's success signal
-before returning the `Runtime`, so public scheduling starts with endpoints and
-worker services ready.
+Each worker constructs its `Builtins` after receiving the shared dispatcher.
+Bootstrap waits for every worker's success signal before returning the
+`Runtime`, so public scheduling starts with endpoints and worker services ready.
 
 OS thread-creation errors and cleanup after partial startup remain deferred to a
 separate lifecycle/error design. The accepted scope decision is recorded in

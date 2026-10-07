@@ -47,11 +47,9 @@ async fn stash_scheduler(cx: Builtins) {
                 scheduler: cx.scheduler().clone(),
             };
 
-            cx.local_scheduler()
-                .expect("On the same thread")
-                .spawn(async move || {
+            cx.scheduler()
+                .spawn(async move |_| {
                     let pi = thingy.calculate_pi().await;
-
                     assert_eq!(pi, 3.0);
                 })
                 .await
@@ -69,9 +67,8 @@ async fn stash_scheduler(cx: Builtins) {
 
             // And we try to use it from another task on the same thread.
             let result = cx
-                .local_scheduler()
-                .expect("On the same thread as cx")
-                .spawn(async move || {
+                .scheduler()
+                .spawn(async move |_| {
                     let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
 
                     // It works, right? Right.

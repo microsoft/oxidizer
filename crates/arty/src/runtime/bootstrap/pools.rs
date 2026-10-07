@@ -9,12 +9,12 @@ use crate::runtime::blocking_worker::BlockingPool;
 #[derive(Debug, Clone)]
 pub(in crate::runtime) enum BlockingPools {
     Shared(BlockingPool),
-    Isolated,
+    PerWorker(Option<NonZeroUsize>),
 }
 
 impl BlockingPools {
-    pub(in crate::runtime) const fn isolated() -> Self {
-        Self::Isolated
+    pub(in crate::runtime) const fn per_worker(max_workers: Option<NonZeroUsize>) -> Self {
+        Self::PerWorker(max_workers)
     }
 
     pub(in crate::runtime) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
@@ -24,7 +24,7 @@ impl BlockingPools {
     pub(super) fn build_worker(&self) -> BlockingPool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::Isolated => BlockingPool::new_with_mode(None, "isolated"),
+            Self::PerWorker(max_workers) => BlockingPool::new_with_mode(*max_workers, "per_worker"),
         }
     }
 }
@@ -41,8 +41,8 @@ mod tests {
     }
 
     #[test]
-    fn isolated_policy_creates_independent_blocking_pools() {
-        let pools = BlockingPools::isolated();
+    fn per_worker_policy_creates_independent_blocking_pools() {
+        let pools = BlockingPools::per_worker(NonZeroUsize::new(1));
         assert!(!pools.build_worker().shares_pool_with(&pools.build_worker()));
     }
 }

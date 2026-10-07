@@ -61,9 +61,7 @@
 //! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
-//! - [`Scheduler`](crate::task::Scheduler) keeps child work on its
-//!   worker; [`LocalScheduler`](crate::task::LocalScheduler) lets tasks
-//!   share non-`Send` state there.
+//! - [`Scheduler`](crate::task::Scheduler) keeps child work on its worker.
 //! - [`Clock`](crate::time::Clock) provides timers and timeouts;
 //!   [`ClockControl`](crate::time::ClockControl) controls time in tests.
 //! - [`Thread`](core::Thread) describes a worker, and
@@ -155,27 +153,18 @@ use arty_io_core as _;
 /// # Configuration
 ///
 /// Without options, the attribute uses
-/// [`Runtime::new`](crate::runtime::Runtime::new). You can instead specify:
+/// [`Runtime::new`](crate::runtime::Runtime::new). The optional configuration is:
 ///
 /// - `workers = N` caps the number of async workers. Use an integer literal
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
 ///   are available, Arty starts fewer workers; zero fails at construction.
-/// - `builder = expression` supplies a
-///   [`RuntimeBuilder`](crate::runtime::RuntimeBuilder). It runs once on the
-///   calling thread before workers start; use it for clocks, telemetry, pools,
-///   or other custom settings.
-/// - `runtime_path = ::renamed_arty::runtime` points generated code at a
-///   renamed or re-exported Arty runtime module.
 ///
-/// `workers` and `builder` cannot be combined. A worker limit does not limit
-/// blocking-pool threads. Without a limit, the runtime uses
-/// [`WorkersPolicy::auto`](crate::runtime::WorkersPolicy::auto).
+/// A worker limit does not limit blocking-pool threads. Without a limit, the
+/// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
 ///
-/// The builder expression runs before the async body, so it cannot use the
-/// injected argument or variables declared inside the body. It must produce
-/// a builder: write `builder = app_builder()` or `builder = try_builder()?`
-/// when the entry point's return type allows `?`. The attribute does not
-/// insert `?`. `runtime_path` does not change paths you write in the builder.
+/// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
+/// instead of the attribute when clocks, telemetry, blocking pools, stack size,
+/// or an exact/all-workers policy must be configured.
 ///
 /// # Panics
 ///
@@ -204,20 +193,11 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
-/// Configure worker and blocking-pool limits with a builder:
+/// Cap the async worker count:
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// fn app_builder() -> arty::runtime::RuntimeBuilder {
-///     use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-///
-///     Runtime::builder()
-///         .workers(WorkersPolicy::at_most(4))
-///         .blocking_pool(BlockingPoolPolicy::shared(8))
-/// }
-///
-/// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(builder = app_builder())]
+/// #[arty::main(workers = 4)]
 /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
@@ -240,9 +220,8 @@ pub use arty_macros::main;
 /// and `#[ignore]` are preserved. An ignored test starts no runtime unless
 /// the test harness runs it.
 ///
-/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
-/// `builder`, and `runtime_path` options also apply. By default, a test uses
-/// one worker; `workers` or `builder` can change that.
+/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
+/// option also applies. By default, a test uses one worker.
 ///
 /// # Simulated time
 ///
@@ -257,10 +236,10 @@ pub use arty_macros::main;
 /// `auto_advance_timers(true)` advances time eagerly; it does not wait for an
 /// idle runtime or guarantee the order of concurrent timers.
 ///
-/// The control argument works with `workers`, but not `builder`. To use a
-/// custom builder with controlled time, create the control in a synchronous
-/// test and call `builder.clock(control.clone()).build()`. Enabling
-/// `test-util` alone does not change a one-argument test's clock.
+/// The control argument works with `workers`. To use a custom runtime builder
+/// with controlled time, create the control in a synchronous test and call
+/// `builder.clock(control.clone()).build()`. Enabling `test-util` alone does
+/// not change a one-argument test's clock.
 ///
 /// # Panics
 ///
@@ -338,13 +317,12 @@ pub mod core {
     pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 }
 
-/// Clocks, timers, and timeouts.
+/// Runtime clocks and controlled test time.
 ///
-/// Enable `time` to use [`tick`] clocks without starting an Arty runtime.
-/// A task's `Builtins::clock()` has timers driven by its worker. Outside the
-/// runtime, delays on [`Clock`](crate::time::Clock) need a timer driver;
-/// `tick::SimpleClock` can read time without a timer driver when the underlying
-/// tick API is needed directly.
+/// Enable `time` to use [`Clock`](crate::time::Clock) without starting an Arty
+/// runtime. A task's `Builtins::clock()` has timers driven by its worker.
+/// Applications that need timer future types or extension traits should use
+/// the underlying [`tick`] API directly.
 ///
 /// Enable `test-util` in dev-dependencies to use `ClockControl` for simulated time.
 ///
@@ -365,11 +343,11 @@ pub mod core {
 /// ```
 #[cfg(any(test, feature = "time"))]
 pub mod time {
+    #[doc(inline)]
+    pub use tick::Clock;
     #[cfg(any(test, feature = "test-util"))]
     #[doc(inline)]
     pub use tick::ClockControl;
-    #[doc(inline)]
-    pub use tick::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch, Timeout};
 }
 
 #[cfg(test)]

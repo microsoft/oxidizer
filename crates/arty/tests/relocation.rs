@@ -167,19 +167,19 @@ fn assert_async_follows_relocation(observation: &RelocationObservation) {
 }
 
 #[test]
-fn relocating_scheduler_uses_destination_pool_when_isolated() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::isolated(), RelocationTarget::Scheduler);
+fn relocating_scheduler_uses_destination_pool_when_per_worker() {
+    let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Scheduler);
 
     assert_ne!(
         observation.blocking_task.before, observation.blocking_task.after,
-        "an isolated pool must dispatch blocking tasks to the destination worker's pool after relocating the scheduler"
+        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating the scheduler"
     );
     assert_async_follows_relocation(&observation);
 }
 
 #[test]
 fn relocating_scheduler_uses_same_pool_when_shared() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::shared(1), RelocationTarget::Scheduler);
+    let observation = relocate_and_observe(BlockingPoolPolicy::shared().max(1), RelocationTarget::Scheduler);
 
     assert_eq!(
         observation.blocking_task.before, observation.blocking_task.after,
@@ -189,19 +189,19 @@ fn relocating_scheduler_uses_same_pool_when_shared() {
 }
 
 #[test]
-fn relocating_builtins_uses_destination_pool_when_isolated() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::isolated(), RelocationTarget::Builtins);
+fn relocating_builtins_uses_destination_pool_when_per_worker() {
+    let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Builtins);
 
     assert_ne!(
         observation.blocking_task.before, observation.blocking_task.after,
-        "an isolated pool must dispatch blocking tasks to the destination worker's pool after relocating Builtins"
+        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating Builtins"
     );
     assert_async_follows_relocation(&observation);
 }
 
 #[test]
 fn relocating_builtins_uses_same_pool_when_shared() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::shared(1), RelocationTarget::Builtins);
+    let observation = relocate_and_observe(BlockingPoolPolicy::shared().max(1), RelocationTarget::Builtins);
 
     assert_eq!(
         observation.blocking_task.before, observation.blocking_task.after,

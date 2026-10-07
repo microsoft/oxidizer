@@ -19,31 +19,17 @@ use darling::ast::NestedMeta;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::{Expr, Ident, ItemFn, Lit, Path, parse_quote, parse2};
+use syn::{Expr, Ident, ItemFn, Lit, parse_quote, parse2};
 
 #[derive(Debug, FromMeta)]
 struct Args {
-    runtime_path: Option<Path>,
     #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
     workers: Option<Expr>,
-    #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
-    builder: Option<Expr>,
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &Path, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        if let Some(builder) = &self.builder {
-            if self.workers.is_some() {
-                return Err(syn::Error::new_spanned(builder, "`builder` cannot be combined with `workers`"));
-            }
-            if clock.is_some() {
-                return Err(syn::Error::new_spanned(
-                    builder,
-                    "`builder` cannot be combined with a ClockControl argument; configure the clock explicitly with RuntimeBuilder",
-                ));
-            }
-            return Ok(quote!(#runtime_path::RuntimeBuilder::build(#builder)));
-        }
+    fn runtime(&self, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
+        let runtime_path: syn::Path = parse_quote!(::arty::runtime);
         if self.workers.is_none() && clock.is_none() && !test {
             return Ok(quote!(#runtime_path::Runtime::new()));
         }
@@ -67,7 +53,7 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
     }
     Err(syn::Error::new_spanned(
         value,
-        "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`; use `builder` for expressions or processor policies",
+        "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`; use explicit runtime construction for expressions or processor policies",
     ))
 }
 
@@ -142,8 +128,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let default_path = parse_quote!(::arty::runtime);
-    let runtime_path = args.runtime_path.as_ref().unwrap_or(&default_path);
+    let runtime_path: syn::Path = parse_quote!(::arty::runtime);
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -188,7 +173,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(clock.as_ref().map(|_| &clock_binding), test) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -262,12 +247,12 @@ mod tests {
     }
 
     #[test]
-    fn test_preserves_attributes_and_runtime_override() {
+    fn test_preserves_attributes() {
         let expansion = test(
-            quote!(runtime_path = ::renamed),
+            TokenStream::new(),
             quote! {
                 #[should_panic(expected = "original payload")]
-                async fn fails(mut cx: renamed::Builtins) {
+                async fn fails(mut cx: arty::task::Builtins) {
                     fail(&mut cx).await;
                 }
             },
@@ -276,19 +261,19 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            let __arty_runtime = ::renamed::Runtime::builder()
-                .workers(::renamed::WorkersPolicy::at_most(1))
+            let __arty_runtime = ::arty::runtime::Runtime::builder()
+                .workers(::arty::runtime::WorkersPolicy::at_most(1))
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
-                .block_on(async move |mut cx: renamed::Builtins| {
+                .block_on(async move |mut cx: arty::task::Builtins| {
                     fail(&mut cx).await;
                 });
             let __arty_shutdown = __arty_runtime.stop();
             __arty_result
                 .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
-                .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
+                .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
         }
         "#);
     }
@@ -296,7 +281,7 @@ mod tests {
     #[test]
     fn workers_selects_at_most_the_literal_count() {
         let expansion = main(
-            quote!(workers = 4usize, runtime_path = ::renamed),
+            quote!(workers = 4usize),
             quote! {
                 pub async fn run(cx: <App as Types>::Context) -> AppResult {
                     run(cx).await
@@ -305,8 +290,8 @@ mod tests {
         );
         let expected = quote! {
             pub fn run() -> AppResult {
-                let __arty_runtime = ::renamed::Runtime::builder()
-                    .workers(::renamed::WorkersPolicy::at_most(4usize))
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::at_most(4usize))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -315,33 +300,7 @@ mod tests {
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
-                    .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
-            }
-        };
-        assert_eq!(expansion.to_string(), expected.to_string());
-    }
-
-    #[test]
-    fn builder_expression_preserves_explicit_question_mark_and_result_alias() {
-        let expansion = main(
-            quote!(builder = app_builder()?, runtime_path = ::renamed),
-            quote! {
-                async fn run(cx: Context) -> AppResult {
-                    run(cx).await
-                }
-            },
-        );
-        let expected = quote! {
-            fn run() -> AppResult {
-                let __arty_runtime = ::renamed::RuntimeBuilder::build(app_builder()?)
-                    .expect("failed to create the runtime for the entry point");
-                let __arty_result = __arty_runtime
-                    .scheduler()
-                    .block_on(async move |cx: Context| { run(cx).await });
-                let __arty_shutdown = __arty_runtime.stop();
-                __arty_result
-                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
-                    .unwrap_or_else(|error| ::renamed::__private::resume_error(error))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -350,7 +309,7 @@ mod tests {
     #[test]
     fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
         let expansion = test(
-            quote!(workers = 1, runtime_path = crate::renamed),
+            quote!(workers = 1),
             quote! {
                 #[ignore = "manual test"]
                 #[should_panic(expected = "original payload")]
@@ -364,9 +323,9 @@ mod tests {
             #[should_panic(expected = "original payload")]
             #[::core::prelude::v1::test]
             fn run() {
-                let __arty_clock_control = crate::renamed::__private::ClockControl::new();
-                let __arty_runtime = crate::renamed::Runtime::builder()
-                    .workers(crate::renamed::WorkersPolicy::at_most(1))
+                let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::at_most(1))
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -381,7 +340,7 @@ mod tests {
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
-                    .unwrap_or_else(|error| crate::renamed::__private::resume_error(error))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
             }
         };
         assert_eq!(expansion.to_string(), expected.to_string());
@@ -442,17 +401,6 @@ mod tests {
     }
 
     #[test]
-    fn builder_strings_remain_literals_for_type_checking() {
-        let expansion = main(
-            quote!(builder = "app_builder()"),
-            quote! {
-                async fn run(cx: Builtins) {}
-            },
-        );
-        assert!(expansion.to_string().contains("RuntimeBuilder :: build (\"app_builder()\")"));
-    }
-
-    #[test]
     fn invalid_worker_counts_report_errors() {
         for workers in [
             quote!(-0),
@@ -482,11 +430,8 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_configuration_is_rejected_in_either_order() {
-        for args in [
-            quote!(builder = configure(), workers = 1),
-            quote!(workers = 1, builder = configure()),
-        ] {
+    fn removed_configuration_options_are_rejected() {
+        for args in [quote!(builder = configure()), quote!(runtime_path = ::renamed)] {
             for expand in [main, test] {
                 let expansion = expand(
                     args.clone(),
@@ -495,17 +440,10 @@ mod tests {
                     },
                 )
                 .to_string();
-                assert!(expansion.contains("`builder` cannot be combined with `workers`"));
+                assert!(expansion.contains("compile_error"), "{expansion}");
+                assert!(expansion.contains("Unknown field"), "{expansion}");
             }
         }
-        let expansion = test(
-            quote!(builder = configure()),
-            quote! {
-                async fn run(cx: Builtins, control: ClockControl) {}
-            },
-        )
-        .to_string();
-        assert!(expansion.contains("`builder` cannot be combined with a ClockControl argument"));
     }
 
     #[test]
@@ -598,37 +536,13 @@ mod tests {
                 ),
             ),
             (
-                quote!(runtime_path =),
-                quote!(
-                    async fn run(cx: Builtins) {}
-                ),
-            ),
-            (
                 quote!(unknown = 1),
                 quote!(
                     async fn run(cx: Builtins) {}
                 ),
             ),
             (
-                quote!(runtime_path = ::a, runtime_path = ::b),
-                quote!(
-                    async fn run(cx: Builtins) {}
-                ),
-            ),
-            (
                 quote!(workers = 1, workers = 2),
-                quote!(
-                    async fn run(cx: Builtins) {}
-                ),
-            ),
-            (
-                quote!(builder = configure(), builder = configure()),
-                quote!(
-                    async fn run(cx: Builtins) {}
-                ),
-            ),
-            (
-                quote!(builder =),
                 quote!(
                     async fn run(cx: Builtins) {}
                 ),

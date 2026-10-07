@@ -13,19 +13,20 @@ use crate::runtime::error::Error;
 /// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
 /// callbacks separately from async workers.
 ///
-/// # Choosing between isolated and shared
+/// # Choosing between per-worker and shared
 ///
-/// [`isolated`](Self::isolated) gives each async worker its own pool. This
+/// [`per_worker`](Self::per_worker) gives each async worker its own pool. This
 /// separates blocking work between workers, but can use more threads as
 /// the number of workers grows.
 ///
 /// [`shared`](Self::shared), the default, gives all workers one pool with a
-/// common thread limit. Use `shared(n)` to cap that pool's threads.
+/// common thread limit. Chain [`max`](Self::max) to cap the threads in either
+/// the shared pool or each per-worker pool.
 ///
 /// Choose based on your workload; neither policy is faster in every case.
 /// Pool sizing must also account for dependency cycles. A blocking callback
 /// that waits for async work which in turn waits for the same saturated pool
-/// can deadlock. Shared pools make the dependency runtime-wide; isolated pools
+/// can deadlock. Shared pools make the dependency runtime-wide; per-worker pools
 /// confine it to one async worker's pool. Arty does not track transitive task
 /// dependencies to detect such cycles.
 ///
@@ -34,7 +35,7 @@ use crate::runtime::error::Error;
 /// ```
 /// use arty::runtime::{BlockingPoolPolicy, Runtime};
 ///
-/// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
+/// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockingPoolPolicy {
@@ -44,7 +45,7 @@ pub struct BlockingPoolPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 enum Mode {
-    Isolated,
+    PerWorker,
     Shared,
 }
 
@@ -59,42 +60,48 @@ impl BlockingPoolPolicy {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::isolated());
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::per_worker());
     /// ```
     #[must_use]
-    pub const fn isolated() -> Self {
+    pub const fn per_worker() -> Self {
         Self {
-            mode: Mode::Isolated,
+            mode: Mode::PerWorker,
             max_workers: None,
         }
     }
 
     /// Creates a policy sharing one blocking pool across all async workers.
     ///
-    /// `max_workers` limits the pool's threads. Pass a positive count, or `None`
-    /// to use the runtime's default limit. This limit is separate from the
-    /// async worker count. A zero count is retained in the policy and rejected
-    /// by [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
-    ///
     /// # Examples
     ///
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```
     #[must_use]
-    pub fn shared(max_workers: impl Into<Option<usize>>) -> Self {
+    pub const fn shared() -> Self {
         Self {
             mode: Mode::Shared,
-            max_workers: max_workers.into(),
+            max_workers: None,
         }
     }
 
-    /// Telemetry label identifying the pool mode (`isolated` / `shared`).
+    /// Sets the maximum number of threads in the shared pool or in each
+    /// per-worker pool.
+    ///
+    /// A zero count is retained in the policy and rejected by
+    /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
+    #[must_use]
+    pub const fn max(mut self, max_workers: usize) -> Self {
+        self.max_workers = Some(max_workers);
+        self
+    }
+
+    /// Telemetry label identifying the pool mode (`per_worker` / `shared`).
     pub(in crate::runtime) const fn mode_label(&self) -> &'static str {
         match self.mode {
-            Mode::Isolated => "isolated",
+            Mode::PerWorker => "per_worker",
             Mode::Shared => "shared",
         }
     }
@@ -103,12 +110,12 @@ impl BlockingPoolPolicy {
     /// workers at runtime.
     pub(in crate::runtime) fn into_pools(self) -> Result<BlockingPools, Error> {
         match self.mode {
-            Mode::Isolated => Ok(BlockingPools::isolated()),
+            Mode::PerWorker => {
+                let max_workers = validated_max(self.max_workers)?;
+                Ok(BlockingPools::per_worker(max_workers))
+            }
             Mode::Shared => {
-                let max_workers = self
-                    .max_workers
-                    .map(|max_workers| NonZeroUsize::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit))
-                    .transpose()?;
+                let max_workers = validated_max(self.max_workers)?;
                 Ok(BlockingPools::shared(max_workers))
             }
         }
@@ -117,8 +124,14 @@ impl BlockingPoolPolicy {
 
 impl Default for BlockingPoolPolicy {
     fn default() -> Self {
-        Self::shared(None)
+        Self::shared()
     }
+}
+
+fn validated_max(max_workers: Option<usize>) -> Result<Option<NonZeroUsize>, Error> {
+    max_workers
+        .map(|max_workers| NonZeroUsize::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit))
+        .transpose()
 }
 
 #[cfg(test)]
@@ -127,18 +140,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn isolated_into_pools_is_isolated() {
+    fn per_worker_into_pools_is_per_worker() {
         assert!(
-            matches!(BlockingPoolPolicy::isolated().into_pools().unwrap(), BlockingPools::Isolated),
-            "expected Isolated variant"
+            matches!(
+                BlockingPoolPolicy::per_worker().into_pools().unwrap(),
+                BlockingPools::PerWorker(None)
+            ),
+            "expected PerWorker variant"
         );
     }
 
     #[test]
     fn shared_into_pools_is_shared() {
         assert!(
-            matches!(BlockingPoolPolicy::shared(None).into_pools().unwrap(), BlockingPools::Shared(_)),
+            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), BlockingPools::Shared(_)),
             "expected Shared variant"
         );
+    }
+
+    #[test]
+    fn maximum_applies_to_both_pool_modes() {
+        assert!(matches!(
+            BlockingPoolPolicy::per_worker().max(3).into_pools().unwrap(),
+            BlockingPools::PerWorker(Some(max)) if max.get() == 3
+        ));
+        assert!(matches!(
+            BlockingPoolPolicy::shared().max(4).into_pools().unwrap(),
+            BlockingPools::Shared(pool) if pool.max_thread_count() == 4
+        ));
     }
 }

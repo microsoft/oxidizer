@@ -32,53 +32,29 @@ fn assert_send_sync() {
 }
 
 #[cfg(feature = "macros")]
-fn spawning_test_builder() -> arty::runtime::RuntimeBuilder {
-    let builder = Runtime::builder();
-    // Keep cross-worker submission under Miri without repeating it over every fake processor.
-    #[cfg(miri)]
-    let builder = builder.workers(arty::runtime::WorkersPolicy::exactly(2));
-    builder
-}
-
-#[cfg(feature = "macros")]
-#[arty::test(builder = spawning_test_builder())]
+#[arty::test(workers = 2)]
 async fn spawn_some_tasks(cx: Builtins) {
     let async_task = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Builtins| async move {
         YieldFuture::default().await;
         let child1 = cx.scheduler().spawn(async |_| 1111);
         let child2 = cx.scheduler().spawn_anywhere((), |()| async { 2222 });
         let child5 = cx.scheduler().spawn_blocking(|| 5555);
-        let child6 = cx.local_scheduler().unwrap().spawn(async || 6666);
-        let results = futures::join!(child1, child2, child5, child6);
-        assert_eq!(
-            (results.0.unwrap(), results.1.unwrap(), results.2.unwrap(), results.3.unwrap()),
-            (1111, 2222, 5555, 6666)
-        );
+        let results = futures::join!(child1, child2, child5);
+        assert_eq!((results.0.unwrap(), results.1.unwrap(), results.2.unwrap()), (1111, 2222, 5555));
     });
 
-    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Builtins| async move {
+    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |_: Builtins| async move {
         let canary = Rc::new("I am a little bird who only lives on one thread".to_owned());
-        let length = cx
-            .local_scheduler()
-            .unwrap()
-            .spawn({
-                let canary = Rc::clone(&canary);
-                async move || {
-                    YieldFuture::default().await;
-                    canary.len()
-                }
-            })
-            .await
-            .unwrap();
+        YieldFuture::default().await;
+        let length = canary.len();
         assert_eq!(length, canary.len());
     });
 
     cx.scheduler()
         .spawn_anywhere(cx.clone(), |cx: Builtins| async move {
             YieldFuture::default().await;
-            cx.local_scheduler()
-                .unwrap()
-                .spawn(async || {
+            cx.scheduler()
+                .spawn(async |_| {
                     YieldFuture::default().await;
                 })
                 .await

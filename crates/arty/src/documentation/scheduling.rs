@@ -60,38 +60,6 @@
 //! Pass a factory, not an already-created future. Ordinary captures and
 //! results are not relocated automatically.
 //!
-//! # Share non-Send state between local tasks
-//!
-//! Use [`Builtins::local_scheduler`](crate::task::Builtins::local_scheduler)
-//! on a worker when captures or results are also non-`Send`. Local tasks stay
-//! on that worker, but must still own what they capture:
-//!
-//! ```
-//! use std::rc::Rc;
-//!
-//! use arty::task::Builtins;
-//!
-//! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
-//! let value = Rc::new(String::from("worker-local"));
-//! let local = cx
-//!     .local_scheduler()
-//!     .expect("the task runs on its associated worker");
-//! let returned = local
-//!     .spawn({
-//!         let value = Rc::clone(&value);
-//!         async move || value
-//!     })
-//!     .await?;
-//! assert!(Rc::ptr_eq(&value, &returned));
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! Await local joins on their worker; local schedulers and joins cannot cross
-//! threads. To borrow data from a synchronous caller, use
-//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on).
-//!
 //! # Keep blocking work off async workers
 //!
 //! A long synchronous call stops an async worker from polling other tasks.

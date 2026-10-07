@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use crate::runtime::builder::RuntimeBuilder;
-use crate::runtime::context::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
 use crate::task::{RuntimeScheduler, Scheduler};
@@ -52,7 +51,6 @@ use crate::task::{RuntimeScheduler, Scheduler};
 #[derive(Debug)]
 pub struct Runtime {
     scheduler: RuntimeScheduler,
-    pub(in crate::runtime) shared_state: SharedState,
     shutdown_on_drop: bool,
 }
 
@@ -91,7 +89,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::{BlockingPoolPolicy, Runtime};
     ///
-    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared(4));
+    /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```
     #[must_use]
     pub fn builder() -> RuntimeBuilder {
@@ -131,9 +129,9 @@ impl Runtime {
 
     /// Consumes this runtime, requests shutdown, and waits for its workers to stop.
     ///
-    /// Cancels pending async and local tasks and prevents queued blocking
-    /// callbacks from starting. Already-running blocking callbacks are allowed to
-    /// finish. Shutdown is still requested when the calling context cannot wait.
+    /// Cancels pending async tasks and prevents queued blocking callbacks from
+    /// starting. Already-running blocking callbacks are allowed to finish.
+    /// Shutdown is still requested when the calling context cannot wait.
     /// `Ok(())` means shutdown has completed. A calling-context error does not
     /// mean the workers have stopped.
     ///
@@ -183,10 +181,9 @@ impl Runtime {
         self.scheduler.dispatcher.wait()
     }
 
-    pub(in crate::runtime) const fn with_dispatcher(dispatcher: DispatcherClient, shared_state: SharedState) -> Self {
+    pub(in crate::runtime) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
-            shared_state,
             shutdown_on_drop: true,
         }
     }
@@ -236,7 +233,7 @@ mod tests {
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
         )));
-        let runtime = Runtime::with_dispatcher(dispatcher, vec![].into());
+        let runtime = Runtime::with_dispatcher(dispatcher);
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
     }
 

@@ -53,7 +53,7 @@ fn active_sink() -> Sink {
 fn runtime(sink: Sink) -> Runtime {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .sink(sink)
         .build()
         .expect("benchmark requires one available processor")

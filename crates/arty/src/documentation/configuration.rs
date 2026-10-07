@@ -14,7 +14,7 @@
 //!
 //! | Policy | Meaning |
 //! | --- | --- |
-//! | `auto()` (default) | Let Arty choose; currently uses all available processors, but that policy may evolve |
+//! | `default()` | Let Arty choose; currently uses all available processors, but that policy may evolve |
 //! | `all()` | Use all available processors explicitly |
 //! | `at_most(n)` | Use no more than `n`, clamping to available processors |
 //! | `exactly(n)` | Require `n`; return `runtime::Error` if fewer are available |
@@ -22,18 +22,15 @@
 //! The runtime rejects a count of zero when it is built.
 //!
 //! ```
-//! use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
-//! use arty::task::Builtins;
+//! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 //!
-//! fn app_builder() -> RuntimeBuilder {
-//!     Runtime::builder()
+//! fn main() -> Result<(), ohno::AppError> {
+//!     let runtime = Runtime::builder()
 //!         .workers(WorkersPolicy::at_most(2))
-//!         .blocking_pool(BlockingPoolPolicy::shared(4))
-//! }
-//!
-//! #[arty::main(builder = app_builder())]
-//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
-//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+//!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
+//!         .build()?;
+//!     assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
+//!     runtime.stop()?;
 //!     Ok(())
 //! }
 //! ```
@@ -49,15 +46,16 @@
 //!
 //! Blocking work runs off the async workers. By default, they share one pool.
 //! Use [`BlockingPoolPolicy::shared`](crate::runtime::BlockingPoolPolicy::shared)
-//! to set a runtime-wide thread limit, or
-//! [`isolated`](crate::runtime::BlockingPoolPolicy::isolated) to give each
-//! worker its own pool. Isolated pools can use more threads in total.
+//! for one runtime-wide pool, or
+//! [`per_worker`](crate::runtime::BlockingPoolPolicy::per_worker) to give each
+//! worker its own pool. Chain [`max`](crate::runtime::BlockingPoolPolicy::max)
+//! to set the thread limit. Per-worker pools can use more threads in total.
 //! Choose based on your workload rather than assuming one policy is faster.
 //!
 //! Each blocking callback occupies one pool thread until it returns. Do not
 //! create a cycle where a callback waits for async work that then awaits
 //! another callback from the same saturated pool. Shared pools expose every
-//! worker to that cycle; isolated pools limit it to one worker's pool. Arty
+//! worker to that cycle; per-worker pools limit it to one worker's pool. Arty
 //! rejects direct polling of a same-pool blocking handle, but it does not track
 //! transitive dependencies through spawned async tasks.
 //!
@@ -67,13 +65,13 @@
 //! the runtime for you. By default, `main` chooses workers automatically and
 //! `test` uses one worker.
 //!
-//! Use `workers = N` to cap the worker count or `builder = expression` for
-//! custom settings; they cannot be combined. The builder expression runs
-//! before workers start.
+//! Use `workers = N` to cap the worker count. Build the runtime explicitly for
+//! custom clocks, telemetry, blocking pools, stack sizes, or exact worker
+//! policies.
 //!
-//! See [`main`](crate::main) and [`test`](crate::test) for all options. Build
-//! the runtime yourself if you need to handle construction errors or own
-//! its shutdown.
+//! See [`main`](crate::main) and [`test`](crate::test) for the supported
+//! signature and worker option. Build the runtime yourself if you need to
+//! handle construction errors or own its shutdown.
 //!
 //! # Clocks and telemetry
 //!

@@ -3,34 +3,29 @@
 
 //! Worker services and thread-aware relocation.
 
-use many_cpus::ProcessorSet;
 use observed::Sink;
 #[cfg(debug_assertions)]
 use observed::emit;
-use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
-use crate::runtime::context::{RuntimeBuiltins, SharedState};
+use crate::runtime::context::RuntimeBuiltins;
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
-use crate::task::local::{LocalScheduler, LocalTaskBinding};
 use crate::task::scheduler::Scheduler;
 
 /// Services supplied to an async task on its worker.
 ///
-/// Use [`scheduler`](Self::scheduler) for child tasks,
-/// [`local_scheduler`](Self::local_scheduler) for non-[`Send`] captures and results,
-/// and [`clock`](Self::clock) for delays and timeouts. Runtime task factories
-/// receive this value by ownership.
+/// Use [`scheduler`](Self::scheduler) for child tasks and [`clock`](Self::clock)
+/// for delays and timeouts. Runtime task factories receive this value by
+/// ownership.
 ///
 /// New tasks receive their own `Builtins`. Cloning or moving an existing value
 /// does not change its worker or keep its runtime running.
 ///
 /// [`Scheduler::spawn_anywhere`] can relocate an existing `Builtins` to
 /// another ready worker of the same runtime. A worker from another runtime, or
-/// one that is not ready, leaves its association unchanged. Local scheduling
-/// is available only on the associated worker.
+/// one that is not ready, leaves its association unchanged.
 ///
 /// # Examples
 ///
@@ -57,8 +52,6 @@ use crate::task::scheduler::Scheduler;
 pub struct Builtins {
     pub(crate) scheduler: Scheduler,
     thread: Thread,
-    inner: Arc<InnerBuiltins>,
-    pub(crate) shared_state: SharedState,
     clock: Clock,
     sink: Sink,
 }
@@ -176,38 +169,6 @@ impl Builtins {
         &self.sink
     }
 
-    /// Returns a local scheduler when called on the associated worker.
-    ///
-    /// Use it to share non-[`Send`] state between tasks on the same worker.
-    /// The returned scheduler is owned, but cannot be sent to another thread.
-    ///
-    /// Returns `None` when called outside this value's associated worker.
-    /// Carrying `Builtins` to another thread does not grant local scheduling
-    /// access there.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    /// use std::rc::Rc;
-    ///
-    /// let local = cx
-    ///     .local_scheduler()
-    ///     .expect("the task runs on its associated worker");
-    /// let result = local.spawn(async || Rc::new(42)).await?;
-    /// assert_eq!(*result, 42);
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn local_scheduler(&self) -> Option<LocalScheduler> {
-        self.inner.local_task_binding.local_scheduler()
-    }
-
     #[cfg_attr(test, mutants::skip)]
     #[cfg(debug_assertions)]
     fn validate(&self) {
@@ -244,20 +205,9 @@ impl ThreadAware for Builtins {
         let Some(worker_index) = self.scheduler.resolve_worker_index(destination) else {
             return;
         };
-        let Some(inner) = self
-            .shared_state
-            .get(usize::from(worker_index))
-            .expect("registered runtime worker must have a shared-state slot")
-            .get()
-            .cloned()
-        else {
-            return;
-        };
         let source = self.thread.clone();
 
-        // Reuse the validated slot index to keep all runtime services on the same worker.
         self.scheduler.relocate_to_worker(destination, worker_index);
-        self.inner = inner;
         self.thread = destination.clone();
         self.clock.relocate(Some(&source), destination);
         self.sink.relocate(Some(&source), destination);
@@ -265,29 +215,12 @@ impl ThreadAware for Builtins {
 }
 
 impl Builtins {
-    pub(crate) fn sync_init(shared_state: &SharedState, builtins: RuntimeBuiltins) -> Self {
-        let thread = builtins.core.thread;
-
-        let inner = Arc::new(InnerBuiltins {
-            local_task_binding: builtins.core.local_scheduler,
-            processor_set: builtins.core.processor_set,
-        });
-
-        // Each worker initializes its own thread once. Write-once storage prevents
-        // thread-bound runtime state from being replaced after it becomes observable.
-        shared_state
-            .get(usize::from(builtins.task_scheduler.current_worker_index()))
-            .expect("registered runtime worker must have a shared-state slot")
-            .set(Arc::clone(&inner))
-            .expect("each runtime thread is initialized exactly once");
-
+    pub(crate) fn sync_init(builtins: RuntimeBuiltins) -> Self {
         Self {
             scheduler: builtins.task_scheduler,
-            thread,
-            inner,
-            shared_state: Arc::clone(shared_state),
+            thread: builtins.thread,
             clock: builtins.clock,
-            sink: builtins.core.sink,
+            sink: builtins.sink,
         }
     }
 }
@@ -311,11 +244,4 @@ impl AsRef<Sink> for Builtins {
     fn as_ref(&self) -> &Sink {
         self.sink()
     }
-}
-
-/// Immutable worker-local service bundle published once into its runtime's shared slots.
-#[derive(Debug)]
-pub(crate) struct InnerBuiltins {
-    pub(crate) processor_set: ProcessorSet,
-    local_task_binding: LocalTaskBinding,
 }

@@ -12,7 +12,7 @@
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
 //! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
 //! keeps children on their parent's worker. [`RuntimeOperations`] can request
-//! shutdown or pin an external thread to a worker's processors.
+//! shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
 //! pending tasks and waits for blocking callbacks that have already started;

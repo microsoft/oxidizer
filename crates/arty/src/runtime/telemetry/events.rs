@@ -42,7 +42,7 @@ impl From<usize> for ProcessorIndex {
     }
 }
 
-/// Blocking worker pool mode label (`isolated` / `shared`).
+/// Blocking worker pool mode label (`per_worker` / `shared`).
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone, Copy)]
 pub(crate) struct BlockingWorkerPoolMode(pub &'static str);
@@ -256,7 +256,7 @@ mod tests {
             RuntimeStarted {
                 processors_available: SystemMetricCount(8),
                 processors_used: SystemMetricCount(2),
-                blocking_worker_pool_mode: BlockingWorkerPoolMode("isolated"),
+                blocking_worker_pool_mode: BlockingWorkerPoolMode("per_worker"),
                 stack_size_bytes: SystemMetricCount(1024),
             }
         );
@@ -267,7 +267,7 @@ mod tests {
                 .body("runtime started")
                 .dimension("processors.available", "8")
                 .dimension("processors.used", "2")
-                .dimension("blocking_worker_pool.mode", "isolated")
+                .dimension("blocking_worker_pool.mode", "per_worker")
                 .dimension("stack_size_bytes", "1024")
                 .metric()
         );
@@ -550,7 +550,7 @@ mod tests {
         emit!(
             sink,
             BlockingWorkerPoolSaturated {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode("isolated"),
+                blocking_worker_pool_mode: BlockingWorkerPoolMode("per_worker"),
                 max_threads: SystemMetricCount(64),
             }
         );
@@ -559,7 +559,7 @@ mod tests {
             processor.single_event(),
             ExpectedEvent::new("arty.rt.blocking_worker.pool_saturated", Severity::Warn)
                 .body("blocking worker pool is saturated and cannot grow")
-                .dimension("blocking_worker_pool.mode", "isolated")
+                .dimension("blocking_worker_pool.mode", "per_worker")
                 .dimension("blocking_worker_pool.max_threads", "64")
                 .metric()
         );

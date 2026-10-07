@@ -13,10 +13,9 @@ use crate::runtime::error::Error;
 /// The runtime starts one async worker per selected processor. Pass a
 /// policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
-/// The default, [`auto`](Self::auto), lets Arty choose the count. Use
-/// [`at_most`](Self::at_most) for an upper bound, [`exactly`](Self::exactly) when
-/// fewer workers would be an error, or [`all`](Self::all) to require all available
-/// processors.
+/// [`Default`] lets Arty choose the count. Use [`at_most`](Self::at_most) for
+/// an upper bound, [`exactly`](Self::exactly) when fewer workers would be an
+/// error, or [`all`](Self::all) to require all available processors.
 ///
 /// Counts are validated when the runtime is built. Both `at_most(0)` and
 /// `exactly(0)` produce a construction error.
@@ -72,8 +71,8 @@ impl WorkersPolicy {
 
     /// Creates a policy using all available processors.
     ///
-    /// This explicitly selects all processors rather than relying on
-    /// [`auto`](Self::auto)'s default policy.
+    /// This explicitly selects all processors rather than relying on the
+    /// default policy.
     ///
     /// # Examples
     ///
@@ -85,23 +84,6 @@ impl WorkersPolicy {
     #[must_use]
     pub const fn all() -> Self {
         Self(WorkersPolicyKind::All)
-    }
-
-    /// Creates the default policy, allowing Arty to choose the worker count.
-    ///
-    /// The selection policy may evolve. It currently uses all available processors.
-    /// Use an explicit policy when the worker count matters to the application.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
-    ///
-    /// let builder = Runtime::builder().workers(WorkersPolicy::auto());
-    /// ```
-    #[must_use]
-    pub const fn auto() -> Self {
-        Self(WorkersPolicyKind::Auto)
     }
 
     pub(crate) fn select(&self, available: &ProcessorSet) -> Result<ProcessorSet, Error> {
@@ -164,7 +146,7 @@ mod tests {
 
     #[test]
     fn default_runtime_shares_blocking_pool() {
-        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared(None));
+        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
     }
 
     #[cfg(not(miri))]
@@ -213,7 +195,7 @@ mod tests {
     #[test]
     fn automatic_count_uses_all_available_processors() {
         let available = SystemHardware::current().processors();
-        assert_eq!(WorkersPolicy::auto().select(&available).unwrap().len(), available.len(),);
+        assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), available.len(),);
     }
 
     #[cfg(not(miri))]

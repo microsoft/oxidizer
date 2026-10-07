@@ -47,7 +47,6 @@
 //!     .scheduler()
 //!     .spawn_anywhere(cx.clone(), |moved| async move {
 //!         assert_eq!(moved.thread().id(), std::thread::current().id());
-//!         assert!(moved.local_scheduler().is_some());
 //!         (moved.thread().clone(), moved.scheduler().clone())
 //!     })
 //!     .await?;
@@ -64,10 +63,8 @@
 //! # What stays put
 //!
 //! `spawn_anywhere` starts a new task; it never moves a running one. Simply
-//! moving or cloning `Builtins` does not change its worker association, and
-//! [`local_scheduler()`](crate::task::Builtins::local_scheduler) is only
-//! available on that worker. Scheduler handles and worker coordinates do not
-//! keep the runtime alive.
+//! moving or cloning `Builtins` does not change its worker association.
+//! Scheduler handles and worker coordinates do not keep the runtime alive.
 //!
 //! Ordinary `spawn` and `block_on` do not relocate captures or returned values.
 //! `spawn_anywhere` relocates its explicit payload, but not its result.

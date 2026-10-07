@@ -29,8 +29,8 @@ independently.
 cloned or used from another thread.
 
 Ordinary task factories and results must be `Send`, but their futures need not
-be. Use the local scheduler for non-`Send` captures or results; local schedulers
-and joins cannot leave their worker.
+be. Create worker-local, non-`Send` state inside the task future after it reaches
+the destination worker.
 
 `spawn_anywhere` lets the runtime choose a worker;
 `Scheduler::spawn_everywhere` starts one task per worker. Submission order
@@ -57,7 +57,7 @@ See the
 
 `spawn_blocking` runs a synchronous callback away from async workers. Captures
 and results must be `Send`. Workers share one blocking pool by default; the
-isolated policy separates their blocking workloads into one pool per worker,
+per-worker policy separates their blocking workloads into one pool per worker,
 potentially using more threads.
 
 Arty provides timers, but not async network or file I/O drivers. An async I/O
