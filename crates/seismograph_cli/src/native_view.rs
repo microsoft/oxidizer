@@ -10,7 +10,8 @@ use std::fmt::Write as _;
 
 use seismograph_rallocator::native::{Freshness, ObservationSource, Owner, Ranges, Snapshot};
 
-pub(crate) const LIMITATIONS: &str = "Native capacity is NOT application-live memory. Last contributor is NOT the current lease holder. \
+pub(crate) const LIMITATIONS: &str = "Native capacity is NOT application-live memory. Last contributor is not necessarily the current lease holder. \
+     Matching lease generations mean contributed during that lease, not verified current ownership. \
      Busy/unobserved owners are unknown, not zero. Bounded walks can omit slabs/ranges/messages. \
      Matching rounds mean contributed this round, not an exact current census; the first round may predate polling. \
      Ages are measured at capture. Large outstanding allocator ranges include pending/retained frees, not app-live counts. \
