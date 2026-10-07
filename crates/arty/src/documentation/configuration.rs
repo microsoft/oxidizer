@@ -54,6 +54,13 @@
 //! worker its own pool. Isolated pools can use more threads in total.
 //! Choose based on your workload rather than assuming one policy is faster.
 //!
+//! Each blocking callback occupies one pool thread until it returns. Do not
+//! create a cycle where a callback waits for async work that then awaits
+//! another callback from the same saturated pool. Shared pools expose every
+//! worker to that cycle; isolated pools limit it to one worker's pool. Arty
+//! rejects direct polling of a same-pool blocking handle, but it does not track
+//! transitive dependencies through spawned async tasks.
+//!
 //! # Entry-point attributes
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop

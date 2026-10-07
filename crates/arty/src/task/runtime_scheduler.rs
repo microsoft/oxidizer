@@ -10,10 +10,8 @@ use pin_project::pin_project;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;
-use crate::runtime::blocking_worker::{current_blocking_pool, with_active_blocking_wait_pool};
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::thread::is_async_worker_thread;
-use crate::task::{Builtins, JoinHandle};
+use crate::task::{Builtins, JoinHandle, Scheduler};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
 
@@ -105,11 +103,11 @@ impl RuntimeScheduler {
     /// a worker belonging to another runtime. It also returns an error from
     /// inside an already-running `futures` executor, before submitting the task.
     ///
-    /// Calling this from a blocking callback is supported for async work that
-    /// does not wait for another task from the same blocking pool. Same-pool
-    /// blocking joins, including those reached through spawned async tasks, are
-    /// rejected whether they are awaited or waited synchronously, preventing
-    /// pool starvation.
+    /// Calling this from a blocking callback is supported, but the submitted
+    /// work must not depend on another task queued to that callback's pool.
+    /// Such a dependency cannot run until the callback returns, while the
+    /// callback cannot return until `block_on` completes, causing a deadlock.
+    /// Arty does not track transitive task dependencies to detect this cycle.
     ///
     /// # Examples
     ///
@@ -130,10 +128,9 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'a,
         R: Send + 'static,
     {
-        if is_async_worker_thread() {
+        if Scheduler::is_current_worker_thread() {
             return Err(Error::new("block_on cannot be called from an async Arty worker"));
         }
-        let blocking_pool = current_blocking_pool();
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);
         let (completion, destroyed) = channel::unbounded();
@@ -142,8 +139,7 @@ impl RuntimeScheduler {
             inner: future_factory,
             completion,
         };
-        let factory: BoxedFutureFactory<'a, R> =
-            Box::new(move |cx| with_active_blocking_wait_pool(storage.into_future(cx), blocking_pool).boxed_local());
+        let factory: BoxedFutureFactory<'a, R> = Box::new(move |cx| storage.into_future(cx).boxed_local());
         // SAFETY: ScopedJoin cannot return or unwind until the borrowing factory/future
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
@@ -175,7 +171,7 @@ impl RuntimeScheduler {
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
-    /// assert_eq!(task.wait()?, 4);
+    /// assert_eq!(futures::executor::block_on(task)?, 4);
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -187,10 +183,10 @@ impl RuntimeScheduler {
     ///
     /// struct SendOnly(u32);
     /// let runtime = Runtime::new()?;
-    /// let result = runtime
+    /// let task = runtime
     ///     .scheduler()
-    ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) })
-    ///     .wait()?;
+    ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) });
+    /// let result = futures::executor::block_on(task)?;
     /// assert_eq!(result.0, 42);
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -217,6 +213,12 @@ impl RuntimeScheduler {
     /// Shutdown rejects new callbacks and cancels queued callbacks before they
     /// start. Already-running callbacks are allowed to finish.
     ///
+    /// Do not synchronously poll a handle for work submitted to the same pool;
+    /// direct attempts panic. Also avoid indirect cycles where a blocking
+    /// callback calls [`block_on`](Self::block_on) and that async work awaits
+    /// blocking work from the callback's pool. Arty does not detect that
+    /// transitive dependency and the pool can deadlock.
+    ///
     /// # Examples
     ///
     /// ```
@@ -224,7 +226,7 @@ impl RuntimeScheduler {
     ///
     /// let runtime = Runtime::new()?;
     /// let task = runtime.scheduler().spawn_blocking(|| 6 * 7);
-    /// assert_eq!(task.wait()?, 42);
+    /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>

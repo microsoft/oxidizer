@@ -8,12 +8,15 @@
 
 mod panic_support;
 
+mod support;
+
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 
 testing_aids::init_tracing!();
 
@@ -53,7 +56,7 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
     runtime.stop().unwrap();
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(invoked.load(Ordering::SeqCst), 0);
-    assert!(queued.wait().unwrap_err().is_shutdown());
+    assert!(queued.join().unwrap_err().is_shutdown());
 }
 
 #[test]

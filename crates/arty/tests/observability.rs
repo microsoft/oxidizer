@@ -14,11 +14,14 @@
 
 testing_aids::init_tracing!();
 
+mod support;
+
 use arty::runtime::{Runtime, WorkersPolicy};
 #[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
+use support::JoinHandleExt as _;
 #[cfg(all(debug_assertions, not(miri)))]
 use thread_aware::ThreadAware;
 
@@ -91,7 +94,7 @@ fn validation_follows_accepted_worker(known_source: bool) {
                 (cx, scheduler, thread)
             })
         })
-        .map(|handle| handle.wait().expect("each worker must return its services"))
+        .map(|handle| handle.join().expect("each worker must return its services"))
         .collect();
     let mut builtins = workers[0].0.clone();
     let source = workers[0].2.clone();
@@ -102,7 +105,7 @@ fn validation_follows_accepted_worker(known_source: bool) {
             builtins.relocate(known_source.then_some(&source), cx.thread());
             let _ = builtins.thread();
         })
-        .wait()
+        .join()
         .expect("relocation must complete on the destination worker");
     runtime.stop().expect("workers must shut down after validation");
 
@@ -126,7 +129,7 @@ fn started_event_reports_worker_policy() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -151,7 +154,7 @@ fn each_async_worker_starts_and_stops() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -171,7 +174,7 @@ fn async_worker_os_threads_report_lifecycle() {
         .build()
         .unwrap();
 
-    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).wait().unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap();
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -211,7 +214,7 @@ fn spawned_task_emits_spawned_and_completed() {
         .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async {}))
         .collect();
     for handle in handles {
-        handle.wait().unwrap();
+        handle.join().unwrap();
     }
     runtime.stop().unwrap();
 
@@ -238,7 +241,7 @@ fn panicking_task_emits_panicked_event() {
         .scheduler()
         .spawn_anywhere::<(), _, ()>((), |_, ()| async { panic!("intentional panic for telemetry test") });
     // The panic propagates through `wait()`; swallow it so the test thread survives.
-    assert!(handle.wait().unwrap_err().is_panic());
+    assert!(handle.join().unwrap_err().is_panic());
     runtime.stop().unwrap();
 
     let events = processor.events();
@@ -260,7 +263,7 @@ fn round_robin_submissions_emit_one_spawn_event_per_worker() {
         .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async {}))
         .collect();
     for handle in handles {
-        handle.wait().unwrap();
+        handle.join().unwrap();
     }
     runtime.stop().unwrap();
 
@@ -287,7 +290,7 @@ fn local_task_emits_spawned_and_completed_with_local_placement() {
                 .await
                 .unwrap();
         })
-        .wait()
+        .join()
         .unwrap();
     runtime.stop().unwrap();
 

@@ -6,6 +6,8 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
+mod support;
+
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
@@ -21,6 +23,7 @@ use arty::time::Clock;
 use futures::future::join_all;
 use observed::Sink;
 use observed_testing::{TEST_ID, test_emitter};
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -37,7 +40,7 @@ fn worker_scheduler(runtime: &Runtime) -> Scheduler {
 fn count_workers(runtime: &Runtime) -> usize {
     let tasks = worker_scheduler(runtime).spawn_everywhere((), |()| async { thread::current().id() });
     let count = tasks.len();
-    let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.wait().unwrap()).collect();
+    let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), count);
     count
 }
@@ -112,8 +115,8 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
     let first = worker_scheduler(&runtime);
     let second = worker_scheduler(&runtime);
     assert_eq!(
-        first.spawn_blocking(|| thread::current().id()).wait().unwrap(),
-        second.spawn_blocking(|| thread::current().id()).wait().unwrap()
+        first.spawn_blocking(|| thread::current().id()).join().unwrap(),
+        second.spawn_blocking(|| thread::current().id()).join().unwrap()
     );
     runtime.stop().unwrap();
     let events = processor.events();
@@ -160,10 +163,10 @@ fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
         assert!(
             scheduler
                 .spawn(async |cx| cx.thread().id() == thread::current().id())
-                .wait()
+                .join()
                 .unwrap()
         );
-        let outcome = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
+        let outcome = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
         assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
     });
 }
@@ -173,10 +176,10 @@ fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining(
     let runtime = runtime(1);
     let scheduler = worker_scheduler(&runtime);
     assert_ne!(
-        scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(),
-        scheduler.spawn(async |_| thread::current().id()).wait().unwrap()
+        scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
+        scheduler.spawn(async |_| thread::current().id()).join().unwrap()
     );
-    let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
+    let outcome = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap();
     assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
 }
 
@@ -197,7 +200,7 @@ fn nested_block_on_rejects_the_factory_before_submission() {
 }
 
 #[test]
-fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
+fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
     completes_without_deadlock(|| {
         let first = Runtime::builder()
             .workers(WorkersPolicy::exactly(1))
@@ -209,15 +212,10 @@ fn worker_context_belongs_to_one_runtime_and_rejects_all_nested_waits() {
         let second_scheduler = second.scheduler();
         assert!(!first_scheduler.is_on_worker());
         assert!(!second_scheduler.is_on_worker());
-        let ready = first_scheduler.spawn_blocking(|| 42);
-        first_scheduler.spawn_blocking(|| ()).wait().unwrap();
         first_scheduler
             .block_on(async |_| {
                 assert!(first_scheduler.is_on_worker());
                 assert!(!second_scheduler.is_on_worker());
-                // The single blocking pool has already delivered this result.
-                // Prove the worker wait guard before attempting a nested borrowing wait.
-                catch_unwind(AssertUnwindSafe(|| ready.wait())).unwrap_err();
                 let invoked = AtomicBool::new(false);
                 for scheduler in [first_scheduler, second_scheduler] {
                     scheduler
@@ -256,7 +254,7 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
                 .unwrap();
             (on_worker, value)
         })
-        .wait()
+        .join()
         .unwrap();
     assert_eq!((on_worker, value), (true, 42));
     Arc::try_unwrap(runtime).unwrap().stop().unwrap();
@@ -280,7 +278,7 @@ fn builtins_publish_the_same_services_on_every_worker() {
         cx.thread().id()
     });
     assert_eq!(tasks.len(), 2);
-    let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.wait().unwrap()).collect();
+    let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), 2);
     assert!(builtins.local_scheduler().is_none());
     runtime.stop().unwrap();
@@ -368,12 +366,12 @@ fn default_blocking_pools_are_shared_between_workers() {
     let schedulers: Vec<_> = (0..2).map(|_| worker_scheduler(&runtime)).collect();
     let workers: Vec<_> = schedulers
         .iter()
-        .map(|scheduler| scheduler.spawn(async |cx| cx.thread().id()).wait().unwrap())
+        .map(|scheduler| scheduler.spawn(async |cx| cx.thread().id()).join().unwrap())
         .collect();
     assert_ne!(workers[0], workers[1]);
     let blocking: Vec<_> = schedulers
         .iter()
-        .map(|scheduler| scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap())
+        .map(|scheduler| scheduler.spawn_blocking(|| thread::current().id()).join().unwrap())
         .collect();
     assert_eq!(blocking[0], blocking[1]);
     assert!(!workers.contains(&blocking[0]));
@@ -386,13 +384,13 @@ fn stopping_one_runtime_does_not_stop_another() {
     let second = runtime(1);
     let first_scheduler = worker_scheduler(&first);
     let second_scheduler = worker_scheduler(&second);
-    let first_worker = first_scheduler.spawn(async |cx| cx.thread().id()).wait().unwrap();
-    let second_worker = second_scheduler.spawn(async |cx| cx.thread().id()).wait().unwrap();
+    let first_worker = first_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
+    let second_worker = second_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     assert_ne!(first_worker, second_worker);
     RuntimeOperations::from(&first).request_stop();
     first.stop().unwrap();
-    assert!(first_scheduler.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
-    assert_eq!(second_scheduler.spawn(async |_| 42).wait().unwrap(), 42);
+    assert!(first_scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
+    assert_eq!(second_scheduler.spawn(async |_| 42).join().unwrap(), 42);
     second.stop().unwrap();
 }
 
@@ -412,11 +410,11 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
     caller
         .scheduler()
         .spawn_anywhere(Unaware(target), |_, Unaware(target)| async move { drop(target) })
-        .wait()
+        .join()
         .unwrap();
-    assert!(retained.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+    assert!(retained.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     release.send(()).unwrap();
-    assert_eq!(callback.wait().unwrap(), 42);
+    assert_eq!(callback.join().unwrap(), 42);
     caller.stop().unwrap();
 }
 
@@ -453,14 +451,14 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
     }));
     observed.recv_timeout(TEST_TIMEOUT).unwrap();
     // This factory cannot run on the same worker until the signalled poll returns.
-    scheduler.spawn(async |_| ()).wait().unwrap();
+    scheduler.spawn(async |_| ()).join().unwrap();
     let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("an already-completed task must be immediately ready");
     };
     assert_eq!(value.get(), 42);
     catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
     assert_eq!(
-        runtime.scheduler().spawn_anywhere((), |_, ()| async { 123u32 }).wait().unwrap(),
+        runtime.scheduler().spawn_anywhere((), |_, ()| async { 123u32 }).join().unwrap(),
         123
     );
     runtime.stop().unwrap();

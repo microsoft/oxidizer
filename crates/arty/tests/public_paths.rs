@@ -45,8 +45,6 @@ const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&RuntimeOperations) = RuntimeOperations::request_stop;
 const _: fn(&RuntimeOperations, &arty::core::Thread) -> Result<(), Error> = RuntimeOperations::pin_current_thread_to;
-const _: fn(JoinHandle<u32>) -> Result<u32, JoinError> = JoinHandle::wait;
-
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;
 const _: fn() = assert_join_output::<LocalJoinHandle<u32>>;

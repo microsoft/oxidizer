@@ -168,10 +168,9 @@ impl ArtyCase {
                 }
                 start.elapsed()
             }
-            Workload::FromTask => self
-                .runtime
-                .scheduler()
-                .spawn_anywhere((iterations, count), |cx, (iterations, count)| async move {
+            Workload::FromTask => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
+                (iterations, count),
+                |cx, (iterations, count)| async move {
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();
                     for _ in 0..iterations {
@@ -182,13 +181,12 @@ impl ArtyCase {
                         }
                     }
                     start.elapsed()
-                })
-                .wait()
-                .expect("benchmark parent finishes before shutdown"),
-            Workload::Local => self
-                .runtime
-                .scheduler()
-                .spawn_anywhere((iterations, count), |cx, (iterations, count)| async move {
+                },
+            ))
+            .expect("benchmark parent finishes before shutdown"),
+            Workload::Local => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
+                (iterations, count),
+                |cx, (iterations, count)| async move {
                     let scheduler = cx.local_scheduler().expect("local benchmark runs on its associated worker");
                     let mut handles = Vec::with_capacity(count);
                     let start = Instant::now();
@@ -200,9 +198,9 @@ impl ArtyCase {
                         }
                     }
                     start.elapsed()
-                })
-                .wait()
-                .expect("benchmark parent finishes before shutdown"),
+                },
+            ))
+            .expect("benchmark parent finishes before shutdown"),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {

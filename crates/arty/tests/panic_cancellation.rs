@@ -8,6 +8,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,6 +20,7 @@ use std::task::{Context, Poll};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -83,7 +86,7 @@ fn remote_cancellation_drop_panic_completes_shutdown() {
     runtime.stop().unwrap();
     received.recv_timeout(TEST_TIMEOUT).unwrap();
     assert_eq!(drops.load(Ordering::SeqCst), 1);
-    assert!(task.wait().unwrap_err().is_shutdown());
+    assert!(task.join().unwrap_err().is_shutdown());
 }
 
 #[test]
@@ -101,7 +104,7 @@ fn local_cancellation_drop_panic_completes_shutdown() {
                 drop(task);
             },
         )
-        .wait()
+        .join()
         .unwrap();
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
     runtime.stop().unwrap();

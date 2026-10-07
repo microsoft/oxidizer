@@ -338,6 +338,13 @@ impl Scheduler {
     /// Already-running callbacks cannot be interrupted and are allowed to finish.
     /// Pool sizing targets blocking calls, not sustained CPU-parallel workloads.
     ///
+    /// A callback must not synchronously poll another blocking handle from its
+    /// own pool; direct attempts panic. It must also avoid indirect cycles through
+    /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on):
+    /// if the async work awaits a callback queued to the occupied pool, neither
+    /// side can complete. Arty does not track transitive dependencies to detect
+    /// that deadlock.
+    ///
     /// # Examples
     ///
     /// Read a file without blocking the async worker:

@@ -8,10 +8,13 @@
 
 mod panic_support;
 
+mod support;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -47,7 +50,7 @@ fn abandoned_remote_result_drop_is_contained() {
     drop(task);
     release.send(());
     received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }
@@ -96,7 +99,7 @@ fn abandoned_blocking_result_drop_is_contained() {
     drop(task);
     release.send(()).unwrap();
     received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(runtime.scheduler().spawn_blocking(|| 7).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_blocking(|| 7).join().unwrap(), 7);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }

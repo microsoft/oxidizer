@@ -5,6 +5,8 @@
 
 //! Task failure and shutdown are results, not unwinds or permanently pending joins.
 
+mod support;
+
 use std::cell::Cell;
 use std::error::Error as _;
 use std::future::{pending, ready};
@@ -20,6 +22,7 @@ use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, RuntimeOperatio
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Builtins, JoinHandle};
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -69,62 +72,11 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
             inner.push(nested_scheduler.spawn_blocking(|| 7));
         }
         let first = inner.into_iter().next().unwrap();
-        catch_unwind(AssertUnwindSafe(|| first.wait())).is_err()
+        catch_unwind(AssertUnwindSafe(|| first.join())).is_err()
     });
 
-    assert!(outer.wait().unwrap());
+    assert!(outer.join().unwrap());
     runtime.stop().unwrap();
-}
-
-#[test]
-fn blocking_callback_block_on_rejects_same_pool_blocking_await() {
-    let runtime = Arc::new(runtime());
-    let captured = Arc::clone(&runtime);
-    let outcome = runtime
-        .scheduler()
-        .spawn_blocking(move || captured.scheduler().block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await))
-        .wait()
-        .unwrap();
-
-    assert!(
-        outcome
-            .unwrap_err()
-            .source()
-            .unwrap()
-            .downcast_ref::<JoinError>()
-            .unwrap()
-            .is_panic()
-    );
-    Arc::try_unwrap(runtime).unwrap().stop().unwrap();
-}
-
-#[test]
-fn blocking_callback_block_on_propagates_same_pool_rejection_to_async_children() {
-    let runtime = Arc::new(runtime());
-    let captured = Arc::clone(&runtime);
-    let outcome = runtime
-        .scheduler()
-        .spawn_blocking(move || {
-            captured.scheduler().block_on(async |cx| {
-                cx.scheduler()
-                    .spawn(async |child| child.scheduler().spawn_blocking(|| 7).await)
-                    .await
-                    .unwrap()
-            })
-        })
-        .wait()
-        .unwrap();
-
-    assert!(
-        outcome
-            .unwrap_err()
-            .source()
-            .unwrap()
-            .downcast_ref::<JoinError>()
-            .unwrap()
-            .is_panic()
-    );
-    Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
@@ -139,7 +91,7 @@ fn blocking_callback_block_on_can_await_another_pools_blocking_task() {
                 .scheduler()
                 .block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await.unwrap())
         })
-        .wait()
+        .join()
         .unwrap();
 
     assert_eq!(outcome.unwrap(), 7);
@@ -232,7 +184,7 @@ fn local_future_destructor_panic_preserves_runtime_usability() {
             assert_eq!(*value, 7);
         })
         .unwrap();
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
     runtime.stop().unwrap();
 }
 
@@ -303,7 +255,7 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
         });
     receive_start.recv_timeout(TEST_TIMEOUT).unwrap();
     runtime.stop().unwrap();
-    assert!(task.wait().unwrap_err().is_shutdown());
+    assert!(task.join().unwrap_err().is_shutdown());
     receive_drop.recv_timeout(TEST_TIMEOUT).unwrap();
 }
 
@@ -326,10 +278,10 @@ fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
         move || invoked.store(true, Ordering::Relaxed)
     });
     operations.request_stop();
-    assert!(scheduler.spawn_blocking(|| 7).wait().unwrap_err().is_shutdown());
+    assert!(scheduler.spawn_blocking(|| 7).join().unwrap_err().is_shutdown());
     release.send(()).unwrap();
-    assert_eq!(running.wait().unwrap(), 42);
-    assert!(queued.wait().unwrap_err().is_shutdown());
+    assert_eq!(running.join().unwrap(), 42);
+    assert!(queued.join().unwrap_err().is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
     runtime.stop().unwrap();
 }
@@ -387,7 +339,7 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
             (queued, invoked)
         })
         .unwrap();
-    assert!(queued.wait().unwrap_err().is_shutdown());
+    assert!(queued.join().unwrap_err().is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
 }
 

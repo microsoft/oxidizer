@@ -8,6 +8,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -17,6 +19,7 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -126,14 +129,14 @@ fn remote_case(finish: Finish) {
             eprintln!("remote {finish:?}: stopping runtime");
             runtime.stop().unwrap();
             eprintln!("remote {finish:?}: stopped");
-            task.wait()
+            task.join()
         }
         Finish::Success | Finish::Panic => {
-            let outcome = task.wait();
+            let outcome = task.join();
             eprintln!("remote {finish:?}: joined");
             assert_eq!(drops.load(Ordering::SeqCst), 1);
             retained.wake_by_ref();
-            assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+            assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
             eprintln!("remote {finish:?}: sentinel joined; stopping runtime");
             runtime.stop().unwrap();
             eprintln!("remote {finish:?}: stopped");
@@ -259,7 +262,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         stopper.join().unwrap();
         completer.join().unwrap();
         runtime.stop().unwrap();
-        match task.wait() {
+        match task.join() {
             Ok(value) => assert_eq!(value, 42),
             Err(error) => assert!(error.is_shutdown()),
         }

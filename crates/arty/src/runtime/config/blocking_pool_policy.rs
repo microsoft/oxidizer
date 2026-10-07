@@ -21,6 +21,11 @@ use crate::runtime::error::Error;
 /// common thread limit. Use `shared(n)` to cap that pool's threads.
 ///
 /// Choose based on your workload; neither policy is faster in every case.
+/// Pool sizing must also account for dependency cycles. A blocking callback
+/// that waits for async work which in turn waits for the same saturated pool
+/// can deadlock. Shared pools make the dependency runtime-wide; isolated pools
+/// confine it to one async worker's pool. Arty does not track transitive task
+/// dependencies to detect such cycles.
 ///
 /// # Examples
 ///

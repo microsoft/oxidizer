@@ -8,12 +8,15 @@
 
 mod panic_support;
 
+mod support;
+
 use std::cell::Cell;
 use std::panic::panic_any;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -65,7 +68,7 @@ fn abandoned_remote_factory_and_poll_panics_dispose_opaque_payloads_once() {
         }
         received.recv_timeout(TEST_TIMEOUT).unwrap();
         assert_eq!(drops.load(Ordering::SeqCst), 1);
-        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+        assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
         runtime.stop().unwrap();
     }
 }

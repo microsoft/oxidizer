@@ -113,12 +113,20 @@
 //! [blocking pools](super::configuration#blocking-pools) separately from
 //! async workers.
 //!
+//! A blocking callback owns one pool thread until it returns. Calling
+//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) from
+//! that callback is allowed, but the async work must not await another callback
+//! queued to the same saturated pool. That creates a circular dependency and
+//! deadlocks. Directly polling a same-pool blocking handle is rejected, but
+//! Arty does not infer transitive dependencies through async tasks.
+//!
 //! # Observe completion before shutdown
 //!
-//! Await a [`JoinHandle`](crate::task::JoinHandle) inside an async task, or
-//! call `wait()` from a thread allowed to block. A
-//! [`JoinError`](crate::task::JoinError) reports a panic or shutdown;
-//! dropping the handle does not cancel the task.
+//! Await a [`JoinHandle`](crate::task::JoinHandle) inside an async task. From
+//! synchronous code, use
+//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) to
+//! enter the runtime and await required work. A [`JoinError`](crate::task::JoinError)
+//! reports a panic or shutdown; dropping the handle does not cancel the task.
 //!
 //! Shutdown cancels pending tasks and rejects new submissions without invoking
 //! their factories. See [shutdown](super::shutdown) for what happens to pending

@@ -8,7 +8,10 @@
 
 mod panic_support;
 
+mod support;
+
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 
 testing_aids::init_tracing!();
 
@@ -22,8 +25,8 @@ fn async_worker_stop_returns_without_self_joining() {
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-        .wait()
+        .join()
         .unwrap();
-    let result = scheduler.spawn(async move |_| runtime.stop()).wait().unwrap();
+    let result = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
     assert!(result.is_err());
 }

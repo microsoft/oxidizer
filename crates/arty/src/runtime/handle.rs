@@ -5,8 +5,7 @@ use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::context::SharedState;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-use crate::runtime::thread::is_async_worker_thread;
-use crate::task::RuntimeScheduler;
+use crate::task::{RuntimeScheduler, Scheduler};
 
 /// Owns an Arty runtime's workers and their shutdown.
 ///
@@ -46,7 +45,7 @@ use crate::task::RuntimeScheduler;
 ///
 /// let runtime = Runtime::new()?;
 /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
-/// assert_eq!(task.wait()?, 42);
+/// assert_eq!(futures::executor::block_on(task)?, 42);
 /// runtime.stop()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -118,7 +117,10 @@ impl Runtime {
     /// let scheduler = runtime.scheduler();
     /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
     /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
-    /// assert_eq!(first.wait()? + second.wait()?, 42);
+    /// assert_eq!(
+    ///     futures::executor::block_on(first)? + futures::executor::block_on(second)?,
+    ///     42
+    /// );
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
@@ -151,18 +153,17 @@ impl Runtime {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::Runtime;
+    /// use arty::runtime::{Runtime, RuntimeOperations};
     ///
     /// let runtime = Runtime::new()?;
-    /// let scheduler = runtime
-    ///     .scheduler()
-    ///     .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-    ///     .wait()?;
+    /// let error = runtime.scheduler().block_on(async |cx| {
+    ///     RuntimeOperations::from(&cx).request_stop();
+    ///     cx.scheduler()
+    ///         .spawn(async |_| 42)
+    ///         .await
+    ///         .expect_err("submission follows shutdown")
+    /// })?;
     /// runtime.stop()?;
-    /// let error = scheduler
-    ///     .spawn(async |_| 42)
-    ///     .wait()
-    ///     .expect_err("submission follows shutdown");
     /// assert!(error.is_shutdown());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -173,7 +174,7 @@ impl Runtime {
     }
 
     fn wait(&self) -> Result<(), Error> {
-        if is_async_worker_thread() {
+        if Scheduler::is_current_worker_thread() {
             return Err(Error::new("an async Arty worker cannot wait for runtime shutdown"));
         }
         if self.scheduler.dispatcher.is_current_blocking_task() {
@@ -251,7 +252,7 @@ mod tests {
             runtime
                 .scheduler()
                 .spawn_blocking(move || dispatcher.is_current_blocking_task())
-                .wait()
+                .join()
                 .unwrap()
         );
 
@@ -268,15 +269,15 @@ mod tests {
         let scheduler = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
+            .join()
             .unwrap();
-        assert!(scheduler.spawn(async |_| is_async_worker_thread()).wait().unwrap());
+        assert!(scheduler.spawn(async |_| Scheduler::is_current_worker_thread()).join().unwrap());
 
-        scheduler.spawn(async move |_| drop(runtime)).wait().unwrap();
+        scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
 
         assert!(dispatcher.is_shutting_down());
         dispatcher.wait().unwrap();
-        assert!(scheduler.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+        assert!(scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     }
 
     #[test]
@@ -289,9 +290,9 @@ mod tests {
         let scheduler = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
+            .join()
             .unwrap();
-        scheduler.spawn(async move |_| drop(runtime)).wait().unwrap();
+        scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
         assert!(dispatcher.is_shutting_down());
         dispatcher.wait().unwrap();
     }
@@ -318,20 +319,20 @@ mod tests {
         assert!(
             caller
                 .scheduler()
-                .spawn_anywhere((), |_, ()| async { is_async_worker_thread() })
-                .wait()
+                .spawn_anywhere((), |_, ()| async { Scheduler::is_current_worker_thread() })
+                .join()
                 .unwrap()
         );
 
         caller
             .scheduler()
             .spawn_anywhere(Unaware(runtime), |_, Unaware(runtime)| async move { drop(runtime) })
-            .wait()
+            .join()
             .unwrap();
 
         assert!(dispatcher.is_shutting_down());
         release.send(()).unwrap();
-        assert_eq!(blocking.wait().unwrap(), 42);
+        assert_eq!(blocking.join().unwrap(), 42);
         dispatcher.wait().unwrap();
         caller.stop().unwrap();
     }

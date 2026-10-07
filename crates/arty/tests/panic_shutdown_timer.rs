@@ -9,6 +9,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::pin::Pin;
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
@@ -16,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use arty::time::Clock;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -107,8 +110,8 @@ fn timer_case(retain_waker: bool) {
     release.send(()).unwrap();
     assert!(stopper.join().unwrap().is_err());
     completed.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(blocking.wait().unwrap(), 42);
-    assert!(task.wait().unwrap_err().is_shutdown());
+    assert_eq!(blocking.join().unwrap(), 42);
+    assert!(task.join().unwrap_err().is_shutdown());
     if let Some(retained) = retained {
         retained.wake_by_ref();
         let consuming = retained.clone();

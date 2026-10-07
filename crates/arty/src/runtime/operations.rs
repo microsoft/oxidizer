@@ -157,7 +157,7 @@ mod tests {
         let worker = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-            .wait()
+            .join()
             .unwrap();
         runtime.shared_state = vec![OnceLock::new()].into();
         assert!(RuntimeOperations::from(&runtime).pin_current_thread_to(&worker).is_err());
@@ -177,14 +177,14 @@ mod tests {
                     cx.clone(),
                 )
             })
-            .wait()
+            .join()
             .unwrap();
         let unfamiliar = coordinates.build(thread::current().id());
         let foreign = ThreadBuilder::default().build(source.id());
         assert_eq!(source.owner(), unfamiliar.owner());
         assert_ne!(source.id(), unfamiliar.id());
         assert_ne!(source.owner(), foreign.owner());
-        let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();
+        let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
 
         for destination in [&source, &unfamiliar, &foreign, &unfamiliar, &source] {
             scheduler.relocate(Some(destination), destination);
@@ -192,8 +192,8 @@ mod tests {
             assert_eq!(builtins.thread(), &source);
 
             for scheduler in [&scheduler, builtins.scheduler()] {
-                assert_eq!(scheduler.spawn(async |_| thread::current().id()).wait().unwrap(), source.id());
-                assert_eq!(scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(), blocking_thread);
+                assert_eq!(scheduler.spawn(async |_| thread::current().id()).join().unwrap(), source.id());
+                assert_eq!(scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(), blocking_thread);
             }
 
             for operations in [operations.clone(), RuntimeOperations::from(&builtins)] {
@@ -223,7 +223,7 @@ mod tests {
                     .scheduler()
                     .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx) })
             })
-            .map(|handle| handle.wait().unwrap())
+            .map(|handle| handle.join().unwrap())
             .collect();
         let source = &workers[0].0;
         let destination = &workers[1].0;
@@ -235,7 +235,7 @@ mod tests {
 
         assert_eq!(builtins.thread(), source);
         assert_eq!(
-            builtins.scheduler().spawn(async |_| thread::current().id()).wait().unwrap(),
+            builtins.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
             source.id()
         );
     }

@@ -27,8 +27,8 @@ use crate::runtime::handle::Runtime;
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
+use crate::runtime::thread::spawn;
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::thread::{flag_current_thread, spawn};
 use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
@@ -202,8 +202,6 @@ impl AsyncWorkerStartInfo {
         } = self;
 
         let worker_sink = sink.clone();
-        flag_current_thread();
-
         // Pin the thread to its assigned processor.
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();

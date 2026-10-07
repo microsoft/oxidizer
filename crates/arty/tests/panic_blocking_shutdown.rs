@@ -8,11 +8,14 @@
 
 mod panic_support;
 
+mod support;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 
 testing_aids::init_tracing!();
@@ -57,12 +60,12 @@ fn queued_blocking_capture_drop_panic_still_completes_its_join() {
     });
     operations.request_stop();
     release.send(()).unwrap();
-    assert_eq!(running.wait().unwrap(), 42);
+    assert_eq!(running.join().unwrap(), 42);
     runtime.stop().unwrap();
     received.recv_timeout(TEST_TIMEOUT).unwrap();
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(invoked.load(Ordering::SeqCst), 0);
-    assert!(queued.wait().unwrap_err().is_shutdown());
+    assert!(queued.join().unwrap_err().is_shutdown());
 }
 
 #[test]
@@ -75,10 +78,10 @@ fn running_blocking_capture_drop_panic_is_a_join_error() {
         dropped,
     };
     let task = runtime.scheduler().spawn_blocking(move || drop(capture));
-    assert!(task.wait().unwrap_err().is_panic());
+    assert!(task.join().unwrap_err().is_panic());
     received.recv_timeout(TEST_TIMEOUT).unwrap();
     assert_eq!(drops.load(Ordering::SeqCst), 1);
-    assert_eq!(runtime.scheduler().spawn_blocking(|| 7).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_blocking(|| 7).join().unwrap(), 7);
     runtime.stop().unwrap();
 }
 
@@ -100,5 +103,5 @@ fn stop_waits_for_running_blocking_panic_and_retains_its_error() {
     release.send(()).unwrap();
     runtime.stop().unwrap();
     observed.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert!(task.wait().unwrap_err().is_panic());
+    assert!(task.join().unwrap_err().is_panic());
 }

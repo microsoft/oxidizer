@@ -37,12 +37,13 @@
 //! use arty::runtime::{Runtime, RuntimeOperations};
 //!
 //! let runtime = Runtime::new()?;
-//! let scheduler = runtime.scheduler();
-//! RuntimeOperations::from(&runtime).request_stop();
-//! let error = scheduler
-//!     .spawn_anywhere((), |_, ()| async { 42 })
-//!     .wait()
-//!     .expect_err("submission follows shutdown");
+//! let error = runtime.scheduler().block_on(async |cx| {
+//!     RuntimeOperations::from(&cx).request_stop();
+//!     cx.scheduler()
+//!         .spawn(async |_| 42)
+//!         .await
+//!         .expect_err("submission follows shutdown")
+//! })?;
 //! assert!(error.is_shutdown());
 //! runtime.stop()?;
 //! # Ok::<(), arty::runtime::Error>(())

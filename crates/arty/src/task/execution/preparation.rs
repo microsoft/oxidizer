@@ -10,7 +10,6 @@ use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
 
-use crate::runtime::blocking_worker::{BlockingWaitContext, current_blocking_wait_context, with_blocking_wait_context};
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
 use crate::task::execution::local::LocalTaskFuture;
@@ -42,8 +41,6 @@ where
     R: 'static,
 {
     let (result_tx, result_rx) = LocalEvent::boxed();
-    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_context());
-    let future = with_blocking_wait_context(future, blocking_wait);
     let future = LocalTaskFuture::new(future, result_tx, parent_task_enrichment, sink);
     (future, LocalJoinHandle::new(result_rx))
 }
@@ -60,19 +57,17 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_context());
-    let task_blocking_wait = Arc::clone(&blocking_wait);
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
-        let inner = with_blocking_wait_context(async move { future_factory(cx).await }, task_blocking_wait);
+        let inner = async move { future_factory(cx).await };
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
         drop(tasks.add(RemoteTaskFuture::new(inner, result_tx, parent_task_enrichment, sink)));
     });
-    (future_factory, JoinHandle::new(result_rx).with_blocking_wait_context(blocking_wait))
+    (future_factory, JoinHandle::new(result_rx))
 }
 
 pub(crate) fn prepare_remote_on_worker<FF, F, R>(
@@ -89,8 +84,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let blocking_wait = BlockingWaitContext::new(current_blocking_wait_context());
-    let inner = with_blocking_wait_context(async move { future_factory(builtins).await }, Arc::clone(&blocking_wait));
+    let inner = async move { future_factory(builtins).await };
     drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
         inner,
         result_tx,
@@ -98,7 +92,7 @@ where
         sink,
         Some(shutdown_signal),
     )));
-    JoinHandle::new(result_rx).with_blocking_wait_context(blocking_wait)
+    JoinHandle::new(result_rx)
 }
 
 pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)

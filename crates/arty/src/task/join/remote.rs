@@ -9,15 +9,14 @@ use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
-use crate::runtime::blocking_worker::{BlockingWaitContext, is_current_blocking_pool};
-use crate::runtime::thread::assert_not_flagged;
+use crate::runtime::blocking_worker::is_current_blocking_pool;
 use crate::task::execution::TaskResult;
 
 /// A handle for receiving an async or blocking task's result.
 ///
-/// Await the handle inside async code, or call [`wait`](Self::wait) from
-/// synchronous code. Completion produces `Ok(result)`. A task panic or shutdown
-/// cancellation produces [`JoinError`] without unwinding the joining caller.
+/// Await the handle inside async code. Completion produces `Ok(result)`. A task
+/// panic or shutdown cancellation produces [`JoinError`] without unwinding the
+/// joining task.
 ///
 /// Dropping the handle does not cancel its task or rethrow a task panic.
 /// The runtime must remain running for pending async work to complete.
@@ -27,8 +26,8 @@ use crate::task::execution::TaskResult;
 /// # Panics
 ///
 /// Panics if polled again after its result has been received. A blocking
-/// handle also panics if it is polled from its own blocking callback or from
-/// async work that a callback in the same pool is synchronously waiting for.
+/// handle also panics if it is polled directly from a callback running in the
+/// same blocking pool.
 ///
 /// # Examples
 ///
@@ -52,8 +51,6 @@ where
     #[pin]
     result_rx: Option<BoxedReceiver<TaskResult<R>>>,
     blocking_pool: Option<Arc<()>>,
-    #[debug(ignore)]
-    blocking_wait: Option<Arc<BlockingWaitContext>>,
     completed: bool,
 }
 
@@ -65,7 +62,6 @@ where
         Self {
             result_rx: Some(result_rx),
             blocking_pool: None,
-            blocking_wait: None,
             completed: false,
         }
     }
@@ -74,7 +70,6 @@ where
         Self {
             result_rx: None,
             blocking_pool: None,
-            blocking_wait: None,
             completed: false,
         }
     }
@@ -84,53 +79,8 @@ where
         self
     }
 
-    pub(crate) fn with_blocking_wait_context(mut self, context: Arc<BlockingWaitContext>) -> Self {
-        self.blocking_wait = Some(context);
-        self
-    }
-
-    /// Blocks until the task's result is available.
-    ///
-    /// Use `.await` inside async code instead. This waits for one task,
-    /// not for runtime shutdown. Stopping or dropping the runtime owner waits
-    /// for its workers to stop.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`JoinError`] if the task panicked or shutdown cancelled or
-    /// rejected it. An error returned by the task itself remains its result.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the result has already been received by polling the handle.
-    /// Also panics if called from an async Arty worker or while waiting for a
-    /// task belonging to the current blocking pool, even if the result is
-    /// already ready. A blocking callback may wait for an async task, but not
-    /// for another task queued behind itself in the same pool, including
-    /// through async descendants.
-    ///
-    /// An async task waited by a blocking callback fails with a panic
-    /// [`JoinError`] if it or one of its descendants awaits blocking work from
-    /// that callback's pool.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use arty::runtime::Runtime;
-    ///
-    /// let runtime = Runtime::new()?;
-    /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
-    /// assert_eq!(task.wait()?, 42);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn wait(self) -> Result<R, JoinError> {
-        assert_not_flagged();
-        assert!(
-            !self.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
-            "blocking JoinHandle::wait cannot wait for the current blocking pool"
-        );
-        let _blocking_wait = self.blocking_wait.as_ref().and_then(BlockingWaitContext::activate_current_pool);
-
+    #[cfg(test)]
+    pub(crate) fn join(self) -> Result<R, JoinError> {
         futures::executor::block_on(self)
     }
 }

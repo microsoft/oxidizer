@@ -8,10 +8,13 @@
 
 mod panic_support;
 
+mod support;
+
 use std::cell::RefCell;
 use std::sync::mpsc;
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -69,10 +72,10 @@ fn owner_unwind(blocking: bool) {
             panic!("async task owning runtime");
         })
     };
-    assert!(failed.wait().unwrap_err().is_panic());
+    assert!(failed.join().unwrap_err().is_panic());
     cancelled.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert!(canary.wait().unwrap_err().is_shutdown());
-    assert!(scheduler.spawn(async |_| 42).wait().unwrap_err().is_shutdown());
+    assert!(canary.join().unwrap_err().is_shutdown());
+    assert!(scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     retired.recv_timeout(TEST_TIMEOUT).unwrap();
 }
 

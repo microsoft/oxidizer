@@ -8,11 +8,14 @@
 
 testing_aids::init_tracing!();
 
+mod support;
+
 use std::thread;
 
 use arty::core::Thread;
 use arty::runtime::{Runtime, RuntimeOperations, WorkersPolicy};
 use many_cpus::{ProcessorId, SystemHardware};
+use support::JoinHandleExt as _;
 use thread_aware::{ThreadAware, ThreadBuilder, Unaware};
 
 #[cfg(test)]
@@ -39,7 +42,7 @@ fn pinning_rejects_a_foreign_owner_with_a_registered_thread_id() {
     let worker = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-        .wait()
+        .join()
         .unwrap();
     let foreign = ThreadBuilder::default().build(worker.id());
     let operations = RuntimeOperations::from(&runtime);
@@ -59,7 +62,7 @@ fn runtime_operations_are_available_off_worker() {
         .spawn_anywhere((), |cx, ()| async move {
             (cx.thread().clone(), cx, SystemHardware::current().current_processor_id())
         })
-        .wait()
+        .join()
         .unwrap();
 
     let actual = thread::spawn(move || {
@@ -88,7 +91,7 @@ fn explicit_targets_select_workers_without_relocating_operations() {
                 .scheduler()
                 .spawn_anywhere((), |cx, ()| async move { (cx, SystemHardware::current().current_processor_id()) })
         })
-        .map(|handle| handle.wait().unwrap())
+        .map(|handle| handle.join().unwrap())
         .collect();
     let source = workers[0].0.thread().clone();
     let destination = workers[1].0.thread().clone();
@@ -122,12 +125,12 @@ fn operations_reject_foreign_workers_without_changing_runtime_identity() {
                 SystemHardware::current().current_processor_id(),
             )
         })
-        .wait()
+        .join()
         .unwrap();
     let destination = other_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-        .wait()
+        .join()
         .unwrap();
 
     assert!(operations.pin_current_thread_to(&destination).is_err());
@@ -170,7 +173,7 @@ fn runtime_and_builtin_conversions_use_the_same_affinity_information() {
             let worker = cx.thread().clone();
             (cx, worker, SystemHardware::current().current_processor_id())
         })
-        .wait()
+        .join()
         .unwrap();
     assert_eq!(
         (
@@ -189,7 +192,7 @@ fn maximum_processors_clamps_to_available_processors() {
     let runtime = Runtime::builder().workers(WorkersPolicy::at_most(usize::MAX)).build().unwrap();
     let workers: std::collections::HashSet<_> = (0..available)
         .map(|_| runtime.scheduler().spawn_anywhere((), |_, ()| async { thread::current().id() }))
-        .map(|handle| handle.wait().unwrap())
+        .map(|handle| handle.join().unwrap())
         .collect();
 
     assert_eq!(workers.len(), available);

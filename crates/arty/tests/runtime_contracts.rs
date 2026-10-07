@@ -5,6 +5,8 @@
 
 #![cfg(feature = "rt")]
 
+mod support;
+
 use std::cell::Cell;
 use std::error::Error as _;
 use std::future::{pending, poll_fn};
@@ -20,6 +22,7 @@ use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolic
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Builtins;
 use arty::task::JoinError;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::{ThreadAware, Unaware};
 #[cfg(all(feature = "macros", feature = "test-util"))]
@@ -46,24 +49,24 @@ fn borrowed_runtime_scheduler_shares_round_robin_but_bound_handles_retain_affini
     assert!(std::ptr::eq(first, another));
     let (a, bound) = first
         .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
-        .wait()
+        .join()
         .unwrap();
-    let b = another.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap();
+    let b = another.spawn_anywhere((), |_, ()| async { thread::current().id() }).join().unwrap();
     let a_again = runtime
         .scheduler()
         .spawn_anywhere((), |_, ()| async { thread::current().id() })
-        .wait()
+        .join()
         .unwrap();
     assert_ne!(a, b);
     assert_eq!(a, a_again);
     let bound_clone = bound.clone();
-    let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).wait().unwrap())
+    let cloned_result = thread::spawn(move || bound_clone.spawn(async |_| thread::current().id()).join().unwrap())
         .join()
         .unwrap();
     assert_eq!(cloned_result, a);
-    assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), a);
+    assert_eq!(bound.spawn(async |_| thread::current().id()).join().unwrap(), a);
     assert_eq!(
-        first.spawn_anywhere((), |_, ()| async { thread::current().id() }).wait().unwrap(),
+        first.spawn_anywhere((), |_, ()| async { thread::current().id() }).join().unwrap(),
         b
     );
 }
@@ -71,20 +74,20 @@ fn borrowed_runtime_scheduler_shares_round_robin_but_bound_handles_retain_affini
 #[test]
 fn relocation_rebinds_only_the_notified_worker_scheduler_clone() {
     let runtime = runtime(2);
-    let source = runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }).wait().unwrap();
+    let source = runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }).join().unwrap();
     let destination = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-        .wait()
+        .join()
         .unwrap();
     let original = source.scheduler().clone();
     let mut bound = original.clone();
     bound.relocate(None, &destination);
     for _ in 0..4 {
-        assert_eq!(bound.spawn(async |_| thread::current().id()).wait().unwrap(), destination.id());
+        assert_eq!(bound.spawn(async |_| thread::current().id()).join().unwrap(), destination.id());
     }
     assert_eq!(
-        original.spawn(async |_| thread::current().id()).wait().unwrap(),
+        original.spawn(async |_| thread::current().id()).join().unwrap(),
         source.thread().id()
     );
     assert_ne!(source.thread(), &destination);
@@ -102,7 +105,7 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
                     .map(|_| {
                         scheduler
                             .spawn_anywhere((), |_, ()| async { thread::current().id() })
-                            .wait()
+                            .join()
                             .unwrap()
                     })
                     .collect::<Vec<_>>()
@@ -194,8 +197,8 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
         assert!(observed.recv_timeout(TEST_TIMEOUT).unwrap());
     });
 
-    task.wait().unwrap();
-    timer.wait().unwrap();
+    task.join().unwrap();
+    timer.join().unwrap();
     runtime.stop().unwrap();
     assert_eq!(in_flight.load(Ordering::Acquire), 0);
 }
@@ -206,7 +209,7 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-        .wait()
+        .join()
         .unwrap();
     runtime.stop().unwrap();
     let invoked = Arc::new(AtomicBool::new(false));
@@ -234,9 +237,9 @@ fn blocking_tasks_leave_the_async_worker_responsive() {
         42
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17 }).wait().unwrap(), 17);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17 }).join().unwrap(), 17);
     release.send(()).unwrap();
-    assert_eq!(blocking.wait().unwrap(), 42);
+    assert_eq!(blocking.join().unwrap(), 42);
 }
 
 #[test]
@@ -268,7 +271,7 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
     })
     .join()
     .unwrap();
-    assert_eq!(task.wait().unwrap(), 42);
+    assert_eq!(task.join().unwrap(), 42);
 }
 
 #[cfg(all(feature = "macros", feature = "test-util"))]
@@ -293,10 +296,10 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));
     let polling = runtime.scheduler().spawn_anywhere((), |_, ()| async { panic_any(Payload(2)) });
     for task in [factory, polling] {
-        let outcome = catch_unwind(AssertUnwindSafe(|| task.wait())).unwrap();
+        let outcome = catch_unwind(AssertUnwindSafe(|| task.join())).unwrap();
         assert!(outcome.unwrap_err().is_panic());
     }
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
 }
 
 #[test]
@@ -357,7 +360,7 @@ fn local_non_send_state_is_destroyed_on_its_worker() {
             assert!(dropped.get());
             cx.clone()
         })
-        .wait()
+        .join()
         .unwrap();
     thread::spawn({
         let portable = portable.clone();
@@ -423,7 +426,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
         let scheduler = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .wait()
+            .join()
             .unwrap();
         let (finished, receive) = mpsc::channel();
         let task = scheduler.spawn_blocking(move || {
@@ -431,7 +434,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
             finished.send(()).unwrap();
         });
         receive.recv_timeout(TEST_TIMEOUT).unwrap();
-        task.wait().unwrap();
+        task.join().unwrap();
     }
 }
 

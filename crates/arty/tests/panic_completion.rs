@@ -8,6 +8,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,6 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -49,9 +52,9 @@ fn remote_completed_future_drop_is_a_join_error() {
             drops,
             _pinned: PhantomPinned,
         });
-    assert!(task.wait().unwrap_err().is_panic());
+    assert!(task.join().unwrap_err().is_panic());
     assert_eq!(drops.load(Ordering::SeqCst), 1);
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     runtime.stop().unwrap();
 }
 

@@ -5,6 +5,8 @@
 
 #![cfg(feature = "rt")]
 
+mod support;
+
 use std::rc::Rc;
 use std::thread;
 
@@ -17,6 +19,7 @@ use arty::task::Builtins;
 use arty::task::Scheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
+use support::JoinHandleExt as _;
 use testing_aids::YieldFuture;
 #[cfg(feature = "macros")]
 use thread_aware::Unaware;
@@ -107,15 +110,15 @@ fn test_worker_affinity() {
     let (thread1, scheduler1) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
-        .wait()
+        .join()
         .unwrap();
     let (thread2, scheduler2) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { (thread::current().id(), cx.scheduler().clone()) })
-        .wait()
+        .join()
         .unwrap();
-    let thread3 = scheduler1.spawn(async |_| thread::current().id()).wait().unwrap();
-    let thread4 = scheduler2.spawn(async |_| thread::current().id()).wait().unwrap();
+    let thread3 = scheduler1.spawn(async |_| thread::current().id()).join().unwrap();
+    let thread4 = scheduler2.spawn(async |_| thread::current().id()).join().unwrap();
 
     assert_ne!(thread1, thread2, "round-robin submissions select different workers");
     assert_eq!(thread1, thread3, "bound submission preserves the first worker");
@@ -135,7 +138,7 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
                 (*value, thread::current().id(), associated)
             }
         })
-        .wait()
+        .join()
         .unwrap();
     assert_eq!((created, polled), (associated, associated));
 }
@@ -164,7 +167,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
             },
             |cx, probe| async move { (probe.source, probe.destination, cx.thread().clone(), thread::current().id()) },
         )
-        .wait()
+        .join()
         .unwrap();
     assert!(source.is_none());
     assert_eq!(destination, Some(worker.clone()));
@@ -194,7 +197,7 @@ fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
     let result = runtime
         .scheduler()
         .spawn_anywhere((), |_, ()| async { ResultValue(std::cell::Cell::new(42)) })
-        .wait()
+        .join()
         .unwrap();
     assert_eq!(result.0.get(), 42);
     runtime.stop().unwrap();
@@ -283,13 +286,13 @@ fn spawn_everywhere_returns_shutdown_joins_without_invoking_factories() {
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-        .wait()
+        .join()
         .unwrap();
     arty::runtime::RuntimeOperations::from(&runtime).request_stop();
     let tasks = scheduler.spawn_everywhere::<(), _, ()>((), |()| async { panic!("rejected factories must not run") });
     assert!(!tasks.is_empty());
     for task in tasks {
-        assert!(task.wait().unwrap_err().is_shutdown());
+        assert!(task.join().unwrap_err().is_shutdown());
     }
     runtime.stop().unwrap();
 }

@@ -8,11 +8,14 @@
 
 mod panic_support;
 
+mod support;
+
 use std::panic::panic_any;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -65,7 +68,7 @@ fn remote_secondary_payload_drop_cannot_escape_result_disposal() {
     drop(join);
     release.send(());
     received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).wait().unwrap(), 42);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
     assert_eq!(result_drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }

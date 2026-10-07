@@ -8,10 +8,13 @@
 
 mod panic_support;
 
+mod support;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use thread_aware::{Thread, ThreadAware};
 
 testing_aids::init_tracing!();
@@ -56,11 +59,11 @@ fn runtime_input_relocation_panic_is_a_join_error() {
         data.factories.fetch_add(1, Ordering::SeqCst);
         std::future::ready(())
     });
-    assert!(task.wait().unwrap_err().is_panic());
+    assert!(task.join().unwrap_err().is_panic());
     assert_eq!(relocations.load(Ordering::SeqCst), 1);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(factories.load(Ordering::SeqCst), 0);
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     runtime.stop().unwrap();
 }
 

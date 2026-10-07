@@ -8,6 +8,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::future::poll_fn;
 use std::pin::pin;
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use std::task::{Context, Poll, Wake, Waker};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -57,7 +60,7 @@ fn remote_panicking_join_waker_preserves_published_result() {
         std::thread::yield_now();
     }
     assert_eq!(futures::executor::block_on(join).unwrap(), 42);
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).wait().unwrap(), 7);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     assert_eq!(notifications.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }
@@ -176,7 +179,7 @@ fn blocking_panicking_join_waker_on_cancellation_is_contained() {
 
     RuntimeOperations::from(&runtime).request_stop();
     release_tx.send(()).unwrap();
-    running.wait().unwrap();
+    running.join().unwrap();
     runtime.stop().unwrap();
 
     let Poll::Ready(Err(error)) = queued.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {

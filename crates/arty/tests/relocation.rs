@@ -7,11 +7,14 @@
 
 testing_aids::init_tracing!();
 
+mod support;
+
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use arty::task::{Builtins, Scheduler};
 use futures::future::join_all;
+use support::JoinHandleExt as _;
 use thread_aware::{ThreadAware, ThreadBuilder};
 
 #[cfg(not(miri))]
@@ -29,7 +32,7 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
     let (source, mut scheduler) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx.scheduler().clone()) })
-        .wait()
+        .join()
         .unwrap();
     let foreign = ThreadBuilder::default().build(source.id());
     assert_ne!(source.owner(), foreign.owner());
@@ -38,7 +41,7 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
     let scheduler: &Scheduler = scheduler.as_ref();
     let actual = scheduler
         .spawn_anywhere(RelocationSource(None), |probe| async move { probe.0 })
-        .wait()
+        .join()
         .unwrap();
     assert_eq!(actual, Some(source));
 }
@@ -214,23 +217,23 @@ fn foreign_owner_relocation_preserves_runtime_binding() {
     let mut builtins = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
-        .wait()
+        .join()
         .unwrap();
     let source = builtins.thread().clone();
     let destination = destination_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-        .wait()
+        .join()
         .unwrap();
-    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap();
+    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
 
     builtins.relocate(Some(&source), &destination);
 
     assert_eq!(
         (
             builtins.thread(),
-            builtins.scheduler().spawn(async |_| thread::current().id()).wait().unwrap(),
-            builtins.scheduler().spawn_blocking(|| thread::current().id()).wait().unwrap(),
+            builtins.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
+            builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap(),
         ),
         (&source, source.id(), blocking_thread),
     );
@@ -244,7 +247,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }))
-        .map(|handle| handle.wait().unwrap())
+        .map(|handle| handle.join().unwrap())
         .collect();
     let mut scheduler = workers[0].scheduler().clone();
     scheduler.relocate(Some(workers[0].thread()), workers[1].thread());
@@ -253,7 +256,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
     let actual: Vec<_> = (0..SPAWN_COUNT)
         .map(|_| scheduler.spawn(async |_| thread::current().id()))
-        .map(|handle| handle.wait().unwrap())
+        .map(|handle| handle.join().unwrap())
         .collect();
 
     assert_eq!(actual, vec![workers[1].thread().id(); SPAWN_COUNT]);
@@ -266,22 +269,22 @@ fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let builtins = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
-        .wait()
+        .join()
         .unwrap();
     let mut scheduler = builtins.scheduler().clone();
     let destination = destination_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
-        .wait()
+        .join()
         .unwrap();
-    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap();
+    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
 
     scheduler.relocate(Some(builtins.thread()), &destination);
 
     assert_eq!(
         (
-            scheduler.spawn(async |_| thread::current().id()).wait().unwrap(),
-            scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(),
+            scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
+            scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
         ),
         (builtins.thread().id(), blocking_thread),
     );

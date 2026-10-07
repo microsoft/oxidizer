@@ -8,11 +8,14 @@
 
 testing_aids::init_tracing!();
 
+mod support;
+
 use arty::runtime::Runtime;
 #[cfg(feature = "macros")]
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink};
+use support::JoinHandleExt as _;
 use thread_aware::Unaware;
 
 #[derive(Enrichment)]
@@ -218,7 +221,7 @@ fn task_outcomes_keep_the_submission_context() {
                         .map_err(Unaware)
                     },
                 )
-                .wait()
+                .join()
                 .unwrap();
             assert_eq!(outcome.is_err(), panics);
             if let Err(Unaware(error)) = outcome {

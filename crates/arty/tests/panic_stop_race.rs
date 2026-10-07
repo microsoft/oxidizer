@@ -8,6 +8,8 @@
 
 mod panic_support;
 
+mod support;
+
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,6 +20,7 @@ use std::task::{Context, Poll, Waker};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
+use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -97,7 +100,7 @@ fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
         stopper.join().unwrap();
         panicker.join().unwrap();
         runtime.stop().unwrap();
-        let error = task.wait().unwrap_err();
+        let error = task.join().unwrap_err();
         assert!(error.is_panic() || error.is_shutdown());
         assert_ne!(error.is_panic(), error.is_shutdown());
         assert_eq!(drops.load(Ordering::SeqCst), 1);
