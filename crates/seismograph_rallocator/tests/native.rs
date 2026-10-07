@@ -241,8 +241,24 @@ fn zero_source_round_trips_without_inventing_coverage() {
 
 #[test]
 fn every_truncation_is_rejected() {
-    let bytes = bytes(&fixture());
-    for length in 0..bytes.len() {
+    let snapshot = fixture();
+    let bytes = bytes(&snapshot);
+    #[cfg(not(miri))]
+    let lengths = 0..bytes.len();
+    #[cfg(miri)]
+    let lengths = {
+        // Native tests exhaust every byte; Miri retains header and owner-boundary reads.
+        let mut lengths = (0..12).collect::<Vec<_>>();
+        for count in 0..=snapshot.owners.len() {
+            let boundary = encoded_len_with_owners(&snapshot, &snapshot.owners[..count]).unwrap();
+            lengths.extend(boundary - 8..boundary);
+            if count < snapshot.owners.len() {
+                lengths.extend(boundary..boundary + 19);
+            }
+        }
+        lengths.into_iter()
+    };
+    for length in lengths {
         assert!(decode(&bytes[..length]).is_err(), "prefix {length}");
     }
 }

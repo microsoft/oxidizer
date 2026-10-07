@@ -87,6 +87,10 @@ The following package-level exclusions are intentional:
   borrowed encoding and error-path coverage under Miri. This avoids exercising
   Windows `System` allocation-header bookkeeping through the counting wrapper
   during interpreter test-harness teardown.
+  The schema truncation regression retains every byte prefix natively and under
+  `cargo careful`. Miri checks the complete wire header, each owner header, and
+  the final eight bytes before every owner boundary instead of repeating the
+  same decoder reads for every byte in the observation arrays.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native
