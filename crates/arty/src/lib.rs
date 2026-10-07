@@ -85,6 +85,19 @@
 //! it. If the blocked code waits for work on that worker, or blocking callbacks
 //! wait on each other in an exhausted pool, the stall can become a deadlock.
 //!
+//! This deadlocks: the worker waits synchronously for a child that only the
+//! same worker can poll.
+//!
+//! ```no_run
+//! # #[cfg(all(feature = "macros", feature = "rt"))]
+//! #[arty::main]
+//! async fn main(cx: arty::task::Builtins) {
+//!     let child = cx.scheduler().spawn(async |_| 42);
+//!     let _ = futures::executor::block_on(child);
+//! }
+//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+//! ```
+//!
 //! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) is
 //! the narrow blocking entry point for running async work from synchronous
 //! code. It rejects calls from async workers. For synchronous I/O or library

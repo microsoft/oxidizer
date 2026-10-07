@@ -83,6 +83,17 @@ tasks and advance timers. Blocking a worker stalls every task assigned to
 it. If the blocked code waits for work on that worker, or blocking callbacks
 wait on each other in an exhausted pool, the stall can become a deadlock.
 
+This deadlocks: the worker waits synchronously for a child that only the
+same worker can poll.
+
+```rust
+#[arty::main]
+async fn main(cx: arty::task::Builtins) {
+    let child = cx.scheduler().spawn(async |_| 42);
+    let _ = futures::executor::block_on(child);
+}
+```
+
 [`RuntimeScheduler::block_on`][__link14] is
 the narrow blocking entry point for running async work from synchronous
 code. It rejects calls from async workers. For synchronous I/O or library
@@ -129,7 +140,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbuVbVPD4fvvkbP3apKZI9eb4bI9bNl5L_5UQbZHA8oMNiyZBhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbSdlyKkRW6FIbGthtl0Z6NnwbEGgdHEU70Ykb9hcyjhJYykdhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::Clock
