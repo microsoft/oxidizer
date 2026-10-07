@@ -129,7 +129,7 @@ mod tests {
     use std::alloc::{GlobalAlloc, Layout};
     use std::ptr;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicPtr;
+    use std::sync::atomic::{AtomicBool, AtomicPtr};
 
     use super::*;
     use crate::buddy::{Buddy, Nodes};
@@ -214,11 +214,24 @@ mod tests {
 
     #[test]
     fn relaxed_free_only_handoff_keeps_frontend_metadata_race_free() {
+        struct CancelOnPanic<'a>(&'a AtomicBool);
+
+        impl Drop for CancelOnPanic<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_or(std::thread::panicking(), Ordering::Relaxed);
+            }
+        }
+
         const ITERATIONS: usize = 10_000;
         let pointer = Arc::new(AtomicPtr::<u8>::new(ptr::null_mut()));
+        // A failed worker must not leave its peer spinning while scope joins.
+        // Relaxed cancellation does not synchronize the allocation handoff.
+        let cancelled = AtomicBool::new(false);
+        let cancelled = &cancelled;
         std::thread::scope(|scope| {
             let producer_pointer = Arc::clone(&pointer);
             scope.spawn(move || {
+                let _cancel_on_panic = CancelOnPanic(cancelled);
                 let layout = Layout::from_size_align(48, 16).unwrap();
                 for _ in 0..ITERATIONS {
                     // SAFETY: The valid layout requests one fresh allocation.
@@ -228,12 +241,14 @@ mod tests {
                         .compare_exchange(ptr::null_mut(), allocation, Ordering::Relaxed, Ordering::Relaxed)
                         .is_err()
                     {
+                        assert!(!cancelled.load(Ordering::Relaxed), "handoff consumer panicked");
                         std::hint::spin_loop();
                     }
                 }
             });
             let consumer_pointer = Arc::clone(&pointer);
             scope.spawn(move || {
+                let _cancel_on_panic = CancelOnPanic(cancelled);
                 let layout = Layout::from_size_align(48, 16).unwrap();
                 for _ in 0..ITERATIONS {
                     let allocation = loop {
@@ -241,6 +256,7 @@ mod tests {
                         if !allocation.is_null() {
                             break allocation;
                         }
+                        assert!(!cancelled.load(Ordering::Relaxed), "handoff producer panicked");
                         std::hint::spin_loop();
                     };
                     // SAFETY: The producer transfers this exact live allocation
