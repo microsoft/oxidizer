@@ -156,7 +156,7 @@ fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismo
     let _suppression = seismograph::recorder::SuppressionGuard::enter();
     let round = seismograph_rallocator::native::observation_round();
     let captured_nanos = seismograph_rallocator::native::captured_nanos();
-    let (owners, owner_count, owners_complete) = crate::thread::inventory(round, captured_nanos)?;
+    let (owners, owner_count, owners_complete) = crate::thread::inventory(round, captured_nanos, crate::observation::WALK_BUDGET)?;
     // Pool collection has ended before taking the global backend lock; owner
     // creation takes pool -> backend, so the collector must not reverse that order.
     let global = crate::backend::observe();

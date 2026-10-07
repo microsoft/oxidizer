@@ -142,6 +142,8 @@
 //! state; unavailable denotes telemetry storage failure. Every observation
 //! identifies its recording session, round, lease generation and capture time.
 //! Walks and inventory collection are bounded and explicitly report truncation.
+//! Idle-owner inspection shares one traversal budget across the inventory while
+//! the pool lock is held; omitted walks remain explicitly partial.
 //! Failed telemetry storage is unavailable, not fabricated zero state.
 //!
 //! Native outstanding ranges are not application-live allocations; incoming

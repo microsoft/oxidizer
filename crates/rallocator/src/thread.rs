@@ -145,7 +145,11 @@ pub(crate) fn observe_current(action: impl FnOnce(&Owner)) {
     });
 }
 
-pub(crate) fn inventory(round: u64, captured_nanos: u64) -> Result<(crate::observation::OwnerBuffer, u64, bool), seismograph::Error> {
+pub(crate) fn inventory(
+    round: u64,
+    captured_nanos: u64,
+    mut budget: usize,
+) -> Result<(crate::observation::OwnerBuffer, u64, bool), seismograph::Error> {
     let capacity = {
         let pool = lock_pool();
         pool.count.saturating_add(8).min(crate::observation::OWNER_LIMIT)
@@ -163,7 +167,6 @@ pub(crate) fn inventory(round: u64, captured_nanos: u64) -> Result<(crate::obser
         let (source, observation) = if leased {
             owner.observation().published()
         } else {
-            let mut budget = crate::observation::WALK_BUDGET;
             // SAFETY: An even generation denotes a returned owner; holding the
             // pool lock prevents acquisition or any mutation of its core.
             let mut state = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
@@ -402,6 +405,56 @@ mod tests {
             assert_ne!(current.get(), 0);
             assert_eq!(lock_pool().count, 1);
         });
+    }
+
+    #[test]
+    fn idle_inventory_shares_one_walk_budget_across_owners() {
+        const CHILD: &str = "RALLOCATOR_SHARED_INVENTORY_BUDGET_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "thread::tests::idle_inventory_shares_one_walk_budget_across_owners"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        let endpoints = [acquire(), acquire()];
+        assert!(endpoints.iter().all(|&address| address != 0));
+        let request = Request::new(Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let mut allocations = Vec::new();
+        for address in endpoints {
+            // SAFETY: Each acquire grants this test the endpoint's sole lease.
+            let owner = unsafe { &*(address as *const Owner) };
+            // SAFETY: The mutable core borrow ends before this lease is returned.
+            let pointer = unsafe { &mut *owner.core_ptr() }.allocate(request);
+            assert!(!pointer.is_null());
+            allocations.push((address, pointer));
+            // SAFETY: The test returns its lease without any retained core borrow.
+            unsafe { release(address) };
+        }
+        let (rows, total, complete) = inventory(1, 1, 1).unwrap();
+        assert_eq!(total, 2);
+        assert!(complete);
+        let observations = rows.as_slice().iter().map(|owner| owner.observation.unwrap()).collect::<Vec<_>>();
+        assert_eq!(
+            observations
+                .iter()
+                .flat_map(|state| state.classes)
+                .map(|class| class.observed_slabs)
+                .sum::<u64>(),
+            1
+        );
+        assert!(observations.iter().any(|state| !state.slabs_complete));
+        let _pool = lock_pool();
+        for (address, pointer) in allocations {
+            // SAFETY: The pool lock excludes acquisition of this idle endpoint.
+            let owner = unsafe { &*(address as *const Owner) };
+            // SAFETY: The same lock grants exclusive access to the inactive core.
+            let core = unsafe { &mut *owner.core_ptr() };
+            // SAFETY: This test still owns the live allocation and retires it once.
+            unsafe { core.deallocate(pointer.addr()) };
+        }
     }
 
     #[test]

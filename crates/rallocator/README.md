@@ -151,6 +151,8 @@ core. Quiet leased owners retain older publications or explicitly unknown
 state; unavailable denotes telemetry storage failure. Every observation
 identifies its recording session, round, lease generation and capture time.
 Walks and inventory collection are bounded and explicitly report truncation.
+Idle-owner inspection shares one traversal budget across the inventory while
+the pool lock is held; omitted walks remain explicitly partial.
 Failed telemetry storage is unavailable, not fabricated zero state.
 
 Native outstanding ranges are not application-live allocations; incoming
@@ -177,7 +179,7 @@ untouched and are not build targets. Miri is not a v4 backend.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwSPhgri7lR8bkbOdrYOFN9wbGl7_Gf0khwgbqAQiCoNcQ_phZIKCanJhbGxvY2F0b3JlMC4yLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbATsDLrRE8vwb9dqymEyAH6EbJO-GYuVpg2wb9UEF8qSVFPVhZIKCanJhbGxvY2F0b3JlMC4yLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
  [__link0]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::set_publication_enabled
  [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::request_observation
  [__link2]: https://docs.rs/rallocator/0.2.0/rallocator/struct.Rallocator.html
