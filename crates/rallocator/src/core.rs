@@ -1178,6 +1178,30 @@ mod tests {
     }
 
     #[test]
+    fn valid_size_realloc_failure_preserves_the_original_allocation() {
+        let address = fresh_owner();
+        // SAFETY: The fresh endpoint remains persistent throughout this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: The test is this endpoint's sole core lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let original = Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let replacement = Request::new(std::alloc::Layout::from_size_align(8 << 20, 16).unwrap()).unwrap();
+        let pointer = core.allocate(original);
+        assert!(!pointer.is_null());
+        // SAFETY: The checked allocation exclusively owns these 32 payload bytes.
+        unsafe { pointer.write_bytes(73, 32) };
+        crate::hal::fail_next(crate::hal::Failure::Commit);
+        // SAFETY: The original remains live and the copy length fits both layouts.
+        assert!(unsafe { core.reallocate(pointer.addr(), replacement, 32) }.is_null());
+        // SAFETY: A failed realloc must retain the original allocation and payload.
+        assert!(unsafe { std::slice::from_raw_parts(pointer, 32) }.iter().all(|&byte| byte == 73));
+        // SAFETY: The original allocation is still live and is retired exactly once.
+        unsafe { core.deallocate(pointer.addr()) };
+        core.flush();
+        assert!(core.is_empty());
+    }
+
+    #[test]
     fn slab_metadata_commit_failure_returns_null_and_can_be_retried() {
         let address = fresh_owner();
         // SAFETY: This fresh endpoint's core has no live allocations or other lease.
