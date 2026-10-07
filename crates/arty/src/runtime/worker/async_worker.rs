@@ -4,6 +4,7 @@
 use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -178,10 +179,10 @@ where
 
     #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
     fn execute_phase(&mut self) {
-        while self.execute_step() {}
+        while matches!(self.execute_step(), ControlFlow::Continue(())) {}
     }
 
-    fn execute_step(&mut self) -> bool {
+    fn execute_step(&mut self) -> ControlFlow<()> {
         let batch_exhausted = self.process_commands();
 
         let cycle_outcome = self
@@ -205,10 +206,10 @@ where
             CycleOutcome::Continue | CycleOutcome::Suspend => {}
             // This is the only way to exit the loop, guaranteeing safe shutdown of the
             // executor. The storage has already been retired before timer callbacks run.
-            CycleOutcome::Shutdown => return false,
+            CycleOutcome::Shutdown => return ControlFlow::Break(()),
         }
 
-        true
+        ControlFlow::Continue(())
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
@@ -438,7 +439,7 @@ mod tests {
         }
 
         fn setup_step(&mut self, failure: &'static str) {
-            if !self.worker.execute_step() {
+            if self.worker.execute_step().is_break() {
                 self.progress_failure = Some(failure);
             }
         }
@@ -515,7 +516,7 @@ mod tests {
                 full_batch && self.ready_task.is_none() && !self.task_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
             let timer_should_progress =
                 full_batch && self.timer_advanced_by_step && !self.timer_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
-            let running = self.worker.execute_step();
+            let running = self.worker.execute_step().is_continue();
             if running && task_should_progress && !self.task_done.load(Ordering::Relaxed) {
                 self.progress_failure = Some("ready task must progress between full command batches");
             }
@@ -552,7 +553,7 @@ mod tests {
                     break;
                 }
                 WorkerSignal::waker(&self.signal).wake_by_ref();
-                stopped = !self.worker.execute_step();
+                stopped = self.worker.execute_step().is_break();
             }
             if !stopped {
                 std::mem::forget(self.worker);
@@ -632,6 +633,48 @@ mod tests {
         assert!(task_done.load(Ordering::Relaxed));
         assert!(timer_done.load(Ordering::Relaxed));
         assert!((COMMANDS_PER_CYCLE..=2 * COMMANDS_PER_CYCLE + 1).contains(&processed.load(Ordering::Relaxed)));
+    }
+
+    #[test]
+    fn a_full_command_batch_skips_waiting_for_the_worker_signal() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let (ready_tx, ready_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+
+        // SAFETY: the shutdown command below drives this worker to completion before it is dropped.
+        let mut worker = unsafe {
+            AsyncWorker::new(
+                command_rx,
+                async |_, _| (),
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::clone(&signal),
+                Arc::new(AtomicBool::new(false)),
+                ready_tx,
+            )
+        };
+        assert!(worker.execute_step().is_continue());
+        ready_rx.recv().unwrap();
+
+        WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(signal.is_notified());
+        assert!(worker.execute_step().is_continue());
+        assert!(!signal.is_notified());
+
+        for _ in 0..COMMANDS_PER_CYCLE {
+            command_tx
+                .send(AsyncWorkerCommand::EnqueueTask {
+                    future_factory: Some(Box::new(|(), _| {})),
+                })
+                .unwrap();
+        }
+        WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(signal.is_notified());
+        assert!(worker.execute_step().is_continue());
+        assert!(signal.is_notified());
+
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker.run();
     }
 
     #[cfg(not(miri))]

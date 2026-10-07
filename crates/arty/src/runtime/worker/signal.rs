@@ -72,6 +72,13 @@ impl WorkerSignal {
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
 
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
+    pub(in crate::runtime) fn is_notified(&self) -> bool {
+        *self.notified.lock()
+    }
+
     fn notify(&self) {
         *self.notified.lock() = true;
         self.wake_waiter();

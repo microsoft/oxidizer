@@ -267,9 +267,9 @@ impl BlockingPool {
     }
 }
 
-// Keep the private closed-pool race outside the coverage-excluded test scaffolding.
 #[cfg(test)]
 #[test]
+#[cfg_attr(coverage_nightly, coverage(off))] // The rejected callback is deliberately asserted not to execute.
 fn closed_pool_rejects_worker_submission_after_admission() {
     let pool = BlockingPool::new(NonZeroUsize::new(1));
     let worker = BlockingWorker::new(pool.clone(), Sink::noop());

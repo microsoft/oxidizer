@@ -180,11 +180,63 @@ mod tests {
     }
 
     #[test]
-    fn validation_failures_preserve_private_identity() {
-        let error = Error::foreign_worker();
-        assert_eq!(
-            error.source().unwrap().downcast_ref::<RuntimeValidation>(),
-            Some(&RuntimeValidation::ForeignWorker)
-        );
+    fn validation_failures_preserve_private_identity_and_display_context() {
+        let cases = [
+            (
+                Error::invalid_worker_count(),
+                RuntimeValidation::InvalidWorkerCount,
+                "worker count must be greater than zero",
+            ),
+            (
+                Error::invalid_blocking_pool_limit(),
+                RuntimeValidation::InvalidBlockingPoolLimit,
+                "blocking pool max_workers must be greater than zero",
+            ),
+            (
+                Error::foreign_worker(),
+                RuntimeValidation::ForeignWorker,
+                "the worker passed to pin_current_thread_to must belong to this runtime",
+            ),
+            (
+                Error::unregistered_worker(),
+                RuntimeValidation::UnregisteredWorker,
+                "the worker passed to pin_current_thread_to must be a registered runtime worker",
+            ),
+            (
+                Error::unavailable_worker_services(),
+                RuntimeValidation::UnavailableWorkerServices,
+                "processor services for the worker passed to pin_current_thread_to are unavailable",
+            ),
+            (
+                Error::pin_from_async_worker(),
+                RuntimeValidation::PinFromAsyncWorker,
+                "an async Arty worker cannot change its processor affinity",
+            ),
+            (
+                Error::pin_from_blocking_callback(),
+                RuntimeValidation::PinFromBlockingCallback,
+                "an Arty blocking callback cannot change its processor affinity",
+            ),
+            (
+                Error::block_on_from_worker(),
+                RuntimeValidation::BlockOnFromWorker,
+                "block_on cannot be called from an async Arty worker",
+            ),
+            (
+                Error::shutdown_wait_from_worker(),
+                RuntimeValidation::ShutdownWaitFromWorker,
+                "an async Arty worker cannot wait for runtime shutdown",
+            ),
+            (
+                Error::shutdown_wait_from_blocking_callback(),
+                RuntimeValidation::ShutdownWaitFromBlockingCallback,
+                "a runtime blocking callback cannot wait for its own shutdown",
+            ),
+        ];
+
+        for (error, validation, message) in cases {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(error.source().unwrap().downcast_ref::<RuntimeValidation>(), Some(&validation));
+        }
     }
 }
