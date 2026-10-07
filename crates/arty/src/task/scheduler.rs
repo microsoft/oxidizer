@@ -409,7 +409,10 @@ mod tests {
             .unwrap();
         let registered = runtime
             .scheduler()
-            .block_on(async |_| CURRENT_WORKER.with_borrow(Option::is_some))
+            .block_on(async |_| {
+                assert!(Scheduler::is_current_worker_thread());
+                CURRENT_WORKER.with_borrow(Option::is_some)
+            })
             .unwrap();
 
         assert!(registered);

@@ -32,9 +32,11 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
         body();
         _ = completed.send(());
     });
-    completion
-        .recv_timeout(TEST_TIMEOUT)
-        .expect("the supported operation must complete without a same-pool deadlock");
+    if completion.recv_timeout(TEST_TIMEOUT).is_err() {
+        eprintln!("the supported operation deadlocked");
+        #[expect(clippy::exit, reason = "a deadlocked runtime thread prevents normal child-process teardown")]
+        std::process::exit(112);
+    }
 }
 
 #[test]

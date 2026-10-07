@@ -47,9 +47,11 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
         body();
         _ = completed.send(());
     });
-    completion
-        .recv_timeout(TEST_TIMEOUT)
-        .expect("the worker wait guard must reject the operation instead of deadlocking");
+    if completion.recv_timeout(TEST_TIMEOUT).is_err() {
+        eprintln!("the worker wait guard deadlocked");
+        #[expect(clippy::exit, reason = "a deadlocked runtime thread prevents normal test-process teardown")]
+        std::process::exit(112);
+    }
 }
 
 #[test]

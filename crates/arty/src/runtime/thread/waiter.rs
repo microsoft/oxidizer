@@ -41,6 +41,17 @@ impl Display for WorkerPanicked {
 
 impl StdError for WorkerPanicked {}
 
+#[derive(Debug)]
+struct SelfJoin(ThreadId);
+
+impl Display for SelfJoin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime worker {:?} cannot join itself", self.0)
+    }
+}
+
+impl StdError for SelfJoin {}
+
 fn completion_result(failed_worker: Option<ThreadId>) -> Result<(), Error> {
     failed_worker.map_or(Ok(()), |worker| Err(Error::new(WorkerPanicked(worker))))
 }
@@ -57,6 +68,10 @@ impl ThreadWaiter {
         loop {
             match &mut *state_guard {
                 State::Ready(threads) => {
+                    let current_thread = thread::current().id();
+                    if threads.iter().any(|worker| worker.thread().id() == current_thread) {
+                        return Err(Error::new(SelfJoin(current_thread)));
+                    }
                     let threads = std::mem::take(threads);
                     *state_guard = State::Joining;
                     drop(state_guard);
@@ -163,6 +178,21 @@ mod tests {
         let repeated = waiter.wait().unwrap_err().to_string();
         assert_eq!(first, repeated);
         assert!(first.contains("panicked"));
+    }
+
+    #[test]
+    fn worker_cannot_join_itself() {
+        let (waiter_tx, waiter_rx) = mpsc::channel();
+        let (outcome_tx, outcome_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let waiter: Arc<ThreadWaiter> = waiter_rx.recv().unwrap();
+            outcome_tx.send(waiter.wait().unwrap_err().to_string()).unwrap();
+        });
+        let waiter = Arc::new(ThreadWaiter::new(vec![worker]));
+        waiter_tx.send(Arc::clone(&waiter)).unwrap();
+
+        assert!(outcome_rx.recv_timeout(TEST_TIMEOUT).unwrap().contains("cannot join itself"));
+        waiter.wait().unwrap();
     }
 
     #[test]
