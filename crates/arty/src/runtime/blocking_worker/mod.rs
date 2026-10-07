@@ -287,9 +287,7 @@ pub(super) mod blocking_worker_tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use crate::runtime::blocking_worker::{
-        BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, is_current_blocking_pool,
-    };
+    use crate::runtime::blocking_worker::{BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, is_current_blocking_pool};
 
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {

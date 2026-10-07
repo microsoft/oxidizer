@@ -22,8 +22,9 @@
 //! services. Workers use thread-local bookkeeping rather than a global
 //! runtime singleton.
 //!
-//! Arty provides task scheduling, blocking-task pools, clocks, and telemetry.
-//! It does not provide async I/O drivers or move running tasks between workers.
+//! Arty provides task scheduling, clocks, telemetry, and pools for offloading
+//! blocking callbacks. It does not provide async I/O drivers or move running
+//! tasks between workers.
 //!
 //! # Quickstart
 //!
@@ -75,6 +76,23 @@
 //! nearby, and can reduce contention for that data. Shared data may still contend.
 //! Choose Tokio for automatic task distribution or its async I/O ecosystem;
 //! Arty does not provide Tokio's I/O or timer drivers.
+//!
+//! # Blocking work
+//!
+//! Join handles are futures: await them. Arty deliberately does not expose a
+//! synchronous join operation because async workers must stay free to poll
+//! tasks and advance timers. Blocking a worker stalls every task assigned to
+//! it. If the blocked code waits for work on that worker, or blocking callbacks
+//! wait on each other in an exhausted pool, the stall can become a deadlock.
+//!
+//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) is
+//! the narrow blocking entry point for running async work from synchronous
+//! code. It rejects calls from async workers. For synchronous I/O or library
+//! calls, use
+//! [`Scheduler::spawn_blocking`](crate::task::Scheduler::spawn_blocking) or
+//! [`RuntimeScheduler::spawn_blocking`](crate::task::RuntimeScheduler::spawn_blocking)
+//! and await the join. The callback runs in a blocking pool instead of on an
+//! async worker.
 //!
 //! # Detailed documentation
 //!
