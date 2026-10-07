@@ -81,7 +81,10 @@ The following package-level exclusions are intentional:
   interpreter backend. Miri is not a supported allocator backend; the old v1
   Miri backend and telemetry test binaries are removed.
   `seismograph` retains its independent portable runtime-analysis coverage,
-  and the event-only `seismograph_rallocator` schema is platform-independent.
+  and the schema-3 native owner/backend inventory codec in
+  `seismograph_rallocator` is platform-independent, as is its separate
+  allocation-event projection. Neither requires the native allocator backend
+  to run under Miri.
   Its custom-global-allocator allocation-count fixture runs natively and under
   `cargo careful`, not Miri. The separate native-schema integration tests retain
   borrowed encoding and error-path coverage under Miri. This avoids exercising
