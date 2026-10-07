@@ -497,7 +497,7 @@ impl AllocationRecord {
                 "Address 0x{:x} · requested {} B · alignment {} B · recorded heap key {}",
                 self.address, self.size, self.alignment, self.heap_key
             ),
-            "Addresses and source correlation keys may repeat. Pairing uses original captured event order, not global lifetime identity."
+            "Addresses and source correlation keys may repeat. Pairing uses timestamp, recorder thread, then sequence order, not global lifetime identity."
                 .into(),
         ]
     }

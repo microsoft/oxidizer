@@ -27,6 +27,13 @@ fn event(kind: EventKind, id: u64, thread: u64, actor: u64) -> Event {
     }
 }
 
+fn ordered(mut events: Vec<Event>) -> Vec<Event> {
+    for (index, event) in events.iter_mut().enumerate() {
+        event.timestamp = EventTimestamp::from_ticks(index as u64);
+    }
+    events
+}
+
 #[test]
 fn caller_projection_preserves_all_known_heap_kinds_and_ignores_nonallocation_kinds() {
     let mut events = Vec::new();
@@ -77,11 +84,11 @@ fn caller_projection_matches_remote_frees_and_maps_allocator_actor_names() {
     let runtime = Events {
         total_events: 3,
         lost_events: 2,
-        events: vec![
+        events: ordered(vec![
             event(EventKind::Allocation, 1, 7, 70),
             event(EventKind::Deallocation, 1, 9, 90),
             event(EventKind::Deallocation, 2, 9, 90),
-        ],
+        ]),
         threads: vec![
             ThreadLog {
                 thread_id: ThreadId::new(7),
@@ -120,13 +127,13 @@ fn caller_projection_matches_remote_frees_and_maps_allocator_actor_names() {
 #[test]
 fn repeated_address_keys_pair_each_lifetime_with_its_own_owner() {
     let runtime = Events {
-        events: vec![
+        events: ordered(vec![
             event(EventKind::Allocation, 0x1234, 7, 0),
             event(EventKind::Deallocation, 0x1234, 9, 0),
             event(EventKind::Allocation, 0x1234, 9, 0),
             event(EventKind::Deallocation, 0x1234, 7, 0),
             event(EventKind::Allocation, 0x1234, 7, 0),
-        ],
+        ]),
         threads: vec![
             ThreadLog {
                 thread_id: ThreadId::new(7),
@@ -171,13 +178,13 @@ fn orphan_frees_do_not_match_later_allocations_or_other_addresses() {
         allocation.address = Address::new(0x9999);
     }
     let runtime = Events {
-        events: vec![
+        events: ordered(vec![
             event(EventKind::Deallocation, 0x1234, 9, 0),
             event(EventKind::Allocation, 0x1234, 7, 0),
             other_address,
             event(EventKind::Deallocation, 0x1234, 9, 0),
             event(EventKind::Deallocation, 0x1234, 9, 0),
-        ],
+        ]),
         ..Default::default()
     };
     let projected = seismograph_rallocator::events::callers(&runtime);
@@ -192,15 +199,36 @@ fn orphan_frees_do_not_match_later_allocations_or_other_addresses() {
 #[test]
 fn missing_free_before_reuse_does_not_merge_retained_allocation_records() {
     let runtime = Events {
-        events: vec![
+        events: ordered(vec![
             event(EventKind::Allocation, 0x1234, 7, 0),
             event(EventKind::Allocation, 0x1234, 9, 0),
             event(EventKind::Deallocation, 0x1234, 7, 0),
-        ],
+        ]),
         ..Default::default()
     };
     let projected = seismograph_rallocator::events::callers(&runtime);
     assert_ne!(projected.events[0].allocation_id, projected.events[1].allocation_id);
     assert_eq!(projected.events[1].allocation_id, projected.events[2].allocation_id);
     assert_eq!(projected.events[2].thread_log_id, 9);
+}
+
+#[test]
+fn chronological_pairing_preserves_recorder_order_and_breaks_timestamp_ties() {
+    let mut allocation = event(EventKind::Allocation, 0x1234, 7, 0);
+    let mut free = event(EventKind::Deallocation, 0x1234, 9, 0);
+    allocation.timestamp = EventTimestamp::from_ticks(2);
+    free.timestamp = EventTimestamp::from_ticks(3);
+    let mut reused = event(EventKind::Allocation, 0x1234, 9, 0);
+    reused.timestamp = EventTimestamp::from_ticks(3);
+    reused.sequence = EventSequence::new(2);
+    let runtime = Events {
+        events: vec![free, reused, allocation],
+        ..Default::default()
+    };
+    let projected = seismograph_rallocator::events::callers(&runtime);
+    assert_eq!(projected.events[0].kind, seismograph_rallocator::callers::EventKind::Deallocated);
+    assert_eq!(projected.events[0].allocation_id, projected.events[2].allocation_id);
+    assert_ne!(projected.events[0].allocation_id, projected.events[1].allocation_id);
+    assert_eq!(projected.events[0].thread_log_id, 7);
+    assert!(projected.events[0].allocation_recorded);
 }

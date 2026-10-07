@@ -153,6 +153,22 @@ fn remote_free_after_owner_exit_records_address_and_container_actor() {
             .all(|(_, allocation)| { allocation.heap_id.get() == 0 && allocation.event_thread_id.get() == 0 })
     );
     assert_ne!(matching[0].thread_id, matching[1].thread_id);
+    let callers = seismograph_rallocator::events::callers(&decoded.events);
+    let projected = callers
+        .events
+        .iter()
+        .filter(|event| event.address == address as u64)
+        .collect::<Vec<_>>();
+    assert_eq!(projected.len(), 2);
+    assert_eq!(projected[0].allocation_id, projected[1].allocation_id);
+    assert!(projected.iter().all(|event| event.allocation_recorded));
+    let allocating_thread = matching
+        .iter()
+        .find(|event| event.kind == EventKind::Allocation)
+        .unwrap()
+        .thread_id
+        .get();
+    assert!(projected.iter().all(|event| event.thread_log_id == allocating_thread));
     assert!(
         !records[1].1.freed_after_heap_release,
         "general owners do not masquerade as released bump heaps"

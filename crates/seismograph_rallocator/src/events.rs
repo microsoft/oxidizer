@@ -5,7 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use seismograph::recorder::event::{EventKind as RuntimeKind, Events};
+use seismograph::recorder::alloc::Allocation;
+use seismograph::recorder::event::{Event as RuntimeEvent, EventKind as RuntimeKind, Events};
 
 use crate::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 
@@ -16,12 +17,30 @@ const LEGACY_HEAP_KINDS: [(seismograph::recorder::alloc::HeapKind, HeapKind); 3]
     (seismograph::recorder::alloc::HeapKind::Thread, HeapKind::Thread),
 ];
 
+fn chronological_allocations(events: &Events) -> Vec<(usize, &RuntimeEvent, Allocation, HeapKind)> {
+    let mut allocations = events
+        .events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            let allocation = event.allocation()?;
+            LEGACY_HEAP_KINDS
+                .iter()
+                .find_map(|(runtime, legacy)| (*runtime == allocation.heap_kind).then_some((index, event, allocation, *legacy)))
+        })
+        .collect::<Vec<_>>();
+    allocations.sort_by_key(|(_, event, _, _)| (event.timestamp.ticks(), event.thread_id.get(), event.sequence.get()));
+    allocations
+}
+
 /// Projects authoritative container events into the legacy caller-view model.
 ///
 /// Unmatched allocation records are not proof of live memory. Counterpart records
 /// may be absent across intervals, suppression, sampling or buffer overwrites.
 /// Address correlation keys can repeat. View-local IDs pair only the most recent
 /// preceding retained allocation with a free; they do not survive captures.
+/// Pairing uses timestamp, recorder thread, then sequence order. Exact ties retain
+/// input order, and the projected events retain their original recorder order.
 #[must_use]
 pub fn callers(events: &Events) -> Callers {
     let mut pending = HashMap::new();
@@ -49,12 +68,8 @@ pub fn callers(events: &Events) -> Callers {
         log_indexes.insert(log.thread_log_id, result.threads.len());
         result.threads.push(log);
     }
-    let allocations = events.events.iter().enumerate().filter_map(|(index, event)| {
-        let allocation = event.allocation()?;
-        LEGACY_HEAP_KINDS
-            .iter()
-            .find_map(|(runtime, legacy)| (*runtime == allocation.heap_kind).then_some((index, event, allocation, *legacy)))
-    });
+    let allocations = chronological_allocations(events);
+    let mut projected_events = Vec::with_capacity(allocations.len());
     for (index, event, allocation, heap_kind) in allocations {
         if event.kind != RuntimeKind::Allocation && event.kind != RuntimeKind::Deallocation {
             continue;
@@ -103,8 +118,10 @@ pub fn callers(events: &Events) -> Callers {
             let bucket = (u64::BITS - allocation.size.leading_zeros()) as usize;
             log.allocated_histogram[bucket] += 1;
         }
-        result.events.push(projected);
+        projected_events.push((index, projected));
     }
+    projected_events.sort_unstable_by_key(|(index, _)| *index);
+    result.events = projected_events.into_iter().map(|(_, event)| event).collect();
     for event in &result.events {
         if event.kind == EventKind::Allocated
             && !deallocated.contains(&event.allocation_id)
