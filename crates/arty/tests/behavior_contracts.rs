@@ -172,9 +172,9 @@ fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
 fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
     let runtime = runtime(1);
     let scheduler = worker_scheduler(&runtime);
-    assert!(
-        scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap()
-            != scheduler.spawn(async |_| thread::current().id()).wait().unwrap()
+    assert_ne!(
+        scheduler.spawn_blocking(|| thread::current().id()).wait().unwrap(),
+        scheduler.spawn(async |_| thread::current().id()).wait().unwrap()
     );
     let outcome = scheduler.spawn_blocking(move || runtime.stop()).wait().unwrap();
     assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
