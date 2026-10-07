@@ -406,7 +406,7 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
     if snapshot.owner_count < count as u64 || (snapshot.owners_complete && snapshot.owner_count != count as u64) {
         return Err(error(ErrorKind::Malformed));
     }
-    let mut ids = HashSet::with_capacity(count);
+    let mut ids = HashSet::new();
     // Grow only after successfully decoding each row, not by a forged count.
     for _ in 0..count {
         let mut owner = Owner {

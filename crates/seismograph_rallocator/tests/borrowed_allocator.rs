@@ -11,7 +11,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use seismograph_rallocator::native::{Observation, ObservationSource, Owner, Snapshot};
-use seismograph_rallocator::{ErrorKind, encode, encode_with_owners, encoded_len, encoded_len_with_owners};
+use seismograph_rallocator::{ErrorKind, MAX_OWNERS, decode, encode, encode_with_owners, encoded_len, encoded_len_with_owners};
 
 thread_local! {
     static CALLS: Cell<Option<usize>> = const { Cell::new(None) };
@@ -84,4 +84,20 @@ fn borrowed_length_encoding_and_error_paths_never_use_global_allocator() {
     assert_eq!(owned_encoded.unwrap(), length);
     assert_eq!(wrong_length.unwrap_err().kind(), ErrorKind::LengthMismatch);
     assert_eq!(duplicate.unwrap_err().kind(), ErrorKind::DuplicateOwner);
+}
+
+#[test]
+fn forged_maximum_inventory_with_invalid_first_owner_does_not_allocate() {
+    let metadata = Snapshot::default();
+    let header_length = encoded_len(&metadata).unwrap();
+    let mut input = vec![0; header_length];
+    encode(&metadata, &mut input).unwrap();
+    input[36..44].copy_from_slice(&(MAX_OWNERS as u64).to_le_bytes());
+    input[46..50].copy_from_slice(&u32::try_from(MAX_OWNERS).unwrap().to_le_bytes());
+    input.resize(header_length + MAX_OWNERS * 19, 0);
+    CALLS.with(|calls| calls.set(Some(0)));
+    let decoded = decode(&input);
+    let calls = CALLS.with(|calls| calls.replace(None).unwrap());
+    assert_eq!(decoded.unwrap_err().kind(), ErrorKind::DuplicateOwner);
+    assert_eq!(calls, 0);
 }
