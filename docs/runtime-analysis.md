@@ -82,6 +82,11 @@ The following package-level exclusions are intentional:
   Miri backend and telemetry test binaries are removed.
   `seismograph` retains its independent portable runtime-analysis coverage,
   and the event-only `seismograph_rallocator` schema is platform-independent.
+  Its custom-global-allocator allocation-count fixture runs natively and under
+  `cargo careful`, not Miri. The separate native-schema integration tests retain
+  borrowed encoding and error-path coverage under Miri. This avoids exercising
+  Windows `System` allocation-header bookkeeping through the counting wrapper
+  during interpreter test-harness teardown.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native

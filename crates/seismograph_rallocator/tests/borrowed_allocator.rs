@@ -3,6 +3,10 @@
 
 //! Verify producer serialization cannot call the application's global allocator.
 
+// Allocation counting runs natively and under cargo careful; native.rs retains
+// borrowed codec and error-path coverage under Miri without replacing its allocator.
+#![cfg(not(miri))]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
