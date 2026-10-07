@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::NonZero;
+use std::num::{NonZero, NonZeroUsize};
 
 use many_cpus::ProcessorSet;
 
@@ -107,7 +107,7 @@ impl WorkersPolicy {
     pub(crate) fn select(&self, available: &ProcessorSet) -> Result<ProcessorSet, Error> {
         let count = match self.0 {
             WorkersPolicyKind::Exactly(0) | WorkersPolicyKind::AtMost(0) => {
-                return Err(Error::new("worker count must be greater than zero"));
+                return Err(Error::invalid_worker_count());
             }
             WorkersPolicyKind::Exactly(count) if count > available.len() => {
                 return Err(Error::insufficient_processors(count, available.len()));
@@ -138,7 +138,7 @@ enum WorkersPolicyKind {
 #[derive(Debug, PartialEq)]
 pub(crate) struct RuntimeConfig {
     pub(crate) workers_policy: WorkersPolicy,
-    pub(crate) stack_size: usize,
+    pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
 }
 
@@ -148,7 +148,7 @@ impl Default for RuntimeConfig {
             workers_policy: WorkersPolicy::default(),
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
-            stack_size: 2 * 1024 * 1024,
+            stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
         }
     }

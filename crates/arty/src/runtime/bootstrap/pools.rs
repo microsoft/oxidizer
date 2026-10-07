@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::num::NonZeroUsize;
+
 use crate::runtime::blocking_worker::BlockingPool;
 
 /// Resolves whether workers share their blocking-task pool.
@@ -15,7 +17,7 @@ impl BlockingPools {
         Self::Isolated
     }
 
-    pub(in crate::runtime) fn shared(max_workers: Option<usize>) -> Self {
+    pub(in crate::runtime) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
         Self::Shared(BlockingPool::new_with_mode(max_workers, "shared"))
     }
 
@@ -34,7 +36,7 @@ mod tests {
 
     #[test]
     fn shared_policy_reuses_the_same_blocking_pool() {
-        let pools = BlockingPools::shared(Some(1));
+        let pools = BlockingPools::shared(NonZeroUsize::new(1));
         assert!(pools.build_worker().shares_pool_with(&pools.build_worker()));
     }
 

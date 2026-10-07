@@ -27,17 +27,17 @@ use crate::task::execution::TaskResult;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-///     use std::rc::Rc;
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// use std::rc::Rc;
 ///
-///     let scheduler = cx
-///         .local_scheduler()
-///         .expect("the task runs on its associated worker");
-///     let task = scheduler.spawn(async || Rc::new(42));
-///     assert_eq!(*task.await?, 42);
-///     Ok(())
-/// }
+/// let scheduler = cx
+///     .local_scheduler()
+///     .expect("the task runs on its associated worker");
+/// let task = scheduler.spawn(async || Rc::new(42));
+/// assert_eq!(*task.await?, 42);
+/// # Ok(())
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(derive_more::Debug)]

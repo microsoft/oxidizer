@@ -252,6 +252,7 @@ dependencies = [
  "arty_executor",
  "arty_io_core",
  "arty_macros",
+ "bolero",
  "criterion",
  "ctor",
  "data_privacy",

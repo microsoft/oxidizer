@@ -15,18 +15,20 @@
 //! ```
 //! use arty::task::Builtins;
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
-//!     let home = cx.thread().id();
-//!     let cloned = cx.scheduler().clone();
-//!     let executed_on = cx
-//!         .scheduler()
-//!         .spawn_blocking(move || cloned.spawn(async |child| child.thread().id()))
-//!         .await?
-//!         .await?;
-//!     assert_eq!(executed_on, home);
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//! let home = cx.thread().id();
+//! let executed_on = cx
+//!     .scheduler()
+//!     .spawn_blocking({
+//!         let scheduler = cx.scheduler().clone();
+//!         move || scheduler.spawn(async |child| child.thread().id())
+//!     })
+//!     .await?
+//!     .await?;
+//! assert_eq!(executed_on, home);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Let the runtime place new work
@@ -39,20 +41,20 @@
 //! ```
 //! use arty::task::{Builtins, JoinError};
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), JoinError> {
-//!     let (worker, scheduler) = cx
-//!         .scheduler()
-//!         .spawn_anywhere(cx.clone(), |moved| async move {
-//!             assert_eq!(moved.thread().id(), std::thread::current().id());
-//!             assert!(moved.local_scheduler().is_some());
-//!             (moved.thread().clone(), moved.scheduler().clone())
-//!         })
-//!         .await?;
-//!     let child = scheduler.spawn(async |child| child.thread().id()).await?;
-//!     assert_eq!(child, worker.id());
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), JoinError> {
+//! let (worker, scheduler) = cx
+//!     .scheduler()
+//!     .spawn_anywhere(cx.clone(), |moved| async move {
+//!         assert_eq!(moved.thread().id(), std::thread::current().id());
+//!         assert!(moved.local_scheduler().is_some());
+//!         (moved.thread().clone(), moved.scheduler().clone())
+//!     })
+//!     .await?;
+//! let child = scheduler.spawn(async |child| child.thread().id()).await?;
+//! assert_eq!(child, worker.id());
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! The runtime may choose the original worker. If a task only needs its own

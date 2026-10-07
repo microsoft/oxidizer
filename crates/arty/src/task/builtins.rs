@@ -36,21 +36,21 @@ use crate::task::scheduler::Scheduler;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-///     let answer = cx
-///         .scheduler()
-///         .spawn(async |child| {
-///             child
-///                 .clock()
-///                 .delay(std::time::Duration::from_millis(1))
-///                 .await;
-///             42
-///         })
-///         .await?;
-///     assert_eq!(answer, 42);
-///     Ok(())
-/// }
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// let answer = cx
+///     .scheduler()
+///     .spawn(async |child| {
+///         child
+///             .clock()
+///             .delay(std::time::Duration::from_millis(1))
+///             .await;
+///         42
+///     })
+///     .await?;
+/// assert_eq!(answer, 42);
+/// # Ok(())
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
@@ -74,16 +74,16 @@ impl Builtins {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     let parent_thread = cx.thread().id();
-    ///     let child_thread = cx
-    ///         .scheduler()
-    ///         .spawn(async |child| child.thread().id())
-    ///         .await?;
-    ///     assert_eq!(child_thread, parent_thread);
-    ///     Ok(())
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// let parent_thread = cx.thread().id();
+    /// let child_thread = cx
+    ///     .scheduler()
+    ///     .spawn(async |child| child.thread().id())
+    ///     .await?;
+    /// assert_eq!(child_thread, parent_thread);
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -104,10 +104,10 @@ impl Builtins {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) {
-    ///     assert_eq!(cx.thread().id(), std::thread::current().id());
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) {
+    /// assert_eq!(cx.thread().id(), std::thread::current().id());
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -128,13 +128,13 @@ impl Builtins {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) {
-    ///     let duration = std::time::Duration::from_millis(1);
-    ///     let watch = cx.clock().stopwatch();
-    ///     cx.clock().delay(duration).await;
-    ///     assert!(watch.elapsed() >= duration);
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) {
+    /// let duration = std::time::Duration::from_millis(1);
+    /// let watch = cx.clock().stopwatch();
+    /// cx.clock().delay(duration).await;
+    /// assert!(watch.elapsed() >= duration);
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -162,10 +162,10 @@ impl Builtins {
     /// struct TaskStarted;
     ///
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) {
-    ///     observed::emit!(cx.sink(), TaskStarted);
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) {
+    /// observed::emit!(cx.sink(), TaskStarted);
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -189,17 +189,17 @@ impl Builtins {
     ///
     /// ```rust
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     use std::rc::Rc;
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// use std::rc::Rc;
     ///
-    ///     let local = cx
-    ///         .local_scheduler()
-    ///         .expect("the task runs on its associated worker");
-    ///     let result = local.spawn(async || Rc::new(42)).await?;
-    ///     assert_eq!(*result, 42);
-    ///     Ok(())
-    /// }
+    /// let local = cx
+    ///     .local_scheduler()
+    ///     .expect("the task runs on its associated worker");
+    /// let result = local.spawn(async || Rc::new(42)).await?;
+    /// assert_eq!(*result, 42);
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -293,18 +293,21 @@ impl Builtins {
 }
 
 impl AsRef<Scheduler> for Builtins {
+    #[inline]
     fn as_ref(&self) -> &Scheduler {
         self.scheduler()
     }
 }
 
 impl AsRef<Clock> for Builtins {
+    #[inline]
     fn as_ref(&self) -> &Clock {
         self.clock()
     }
 }
 
 impl AsRef<Sink> for Builtins {
+    #[inline]
     fn as_ref(&self) -> &Sink {
         self.sink()
     }

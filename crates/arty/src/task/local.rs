@@ -107,20 +107,22 @@ impl LocalTaskBinding {
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-///     use std::rc::Rc;
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// use std::rc::Rc;
 ///
-///     let value = Rc::new(42);
-///     let captured = Rc::clone(&value);
-///     let returned = cx
-///         .local_scheduler()
-///         .expect("the task runs on its associated worker")
-///         .spawn(async move || captured)
-///         .await?;
-///     assert!(Rc::ptr_eq(&value, &returned));
-///     Ok(())
-/// }
+/// let value = Rc::new(42);
+/// let returned = cx
+///     .local_scheduler()
+///     .expect("the task runs on its associated worker")
+///     .spawn({
+///         let value = Rc::clone(&value);
+///         async move || value
+///     })
+///     .await?;
+/// assert!(Rc::ptr_eq(&value, &returned));
+/// # Ok(())
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
@@ -160,19 +162,23 @@ impl LocalScheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     use std::rc::Rc;
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// use std::rc::Rc;
     ///
-    ///     let value = Rc::new(String::from("worker-local"));
-    ///     let captured = Rc::clone(&value);
-    ///     let scheduler = cx
-    ///         .local_scheduler()
-    ///         .expect("the task runs on its associated worker");
-    ///     let returned = scheduler.spawn(async move || captured).await?;
-    ///     assert!(Rc::ptr_eq(&value, &returned));
-    ///     Ok(())
-    /// }
+    /// let value = Rc::new(String::from("worker-local"));
+    /// let scheduler = cx
+    ///     .local_scheduler()
+    ///     .expect("the task runs on its associated worker");
+    /// let returned = scheduler
+    ///     .spawn({
+    ///         let value = Rc::clone(&value);
+    ///         async move || value
+    ///     })
+    ///     .await?;
+    /// assert!(Rc::ptr_eq(&value, &returned));
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> LocalJoinHandle<R>

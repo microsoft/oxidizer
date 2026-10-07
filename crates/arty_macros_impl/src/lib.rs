@@ -160,7 +160,10 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
     };
     let syn::Type::Path(state_type) = state.ty.as_ref() else {
-        return fail(syn::Error::new_spanned(&state.ty, "argument type must be Type::Path"));
+        return fail(syn::Error::new_spanned(
+            &state.ty,
+            "the first parameter must take Builtins by value, such as cx: arty::task::Builtins",
+        ));
     };
     let state_ident = state_ident.clone();
     let state_type = state_type.clone();
@@ -565,7 +568,7 @@ mod tests {
                 quote!(
                     async fn run(cx: &Builtins) {}
                 ),
-                "argument type must be Type::Path",
+                "the first parameter must take Builtins by value",
             ),
             (
                 quote!(

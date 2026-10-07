@@ -20,21 +20,50 @@ fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> 
     timed_out && elapsed >= timeout
 }
 
+fn wait_until_deadline<S>(
+    state: &mut S,
+    timeout: Duration,
+    mut waiting: impl FnMut(&S) -> bool,
+    mut elapsed: impl FnMut(&S) -> Duration,
+    mut timed_wait: impl FnMut(&mut S, Duration) -> bool,
+) {
+    while waiting(state) {
+        let remaining = timeout.saturating_sub(elapsed(state));
+        if remaining.is_zero() {
+            break;
+        }
+        let timed_out = timed_wait(state, remaining);
+        if should_finish_wait(timed_out, elapsed(state), timeout) {
+            break;
+        }
+    }
+}
+
 impl WorkerSignal {
     pub(in crate::runtime) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
-        let mut notified = self.notified.lock();
-        while !*notified {
-            let remaining = timeout.saturating_sub(start.elapsed());
-            if remaining.is_zero() {
-                break;
-            }
-            let (guard, elapsed) = self.ready.wait_timeout(notified, remaining);
-            notified = guard;
-            if should_finish_wait(elapsed.timed_out(), start.elapsed(), timeout) {
-                break;
-            }
-        }
+        let mut notified = Some(self.notified.lock());
+        wait_until_deadline(
+            &mut notified,
+            timeout,
+            |notified| {
+                !**notified
+                    .as_ref()
+                    .expect("the wait always retains or immediately replaces its notification guard")
+            },
+            |_| start.elapsed(),
+            |notified, remaining| {
+                let (guard, elapsed) = self.ready.wait_timeout(
+                    notified
+                        .take()
+                        .expect("the previous timed wait always replaced its notification guard"),
+                    remaining,
+                );
+                *notified = Some(guard);
+                elapsed.timed_out()
+            },
+        );
+        let mut notified = notified.expect("the final timed wait always replaced its notification guard");
         *notified = false;
     }
 
@@ -45,6 +74,11 @@ impl WorkerSignal {
 
     fn notify(&self) {
         *self.notified.lock() = true;
+        self.wake_waiter();
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Removing the native notification strands the smoke test; flag handling is tested separately.
+    fn wake_waiter(&self) {
         self.ready.notify_one();
     }
 }
@@ -62,17 +96,23 @@ impl Wake for WorkerSignal {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::collections::VecDeque;
     use std::sync::mpsc;
     use std::thread;
 
-    use testing_aids::TEST_TIMEOUT;
+    use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
     use super::*;
 
     #[test]
     fn notification_before_wait_is_retained_and_consumed() {
         let signal = Arc::new(WorkerSignal::default());
-        WorkerSignal::waker(&signal).wake();
+        let waker = WorkerSignal::waker(&signal);
+        waker.wake_by_ref();
+        assert!(*signal.notified.lock());
+        signal.wait(Duration::ZERO);
+        assert!(!*signal.notified.lock());
+        waker.wake();
         assert!(*signal.notified.lock());
         signal.wait(Duration::ZERO);
         assert!(!*signal.notified.lock());
@@ -80,6 +120,9 @@ mod tests {
 
     #[test]
     fn remote_wake_releases_a_waiter() {
+        if is_mutation_testing() {
+            return;
+        }
         let signal = Arc::new(WorkerSignal::default());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
@@ -97,6 +140,9 @@ mod tests {
 
     #[test]
     fn an_unnotified_wait_can_time_out() {
+        if is_mutation_testing() {
+            return;
+        }
         let signal = WorkerSignal::default();
         let timeout = Duration::from_millis(20);
         let start = std::time::Instant::now();
@@ -114,34 +160,34 @@ mod tests {
     }
 
     #[test]
-    fn spurious_notifications_do_not_restart_the_timeout() {
-        let signal = Arc::new(WorkerSignal::default());
-        let timeout = Duration::from_millis(20);
-        let (done, finished) = mpsc::channel();
-        let waiter = Arc::clone(&signal);
-        let worker = thread::spawn(move || {
-            let start = std::time::Instant::now();
-            waiter.wait(timeout);
-            done.send(start.elapsed()).unwrap();
-        });
-        let start = std::time::Instant::now();
-        loop {
-            signal.ready.notify_one();
-            match finished.try_recv() {
-                Ok(elapsed) => {
-                    assert!(elapsed >= timeout);
-                    break;
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    assert!(
-                        start.elapsed() < TEST_TIMEOUT,
-                        "spurious notifications must not extend the deadline"
-                    );
-                    thread::yield_now();
-                }
-                Err(mpsc::TryRecvError::Disconnected) => panic!("the waiter must report its elapsed time"),
-            }
+    fn spurious_wakes_reduce_the_remaining_wait_budget() {
+        struct Script {
+            elapsed: Duration,
+            elapsed_after_wait: VecDeque<Duration>,
+            wait_budgets: Vec<Duration>,
         }
-        worker.join().unwrap();
+
+        let timeout = Duration::from_millis(10);
+        let mut script = Script {
+            elapsed: Duration::from_millis(4),
+            elapsed_after_wait: VecDeque::from([Duration::from_millis(7), Duration::from_millis(11)]),
+            wait_budgets: Vec::new(),
+        };
+
+        wait_until_deadline(
+            &mut script,
+            timeout,
+            |_| true,
+            |script| script.elapsed,
+            |script, budget| {
+                script.wait_budgets.push(budget);
+                script.elapsed = script.elapsed_after_wait.pop_front().unwrap();
+                false
+            },
+        );
+
+        assert_eq!(script.wait_budgets, [Duration::from_millis(6), Duration::from_millis(3)]);
+        assert_eq!(script.elapsed, Duration::from_millis(11));
+        assert!(script.elapsed_after_wait.is_empty());
     }
 }

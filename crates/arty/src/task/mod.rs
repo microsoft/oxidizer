@@ -25,12 +25,12 @@
 //!
 //! ```
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-//!     let task = cx.scheduler().spawn(async |_| 6 * 7);
-//!     assert_eq!(task.await?, 42);
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+//! let task = cx.scheduler().spawn(async |_| 6 * 7);
+//! assert_eq!(task.await?, 42);
+//! # Ok(())
+//! # }
 //! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!

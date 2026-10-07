@@ -178,33 +178,37 @@ where
 
     #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
     fn execute_phase(&mut self) {
-        loop {
-            let batch_exhausted = self.process_commands();
+        while self.execute_step() {}
+    }
 
-            let cycle_outcome = self
-                .executor
-                .as_ref()
-                .expect("executor is not dropped until execute phase is finished")
-                .execute_cycle();
+    fn execute_step(&mut self) -> bool {
+        let batch_exhausted = self.process_commands();
 
-            if matches!(cycle_outcome, CycleOutcome::Shutdown) {
-                // No task wakers remain; retire their storage before the final timer callbacks.
-                self.executor = None;
-            }
+        let cycle_outcome = self
+            .executor
+            .as_ref()
+            .expect("executor is not dropped until execute phase is finished")
+            .execute_cycle();
 
-            // Advances the timers registered with the clock.
-            _ = self.clock_driver.advance_timers(Instant::now());
-
-            match cycle_outcome {
-                // Retain the donor's timer cadence, including externally controlled clocks.
-                // A notification arriving before this wait is retained by WorkerSignal.
-                CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
-                CycleOutcome::Continue | CycleOutcome::Suspend => {}
-                // This is the only way to exit the loop, guaranteeing safe shutdown of the
-                // executor. The storage has already been retired before timer callbacks run.
-                CycleOutcome::Shutdown => break,
-            }
+        if matches!(cycle_outcome, CycleOutcome::Shutdown) {
+            // No task wakers remain; retire their storage before the final timer callbacks.
+            self.executor = None;
         }
+
+        // Advances the timers registered with the clock.
+        _ = self.clock_driver.advance_timers(Instant::now());
+
+        match cycle_outcome {
+            // Retain the donor's timer cadence, including externally controlled clocks.
+            // A notification arriving before this wait is retained by WorkerSignal.
+            CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
+            CycleOutcome::Continue | CycleOutcome::Suspend => {}
+            // This is the only way to exit the loop, guaranteeing safe shutdown of the
+            // executor. The storage has already been retired before timer callbacks run.
+            CycleOutcome::Shutdown => return false,
+        }
+
+        true
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
@@ -308,6 +312,8 @@ mod tests {
     use std::task::{Wake, Waker};
     use std::thread;
 
+    #[cfg(not(miri))]
+    use events_once::BoxedSender;
     use events_once::{Event, IntoValueError};
     use observed::Sink;
     use testing_aids::async_test;
@@ -341,6 +347,237 @@ mod tests {
                 sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
             })),
         }
+    }
+
+    #[cfg(not(miri))]
+    struct GeneratedWorkerScenario {
+        command_tx: channel::Sender<AsyncWorkerCommand<()>>,
+        initialize: Option<BoxedSender<()>>,
+        ready_task: Option<BoxedSender<()>>,
+        control: ClockControl,
+        task_done: Arc<AtomicBool>,
+        timer_done: Arc<AtomicBool>,
+        factory_invocations: Arc<AtomicUsize>,
+        forbidden_factory_invocations: Arc<AtomicUsize>,
+        shutdown_signal: Arc<AtomicBool>,
+        signal: Arc<WorkerSignal>,
+        worker: AsyncWorker<()>,
+        timer_ready: bool,
+        timer_advanced_by_step: bool,
+        queued_shutdown: bool,
+        queued_factories: usize,
+        sent_factories: usize,
+        progress_failure: Option<&'static str>,
+    }
+
+    #[cfg(not(miri))]
+    impl GeneratedWorkerScenario {
+        const MAX_OPERATIONS: usize = 12;
+        const MAX_CLEANUP_STEPS: usize = Self::MAX_OPERATIONS + 8;
+
+        fn new() -> Self {
+            let (command_tx, command_rx) = channel::unbounded();
+            let (ready_tx, _ready_rx) = channel::unbounded();
+            let (initialize, initialized) = Event::boxed();
+            let (ready_task, task_ready) = Event::boxed();
+            let control = ClockControl::new();
+            let task_done = Arc::new(AtomicBool::new(false));
+            let timer_done = Arc::new(AtomicBool::new(false));
+            let factory_invocations = Arc::new(AtomicUsize::new(0));
+            let forbidden_factory_invocations = Arc::new(AtomicUsize::new(0));
+            let shutdown_signal = Arc::new(AtomicBool::new(false));
+            let signal = Arc::new(WorkerSignal::default());
+            let task_observer = Arc::clone(&task_done);
+            let timer_observer = Arc::clone(&timer_done);
+
+            // SAFETY: finish() uses bounded steps to drive the worker through executor shutdown.
+            let worker = unsafe {
+                AsyncWorker::new(
+                    command_rx,
+                    async move |tasks, clock| {
+                        drop(tasks.add(async move {
+                            task_ready.await.unwrap();
+                            task_observer.store(true, Ordering::Relaxed);
+                        }));
+                        drop(tasks.add(async move {
+                            clock.delay(Duration::from_secs(1)).await;
+                            timer_observer.store(true, Ordering::Relaxed);
+                        }));
+                        initialized.await.unwrap();
+                    },
+                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                    control.clone().into(),
+                    Arc::clone(&signal),
+                    Arc::clone(&shutdown_signal),
+                    ready_tx,
+                )
+            };
+            let mut scenario = Self {
+                command_tx,
+                initialize: Some(initialize),
+                ready_task: Some(ready_task),
+                control,
+                task_done,
+                timer_done,
+                factory_invocations,
+                forbidden_factory_invocations,
+                shutdown_signal,
+                signal,
+                worker,
+                timer_ready: false,
+                timer_advanced_by_step: false,
+                queued_shutdown: false,
+                queued_factories: 0,
+                sent_factories: 0,
+                progress_failure: None,
+            };
+            scenario.setup_step("worker stopped while registering controlled work");
+            WorkerSignal::waker(&scenario.signal).wake_by_ref();
+            scenario.setup_step("worker stopped while polling controlled work");
+            scenario
+        }
+
+        fn setup_step(&mut self, failure: &'static str) {
+            if !self.worker.execute_step() {
+                self.progress_failure = Some(failure);
+            }
+        }
+
+        fn apply(&mut self, operation: u8) {
+            match operation % 7 {
+                0 => self.queue_factory_batch(operation),
+                1 => {
+                    if let Some(initialize) = self.initialize.take() {
+                        initialize.send(());
+                    }
+                }
+                2 => {
+                    if let Some(ready_task) = self.ready_task.take() {
+                        ready_task.send(());
+                    }
+                }
+                3 => self.ready_timer(),
+                4 => self.step(),
+                5 => self.shutdown_signal.store(true, Ordering::Release),
+                _ => self.queue_shutdown(),
+            }
+        }
+
+        fn queue_factory_batch(&mut self, operation: u8) {
+            let batch_size = match (operation / 7) % 4 {
+                0 => 1,
+                1 => COMMANDS_PER_CYCLE - 1,
+                2 => COMMANDS_PER_CYCLE,
+                _ => COMMANDS_PER_CYCLE + 1,
+            };
+            for _ in 0..batch_size {
+                let invocations = Arc::clone(&self.factory_invocations);
+                let forbidden = Arc::clone(&self.forbidden_factory_invocations);
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
+                let forbidden_after_queued_shutdown = self.queued_shutdown;
+                if self
+                    .command_tx
+                    .send(AsyncWorkerCommand::EnqueueTask {
+                        future_factory: Some(Box::new(move |(), _| {
+                            invocations.fetch_add(1, Ordering::Relaxed);
+                            if forbidden_after_queued_shutdown || shutdown_signal.load(Ordering::Acquire) {
+                                forbidden.fetch_add(1, Ordering::Relaxed);
+                            }
+                        })),
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                self.queued_factories += 1;
+                self.sent_factories += 1;
+            }
+        }
+
+        fn ready_timer(&mut self) {
+            if !self.timer_ready {
+                self.control.advance(Duration::from_secs(1));
+                self.timer_ready = true;
+            }
+        }
+
+        fn step(&mut self) {
+            if self.worker.executor.is_none() {
+                return;
+            }
+            WorkerSignal::waker(&self.signal).wake_by_ref();
+            let initialized = self.worker.thread_state.as_ref().is_some_and(|state| state.get().is_some());
+            let full_batch = initialized
+                && self.queued_factories >= COMMANDS_PER_CYCLE
+                && !self.shutdown_signal.load(Ordering::Acquire)
+                && !self.queued_shutdown;
+            let task_should_progress =
+                full_batch && self.ready_task.is_none() && !self.task_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
+            let timer_should_progress =
+                full_batch && self.timer_advanced_by_step && !self.timer_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
+            let running = self.worker.execute_step();
+            if running && task_should_progress && !self.task_done.load(Ordering::Relaxed) {
+                self.progress_failure = Some("ready task must progress between full command batches");
+            }
+            if running && timer_should_progress && !self.timer_done.load(Ordering::Relaxed) {
+                self.progress_failure = Some("ready timer must progress between full command batches");
+            }
+            if full_batch {
+                self.queued_factories -= COMMANDS_PER_CYCLE;
+            } else if initialized && !self.shutdown_signal.load(Ordering::Acquire) && !self.queued_shutdown {
+                self.queued_factories = 0;
+            }
+            self.timer_advanced_by_step |= self.timer_ready;
+        }
+
+        fn queue_shutdown(&mut self) {
+            if !self.queued_shutdown && self.command_tx.send(AsyncWorkerCommand::Shutdown).is_ok() {
+                self.queued_shutdown = true;
+            }
+        }
+
+        fn finish(mut self) {
+            if let Some(initialize) = self.initialize.take() {
+                initialize.send(());
+            }
+            if let Some(ready_task) = self.ready_task.take() {
+                ready_task.send(());
+            }
+            self.ready_timer();
+            self.queue_shutdown();
+
+            let mut stopped = self.worker.executor.is_none();
+            for _ in 0..Self::MAX_CLEANUP_STEPS {
+                if stopped {
+                    break;
+                }
+                WorkerSignal::waker(&self.signal).wake_by_ref();
+                stopped = !self.worker.execute_step();
+            }
+            if !stopped {
+                std::mem::forget(self.worker);
+                panic!("bounded cleanup must complete worker shutdown");
+            }
+            assert!(self.progress_failure.is_none(), "{}", self.progress_failure.unwrap_or_default());
+            assert_eq!(
+                self.forbidden_factory_invocations.load(Ordering::Relaxed),
+                0,
+                "factories queued after shutdown or pending at shutdown publication must not be invoked"
+            );
+            assert!(self.factory_invocations.load(Ordering::Relaxed) <= self.sent_factories);
+        }
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn generated_command_sequences_preserve_progress_and_close_admission() {
+        bolero::check!().for_each(|input: &[u8]| {
+            let mut scenario = GeneratedWorkerScenario::new();
+            for operation in input.iter().copied().take(GeneratedWorkerScenario::MAX_OPERATIONS) {
+                scenario.apply(operation);
+            }
+            scenario.finish();
+        });
     }
 
     #[test]

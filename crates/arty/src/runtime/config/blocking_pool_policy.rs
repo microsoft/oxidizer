@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::num::NonZeroUsize;
+
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::error::Error;
 
@@ -102,8 +104,13 @@ impl BlockingPoolPolicy {
     pub(in crate::runtime) fn into_pools(self) -> Result<BlockingPools, Error> {
         match self.mode {
             Mode::Isolated => Ok(BlockingPools::isolated()),
-            Mode::Shared if self.max_workers == Some(0) => Err(Error::new("blocking pool max_workers must be greater than zero")),
-            Mode::Shared => Ok(BlockingPools::shared(self.max_workers)),
+            Mode::Shared => {
+                let max_workers = self
+                    .max_workers
+                    .map(|max_workers| NonZeroUsize::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit))
+                    .transpose()?;
+                Ok(BlockingPools::shared(max_workers))
+            }
         }
     }
 }

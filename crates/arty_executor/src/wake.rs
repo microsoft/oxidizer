@@ -111,7 +111,7 @@ unsafe impl Sync for WakeState {}
 
 impl fmt::Debug for WakeState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WakeState")
+        f.debug_struct(std::any::type_name::<Self>())
             .field("active", &self.active.load(atomic::Ordering::Relaxed))
             .field("waker_count", &self.waker_count.load(atomic::Ordering::Relaxed))
             .finish_non_exhaustive()
@@ -562,7 +562,10 @@ mod tests {
         let signal = signal.as_ref();
         signal.retire();
         let state = signal.state();
-        assert!(format!("{state:?}").contains("WakeState"));
+        let debug = format!("{state:?}");
+        assert!(debug.contains(std::any::type_name::<WakeState>()));
+        assert!(debug.contains("active: false"));
+        assert!(debug.contains("waker_count: 0"));
 
         // SAFETY: the pinned signal remains alive until the owned clone is dropped.
         let borrowed = unsafe { signal.waker_ref() };
@@ -665,11 +668,13 @@ mod tests {
         // SAFETY: the signal remains pinned until the worker has stopped using the waker.
         let waker = unsafe { signal.as_ref().waker() };
         let barrier = Arc::new(std::sync::Barrier::new(2));
-        let started = Arc::clone(&barrier);
-        let worker = std::thread::spawn(move || {
-            started.wait();
-            for _ in 0..10_000 {
-                waker.wake_by_ref();
+        let worker = std::thread::spawn({
+            let barrier = Arc::clone(&barrier);
+            move || {
+                barrier.wait();
+                for _ in 0..10_000 {
+                    waker.wake_by_ref();
+                }
             }
         });
         barrier.wait();

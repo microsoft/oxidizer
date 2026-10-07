@@ -20,17 +20,17 @@
 //! use arty::task::Builtins;
 //! use arty::time::FutureExt;
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) {
-//!     let watch = cx.clock().stopwatch();
-//!     cx.clock().delay(Duration::from_millis(1)).await;
-//!     assert!(watch.elapsed() >= Duration::from_millis(1));
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) {
+//! let watch = cx.clock().stopwatch();
+//! cx.clock().delay(Duration::from_millis(1)).await;
+//! assert!(watch.elapsed() >= Duration::from_millis(1));
 //!
-//!     let result = pending::<()>()
-//!         .timeout(cx.clock(), Duration::from_millis(1))
-//!         .await;
-//!     assert!(result.is_err());
-//! }
+//! let result = pending::<()>()
+//!     .timeout(cx.clock(), Duration::from_millis(1))
+//!     .await;
+//! assert!(result.is_err());
+//! # }
 //! ```
 //!
 //! A busy worker may resume a task later than the requested delay. A timeout

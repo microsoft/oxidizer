@@ -196,11 +196,11 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) {
-///     cx.clock().delay(std::time::Duration::from_millis(1)).await;
-///     println!("Hello from Arty!");
-/// }
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) {
+/// cx.clock().delay(std::time::Duration::from_millis(1)).await;
+/// println!("Hello from Arty!");
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -354,13 +354,13 @@ pub mod core {
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) {
-///     let duration = std::time::Duration::from_millis(1);
-///     let watch = cx.clock().stopwatch();
-///     cx.clock().delay(duration).await;
-///     assert!(watch.elapsed() >= duration);
-/// }
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) {
+/// let duration = std::time::Duration::from_millis(1);
+/// let watch = cx.clock().stopwatch();
+/// cx.clock().delay(duration).await;
+/// assert!(watch.elapsed() >= duration);
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[cfg(any(test, feature = "time"))]

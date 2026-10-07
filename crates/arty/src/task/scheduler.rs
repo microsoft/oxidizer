@@ -51,13 +51,13 @@ struct CurrentWorker {
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-///     let scheduler = cx.scheduler().clone();
-///     let task = scheduler.spawn(async |_| 42);
-///     assert_eq!(task.await?, 42);
-///     Ok(())
-/// }
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// let scheduler = cx.scheduler().clone();
+/// let task = scheduler.spawn(async |_| 42);
+/// assert_eq!(task.await?, 42);
+/// # Ok(())
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
@@ -146,24 +146,24 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     use std::rc::Rc;
-    ///     use std::time::Duration;
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// use std::rc::Rc;
+    /// use std::time::Duration;
     ///
-    ///     let answer = cx
-    ///         .scheduler()
-    ///         .spawn(|child| {
-    ///             let value = Rc::new(42);
-    ///             async move {
-    ///                 child.clock().delay(Duration::from_millis(1)).await;
-    ///                 *value
-    ///             }
-    ///         })
-    ///         .await?;
-    ///     assert_eq!(answer, 42);
-    ///     Ok(())
-    /// }
+    /// let answer = cx
+    ///     .scheduler()
+    ///     .spawn(|child| {
+    ///         let value = Rc::new(42);
+    ///         async move {
+    ///             child.clock().delay(Duration::from_millis(1)).await;
+    ///             *value
+    ///         }
+    ///     })
+    ///     .await?;
+    /// assert_eq!(answer, 42);
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
@@ -229,19 +229,19 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     let answer = cx
-    ///         .scheduler()
-    ///         .spawn_anywhere(cx.clone(), |moved| async move {
-    ///             assert_eq!(moved.thread().id(), std::thread::current().id());
-    ///             assert!(moved.local_scheduler().is_some());
-    ///             42
-    ///         })
-    ///         .await?;
-    ///     assert_eq!(answer, 42);
-    ///     Ok(())
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// let answer = cx
+    ///     .scheduler()
+    ///     .spawn_anywhere(cx.clone(), |moved| async move {
+    ///         assert_eq!(moved.thread().id(), std::thread::current().id());
+    ///         assert!(moved.local_scheduler().is_some());
+    ///         42
+    ///     })
+    ///     .await?;
+    /// assert_eq!(answer, 42);
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     ///
@@ -283,16 +283,16 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     let tasks = cx
-    ///         .scheduler()
-    ///         .spawn_everywhere(cx.clone(), |worker| async move { worker.thread().id() });
-    ///     for task in tasks {
-    ///         let _worker = task.await?;
-    ///     }
-    ///     Ok(())
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// let tasks = cx
+    ///     .scheduler()
+    ///     .spawn_everywhere(cx.clone(), |worker| async move { worker.thread().id() });
+    /// for task in tasks {
+    ///     let _worker = task.await?;
     /// }
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     ///
@@ -351,17 +351,15 @@ impl Scheduler {
     ///
     /// ```no_run
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(
-    ///     cx: arty::task::Builtins,
-    /// ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    ///     let contents = cx
-    ///         .scheduler()
-    ///         .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
-    ///         .await??;
-    ///     println!("{contents}");
-    ///     Ok(())
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), ohno::AppError> {
+    /// let contents = cx
+    ///     .scheduler()
+    ///     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
+    ///     .await??;
+    /// println!("{contents}");
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     ///

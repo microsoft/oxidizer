@@ -31,6 +31,38 @@ impl Error {
         Self::new(InsufficientProcessors { requested, available })
     }
 
+    pub(crate) fn invalid_worker_count() -> Self {
+        Self::new(RuntimeValidation::InvalidWorkerCount)
+    }
+
+    pub(crate) fn invalid_blocking_pool_limit() -> Self {
+        Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
+    }
+
+    pub(crate) fn foreign_worker() -> Self {
+        Self::new(RuntimeValidation::ForeignWorker)
+    }
+
+    pub(crate) fn unregistered_worker() -> Self {
+        Self::new(RuntimeValidation::UnregisteredWorker)
+    }
+
+    pub(crate) fn unavailable_worker_services() -> Self {
+        Self::new(RuntimeValidation::UnavailableWorkerServices)
+    }
+
+    pub(crate) fn block_on_from_worker() -> Self {
+        Self::new(RuntimeValidation::BlockOnFromWorker)
+    }
+
+    pub(crate) fn shutdown_wait_from_worker() -> Self {
+        Self::new(RuntimeValidation::ShutdownWaitFromWorker)
+    }
+
+    pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
+        Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
+    }
+
     #[cfg(any(test, feature = "macros"))]
     pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
         self.source
@@ -66,6 +98,35 @@ impl Display for InsufficientProcessors {
 }
 
 impl StdError for InsufficientProcessors {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeValidation {
+    InvalidWorkerCount,
+    InvalidBlockingPoolLimit,
+    ForeignWorker,
+    UnregisteredWorker,
+    UnavailableWorkerServices,
+    BlockOnFromWorker,
+    ShutdownWaitFromWorker,
+    ShutdownWaitFromBlockingCallback,
+}
+
+impl Display for RuntimeValidation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::InvalidWorkerCount => "worker count must be greater than zero",
+            Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
+            Self::ForeignWorker => "the worker passed to pin_current_thread_to must belong to this runtime",
+            Self::UnregisteredWorker => "the worker passed to pin_current_thread_to must be a registered runtime worker",
+            Self::UnavailableWorkerServices => "processor services for the worker passed to pin_current_thread_to are unavailable",
+            Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
+            Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
+            Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
+        })
+    }
+}
+
+impl StdError for RuntimeValidation {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -103,6 +164,15 @@ mod tests {
         assert_eq!(
             error.source().unwrap().downcast_ref::<io::Error>().unwrap().kind(),
             io::ErrorKind::TimedOut
+        );
+    }
+
+    #[test]
+    fn validation_failures_preserve_private_identity() {
+        let error = Error::foreign_worker();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<RuntimeValidation>(),
+            Some(&RuntimeValidation::ForeignWorker)
         );
     }
 }

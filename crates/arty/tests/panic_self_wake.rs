@@ -58,26 +58,28 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
         .unwrap();
     let polls = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
-    let captured_polls = Arc::clone(&polls);
-    let captured_drops = Arc::clone(&drops);
     runtime
         .scheduler()
-        .block_on(async move |cx| {
-            for _ in 0..repetitions {
-                let tasks = cx.scheduler().spawn_everywhere(
-                    (cx.clone(), Unaware((Arc::clone(&captured_polls), Arc::clone(&captured_drops)))),
-                    |(child, Unaware((polls, drops)))| SelfWakePanic {
-                        polls,
-                        drops,
-                        owner: child.thread().id(),
-                        _local: Rc::new(()),
-                    },
-                );
-                for task in tasks {
-                    assert!(task.await.unwrap_err().is_panic());
-                }
-                for task in cx.scheduler().spawn_everywhere((), |()| async { 42 }) {
-                    assert_eq!(task.await.unwrap(), 42);
+        .block_on({
+            let polls = Arc::clone(&polls);
+            let drops = Arc::clone(&drops);
+            async move |cx| {
+                for _ in 0..repetitions {
+                    let tasks = cx.scheduler().spawn_everywhere(
+                        (cx.clone(), Unaware((Arc::clone(&polls), Arc::clone(&drops)))),
+                        |(child, Unaware((polls, drops)))| SelfWakePanic {
+                            polls,
+                            drops,
+                            owner: child.thread().id(),
+                            _local: Rc::new(()),
+                        },
+                    );
+                    for task in tasks {
+                        assert!(task.await.unwrap_err().is_panic());
+                    }
+                    for task in cx.scheduler().spawn_everywhere((), |()| async { 42 }) {
+                        assert_eq!(task.await.unwrap(), 42);
+                    }
                 }
             }
         })
@@ -93,22 +95,24 @@ fn local_self_waking_panics_do_not_repoll_or_corrupt_later_tasks() {
     let runtime = runtime();
     let polls = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
-    let captured_polls = Arc::clone(&polls);
-    let captured_drops = Arc::clone(&drops);
     runtime
         .scheduler()
-        .block_on(async move |cx| {
-            for _ in 0..repetitions {
-                let polls = Arc::clone(&captured_polls);
-                let drops = Arc::clone(&captured_drops);
-                let task = cx.local_scheduler().unwrap().spawn(move || SelfWakePanic {
-                    polls,
-                    drops,
-                    owner: std::thread::current().id(),
-                    _local: Rc::new(()),
-                });
-                assert!(task.await.unwrap_err().is_panic());
-                assert_eq!(*cx.local_scheduler().unwrap().spawn(async || Rc::new(42)).await.unwrap(), 42);
+        .block_on({
+            let polls = Arc::clone(&polls);
+            let drops = Arc::clone(&drops);
+            async move |cx| {
+                for _ in 0..repetitions {
+                    let polls = Arc::clone(&polls);
+                    let drops = Arc::clone(&drops);
+                    let task = cx.local_scheduler().unwrap().spawn(move || SelfWakePanic {
+                        polls,
+                        drops,
+                        owner: std::thread::current().id(),
+                        _local: Rc::new(()),
+                    });
+                    assert!(task.await.unwrap_err().is_panic());
+                    assert_eq!(*cx.local_scheduler().unwrap().spawn(async || Rc::new(42)).await.unwrap(), 42);
+                }
             }
         })
         .unwrap();

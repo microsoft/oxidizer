@@ -16,7 +16,7 @@ testing_aids::init_tracing!();
 
 mod support;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 #[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
 use observed::Value;
@@ -34,6 +34,41 @@ fn events_named<'a>(events: &'a [CapturedEvent], name: &str) -> Vec<&'a Captured
 
 fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
     event.dimensions().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
+#[test]
+fn blocking_pool_reports_distinct_saturation_episodes() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::at_most(1))
+        .blocking_pool(BlockingPoolPolicy::shared(1))
+        .sink(sink)
+        .build()
+        .unwrap();
+
+    for expected_events in 1..=2 {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = runtime.scheduler().spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+
+        let queued: Vec<_> = (0..=5).map(|_| runtime.scheduler().spawn_blocking(|| {})).collect();
+        release_tx.send(()).unwrap();
+        blocker.join().unwrap();
+        for task in queued {
+            task.join().unwrap();
+        }
+
+        assert_eq!(
+            events_named(&processor.events(), "arty.rt.blocking_worker.pool_saturated").len(),
+            expected_events
+        );
+    }
+
+    runtime.stop().unwrap();
 }
 
 #[cfg(all(debug_assertions, not(miri)))]

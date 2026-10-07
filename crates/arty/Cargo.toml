@@ -82,6 +82,7 @@ tick = { workspace = true, optional = true }
 [dev-dependencies]
 arty_executor = { path = "../arty_executor", features = ["test-util"] }
 arty_macros = { path = "../arty_macros" }
+bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 data_privacy = { path = "../data_privacy" }

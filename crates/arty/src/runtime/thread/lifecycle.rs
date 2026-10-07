@@ -37,6 +37,8 @@ where
         .spawn(move || {
             thread_fn(&thread_sink, task);
         })
+        // Fallible construction and partial-startup cleanup are intentionally
+        // deferred: https://github.com/microsoft/oxidizer/pull/785#discussion_r4183811801
         .expect("failed to spawn thread")
 }
 
@@ -100,11 +102,13 @@ mod tests {
     #[test]
     fn spawn_executes_task_successfully() {
         let result = Arc::new(Mutex::new(0));
-        let result_clone = Arc::clone(&result);
 
-        let handle = spawn(&Sink::noop(), "test-thread", None, move || {
-            let mut value = result_clone.lock().unwrap();
-            *value = 42;
+        let handle = spawn(&Sink::noop(), "test-thread", None, {
+            let result = Arc::clone(&result);
+            move || {
+                let mut value = result.lock().unwrap();
+                *value = 42;
+            }
         });
 
         handle.join().unwrap();

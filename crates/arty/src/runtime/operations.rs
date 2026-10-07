@@ -59,17 +59,14 @@ impl RuntimeOperations {
     #[inline]
     pub fn pin_current_thread_to(&self, worker: &Thread) -> Result<(), Error> {
         if !self.dispatcher.owns(worker) {
-            return Err(Error::new("the worker passed to pin_current_thread_to must belong to this runtime"));
+            return Err(Error::foreign_worker());
         }
-        let worker_index = self
-            .dispatcher
-            .worker_index(worker.id())
-            .ok_or_else(|| Error::new("the worker passed to pin_current_thread_to must be a registered runtime worker"))?;
+        let worker_index = self.dispatcher.worker_index(worker.id()).ok_or_else(Error::unregistered_worker)?;
         let inner = self
             .shared_state
             .get(usize::from(worker_index))
             .and_then(OnceLock::get)
-            .ok_or_else(|| Error::new("processor services for the worker passed to pin_current_thread_to are unavailable"))?;
+            .ok_or_else(Error::unavailable_worker_services)?;
         inner.processor_set.pin_current_thread_to();
         Ok(())
     }
@@ -120,6 +117,7 @@ impl From<&Runtime> for RuntimeOperations {
 #[cfg(not(miri))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::error::Error as _;
     use std::thread;
 
     use many_cpus::SystemHardware;
@@ -130,6 +128,7 @@ mod tests {
     use super::*;
     use crate::runtime::bootstrap;
     use crate::runtime::config::{BlockingPoolPolicy, RuntimeConfig, WorkersPolicy};
+    use crate::runtime::error::RuntimeValidation;
 
     #[cfg_attr(test, mutants::skip)]
     fn runtime_with_coordinates(processors: usize) -> (Runtime, ThreadBuilder) {
@@ -148,7 +147,28 @@ mod tests {
         let (runtime, coordinates) = runtime_with_coordinates(1);
         let operations = RuntimeOperations::from(&runtime);
         let unregistered = coordinates.build(thread::current().id());
-        assert!(operations.pin_current_thread_to(&unregistered).is_err());
+        let error = operations.pin_current_thread_to(&unregistered).unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<RuntimeValidation>(),
+            Some(&RuntimeValidation::UnregisteredWorker)
+        );
+    }
+
+    #[test]
+    fn pinning_rejects_a_worker_owned_by_another_runtime() {
+        let (runtime, _) = runtime_with_coordinates(1);
+        let (other, _) = runtime_with_coordinates(1);
+        let foreign = other
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
+            .join()
+            .unwrap();
+
+        let error = RuntimeOperations::from(&runtime).pin_current_thread_to(&foreign).unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<RuntimeValidation>(),
+            Some(&RuntimeValidation::ForeignWorker)
+        );
     }
 
     #[test]
@@ -160,7 +180,11 @@ mod tests {
             .join()
             .unwrap();
         runtime.shared_state = vec![OnceLock::new()].into();
-        assert!(RuntimeOperations::from(&runtime).pin_current_thread_to(&worker).is_err());
+        let error = RuntimeOperations::from(&runtime).pin_current_thread_to(&worker).unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<RuntimeValidation>(),
+            Some(&RuntimeValidation::UnavailableWorkerServices)
+        );
     }
 
     #[test]

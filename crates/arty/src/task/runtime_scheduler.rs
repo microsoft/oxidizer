@@ -129,7 +129,7 @@ impl RuntimeScheduler {
         R: Send + 'static,
     {
         if Scheduler::is_current_worker_thread() {
-            return Err(Error::new("block_on cannot be called from an async Arty worker"));
+            return Err(Error::block_on_from_worker());
         }
         // Validate the ambient executor before any caller-borrowing work is submitted.
         drop(futures::executor::enter().map_err(Error::new)?);

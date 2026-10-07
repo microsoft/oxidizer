@@ -54,14 +54,14 @@ impl JoinError {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[arty::main]
-    /// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    ///     let result: Result<(), arty::task::JoinError> =
-    ///         cx.scheduler().spawn(async |_| panic!("task failed")).await;
-    ///     let error = result.expect_err("the task deliberately panics");
-    ///     assert!(error.is_panic());
-    ///     Ok(())
-    /// }
+    /// # #[arty::main]
+    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// let result: Result<(), arty::task::JoinError> =
+    ///     cx.scheduler().spawn(async |_| panic!("task failed")).await;
+    /// let error = result.expect_err("the task deliberately panics");
+    /// assert!(error.is_panic());
+    /// # Ok(())
+    /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
@@ -115,7 +115,7 @@ impl JoinError {
 
 impl Debug for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("JoinError")
+        f.debug_struct(std::any::type_name::<Self>())
             .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
             .finish()
@@ -153,5 +153,13 @@ mod tests {
         assert_eq!(shutdown.to_string(), "runtime is shutting down");
         assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
         assert!(shutdown.source().is_none());
+    }
+
+    #[test]
+    fn debug_uses_the_rust_type_and_failure_flags() {
+        let debug = format!("{:?}", JoinError::shutdown());
+        assert!(debug.contains(std::any::type_name::<JoinError>()));
+        assert!(debug.contains("is_panic: false"));
+        assert!(debug.contains("is_shutdown: true"));
     }
 }

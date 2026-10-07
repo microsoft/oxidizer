@@ -4,6 +4,10 @@ Arty runs async tasks on dedicated workers, with separate pools for blocking
 work. Tasks receive `Builtins` with their worker's scheduler, clock, and
 telemetry sink.
 
+This document describes the application-facing design. Maintainers should also
+read the [runtime implementation map](INTERNALS.md) for bootstrap, ownership,
+readiness, shutdown, and scoped-borrowing invariants.
+
 ## Workers and isolation
 
 Each runtime owns its workers and shutdown. There is no process-global runtime.

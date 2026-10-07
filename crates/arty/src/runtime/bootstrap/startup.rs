@@ -65,6 +65,7 @@ pub(in crate::runtime) fn build(
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
     let stack_size = processor_config
         .stack_size
+        .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
     let worker_count = processors.len();

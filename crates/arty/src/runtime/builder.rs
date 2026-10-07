@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::num::NonZeroUsize;
+
 use observed::Sink;
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
@@ -79,7 +81,7 @@ impl RuntimeBuilder {
     #[must_use]
     pub const fn stack_size(mut self, size: usize) -> Self {
         assert!(size > 0, "stack size must be greater than zero");
-        self.processor_config.stack_size = size;
+        self.processor_config.stack_size = NonZeroUsize::new(size).expect("size was asserted above to be nonzero");
         self
     }
 
@@ -236,7 +238,7 @@ mod tests {
             builder.processor_config,
             RuntimeConfig {
                 workers_policy: WorkersPolicy::exactly(2),
-                stack_size: 1024 * 1024,
+                stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
         );
@@ -284,7 +286,7 @@ mod tests {
             builder.processor_config,
             RuntimeConfig {
                 workers_policy: WorkersPolicy::exactly(2),
-                stack_size: 1024 * 1024,
+                stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(1),
             }
         );

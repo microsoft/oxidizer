@@ -175,10 +175,10 @@ impl Runtime {
 
     fn wait(&self) -> Result<(), Error> {
         if Scheduler::is_current_worker_thread() {
-            return Err(Error::new("an async Arty worker cannot wait for runtime shutdown"));
+            return Err(Error::shutdown_wait_from_worker());
         }
         if self.scheduler.dispatcher.is_current_blocking_task() {
-            return Err(Error::new("a runtime blocking callback cannot wait for its own shutdown"));
+            return Err(Error::shutdown_wait_from_blocking_callback());
         }
         self.scheduler.dispatcher.wait()
     }

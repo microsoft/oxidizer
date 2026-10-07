@@ -33,12 +33,12 @@ use crate::task::execution::TaskResult;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-///     let task = cx.scheduler().spawn(async |_| 42);
-///     assert_eq!(task.await?, 42);
-///     Ok(())
-/// }
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// let task = cx.scheduler().spawn(async |_| 42);
+/// assert_eq!(task.await?, 42);
+/// # Ok(())
+/// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(derive_more::Debug)]
@@ -74,7 +74,7 @@ where
         }
     }
 
-    pub(crate) fn with_blocking_pool(mut self, pool: Arc<()>) -> Self {
+    pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
         self.blocking_pool = Some(pool);
         self
     }
@@ -83,6 +83,14 @@ where
     pub(crate) fn join(self) -> Result<R, JoinError> {
         futures::executor::block_on(self)
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Removing this guard makes the black-box blocking-pool regression deadlock.
+fn assert_not_current_blocking_pool(blocking_pool: Option<&Arc<()>>) {
+    assert!(
+        !blocking_pool.is_some_and(is_current_blocking_pool),
+        "blocking JoinHandle cannot be polled while the current blocking pool waits for it"
+    );
 }
 
 impl<R> Future for JoinHandle<R>
@@ -94,10 +102,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         assert!(!*this.completed, "JoinHandle polled after completion");
-        assert!(
-            !this.blocking_pool.as_ref().is_some_and(is_current_blocking_pool),
-            "blocking JoinHandle cannot be polled while the current blocking pool waits for it"
-        );
+        assert_not_current_blocking_pool(this.blocking_pool.as_ref());
         let Some(result_rx) = this.result_rx.as_mut().as_pin_mut() else {
             *this.completed = true;
             return Poll::Ready(Err(JoinError::shutdown()));

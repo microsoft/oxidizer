@@ -40,21 +40,21 @@
 //!
 //! use arty::task::Builtins;
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
-//!     let answer = cx
-//!         .scheduler()
-//!         .spawn(|child| {
-//!             let value = Rc::new(42);
-//!             async move {
-//!                 child.clock().delay(Duration::from_millis(1)).await;
-//!                 *value
-//!             }
-//!         })
-//!         .await?;
-//!     assert_eq!(answer, 42);
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//! let answer = cx
+//!     .scheduler()
+//!     .spawn(|child| {
+//!         let value = Rc::new(42);
+//!         async move {
+//!             child.clock().delay(Duration::from_millis(1)).await;
+//!             *value
+//!         }
+//!     })
+//!     .await?;
+//! assert_eq!(answer, 42);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Pass a factory, not an already-created future. Ordinary captures and
@@ -71,17 +71,21 @@
 //!
 //! use arty::task::Builtins;
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
-//!     let value = Rc::new(String::from("worker-local"));
-//!     let captured = Rc::clone(&value);
-//!     let local = cx
-//!         .local_scheduler()
-//!         .expect("the task runs on its associated worker");
-//!     let returned = local.spawn(async move || captured).await?;
-//!     assert!(Rc::ptr_eq(&value, &returned));
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//! let value = Rc::new(String::from("worker-local"));
+//! let local = cx
+//!     .local_scheduler()
+//!     .expect("the task runs on its associated worker");
+//! let returned = local
+//!     .spawn({
+//!         let value = Rc::clone(&value);
+//!         async move || value
+//!     })
+//!     .await?;
+//! assert!(Rc::ptr_eq(&value, &returned));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Await local joins on their worker; local schedulers and joins cannot cross
@@ -97,15 +101,15 @@
 //! ```no_run
 //! use arty::task::Builtins;
 //!
-//! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//!     let contents = cx
-//!         .scheduler()
-//!         .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
-//!         .await??;
-//!     println!("{contents}");
-//!     Ok(())
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+//! let contents = cx
+//!     .scheduler()
+//!     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
+//!     .await??;
+//! println!("{contents}");
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! The first `?` handles task failure; the second handles the file error.
