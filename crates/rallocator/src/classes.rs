@@ -18,7 +18,7 @@ pub(crate) struct Class {
     pub(crate) capacity: u16,
     pub(crate) waking: u16,
 }
-
+// Checked loop increments prevent assignment-operator mutations from trapping rustc in infinite const evaluation.
 const fn make_classes() -> [Class; COUNT] {
     let mut classes = [Class {
         size: 0,
@@ -44,7 +44,7 @@ const fn make_classes() -> [Class; COUNT] {
             capacity,
             waking: if capacity / 4 < 32 { capacity / 4 } else { 32 },
         };
-        i += 1;
+        i = i.checked_add(1).expect("class-table indices are bounded by COUNT");
     }
     classes
 }
@@ -56,13 +56,15 @@ const fn make_lookup() -> [u8; SMALL_MAX / 16] {
     let mut bucket = 0;
     let mut class = 0;
     while bucket < table.len() {
-        while CLASSES[class].size < bucket * 16 + 1 {
-            class += 1;
+        while CLASSES[class].size <= bucket * 16 {
+            class = class.checked_add(1).expect("lookup class indices are bounded by COUNT");
         }
         #[expect(clippy::cast_possible_truncation, reason = "The lookup contains only the 44 small-class indices")]
         let index = class as u8;
         table[bucket] = index;
-        bucket += 1;
+        bucket = bucket
+            .checked_add(1)
+            .expect("lookup bucket indices are bounded by the table length");
     }
     table
 }
