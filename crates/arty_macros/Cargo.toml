@@ -30,5 +30,8 @@ proc-macro = true
 [dependencies]
 arty_macros_impl = { workspace = true }
 
+[dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
+
 [lints]
 workspace = true

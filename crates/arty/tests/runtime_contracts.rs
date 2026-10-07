@@ -8,7 +8,9 @@
 mod support;
 
 use std::error::Error as _;
-use std::future::{pending, poll_fn};
+#[cfg(all(feature = "macros", feature = "test-util"))]
+use std::future::pending;
+use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};

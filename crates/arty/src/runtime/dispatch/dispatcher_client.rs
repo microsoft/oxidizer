@@ -153,6 +153,25 @@ mod tests {
     }
 
     #[test]
+    fn clients_return_the_dispatchers_shutdown_signal() {
+        let (command_tx, _commands) = channel::unbounded();
+        let worker = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: test_threads(1).pop().unwrap(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+        };
+        let core = Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(vec![]),
+            nonempty::NonEmpty::new(worker),
+            Sink::noop(),
+        ));
+        let client = DispatcherClient::new(Arc::clone(&core));
+
+        assert!(Arc::ptr_eq(&client.shutdown_signal(), &core.shutdown_signal()));
+    }
+
+    #[test]
     fn relocate_updates_task_placement() {
         // Create a dispatcher with 2 workers so we can verify which one receives tasks.
         let (worker0_tx, worker0_rx) = channel::unbounded();
