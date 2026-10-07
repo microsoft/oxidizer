@@ -214,6 +214,112 @@ mod tests {
     }
 
     #[test]
+    fn linked_successors_complete_in_queue_order() {
+        struct State {
+            last: *const AtomicPtr<Node<Self>>,
+            invocations: usize,
+        }
+        // SAFETY: This exclusive fixture has no concurrent value accesses,
+        // and the last pointer stays valid until both nodes complete.
+        unsafe impl Send for State {}
+        unsafe fn increment(node: *mut Node<State>, value: *mut State) {
+            // SAFETY: attach grants this invocation the exclusive value lease.
+            let state = unsafe { &mut *value };
+            state.invocations += 1;
+            // SAFETY: Both nodes remain live until attach finishes.
+            let successor = unsafe { &*node }.next.load(Ordering::Acquire);
+            if !successor.is_null() {
+                // SAFETY: The fixture's queue remains alive throughout attach.
+                unsafe { &*state.last }.store(successor, Ordering::Release);
+            }
+        }
+        let mut shared = Combining::new(State {
+            last: std::ptr::null(),
+            invocations: 0,
+        });
+        shared.value.get_mut().last = &raw const shared.last;
+        let mut successor = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: increment,
+        };
+        let mut head = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(&raw mut successor),
+            invoke: increment,
+        };
+        // SAFETY: Both stack nodes remain stationary and alive until attach
+        // completes; this exclusive fixture has no concurrent queue publisher.
+        unsafe { shared.attach(&raw mut head) };
+        assert_eq!(head.status.load(Ordering::Acquire), DONE);
+        assert_eq!(successor.status.load(Ordering::Acquire), DONE);
+        assert!(shared.last.load(Ordering::Acquire).is_null());
+        assert!(!shared.flag.load(Ordering::Acquire));
+        assert_eq!(shared.with(|value| value.invocations), 2);
+    }
+
+    #[test]
+    fn stalled_publisher_receives_the_head_lease_before_predecessor_completion() {
+        struct State {
+            last: *const AtomicPtr<Node<Self>>,
+            successor: *mut Node<Self>,
+            published: std::sync::mpsc::Sender<()>,
+            invocations: usize,
+        }
+        // SAFETY: The fixture's scoped threads keep both nodes and the queue
+        // alive; shared accesses use atomics and State has one value lease.
+        unsafe impl Send for State {}
+        unsafe fn publish(node: *mut Node<State>, value: *mut State) {
+            // SAFETY: attach gives this invocation exclusive access to State.
+            let state = unsafe { &mut *value };
+            state.invocations += 1;
+            // SAFETY: The scoped publisher keeps the successor alive.
+            unsafe { &*state.last }.store(state.successor, Ordering::Release);
+            // The successor is published but deliberately not linked yet.
+            // SAFETY: The caller keeps its node alive throughout invocation.
+            assert!(unsafe { &*node }.next.load(Ordering::Acquire).is_null());
+            state.published.send(()).unwrap();
+        }
+        let (published, ready) = std::sync::mpsc::channel();
+        let mut successor = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: publish,
+        };
+        let mut shared = Combining::new(State {
+            last: std::ptr::null(),
+            successor: &raw mut successor,
+            published,
+            invocations: 0,
+        });
+        shared.value.get_mut().last = &raw const shared.last;
+        let head = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: publish,
+        };
+        std::thread::scope(|scope| {
+            let head_next = &head.next;
+            let successor_address = (&raw const successor) as usize;
+            scope.spawn(move || {
+                ready.recv().unwrap();
+                // Hold the publication gap open while attach reaches its
+                // successor-link wait, rather than relying on random contention.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                head_next.store(successor_address as *mut Node<State>, Ordering::Release);
+            });
+            // SAFETY: The scope keeps the publisher and both stationary nodes
+            // alive until attach transfers the lease and completes the head.
+            unsafe { shared.attach((&raw const head).cast_mut()) };
+        });
+        assert_eq!(head.status.load(Ordering::Acquire), DONE);
+        assert_eq!(successor.status.load(Ordering::Acquire), HEAD);
+        assert!(shared.flag.load(Ordering::Acquire));
+        assert_eq!(shared.last.load(Ordering::Acquire), &raw mut successor);
+        assert_eq!(shared.value.get_mut().invocations, 1);
+    }
+
+    #[test]
     fn contended_combining_executes_every_action_once() {
         let shared = Arc::new(Combining::new(0usize));
         let barrier = Arc::new(Barrier::new(16));

@@ -24,6 +24,20 @@ struct ExtendedParameter {
 unsafe extern "system" {
     fn VirtualAlloc(address: *mut c_void, size: usize, kind: u32, protect: u32) -> *mut c_void;
     fn VirtualFree(address: *mut c_void, size: usize, kind: u32) -> i32;
+    #[cfg(test)]
+    fn GetErrorMode() -> u32;
+    #[cfg(test)]
+    fn SetErrorMode(mode: u32) -> u32;
+}
+
+#[cfg(test)]
+pub(crate) fn disable_test_crash_reporting() {
+    const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+    // SAFETY: GetErrorMode reads this process's flags without accessing pointers.
+    let previous = unsafe { GetErrorMode() };
+    // SAFETY: Only the fatal-path test subprocess calls this; existing flags
+    // are preserved, and abort still terminates with its original exit status.
+    unsafe { SetErrorMode(previous | SEM_NOGPFAULTERRORBOX) };
 }
 
 #[link(name = "mincore")]

@@ -490,12 +490,20 @@ mod tests {
 
     #[test]
     fn routing_collisions_and_same_slab_rings() {
-        // More than 256 distinct aligned endpoints guarantees collisions in the
-        // first routing round, independently of the OS reservation addresses.
-        let owners = (0..300).map(|_| fresh_owner()).collect::<Vec<_>>();
+        // Select the sender from a colliding pair so its own-slot forwarding
+        // path runs independently of the OS reservation addresses.
+        let mut owners = (0..300).map(|_| fresh_owner()).collect::<Vec<_>>();
         assert!(owners.iter().all(|&owner| owner != 0));
-        let sender = fresh_owner();
-        assert_ne!(sender, 0);
+        let mut slots = [None; 256];
+        let sender_index = owners
+            .iter()
+            .enumerate()
+            .find_map(|(index, &owner)| {
+                let slot = (owner >> Owner::ALLOC_BITS) & 255;
+                slots[slot].replace(index).map(|_| index)
+            })
+            .unwrap();
+        let sender = owners.swap_remove(sender_index);
         let mut addresses = Vec::new();
         // These endpoints are leased exclusively to this test, despite
         // modelling many owners without needing hundreds of OS threads.

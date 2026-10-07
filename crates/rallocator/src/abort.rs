@@ -26,6 +26,8 @@ pub(crate) fn assert_aborts(name: &str, action: impl FnOnce()) {
     const CASE: &str = "RALLOCATOR_ABORT_CASE";
     const BASELINE: &str = "RALLOCATOR_ABORT_BASELINE";
     if std::env::var_os(CASE).as_deref() == Some(std::ffi::OsStr::new(name)) {
+        #[cfg(target_os = "windows")]
+        crate::hal::disable_test_crash_reporting();
         #[cfg(target_os = "linux")]
         {
             let limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };

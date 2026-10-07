@@ -23,6 +23,8 @@ use linux as platform;
 pub(crate) use platform::{PAGE, RESERVE_MIN, release, wait, wake_one};
 #[cfg(target_os = "windows")]
 use win64 as platform;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use win64::disable_test_crash_reporting;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{pause, prefetch};
 
