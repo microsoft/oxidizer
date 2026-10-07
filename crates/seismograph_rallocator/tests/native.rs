@@ -302,6 +302,42 @@ fn strict_flags_schema_reserved_and_source_tags() {
 }
 
 #[test]
+fn malformed_payload_diagnostics_explain_the_rejection() {
+    let original = bytes(&fixture());
+    let mut invalid_magic = original.clone();
+    invalid_magic[0] = 0;
+    let mut unsupported_schema = original.clone();
+    unsupported_schema[8] = 7;
+    let mut invalid_flag = original.clone();
+    invalid_flag[44] = 2;
+    let mut excessive_count = original.clone();
+    excessive_count[46..50].copy_from_slice(&u32::MAX.to_le_bytes());
+    let mut zero_owner = original;
+    zero_owner[595..603].fill(0);
+    let cases = [
+        (decode(&invalid_magic).unwrap_err(), "the magic bytes are invalid"),
+        (
+            decode(&unsupported_schema).unwrap_err(),
+            "schema 7 is unsupported; expected schema 3",
+        ),
+        (decode(&[]).unwrap_err(), "the payload ended before all fields were available"),
+        (
+            encode(&fixture(), &mut []).unwrap_err(),
+            "the buffer length does not match the encoded payload",
+        ),
+        (
+            decode(&excessive_count).unwrap_err(),
+            "the inventory count or payload length exceeds the supported limit",
+        ),
+        (decode(&invalid_flag).unwrap_err(), "a field or inventory invariant is invalid"),
+        (decode(&zero_owner).unwrap_err(), "owner identifiers must be nonzero and unique"),
+    ];
+    for (error, explanation) in cases {
+        assert_eq!(error.to_string(), format!("native allocator payload: {explanation}"));
+    }
+}
+
+#[test]
 fn duplicate_owners_and_inconsistent_inventory_are_rejected() {
     let mut snapshot = fixture();
     snapshot.owners.push(snapshot.owners[0]);

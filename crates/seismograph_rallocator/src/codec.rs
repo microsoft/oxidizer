@@ -53,9 +53,17 @@ impl Error {
 }
 
 impl core::fmt::Display for Error {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Human-readable diagnostic decoration; rejection categories remain tested.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "native allocator payload: {:?}", self.kind)
+        f.write_str("native allocator payload: ")?;
+        match self.kind {
+            ErrorKind::InvalidMagic => f.write_str("the magic bytes are invalid"),
+            ErrorKind::UnsupportedSchema(schema) => write!(f, "schema {schema} is unsupported; expected schema 3"),
+            ErrorKind::Truncated => f.write_str("the payload ended before all fields were available"),
+            ErrorKind::LengthMismatch => f.write_str("the buffer length does not match the encoded payload"),
+            ErrorKind::LengthOverflow => f.write_str("the inventory count or payload length exceeds the supported limit"),
+            ErrorKind::Malformed => f.write_str("a field or inventory invariant is invalid"),
+            ErrorKind::DuplicateOwner => f.write_str("owner identifiers must be nonzero and unique"),
+        }
     }
 }
 impl core::error::Error for Error {}
