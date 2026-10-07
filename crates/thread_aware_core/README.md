@@ -152,7 +152,7 @@ immutable process-lifetime labels cannot dangle and carry no referent state to r
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvDzLj46mCfYbOXRzic-3mzMbhE7XN3WF4xUbgpjfFmDe0CVhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb02KPCr_dauobWtqourwGm6IbktohTIJUrMYbofBgvlnEBolhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
  [__link0]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
@@ -185,6 +185,6 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link4]: https://doc.rust-lang.org/stable/std/?search=thread::Thread
  [__link5]: https://docs.rs/thread_aware
  [__link6]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
- [__link7]: https://docs.rs/thread_aware/latest/thread_aware/_documentation/index.html
+ [__link7]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
  [__link8]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
  [__link9]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner
