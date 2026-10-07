@@ -65,7 +65,9 @@ pub(super) fn prepare_with_progress(
     }
     // Application events do not depend on the presence of an allocator source.
     let view = allocator.get_or_insert_with(|| crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0)));
-    view.callers = Some(seismograph_rallocator::events::callers(&decoded.events));
+    let mut callers = seismograph_rallocator::events::callers(&decoded.events);
+    callers.session_id = view.native.as_ref().map_or(0, |native| native.session_id);
+    view.callers = Some(callers);
 
     progress(Phase::AllocationIndex);
     let deallocated = allocator.as_ref().map(deallocated_allocations).unwrap_or_default();

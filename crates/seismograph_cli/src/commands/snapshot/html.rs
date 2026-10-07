@@ -71,7 +71,9 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
             seismograph_rallocator::decode(&source.data).map_err(Error::DecodeAllocator)?,
         ));
     }
-    snapshot.callers = Some(seismograph_rallocator::events::callers(&seismograph.events));
+    let mut callers = seismograph_rallocator::events::callers(&seismograph.events);
+    callers.session_id = snapshot.native.as_ref().map_or(0, |native| native.session_id);
+    snapshot.callers = Some(callers);
     if let Some(source) = seismograph
         .sources
         .iter()
@@ -214,7 +216,10 @@ mod tests {
     fn capture_allocator_source(
         _context: seismograph::snapshot::SnapshotContext<'_>,
     ) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
-        let snapshot = seismograph_rallocator::native::Snapshot::default();
+        let snapshot = seismograph_rallocator::native::Snapshot {
+            session_id: 7,
+            ..seismograph_rallocator::native::Snapshot::default()
+        };
         let mut data = seismograph::snapshot::SourceData::zeroed(encoded_len(&snapshot).unwrap())?;
         encode(&snapshot, data.as_mut_bytes()).unwrap();
         Ok(data)
@@ -433,6 +438,8 @@ mod tests {
             .to_vec();
 
         let (snapshot, sources) = super::decode_snapshot(&bytes).unwrap();
+        assert_eq!(snapshot.callers.as_ref().unwrap().session_id, 7);
+        assert!(crate::report::render_html_with_sources(&snapshot, &sources).contains("Session 7"));
 
         assert_eq!(
             (

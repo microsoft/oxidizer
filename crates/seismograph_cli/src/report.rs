@@ -2074,7 +2074,7 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
         "<details><summary>Retained unmatched allocation candidates (showing {} of {})</summary><p class=\"muted\">Session {} · {} shared recorder events · {} shared overwritten records · {} thread logs. Unmatched records are not proof of live allocations or leaks: recording boundaries, sampling, suppression and overwrite can hide endpoints even when the lost counter is zero.</p><ol>",
         totals.len().min(8),
         totals.len(),
-        callers.session_id,
+        if callers.session_id == 0 { "unknown".to_owned() } else { callers.session_id.to_string() },
         format_count(callers.total_events),
         format_count(callers.lost_events),
         callers.threads.len(),
@@ -2538,6 +2538,8 @@ mod tests {
         assert!(html.contains("Retained unmatched allocation candidates"));
         assert!(html.contains("not proof of live allocations or leaks"));
         assert!(!html.contains("General live-allocation hotspots"));
+        assert!(html.contains("Session unknown"));
+        assert!(!html.contains("Session 0"));
     }
 
     #[test]
