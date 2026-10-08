@@ -315,9 +315,11 @@ fn realloc_preserves_native_pointer_rules_and_records_successful_layout_changes(
         assert_eq!(replacement, original);
         assert_eq!(std::slice::from_raw_parts(replacement, 17), &[42; 17]);
         let grown_layout = Layout::from_size_align(18, 8).unwrap();
-        let failed = Rallocator.realloc(replacement, grown_layout, (1_usize << 46) + 1);
-        assert!(failed.is_null());
-        assert_eq!(std::slice::from_raw_parts(replacement, 17), &[42; 17]);
+        for size in [(1_usize << 46) + 1, (1_usize << 62) + 1] {
+            let failed = Rallocator.realloc(replacement, grown_layout, size);
+            assert!(failed.is_null());
+            assert_eq!(std::slice::from_raw_parts(replacement, 17), &[42; 17]);
+        }
         let before_free = events();
         let records = at_address(&before_free, original);
         assert_eq!(records.len(), 3);
