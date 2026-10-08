@@ -66,6 +66,20 @@ fn decompressor_limit_fallbacks_fill_only_unset_bounds() {
     assert_eq!(limits, expected);
 }
 
+#[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
+#[test]
+fn decompressor_limit_fallbacks_fill_an_unset_output_bound() {
+    let fallbacks = DecompressorLimits::new().max_output_len(NonZeroU64::new(4096).unwrap());
+    let limits = DecompressorLimits::new()
+        .max_ratio(NonZeroU32::new(7).unwrap())
+        .with_fallbacks(fallbacks);
+    let expected = DecompressorLimits::new()
+        .max_ratio(NonZeroU32::new(7).unwrap())
+        .max_output_len(NonZeroU64::new(4096).unwrap());
+
+    assert_eq!(limits, expected);
+}
+
 #[test]
 fn resources_expose_one_global_instance_and_usable_memory() {
     assert!(
