@@ -170,6 +170,7 @@ where
     /// After this method returns, the thread will end.
     pub(in crate::runtime) fn run(mut self) {
         self.execute_phase();
+        Scheduler::clear_worker_thread();
     }
 
     #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.

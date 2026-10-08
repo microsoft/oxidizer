@@ -73,16 +73,6 @@ impl RuntimeScheduler {
         Self { dispatcher }
     }
 
-    /// Reports whether the caller is on one of this runtime's async workers.
-    ///
-    /// Returns `false` on external threads, blocking-pool threads, and workers
-    /// belonging to another runtime.
-    #[must_use]
-    #[inline]
-    pub fn is_on_worker(&self) -> bool {
-        self.dispatcher.worker_index(std::thread::current().id()).is_some()
-    }
-
     /// Runs a task that borrows caller-owned data and waits for it to finish.
     ///
     /// The factory runs on a worker, not on the calling thread. Both the

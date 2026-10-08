@@ -45,8 +45,7 @@ not guarantee that shutdown has completed.
 
 Polling a blocking join from a callback running in the same blocking pool
 panics instead of allowing a direct pool-starvation cycle. Polling any join
-again after receiving its result, or using a local scheduler outside its
-worker's local context, is also a programming error that can panic.
+again after receiving its result is also a programming error that can panic.
 
 The `main` and `test` attributes stop their runtime before returning the body's
 value or resuming its original panic on the calling thread. Construction

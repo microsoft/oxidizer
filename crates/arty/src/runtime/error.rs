@@ -7,8 +7,8 @@ use std::fmt::{self, Display};
 /// An error constructing or operating a runtime.
 ///
 /// You may receive this error when building a runtime with an invalid worker
-/// count or blocking-pool limit, pinning to an unavailable worker, waiting from
-/// an async worker, or stopping a runtime whose worker panicked.
+/// count or blocking-pool limit, requesting more workers than are available,
+/// waiting from an async worker, or stopping a runtime whose worker panicked.
 ///
 /// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 /// fails because a task panicked or was cancelled, its source is a

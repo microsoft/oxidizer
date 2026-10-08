@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use arty_executor::TaskSet;
 use performables::arc::Arc;
@@ -14,6 +14,10 @@ use crate::task::execution::prepare_remote_on_worker;
 use crate::task::join::JoinHandle;
 
 thread_local! {
+    // Remains set while executor shutdown destroys user futures, even after the
+    // direct-registration context is cleared.
+    static ACTIVE_WORKER: Cell<bool> = const { Cell::new(false) };
+
     // A worker-bound spawn from its owning worker can register directly with the executor.
     // The channel path remains the fallback for callers on other threads.
     static CURRENT_WORKER: RefCell<Option<CurrentWorker>> = const { RefCell::new(None) };
@@ -73,10 +77,11 @@ struct Binding {
 
 impl Scheduler {
     pub(crate) fn is_current_worker_thread() -> bool {
-        CURRENT_WORKER.with_borrow(Option::is_some)
+        ACTIVE_WORKER.get()
     }
 
     pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
+        assert!(!ACTIVE_WORKER.replace(true), "a worker is already active on this thread");
         CURRENT_WORKER.with_borrow_mut(|current| {
             assert!(current.is_none(), "a worker already owns this scheduler context");
             *current = Some(CurrentWorker {
@@ -89,6 +94,11 @@ impl Scheduler {
 
     pub(crate) fn clear_current() {
         drop(CURRENT_WORKER.with_borrow_mut(Option::take));
+    }
+
+    pub(crate) fn clear_worker_thread() {
+        Self::clear_current();
+        ACTIVE_WORKER.set(false);
     }
 
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
@@ -418,13 +428,21 @@ mod tests {
     }
 
     #[test]
-    fn current_scheduler_is_cleared_before_cancelled_futures_drop() {
-        struct DropProbe(mpsc::Sender<bool>);
+    fn clearing_worker_thread_retires_the_active_marker() {
+        ACTIVE_WORKER.set(true);
+        Scheduler::clear_worker_thread();
+        assert!(!Scheduler::is_current_worker_thread());
+    }
+
+    #[test]
+    fn worker_marker_remains_active_after_scheduler_context_is_cleared() {
+        struct DropProbe(mpsc::Sender<(bool, bool)>);
 
         impl Drop for DropProbe {
             fn drop(&mut self) {
-                let cleared = CURRENT_WORKER.with_borrow(Option::is_none);
-                self.0.send(cleared).unwrap();
+                self.0
+                    .send((CURRENT_WORKER.with_borrow(Option::is_none), Scheduler::is_current_worker_thread()))
+                    .unwrap();
             }
         }
 
@@ -449,6 +467,6 @@ mod tests {
 
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         runtime.stop().unwrap();
-        assert!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap(), (true, true));
     }
 }

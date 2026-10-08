@@ -3,9 +3,11 @@
 
 //! Clocks, delays, and tests that do not have to wait for real time.
 //!
-//! Arty re-exports [`tick`] through [`arty::time`](crate::time). The `time`
-//! feature works without an Arty runtime; `rt` also enables time and drives
-//! timers for its workers.
+//! Arty re-exports [`Clock`](crate::time::Clock) and, with `test-util`,
+//! [`ClockControl`](crate::time::ClockControl) through `arty::time`. Use
+//! [`tick`] directly for delay and timeout futures, extension traits,
+//! stopwatches, and periodic timers. The `time` feature works without an Arty
+//! runtime; `rt` also enables time and drives timers for its workers.
 //!
 //! # Use the task's clock
 //!

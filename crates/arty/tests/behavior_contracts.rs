@@ -207,12 +207,8 @@ fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
         let second = runtime(1);
         let first_scheduler = first.scheduler();
         let second_scheduler = second.scheduler();
-        assert!(!first_scheduler.is_on_worker());
-        assert!(!second_scheduler.is_on_worker());
         first_scheduler
             .block_on(async |_| {
-                assert!(first_scheduler.is_on_worker());
-                assert!(!second_scheduler.is_on_worker());
                 let invoked = AtomicBool::new(false);
                 for scheduler in [first_scheduler, second_scheduler] {
                     scheduler
@@ -238,7 +234,6 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
     let (on_worker, value) = runtime
         .scheduler()
         .spawn_blocking(move || {
-            assert!(!captured.scheduler().is_on_worker());
             let mut value = 40;
             let on_worker = captured
                 .scheduler()
@@ -246,7 +241,7 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
                     let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
                     let local = Rc::new(child);
                     value += *local;
-                    captured.scheduler().is_on_worker()
+                    cx.thread().id() == thread::current().id()
                 })
                 .unwrap();
             (on_worker, value)
