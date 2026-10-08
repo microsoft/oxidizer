@@ -94,18 +94,21 @@ fn zeroed_allocation_and_free_match_with_backtraces() {
         let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let _suppression = SuppressionGuard::enter();
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
-        assert!(
-            decoded
-                .events
-                .events
-                .iter()
-                .filter(|event| {
-                    event
-                        .allocation()
-                        .is_some_and(|allocation| allocation.allocation_id == records[0].1.allocation_id)
-                })
-                .all(|event| !event.call_stack.is_empty())
+        let retained = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .allocation()
+                    .is_some_and(|allocation| allocation.allocation_id == records[0].1.allocation_id)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            retained.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::Allocation, EventKind::Deallocation]
         );
+        assert!(retained.iter().all(|event| !event.call_stack.is_empty()));
     }
 }
 
