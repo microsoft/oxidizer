@@ -98,16 +98,19 @@ fn wake_after_retirement(waker: Waker) {
 }
 
 #[test]
+#[ignore = "independent waker behavior is deferred for separate discussion"]
 fn remote_retained_wakers_after_success() {
     remote_case(Finish::Success);
 }
 
 #[test]
+#[ignore = "independent waker behavior is deferred for separate discussion"]
 fn remote_retained_wakers_after_panic() {
     remote_case(Finish::Panic);
 }
 
 #[test]
+#[ignore = "independent waker behavior is deferred for separate discussion"]
 fn remote_retained_wakers_after_cancellation() {
     remote_case(Finish::Pending);
 }

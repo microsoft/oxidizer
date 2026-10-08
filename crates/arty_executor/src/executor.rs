@@ -50,12 +50,8 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor.
 ///
-/// The executor returns [`CycleOutcome::Shutdown`] after task cleanup and when its pooled
-/// result channels are no longer borrowed (e.g. all join handles have been dropped).
-/// By default, cloned task wakers must also be dropped. With
-/// [`ExecutorBuilder::independent_wakers`][crate::ExecutorBuilder::independent_wakers],
-/// they become inert on completion or cancellation and remain valid after shutdown without
-/// retaining task storage.
+/// The executor will only return [`CycleOutcome::Shutdown`] when none of its resources are
+/// referenced any more (e.g. all join handles have been dropped).
 ///
 /// ## Troubleshooting shutdown failure
 ///
@@ -64,6 +60,8 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 ///
 /// Potential causes include:
 ///
+/// * Some future awaited by a task failed to cancel an ongoing `await` operation when the future
+///   was dropped. This suggests a resource management defect in the future.
 /// * A [`JoinHandle`][1] remains alive somewhere with an independent lifetime (e.g. in
 ///   a `thread_local!` variable). This suggests a resource management defect in whatever logic
 ///   placed the [`JoinHandle`][1] there.
@@ -736,25 +734,6 @@ mod tests {
         drop(waker);
 
         assert_eq!((executor.execute_cycle(), polls.get()), (CycleOutcome::Shutdown, 1));
-    }
-
-    #[test]
-    fn independent_completed_task_waker_does_not_delay_shutdown() {
-        // SAFETY: the retained waker metadata is independently owned and the
-        // test keeps the executor alive until its shutdown cycle completes.
-        let executor = unsafe { Executor::builder().independent_wakers().build() };
-        let waker = Rc::new(RefCell::new(None));
-        executor.tasks().add(poll_fn({
-            let waker = Rc::clone(&waker);
-            move |cx| {
-                *waker.borrow_mut() = Some(cx.waker().clone());
-                Poll::Ready(())
-            }
-        }));
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        executor.begin_shutdown();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        assert!(waker.borrow().is_some());
     }
 
     #[test]

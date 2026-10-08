@@ -26,10 +26,8 @@
 //! only is there no "remove" function but similarly, there is no "cancel" function - once a task
 //! has started executing, the only thing that can terminate it is the task itself, by completing.
 //!
-//! By default, task and wake storage is pooled and reused without steady-state allocations.
-//! [`ExecutorBuilder::independent_wakers`] trades lazily allocated wake metadata for cloned
-//! wakers that can outlive tasks and executor shutdown. Arty enables this mode for its safe
-//! application APIs; the executor's default retains its existing storage-lifetime contract.
+//! In a steady state, the executor is allocation-free, as all memory used by the executor is
+//! reused for new tasks when old ones complete.
 
 mod builder;
 mod constants;

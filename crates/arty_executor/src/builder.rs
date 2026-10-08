@@ -13,7 +13,6 @@ pub struct ExecutorBuilder {
     shutdown_timeout: Duration,
     shutdown_timeout_behavior: ShutdownTimeoutBehavior,
     owner_waker: Waker,
-    independent_wakers: bool,
 }
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -25,7 +24,6 @@ impl ExecutorBuilder {
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
             shutdown_timeout_behavior: ShutdownTimeoutBehavior::TerminateProcess,
             owner_waker: Waker::noop().clone(),
-            independent_wakers: false,
         }
     }
 
@@ -38,18 +36,6 @@ impl ExecutorBuilder {
     /// The default is not to wake the owner even if there is more work the executor could do.
     pub fn owner_waker(mut self, owner_waker: Waker) -> Self {
         self.owner_waker = owner_waker;
-        self
-    }
-
-    /// Lets cloned task wakers outlive task storage and executor shutdown.
-    ///
-    /// Wake metadata is allocated lazily on the first clone or notification.
-    /// After completion or cancellation, those wakers remain valid but are inert.
-    ///
-    /// By default, cloned wakers retain task storage and must be dropped before
-    /// shutdown can complete.
-    pub fn independent_wakers(mut self) -> Self {
-        self.independent_wakers = true;
         self
     }
 
@@ -89,14 +75,7 @@ impl ExecutorBuilder {
     #[must_use]
     pub unsafe fn build(self) -> Executor {
         // SAFETY: Forwarding safety guarantees from caller.
-        let core = unsafe {
-            ExecutorCore::new(
-                self.owner_waker,
-                self.shutdown_timeout,
-                self.shutdown_timeout_behavior,
-                self.independent_wakers,
-            )
-        };
+        let core = unsafe { ExecutorCore::new(self.owner_waker, self.shutdown_timeout, self.shutdown_timeout_behavior) };
 
         Executor::new(core)
     }
