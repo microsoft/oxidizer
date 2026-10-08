@@ -789,9 +789,132 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::future::pending;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::pin::Pin;
+    use std::rc::Rc;
+
     use static_assertions::assert_not_impl_any;
 
     use super::*;
+    use crate::TypeErasedTask;
+
+    #[derive(Clone, Copy)]
+    enum TaskLocation {
+        New,
+        Active,
+        Inactive,
+        Completed,
+    }
+
+    struct SignalOnDrop(Rc<Cell<bool>>);
+
+    impl Drop for SignalOnDrop {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    struct PoolOnlyTask {
+        _signal: SignalOnDrop,
+    }
+
+    impl TypeErasedTask for PoolOnlyTask {
+        fn poll(self: Pin<&Self>) -> task::Poll<()> {
+            unreachable!("pool-only dirty-drop fixture is never polled")
+        }
+
+        fn is_inert(&self) -> bool {
+            unreachable!("pool-only dirty-drop fixture is never inspected")
+        }
+
+        fn consume_awakened(&self) -> bool {
+            unreachable!("pool-only dirty-drop fixture is never awakened")
+        }
+
+        fn abort(self: Pin<&Self>) {
+            unreachable!("pool-only dirty-drop fixture is never aborted")
+        }
+
+        unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
+            unreachable!("pool-only dirty-drop fixture is never initialized")
+        }
+
+        #[cfg(debug_assertions)]
+        fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
+            unreachable!("pool-only dirty-drop fixture is never inspected")
+        }
+    }
+
+    fn assert_dirty_drop_reclaims_task(location: TaskLocation) {
+        let dropped = Rc::new(Cell::new(false));
+
+        // SAFETY: This test intentionally violates the graceful-shutdown requirement to verify
+        // that dirty teardown reclaims the task before reporting the programming error.
+        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
+        let signal = SignalOnDrop(Rc::clone(&dropped));
+        drop(executor.add_task(async move {
+            pending::<()>().await;
+            drop(signal);
+        }));
+
+        if !matches!(location, TaskLocation::New) {
+            let task_ref = executor.reentrancy_safe.borrow_mut().new_tasks.pop_front().unwrap();
+            let mut exclusive = executor.exclusive.borrow_mut();
+            match location {
+                TaskLocation::New => unreachable!("handled without moving the task"),
+                TaskLocation::Active => exclusive.active.push_back(task_ref),
+                TaskLocation::Inactive => {
+                    exclusive.inactive.insert(task_ref);
+                }
+                TaskLocation::Completed => exclusive.completed.push_back(task_ref),
+            }
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_new_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::New);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_active_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Active);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_inactive_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Inactive);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_completed_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Completed);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_task_without_result_event() {
+        let dropped = Rc::new(Cell::new(false));
+
+        // SAFETY: This test intentionally violates the graceful-shutdown requirement to verify
+        // that dirty teardown consults task storage independently of result-event storage.
+        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PoolOnlyTask {
+            _signal: SignalOnDrop(Rc::clone(&dropped)),
+        });
+        executor.reentrancy_safe.borrow_mut().new_tasks.push_back(TaskRef::new(task));
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(dropped.get());
+    }
 
     #[test]
     fn thread_safety() {
