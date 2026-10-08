@@ -78,6 +78,30 @@ impl Drop for SignalOnDrop<'_> {
 }
 
 #[test]
+fn warmed_snapshot_capture_does_not_grow_backend_reservations() {
+    if run_with_fresh_inventory("warmed_snapshot_capture_does_not_grow_backend_reservations") {
+        return;
+    }
+    let _recording = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration {
+        allocations: RecordingPolicy::all(false),
+        ..Configuration::default()
+    });
+    let retained = vec![0x5a; 8192];
+    let reservations = |state: Snapshot| (state.global.reserved_bytes, state.global.pagemap_reserved_bytes);
+    for _ in 0..4 {
+        drop(capture());
+    }
+    let before = reservations(capture());
+    let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let after = reservations(capture());
+    assert_eq!(after, before);
+    assert_eq!(retained, vec![0x5a; 8192]);
+    drop(recording);
+    seismograph::recorder(Configuration::default());
+}
+
+#[test]
 fn owners_created_off_remain_visible_and_only_participants_publish() {
     if run_with_fresh_inventory("owners_created_off_remain_visible_and_only_participants_publish") {
         return;
