@@ -37,8 +37,14 @@ impl TaskRef {
     pub(crate) unsafe fn fake() -> Self {
         use crate::MockTypeErasedTask;
 
-        let fake_pool = plurality::MultiPool::new();
-        Self::new(fake_pool.alloc_box(MockTypeErasedTask::new()))
+        let inner = NonNull::<MockTypeErasedTask>::dangling().as_ptr();
+        let inner: *mut dyn TypeErasedTask = inner;
+
+        // SAFETY: The typed dangling pointer is non-null, and the coercion above supplies valid
+        // trait-object metadata. The resulting pointer remains a placeholder and is never
+        // dereferenced or released.
+        let inner = unsafe { NonNull::new_unchecked(inner) };
+        Self { inner }
     }
 
     /// # Safety
@@ -135,10 +141,9 @@ mod tests {
 
         assert_ne!(task_ref1, task_ref2);
 
-        // SAFETY: Each pooled task is released exactly once and no references remain.
-        unsafe {
-            task_ref1.release();
-            task_ref2.release();
-        }
+        // SAFETY: The first pooled task is released exactly once and no references remain.
+        unsafe { task_ref1.release() };
+        // SAFETY: The second pooled task is released exactly once and no references remain.
+        unsafe { task_ref2.release() };
     }
 }

@@ -663,21 +663,42 @@ impl ExecutorCore {
 
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
-        if thread::panicking() {
+        let was_panicking = thread::panicking();
+        let shutdown_started = self.reentrancy_safe.get_mut().shutdown_deadline.is_some();
+
+        let state_exclusive = self.exclusive.get_mut();
+        let state_reentrant = self.reentrancy_safe.get_mut();
+        let shutdown_complete =
+            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty();
+
+        if !shutdown_complete {
+            for task_ref in state_reentrant
+                .new_tasks
+                .drain(..)
+                .chain(state_exclusive.active.drain(..))
+                .chain(state_exclusive.inactive.drain())
+                .chain(state_exclusive.completed.drain(..))
+            {
+                // SAFETY: Each task has exactly one entry across these canonical scheduling
+                // collections. Dirty executor teardown violates the public lifetime contract, but
+                // reclaiming those unique owners preserves the previous owning-pool drop behavior.
+                unsafe { task_ref.release() };
+            }
+        }
+
+        if was_panicking {
             // We skip the assertions if we are already panicking because a double panic more often
             // does not help anything and may even obscure the initial panic in test runs.
             return;
         }
 
         assert!(
-            self.reentrancy_safe.borrow().shutdown_deadline.is_some(),
+            shutdown_started,
             "Executor is being dropped without a shutdown process having been started. This is a programming error."
         );
 
-        let state_exclusive = self.exclusive.get_mut();
-        let state_reentrant = self.reentrancy_safe.get_mut();
         assert!(
-            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty(),
+            shutdown_complete,
             "Executor is being dropped before execute_cycle() returned CycleOutcome::Shutdown. This violates ExecutorBuilder::build() safety requirements."
         );
     }
