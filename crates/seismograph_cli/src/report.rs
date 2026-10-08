@@ -2459,8 +2459,8 @@ mod tests {
             "orphan free",
             "unmatched allocation evidence",
             "&lt;producer&gt;",
-            "thread-flow-link local",
-            "thread-flow-link cross",
+            "<path class=\"thread-flow-link local\" data-source=\"1\" data-destination=\"1\"",
+            "<path class=\"thread-flow-link cross\" data-source=\"1\" data-destination=\"2\"",
             "320 B across 2 allocations",
             "384 B across 3 allocations",
         ] {
