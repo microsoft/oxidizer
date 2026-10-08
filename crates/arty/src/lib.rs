@@ -9,8 +9,19 @@
 
 //! Single-threaded, thread-aware application runtime.
 //!
-//! Arty is being developed as a small runtime. Stable contracts for integrating external I/O
-//! drivers live in [`arty_io_core`].
+//! Arty is the umbrella facade for the runtime's sibling crates. It deliberately re-exports their
+//! foundational types through stable, task-oriented modules so applications only need to depend on
+//! this crate. Stable contracts for integrating external I/O drivers live in [`arty_io_core`].
+//!
+//! # Examples
+//!
+//! ```
+//! use arty::core::ThreadAware;
+//!
+//! fn assert_thread_aware<T: ThreadAware>() {}
+//!
+//! assert_thread_aware::<String>();
+//! ```
 //!
 //! # Features
 //!
@@ -27,15 +38,23 @@
 
 use arty_io_core as _;
 
-/// Foundational runtime and thread-awareness types.
 pub mod core {
+    //! Foundational runtime and thread-awareness types.
+    //!
+    //! Use these types to associate values and work with their owning thread or NUMA node. They are
+    //! re-exported from the sibling `thread_aware_core` crate as part of the Arty umbrella facade.
+
     #[doc(inline)]
     pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 }
 
-/// Time primitives for the runtime.
 #[cfg(any(test, feature = "time"))]
 pub mod time {
+    //! Time primitives for the runtime.
+    //!
+    //! Enable the `time` feature to use clocks, delays, timers, and timeout utilities. These types
+    //! are re-exported from the sibling `tick` crate as part of the Arty umbrella facade.
+
     #[cfg(any(test, feature = "test-util"))]
     #[doc(inline)]
     pub use tick::ClockControl;

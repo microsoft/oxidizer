@@ -15,8 +15,19 @@
 
 Single-threaded, thread-aware application runtime.
 
-Arty is being developed as a small runtime. Stable contracts for integrating external I/O
-drivers live in [`arty_io_core`][__link0].
+Arty is the umbrella facade for the runtime’s sibling crates. It deliberately re-exports their
+foundational types through stable, task-oriented modules so applications only need to depend on
+this crate. Stable contracts for integrating external I/O drivers live in [`arty_io_core`][__link0].
+
+## Examples
+
+```rust
+use arty::core::ThreadAware;
+
+fn assert_thread_aware<T: ThreadAware>() {}
+
+assert_thread_aware::<String>();
+```
 
 ## Features
 
@@ -37,7 +48,7 @@ drivers live in [`arty_io_core`][__link0].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvQUsvsxw3aMb3ltq8ELONs8bDOGus7kuoVYbr5grKcqlQcVhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbqISNPwLVHwIbMWpGoGNxmxMbpm9h6VoO7u4b0fM5sQA_axJhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://crates.io/crates/arty_io_core/0.2.0
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/DESIGN.md
  [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md

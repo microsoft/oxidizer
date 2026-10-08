@@ -51,7 +51,7 @@ thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
-tick = { path = "../tick", features = ["test-util"] }
+tick = { workspace = true, features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

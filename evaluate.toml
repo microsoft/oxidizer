@@ -1,0 +1,4 @@
+[[config.allow]]
+rule = "m_doc_inline"
+file = "crates/arty/src/lib.rs"
+reason = "Arty is an umbrella facade over the first-party sibling crates thread_aware_core and tick; M-DOC-INLINE excludes standard-library and third-party re-exports, not sibling umbrella re-exports. Removing #[doc(inline)] would hide the facade's curated API, while crates/arty/tests/public_surface.rs verifies the exact exposed types. Remove this exception if these crates stop sharing the Arty umbrella."
