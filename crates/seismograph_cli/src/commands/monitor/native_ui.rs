@@ -6,6 +6,8 @@
 #[cfg(test)]
 mod acceptance;
 
+use std::borrow::Cow;
+
 use crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -262,19 +264,20 @@ fn frame(title: String, focused: bool) -> Block<'static> {
         .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
-fn list(
+fn list<'a>(
     terminal: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
     area: Rect,
-    labels: &[String],
+    labels: (usize, impl FnMut(usize) -> Cow<'a, str>),
     selected: usize,
     target: ListTarget,
     block: Block<'static>,
 ) {
-    let selected = selected.min(labels.len().saturating_sub(1));
+    let (count, mut label) = labels;
+    let selected = selected.min(count.saturating_sub(1));
     let visible = usize::from(block.inner(area).height).max(1);
     let first = selected.saturating_sub(visible - 1);
-    let rows = labels.iter().skip(first).take(visible).map(|label| ListItem::new(label.clone()));
+    let rows = (first..count).take(visible).map(|index| ListItem::new(label(index)));
     let mut state = ListState::default().with_selected(Some(selected - first));
     terminal.render_stateful_widget(
         List::new(rows)
@@ -284,7 +287,7 @@ fn list(
         area,
         &mut state,
     );
-    mouse.register(area, 0, first + state.offset(), labels.len(), target);
+    mouse.register(area, 0, first + state.offset(), count, target);
 }
 
 pub(super) fn draw(
@@ -300,15 +303,19 @@ pub(super) fn draw(
     draw_flow(terminal, top, snapshot, unavailable.is_some());
     let [left, right] =
         Layout::horizontal([Constraint::Length(area.width.saturating_sub(40).clamp(18, 34)), Constraint::Min(15)]).areas(body);
-    let mut labels = vec!["Memory".into(), "Global backend".into()];
-    if let Some(snapshot) = snapshot {
-        labels.extend((0..snapshot.owners.len()).map(|index| owner_label(snapshot, index)));
-    }
+    let labels = (snapshot.map_or(2, |snapshot| snapshot.owners.len() + 2), |index| match index {
+        0 => Cow::Borrowed("Memory"),
+        1 => Cow::Borrowed("Global backend"),
+        _ => Cow::Owned(owner_label(
+            snapshot.expect("owner rows are included in the range only when a snapshot is present"),
+            index - 2,
+        )),
+    });
     list(
         terminal,
         mouse,
         left,
-        &labels,
+        labels,
         nav.root,
         ListTarget::HeapBuckets,
         frame(" Allocator · Enter › ".into(), nav.depth == Depth::Root),
@@ -365,7 +372,7 @@ fn draw_unknown(terminal: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect
         terminal,
         mouse,
         choices,
-        &MEMORY.map(str::to_owned),
+        (MEMORY.len(), |index| Cow::Borrowed(MEMORY[index])),
         nav.memory,
         ListTarget::NativeMemory,
         frame(" Memory ".into(), nav.depth == Depth::Memory),
@@ -491,7 +498,7 @@ fn draw_memory(terminal: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect,
         terminal,
         mouse,
         choices,
-        &MEMORY.map(str::to_owned),
+        (MEMORY.len(), |index| Cow::Borrowed(MEMORY[index])),
         nav.memory,
         ListTarget::NativeMemory,
         frame(" Memory ".into(), nav.depth == Depth::Memory),
@@ -588,7 +595,7 @@ fn draw_owner(terminal: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
             terminal,
             mouse,
             choices,
-            &SUBSYSTEMS.map(str::to_owned),
+            (SUBSYSTEMS.len(), |index| Cow::Borrowed(SUBSYSTEMS[index])),
             nav.subsystem,
             ListTarget::NativeSubsystems,
             frame(" Subsystems · Enter › ".into(), true),
@@ -628,23 +635,19 @@ fn draw_classes(terminal: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect
     } else {
         Layout::horizontal([Constraint::Length(if expanded { 24 } else { 18 }), Constraint::Min(10)]).areas(area)
     };
-    let labels = observation
-        .classes
-        .iter()
-        .enumerate()
-        .map(|(index, class)| {
-            if expanded {
-                format!("C{index:02} {} · {}", bytes(class.object_bytes.into()), class.observed_slabs)
-            } else {
-                format!("C{index:02} {}", bytes(class.object_bytes.into()))
-            }
+    let labels = (observation.classes.len(), |index: usize| {
+        let class = &observation.classes[index];
+        Cow::Owned(if expanded {
+            format!("C{index:02} {} · {}", bytes(class.object_bytes.into()), class.observed_slabs)
+        } else {
+            format!("C{index:02} {}", bytes(class.object_bytes.into()))
         })
-        .collect::<Vec<_>>();
+    });
     list(
         terminal,
         mouse,
         choices,
-        &labels,
+        labels,
         nav.class,
         ListTarget::NativeClasses,
         frame(
@@ -795,6 +798,29 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+
+    #[test]
+    fn list_formats_only_visible_labels() {
+        let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        let formatted = std::cell::RefCell::new(Vec::new());
+        terminal
+            .draw(|frame| {
+                list(
+                    frame,
+                    &MouseRows::default(),
+                    frame.area(),
+                    (1026, |index| {
+                        formatted.borrow_mut().push(index);
+                        Cow::Owned(format!("Owner {index}"))
+                    }),
+                    1000,
+                    ListTarget::HeapBuckets,
+                    Block::default().borders(Borders::ALL),
+                );
+            })
+            .unwrap();
+        assert_eq!(*formatted.borrow(), [995, 996, 997, 998, 999, 1000]);
+    }
 
     #[test]
     fn range_bars_handle_empty_partial_and_maximum_counts_without_overflow() {
