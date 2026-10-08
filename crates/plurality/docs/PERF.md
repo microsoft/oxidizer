@@ -43,7 +43,7 @@ What dropping the element type costs. [`MultiPool`] accepts values of any type, 
 
 ## Against other pooling crates
 
-The same allocate-and-free workload run against every pooling crate we found with a comparable model. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the key-based pools offer. `cargo bench --bench plurality`.
+The same allocate-and-free workload run against the comparable pooling implementations retained in this report. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the retained key-based pools offer. `cargo bench --bench plurality`.
 
 | Pool | Allocate + free | Δ vs plurality `Box` |
 |---|---:|---:|
@@ -71,7 +71,7 @@ The scenario a pool actually exists for: 1,000,000 node allocations with a reali
 
 Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.
 
-The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Each row also unsizes a handle and makes a virtual call, so the difference isolates the pool-routing cost rather than type erasure itself. Other surveyed pool crates return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.
+The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Each row also unsizes a handle and makes a virtual call, so the difference isolates the pool-routing cost rather than type erasure itself. The other implementations retained in this report return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.
 
 | Handle | Allocate, call, free | Δ vs plurality |
 |---|---:|---:|
