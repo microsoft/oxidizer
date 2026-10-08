@@ -21,14 +21,6 @@ pub(crate) struct Segment {
     pub(crate) usable_blocks: u32,
     pub(crate) utilization_tracked: bool,
 }
-#[cfg(test)]
-pub(crate) type SegmentFields = Segment;
-#[cfg(test)]
-impl Segment {
-    pub(crate) const fn from_fields(fields: Self) -> Self {
-        fields
-    }
-}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Slice {

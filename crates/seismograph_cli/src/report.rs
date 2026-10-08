@@ -1587,12 +1587,10 @@ fn render_size_classes(html: &mut String, snapshot: &Snapshot) {
 }
 
 fn sum_estimates(values: impl Iterator<Item = Estimate>) -> Estimate {
-    values.fold(Estimate::default(), |total, value| {
-        Estimate::from_fields(crate::allocator_view::EstimateFields {
-            value: total.value.saturating_add(value.value),
-            lower_bound: total.lower_bound.saturating_add(value.lower_bound),
-            upper_bound: total.upper_bound.saturating_add(value.upper_bound),
-        })
+    values.fold(Estimate::default(), |total, value| Estimate {
+        value: total.value.saturating_add(value.value),
+        lower_bound: total.lower_bound.saturating_add(value.lower_bound),
+        upper_bound: total.upper_bound.saturating_add(value.upper_bound),
     })
 }
 
@@ -2603,11 +2601,11 @@ mod tests {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot.stats.live_bytes = 128;
         snapshot.size_classes.push(crate::allocator_view::SizeClass {
-            requested_bytes: Estimate::from_fields(crate::allocator_view::EstimateFields {
+            requested_bytes: Estimate {
                 value: 32,
                 lower_bound: 32,
                 upper_bound: 32,
-            }),
+            },
             ..crate::allocator_view::SizeClass::default()
         });
         let mut html = String::new();

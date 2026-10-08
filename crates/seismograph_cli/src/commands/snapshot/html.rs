@@ -186,7 +186,7 @@ mod tests {
         Error, VerbArgs, allocator_source, contains_runtime_events, decode_snapshot, empty_allocator_snapshot, map_create_error,
         paths_refer_to_same_file, verb,
     };
-    use crate::allocator_view::{SkippedSection, SkippedSectionFields, Snapshot, Version};
+    use crate::allocator_view::{SkippedSection, Snapshot, Version};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATOR_SOURCE: seismograph::snapshot::Source =
@@ -405,12 +405,8 @@ mod tests {
     #[test]
     fn skipped_sections_render_compatibility_details() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
-        snapshot
-            .skipped_sections
-            .push(SkippedSection::from_fields(SkippedSectionFields { id: 999, version: 0 }));
-        snapshot
-            .skipped_sections
-            .push(SkippedSection::from_fields(SkippedSectionFields { id: 1000, version: 1 }));
+        snapshot.skipped_sections.push(SkippedSection { id: 999, version: 0 });
+        snapshot.skipped_sections.push(SkippedSection { id: 1000, version: 1 });
 
         let html = crate::report::render_html(&snapshot);
 

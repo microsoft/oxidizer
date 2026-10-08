@@ -1958,8 +1958,8 @@ mod tests {
 
     use super::super::app::{RuntimeFocus, TaskEventsFocus, TaskHistogram};
     use super::*;
-    use crate::allocator_topology::{Segment, SegmentFields, Slice, SliceKind, TopologyRegion};
-    use crate::allocator_view::{Estimate, EstimateFields, Region, SizeClass, SizeClassFields, Snapshot, Version};
+    use crate::allocator_topology::{Segment, Slice, SliceKind, TopologyRegion};
+    use crate::allocator_view::{Estimate, Region, SizeClass, Snapshot, Version};
 
     fn descriptor() -> MonitorDescriptor {
         MonitorDescriptor {
@@ -2018,14 +2018,14 @@ mod tests {
         let small = Slice {
             index: 0,
             kind: SliceKind::Small,
-            segments: vec![Segment::from_fields(SegmentFields {
+            segments: vec![Segment {
                 index: 0,
                 class_index: 0,
                 context: false,
                 live_blocks: 1,
                 usable_blocks: 4,
                 utilization_tracked: true,
-            })],
+            }],
             ..Slice::default()
         };
         let medium = Slice {
@@ -2055,25 +2055,25 @@ mod tests {
             used_bitmap: vec![0b1111],
             slices: vec![small, medium, bump, unknown],
         });
-        allocator.size_classes.push(SizeClass::from_fields(SizeClassFields {
+        allocator.size_classes.push(SizeClass {
             class_index: 0,
             block_bytes: 64,
-            live_allocations: Estimate::from_fields(EstimateFields {
+            live_allocations: Estimate {
                 value: 1,
                 lower_bound: 1,
                 upper_bound: 1,
-            }),
-            requested_bytes: Estimate::from_fields(EstimateFields {
+            },
+            requested_bytes: Estimate {
                 value: 32,
                 lower_bound: 32,
                 upper_bound: 32,
-            }),
-            usable_bytes: Estimate::from_fields(EstimateFields {
+            },
+            usable_bytes: Estimate {
                 value: 64,
                 lower_bound: 64,
                 upper_bound: 64,
-            }),
-        }));
+            },
+        });
         allocator.callers = Some(Callers::from_fields(CallersFields {
             session_id: 1,
             total_events: 4,

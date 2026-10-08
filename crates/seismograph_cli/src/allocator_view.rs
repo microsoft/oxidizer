@@ -22,12 +22,6 @@ pub(crate) struct Estimate {
     pub(crate) lower_bound: u64,
     pub(crate) upper_bound: u64,
 }
-pub(crate) type EstimateFields = Estimate;
-impl Estimate {
-    pub(crate) const fn from_fields(fields: Self) -> Self {
-        fields
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum PeakLiveBytesScope {
@@ -67,14 +61,6 @@ pub(crate) struct SizeClass {
     pub(crate) live_allocations: Estimate,
     pub(crate) requested_bytes: Estimate,
     pub(crate) usable_bytes: Estimate,
-}
-#[cfg(test)]
-pub(crate) type SizeClassFields = SizeClass;
-#[cfg(test)]
-impl SizeClass {
-    pub(crate) const fn from_fields(fields: Self) -> Self {
-        fields
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -118,14 +104,6 @@ pub(crate) struct Metadata {
 pub(crate) struct SkippedSection {
     pub(crate) id: u16,
     pub(crate) version: u16,
-}
-#[cfg(test)]
-pub(crate) type SkippedSectionFields = SkippedSection;
-#[cfg(test)]
-impl SkippedSection {
-    pub(crate) const fn from_fields(fields: Self) -> Self {
-        fields
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

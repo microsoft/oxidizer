@@ -3497,16 +3497,14 @@ mod tests {
                 ..crate::allocator_topology::Slice::default()
             };
             if kind == crate::allocator_topology::SliceKind::Small {
-                slice.segments.push(crate::allocator_topology::Segment::from_fields(
-                    crate::allocator_topology::SegmentFields {
-                        index: 0,
-                        class_index: 2,
-                        context: false,
-                        live_blocks: 0,
-                        usable_blocks: 100,
-                        utilization_tracked: false,
-                    },
-                ));
+                slice.segments.push(crate::allocator_topology::Segment {
+                    index: 0,
+                    class_index: 2,
+                    context: false,
+                    live_blocks: 0,
+                    usable_blocks: 100,
+                    utilization_tracked: false,
+                });
             }
             if kind == crate::allocator_topology::SliceKind::Medium {
                 slice.span_slices = 2;
@@ -3516,27 +3514,25 @@ mod tests {
             topology.slices.push(slice);
         }
         snapshot.topology.push(topology);
-        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
-            crate::allocator_view::SizeClassFields {
-                class_index: 2,
-                block_bytes: 64,
-                live_allocations: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
-                    value: 25,
-                    lower_bound: 24,
-                    upper_bound: 26,
-                }),
-                requested_bytes: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
-                    value: 1_200,
-                    lower_bound: 1_100,
-                    upper_bound: 1_300,
-                }),
-                usable_bytes: crate::allocator_view::Estimate::from_fields(crate::allocator_view::EstimateFields {
-                    value: 1_600,
-                    lower_bound: 1_536,
-                    upper_bound: 1_664,
-                }),
+        snapshot.size_classes.push(crate::allocator_view::SizeClass {
+            class_index: 2,
+            block_bytes: 64,
+            live_allocations: crate::allocator_view::Estimate {
+                value: 25,
+                lower_bound: 24,
+                upper_bound: 26,
             },
-        ));
+            requested_bytes: crate::allocator_view::Estimate {
+                value: 1_200,
+                lower_bound: 1_100,
+                upper_bound: 1_300,
+            },
+            usable_bytes: crate::allocator_view::Estimate {
+                value: 1_600,
+                lower_bound: 1_536,
+                upper_bound: 1_664,
+            },
+        });
 
         assert_eq!(
             MemorySnapshot::from_snapshot(&snapshot),
@@ -3617,24 +3613,20 @@ mod tests {
     )]
     fn memory_snapshot_groups_retained_allocations_by_routing_shape() {
         let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
-        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
-            crate::allocator_view::SizeClassFields {
-                class_index: 0,
-                block_bytes: 64,
-                live_allocations: crate::allocator_view::Estimate::default(),
-                requested_bytes: crate::allocator_view::Estimate::default(),
-                usable_bytes: crate::allocator_view::Estimate::default(),
-            },
-        ));
-        snapshot.size_classes.push(crate::allocator_view::SizeClass::from_fields(
-            crate::allocator_view::SizeClassFields {
-                class_index: 1,
-                block_bytes: 4_096,
-                live_allocations: crate::allocator_view::Estimate::default(),
-                requested_bytes: crate::allocator_view::Estimate::default(),
-                usable_bytes: crate::allocator_view::Estimate::default(),
-            },
-        ));
+        snapshot.size_classes.push(crate::allocator_view::SizeClass {
+            class_index: 0,
+            block_bytes: 64,
+            live_allocations: crate::allocator_view::Estimate::default(),
+            requested_bytes: crate::allocator_view::Estimate::default(),
+            usable_bytes: crate::allocator_view::Estimate::default(),
+        });
+        snapshot.size_classes.push(crate::allocator_view::SizeClass {
+            class_index: 1,
+            block_bytes: 4_096,
+            live_allocations: crate::allocator_view::Estimate::default(),
+            requested_bytes: crate::allocator_view::Estimate::default(),
+            usable_bytes: crate::allocator_view::Estimate::default(),
+        });
         let event = |allocation_id, size, align, address| {
             Event::from_fields(EventFields {
                 thread_log_id: 1,
