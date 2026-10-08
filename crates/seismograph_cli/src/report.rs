@@ -2429,6 +2429,7 @@ mod tests {
             allocation.call_stack = vec![0x1234];
             let mut free = allocation.clone();
             free.kind = EventKind::Deallocated;
+            free.allocation_recorded = true;
             free.event_thread_id = if id == 1 { 1 } else { 2 };
             free.heap_kind = HeapKind::Bump;
             free.freed_after_heap_release = true;
@@ -2454,6 +2455,21 @@ mod tests {
         let mut snapshot = Snapshot::event_only(Version::new(0, 1, 0));
         snapshot.callers = Some(callers);
         let html = render_html(&snapshot);
+        for (id, actor, status) in [
+            (1, "&lt;producer&gt; · #1", "matched retained pair"),
+            (2, "Thread #2", "matched retained pair"),
+            (3, "Thread #2", "matched retained pair"),
+            (99, "Thread #0", "orphan free"),
+        ] {
+            let row = html
+                .split("<tr>")
+                .find(|row| row.starts_with(&format!("<td>free</td><td>{actor}</td><td>#{id} /")))
+                .unwrap()
+                .split("</tr>")
+                .next()
+                .unwrap();
+            assert!(row.contains(&format!("<td>{status}</td>")), "{row}");
+        }
         for text in [
             "matched retained pair",
             "orphan free",
