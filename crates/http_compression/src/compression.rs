@@ -30,10 +30,7 @@ const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
 const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 
 /// Maximum decompressed size accepted by a layer unless the caller overrides it.
-///
-/// The limit applies cumulatively while a request or response body is streamed, so callers are
-/// protected even when they never buffer the whole body.
-pub const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 64 * 1024 * 1024;
+const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 64 * 1024 * 1024;
 
 const fn default_decompressor_limits() -> DecompressorLimits {
     DecompressorLimits::new().max_output_len(
@@ -247,8 +244,8 @@ pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
 impl<R> CompressionLayer<R> {
     /// Bounds the cost of decompressing a single body.
     ///
-    /// Decompressed output defaults to [`DEFAULT_MAX_DECOMPRESSED_BODY_LEN`]. Bounds left unset in
-    /// `limits` keep the layer's defaults; explicit bounds replace them, and
+    /// Decompressed output defaults to 64 MiB. Bounds left unset in `limits` keep the layer's
+    /// defaults; explicit bounds replace them, and
     /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] explicitly removes the
     /// output cap.
     #[must_use]
@@ -310,8 +307,8 @@ impl CompressionLayer<Server> {
     /// unchanged, including its `Content-Encoding` metadata. This exception
     /// avoids installing a decoder that cannot produce a compressed member.
     ///
-    /// Decompression rejects output beyond [`DEFAULT_MAX_DECOMPRESSED_BODY_LEN`] by default. Set
-    /// [`limits`][Self::limits] when the application needs a different bound.
+    /// Decompression rejects output beyond 64 MiB by default. Set [`limits`][Self::limits] when the
+    /// application needs a different bound.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);

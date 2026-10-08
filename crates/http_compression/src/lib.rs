@@ -100,10 +100,9 @@
 //!
 //! # Bounds
 //!
-//! Decompressed request and response bodies are capped at
-//! [`DEFAULT_MAX_DECOMPRESSED_BODY_LEN`] by default, including when they are streamed rather than
-//! buffered. Use [`limits`][CompressionLayer::limits] to tighten the cap for an application's
-//! budget. Removing it requires an explicit
+//! Decompressed request and response bodies are capped at 64 MiB by default, including when they
+//! are streamed rather than buffered. Use [`limits`][CompressionLayer::limits] to tighten the cap
+//! for an application's budget. Removing it requires an explicit
 //! [`unbounded_output_len`][compressors::DecompressorLimits::unbounded_output_len].
 //!
 //! # Errors
@@ -128,8 +127,5 @@ mod negotiate;
 pub(crate) const CONTENT_DIGEST_HEADER: &str = "content-digest";
 pub(crate) const REPR_DIGEST_HEADER: &str = "repr-digest";
 
-pub use compression::{
-    Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, DEFAULT_MAX_DECOMPRESSED_BODY_LEN, OriginalBody, Server,
-    UnsupportedCompression,
-};
+pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
 pub use error::CompressibleTypeError;

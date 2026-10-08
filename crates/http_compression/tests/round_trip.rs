@@ -15,9 +15,7 @@ use compressors::{CompressionStream, CompressorBuilder, DecompressorLimits, Leve
 use futures::StreamExt as _;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, VARY};
 use http::{HeaderValue, StatusCode};
-use http_compression::{
-    Client, Compression, CompressionLayer, DEFAULT_MAX_DECOMPRESSED_BODY_LEN, OriginalBody, Server, UnsupportedCompression,
-};
+use http_compression::{Client, Compression, CompressionLayer, OriginalBody, Server, UnsupportedCompression};
 use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
 use ohno::Labeled as _;
@@ -576,14 +574,11 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
     assert_eq!(error.label(), "compression_limit_exceeded");
 }
 
-#[test]
-fn default_decompressed_body_limit_is_64_mib() {
-    assert_eq!(DEFAULT_MAX_DECOMPRESSED_BODY_LEN, 67_108_864);
-}
-
 #[tokio::test]
 async fn default_layer_rejects_output_beyond_its_decompressed_body_limit() {
-    let output_len = usize::try_from(DEFAULT_MAX_DECOMPRESSED_BODY_LEN).unwrap() + 1;
+    const DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN: usize = 64 * 1024 * 1024;
+
+    let output_len = DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN + 1;
     let compressed = compress(Format::Zstd, &vec![0_u8; output_len]);
     let handler = client().decompress_responses(&[Format::Zstd]).layer(responds_with(move || {
         HttpResponseBuilder::new_fake()
