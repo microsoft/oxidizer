@@ -916,8 +916,15 @@ mod tests {
                     ..Default::default()
                 };
                 let screen = render(Some(&snapshot), nav, width, 24);
-                assert!(screen.contains("Unknown"), "{screen}");
-                assert!(!screen.contains("Object size"), "{screen}");
+                let left_width = usize::from(width.saturating_sub(40).clamp(18, 34));
+                let detail = screen
+                    .lines()
+                    .skip(11)
+                    .map(|line| line.chars().skip(left_width).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(detail.contains("Unknown"), "{detail}");
+                assert!(!detail.contains("Object size"), "{detail}");
                 assert_eq!(screen.lines().count(), 24);
                 assert!(screen.lines().all(|line| line.chars().count() == usize::from(width)));
             }
