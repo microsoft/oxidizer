@@ -84,7 +84,32 @@ fn captured_native_inventory_acceptance_screens() -> std::io::Result<()> {
         274_894_684_160
     );
     assert_eq!(snapshot.global.ranges.observed_bytes(), 6_373_376);
-    write_inventory_screens(&snapshot, &directory)
+    write_inventory_screens(&snapshot, &directory)?;
+    for (file, expected) in [
+        ("actual-memory.txt", &["OS reserved 256.02 GiB", "Global cached 6.08 MiB"][..]),
+        ("actual-global.txt", &["Cached capacity 6.08 MiB"][..]),
+        (
+            "actual-owner-1.txt",
+            &["Owner 1 [Observed]", "Small slabs 656.00 KiB", "Large ranges 640.00 KiB"][..],
+        ),
+        (
+            "actual-class-1.txt",
+            &[
+                "C43 [Observed]",
+                "Object size 64.00 KiB",
+                "Slab size 256.00 KiB",
+                "Slots / slab 4",
+                "Slabs 2",
+            ][..],
+        ),
+    ] {
+        let screen = std::fs::read_to_string(directory.join(file))?;
+        let normalized = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+        for evidence in expected {
+            assert!(normalized.contains(evidence), "{file}: missing {evidence}\n{screen}");
+        }
+    }
+    Ok(())
 }
 
 #[test]
