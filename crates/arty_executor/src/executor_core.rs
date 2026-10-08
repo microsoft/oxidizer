@@ -12,14 +12,11 @@ use std::time::{Duration, Instant};
 use std::{mem, task, thread};
 
 use events_once::RawLocalEventLake;
-use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use plurality::MultiPool;
 use tick::SimpleClock;
 
-use crate::{
-    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
-    WakeSignal,
-};
+use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -65,7 +62,7 @@ struct ReentrancySafeState {
     /// Storage for all the tasks registered with the executor. Once a task has been registered,
     /// the executor only sees it as a [`TypeErasedTask`][crate::TypeErasedTask], with only the
     /// task itself knowing the specific type of the future and the type of the result it produces.
-    task_storage: RawBlindPool,
+    task_storage: MultiPool,
 
     /// In shutdown mode (`Some`), all tasks are considered completed and the only thing we do is
     /// wait for them to become inert (which may be driven by uncontrollable actions of foreign
@@ -179,7 +176,7 @@ impl ExecutorCore {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
                 result_events: RawLocalEventLake::new(),
-                task_storage: RawBlindPool::builder().drop_policy(DropPolicy::MustNotDropContents).build(),
+                task_storage: MultiPool::new(),
                 shutdown_deadline: None,
             }),
             exclusive: RefCell::new(ExclusiveState {
@@ -220,14 +217,8 @@ impl ExecutorCore {
         // have been dropped.
         let (result_tx, result_rx) = unsafe { state.result_events.rent::<R>() };
 
-        let task = state.task_storage.insert(Task::new(future, result_tx));
-
-        let task_ref = TaskRef::new(
-            // SAFETY: The task pool itself does not keep any references, so we as the currently
-            // only owner of the task have the freedom to create whatever references we desire.
-            // In this case we make a reference that lets us access it as a `dyn TypeErasedTask`.
-            unsafe { task.cast_type_erased_task() }.into_shared(),
-        );
+        let task = state.task_storage.alloc_box(Task::new(future, result_tx));
+        let task_ref = TaskRef::new(task);
 
         let wake_signal = WakeSignal::new(
             Arc::clone(&self.shared.awakened),
@@ -275,9 +266,9 @@ impl ExecutorCore {
         self.poll_active_tasks(&mut state_exclusive);
 
         {
-            let mut state_reentrant = self.reentrancy_safe.borrow_mut();
+            let state_reentrant = self.reentrancy_safe.borrow();
 
-            self.drop_inert_tasks(&mut state_exclusive, &mut state_reentrant);
+            self.drop_inert_tasks(&mut state_exclusive);
 
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
@@ -450,7 +441,7 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
+    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState) {
         let completed_before = state_exclusive.completed.len();
 
         // We drop all completed tasks that are inert, which means they have
@@ -465,15 +456,10 @@ impl ExecutorCore {
             let task = unsafe { task_ref.as_task() };
 
             if task.is_inert() {
-                // SAFETY: The task is still alive (we own it) and we are accessing it from the
-                // same thread as it was created on (the executor is single-threaded). All is well.
-                let pool_ticket = unsafe { task_ref.into_pool_ticket() };
-
-                // SAFETY: This is the only time we are removing this task because that only happens
-                // when a task is removed from the "completed" set, which can only happen once.
-                unsafe {
-                    state_reentrant.task_storage.remove(pool_ticket);
-                }
+                // SAFETY: This is the only time we release this task because that only happens
+                // when it is removed from the "completed" set, which can only happen once. The
+                // executor is single-threaded, and `is_inert` guarantees no references remain.
+                unsafe { task_ref.release() };
 
                 false
             } else {
@@ -691,7 +677,7 @@ impl Drop for ExecutorCore {
         let state_exclusive = self.exclusive.get_mut();
         let state_reentrant = self.reentrancy_safe.get_mut();
         assert!(
-            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty(),
+            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty(),
             "Executor is being dropped before execute_cycle() returned CycleOutcome::Shutdown. This violates ExecutorBuilder::build() safety requirements."
         );
     }

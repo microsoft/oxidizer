@@ -285,7 +285,7 @@ fn entrypoint(c: &mut Criterion) {
         group.finish();
     }
 
-    // --- Allocation-focused benchmarks (infinity_pool exploration) ---
+    // --- Allocation-focused benchmarks ---
     {
         let mut group = c.benchmark_group("emit_alloc");
         bench_enrichment_vec_collect(&mut group, &allocs, &time);
@@ -502,7 +502,7 @@ fn bench_emit_to_noop_sink(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &al
 }
 
 // ===========================================================================
-// Allocation-focused benchmarks for infinity_pool exploration
+// Allocation-focused benchmarks for pooled-allocation exploration
 //
 // These benchmarks isolate the allocation-heavy operations in the emit hot
 // path to establish a baseline before exploring pooled alternatives:
@@ -588,7 +588,7 @@ fn bench_enrichment_entry_clone(group: &mut BenchmarkGroup<'_, WallTime>, allocs
 }
 
 /// Benchmarks the Arc<EnrichmentNode> creation that happens in `enrich()`
-/// scope push - this is the allocation that `infinity_pool` could pool.
+/// scope push - this is the allocation that a pooled implementation could reuse.
 ///
 /// Measures repeated push/pop of a single enrichment scope (1 entry).
 fn bench_arc_enrichment_node_churn(

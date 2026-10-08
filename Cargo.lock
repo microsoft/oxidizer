@@ -263,12 +263,12 @@ dependencies = [
  "events_once",
  "foldhash 0.2.0",
  "gungraun",
- "infinity_pool",
  "metabench",
  "mockall",
  "mutants",
  "nm",
  "pin-project",
+ "plurality",
  "scopeguard",
  "static_assertions",
  "testing_aids",
@@ -2968,17 +2968,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "infinity_pool"
-version = "0.8.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1000fad933f772f0cda4bdeb1737bdb079e210701c7c0f21c44403d9975d42d"
-dependencies = [
- "new_zealand",
- "num-integer",
- "pastey",
-]
-
-[[package]]
 name = "insta"
 version = "1.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4341,7 +4330,6 @@ dependencies = [
  "criterion",
  "deadpool 0.13.1",
  "gungraun",
- "infinity_pool",
  "loom",
  "metabench",
  "mimalloc",

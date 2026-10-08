@@ -68,8 +68,6 @@ const COMPARISON_OPS: &[(&str, &str)] = &[
     ("pool_comparison/churn/object_pool_pull", "object-pool"),
     ("pool_comparison/churn/opool_get", "opool"),
     ("pool_comparison/churn/deadpool_get", "deadpool"),
-    ("pool_comparison/churn/infinity_pinned", "infinity-pool — `PinnedPool`"),
-    ("pool_comparison/churn/infinity_raw", "infinity-pool — `RawPinnedPool`"),
 ];
 
 const DYN_BOX_OPS: &[(&str, &str)] = &[
@@ -77,22 +75,6 @@ const DYN_BOX_OPS: &[(&str, &str)] = &[
     (
         "dyn_box/plurality_multi_box",
         "plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_pinned",
-        "infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_local_pinned",
-        "infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_blind",
-        "infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_local_blind",
-        "infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous)",
     ),
     ("dyn_box/std_box", "standard library — `Box<dyn Trait>`"),
 ];
@@ -408,7 +390,7 @@ fn emit_dyn_box(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, DYN_BOX_OPS[0].0);
     out.push_str("## Owning `dyn Trait` handles\n\n");
     out.push_str("Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.\n\n");
-    out.push_str("infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The rows marked heterogeneous accept values of any type in one pool and therefore pay for more capability; each row here also unsizes a handle and makes a virtual call, so the cost of type erasure alone is the one measured above rather than the difference between these rows. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
+    out.push_str("The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Each row also unsizes a handle and makes a virtual call, so the difference isolates the pool-routing cost rather than type erasure itself. Other surveyed pool crates return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Handle | Allocate, call, free | Δ vs plurality |\n|---|---:|---:|\n");
     for (key, label) in DYN_BOX_OPS {
         let time = crit_per_op(report, key);

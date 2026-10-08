@@ -55,8 +55,6 @@ The same allocate-and-free workload run against every pooling crate we found wit
 | object-pool | 19.48 ns | 1.21× |
 | opool | 20.48 ns | 1.27× |
 | deadpool | 63.62 ns | 3.96× |
-| infinity-pool — `PinnedPool` | 30.68 ns | 1.91× |
-| infinity-pool — `RawPinnedPool` | 13.77 ns | 0.86× |
 
 ## Against the system allocator, under churn
 
@@ -73,16 +71,12 @@ The scenario a pool actually exists for: 1,000,000 node allocations with a reali
 
 Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.
 
-infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The rows marked heterogeneous accept values of any type in one pool and therefore pay for more capability; each row here also unsizes a handle and makes a virtual call, so the cost of type erasure alone is the one measured above rather than the difference between these rows. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench plurality`.
+The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Each row also unsizes a handle and makes a virtual call, so the difference isolates the pool-routing cost rather than type erasure itself. Other surveyed pool crates return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.
 
 | Handle | Allocate, call, free | Δ vs plurality |
 |---|---:|---:|
 | plurality — `Box<dyn Trait>` | 17.92 ns | 1.00× |
 | plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous) | 18.01 ns | 1.00× |
-| infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 36.20 ns | 2.02× |
-| infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 37.69 ns | 2.10× |
-| infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous) | 52.16 ns | 2.91× |
-| infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous) | 38.37 ns | 2.14× |
 | standard library — `Box<dyn Trait>` | 17.93 ns | 1.00× |
 
 The standard-library row is an allocator best case: every allocation is the same size and is immediately freed, so allocator thread caches are maximally effective. The churn benchmark above measures a broader live set and locality effects.
