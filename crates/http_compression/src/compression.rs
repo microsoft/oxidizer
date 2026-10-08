@@ -999,3 +999,21 @@ impl Config {
         Ok(Some(formats))
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_deflate_has_no_http_content_encoding() {
+        let layer = Compression::server(HttpBodyBuilder::new_fake());
+        let mut headers = HeaderMap::new();
+        let body = HttpBodyBuilder::new_fake().text("unchanged");
+
+        let body = layer.role.compress(&layer.config, &mut headers, body, Format::Deflate).unwrap();
+
+        assert!(headers.get(CONTENT_ENCODING).is_none());
+        assert_eq!(futures::executor::block_on(body.into_text()).unwrap(), "unchanged");
+    }
+}
