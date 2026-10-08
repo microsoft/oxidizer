@@ -2479,15 +2479,19 @@ mod tests {
         let mut snapshot = Snapshot::event_only(Version::new(0, 1, 0));
         snapshot.callers = Some(callers);
         let html = render_html(&snapshot);
-        for (id, actor, status) in [
-            (1, "&lt;producer&gt; · #1", "matched retained pair"),
-            (2, "Thread #2", "matched retained pair"),
-            (3, "Thread #2", "matched retained pair"),
-            (99, "Thread #0", "orphan free"),
+        for (operation, id, actor, status) in [
+            ("alloc", 1, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("alloc", 2, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("alloc", 3, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("free", 1, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("free", 2, "Thread #2", "matched retained pair"),
+            ("free", 3, "Thread #2", "matched retained pair"),
+            ("free", 99, "Thread #0", "orphan free"),
+            ("alloc", 100, "Thread #0", "unmatched allocation evidence"),
         ] {
             let row = html
                 .split("<tr>")
-                .find(|row| row.starts_with(&format!("<td>free</td><td>{actor}</td><td>#{id} /")))
+                .find(|row| row.starts_with(&format!("<td>{operation}</td><td>{actor}</td><td>#{id} /")))
                 .unwrap()
                 .split("</tr>")
                 .next()

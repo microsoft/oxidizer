@@ -87,6 +87,23 @@ fn borrowed_length_encoding_and_error_paths_never_use_global_allocator() {
 }
 
 #[test]
+fn truncated_inventory_is_rejected_before_allocating_for_valid_prefix_rows() {
+    let metadata = Snapshot {
+        owner_count: 2,
+        owners: vec![Owner { id: 1, ..Owner::default() }],
+        ..Snapshot::default()
+    };
+    let mut input = vec![0; encoded_len(&metadata).unwrap()];
+    encode(&metadata, &mut input).unwrap();
+    input[46..50].copy_from_slice(&2_u32.to_le_bytes());
+    CALLS.with(|calls| calls.set(Some(0)));
+    let decoded = decode(&input);
+    let calls = CALLS.with(|calls| calls.replace(None).unwrap());
+    assert_eq!(decoded.unwrap_err().kind(), ErrorKind::Truncated);
+    assert_eq!(calls, 0);
+}
+
+#[test]
 fn forged_maximum_inventory_with_invalid_first_owner_does_not_allocate() {
     let metadata = Snapshot::default();
     let header_length = encoded_len(&metadata).unwrap();

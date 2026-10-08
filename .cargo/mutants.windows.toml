@@ -90,6 +90,9 @@ exclude_re = [
     'crates/rallocator/src/remote.rs:\d+:\d+: replace > with >= in Cache::reserve$',
     'crates/rallocator/src/thread.rs:\d+:\d+: replace < with <= in flush_for_teardown$',
     # Legacy domain markup, CSS names and SVG stroke widths are presentation only.
+    # View-local IDs have no fixed numbering: index and index+1 are injective
+    # relabelings that preserve pairing, orphan identity and histogram membership.
+    'crates/seismograph_rallocator/src/events.rs:78:38: replace \+ with \* in callers$',
     'crates/seismograph_cli/src/report.rs:\d+:\d+: replace render_domains with \(\)$',
     'crates/seismograph_cli/src/report.rs:\d+:\d+: replace slice_kind_class -> &.static str with (""|"xyzzy")$',
     'crates/seismograph_cli/src/report.rs:1878:\d+: replace (\+|/|\*) with (-|\*|%|\+|/) in render_thread_flow_diagram$',
@@ -121,6 +124,9 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
 
     # Windows host only.
+    # Removing the incoming drain strands remote returns; the native Windows
+    # mutation run times out. Keep every arithmetic and queue-budget mutation.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace Core::drain with \(\)$',
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
     "\\brun_perf\\b",
