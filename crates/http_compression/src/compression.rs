@@ -30,7 +30,11 @@ const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
 const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 
 /// Maximum decompressed size accepted by a layer unless the caller overrides it.
-const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 64 * 1024 * 1024;
+///
+/// Written as the exact byte count so mutation testing cannot replace one multiplication while
+/// leaving a different, undocumented policy value that ordinary boundary tests cannot cheaply
+/// distinguish.
+const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
 
 const fn default_decompressor_limits() -> DecompressorLimits {
     DecompressorLimits::new().max_output_len(
