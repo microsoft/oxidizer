@@ -410,6 +410,7 @@ mod tests {
     #[test]
     fn stalled_publisher_cannot_expose_or_reclaim_tail() {
         let queue = Arc::new(Queue::new());
+        assert_eq!(queue.observe(), (0, 0));
         let first = Box::new(Message {
             ring: 1,
             next: AtomicUsize::new(0),
@@ -422,6 +423,7 @@ mod tests {
         let b = (&raw const *second) as usize;
         // SAFETY: Stable initialized objects, exclusively owned before publishing.
         unsafe { queue.enqueue(a, a) };
+        assert_eq!(queue.observe(), (a as u64, a as u64));
         let swapped = Arc::new(Barrier::new(2));
         let resume = Arc::new(Barrier::new(2));
         let producer = {
@@ -432,6 +434,7 @@ mod tests {
                 // Reproduce a preemption precisely between exchange and link.
                 let previous = queue.back.0.swap(b, Ordering::AcqRel);
                 swapped.wait();
+                assert_eq!(queue.observe(), (a as u64, b as u64));
                 resume.wait();
                 // SAFETY: Consumer is required to retain previous until linked.
                 unsafe { next(previous).store(b, Ordering::Release) };
@@ -475,6 +478,7 @@ mod tests {
         }
         assert_eq!(seen, [a, b]);
         assert_eq!(queue.retained_message(), Some(c));
+        assert_eq!(queue.observe(), (c as u64, c as u64));
     }
 
     #[test]

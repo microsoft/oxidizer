@@ -1018,7 +1018,16 @@ mod tests {
         let observed = core.observe(&mut budget);
         assert!(observed.slabs_complete);
         assert!(observed.classes[classes::index(48)].observed_slabs > 0);
+        assert!(observed.classes[classes::index(48)].fast_nonempty);
+        assert!(!observed.classes[classes::index(32)].fast_nonempty);
         assert_eq!(observed.large.counts[17], 1, "native tags must be converted to size exponents");
+        let mut one_node = 1;
+        let partial = core.observe(&mut one_node);
+        assert_eq!(one_node, 0);
+        assert_eq!(partial.classes[classes::index(48)].observed_slabs, 0);
+        assert_eq!(partial.large.counts[17], 1);
+        assert!(!partial.slabs_complete);
+        assert!(!partial.large.complete);
         let mut exhausted = 0;
         let partial = core.observe(&mut exhausted);
         assert!(!partial.slabs_complete);
@@ -1052,6 +1061,42 @@ mod tests {
         assert_eq!(observed.remote.messages, 0);
         let mut second_budget = crate::observation::WALK_BUDGET;
         assert_eq!(sender_core.observe(&mut second_budget).remote, observed.remote);
+        sender_core.flush();
+        target_core.flush();
+    }
+
+    #[test]
+    fn local_returns_count_every_object_toward_the_drain_budget() {
+        let target = fresh_owner();
+        let sender = fresh_owner();
+        // SAFETY: Each fresh endpoint remains persistent for this regression.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The test holds this fresh core's sole lease.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: This is a distinct fresh persistent endpoint.
+        let sender_owner = unsafe { &*(sender as *const Owner) };
+        // SAFETY: The test holds this fresh core's sole lease.
+        let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(65_536, 16).unwrap()).unwrap();
+        let mut pointers = Vec::new();
+        for _ in 0..24 {
+            let pointer = target_core.allocate(request);
+            assert!(!pointer.is_null());
+            pointers.push(pointer);
+        }
+        for ring in pointers.chunks_exact(4) {
+            for pointer in ring {
+                // SAFETY: These live allocations retain their stable owner-exclusive slabs.
+                let (meta, _) = unsafe { target_core.map.lookup(pointer.addr()) };
+                // SAFETY: Each allocation transfers once to the outgoing cache.
+                unsafe { sender_core.remote.deallocate(sender_core.map, meta, pointer.addr()) };
+            }
+            // Bypass the sender's smaller byte budget to publish four-object rings.
+            // SAFETY: All cached objects are exclusively held and transfer once.
+            unsafe { sender_core.remote.post(sender_core.map, sender) };
+        }
+        target_core.drain();
+        assert_eq!(target_core.outstanding_objects(), 8);
         sender_core.flush();
         target_core.flush();
     }
@@ -1155,6 +1200,18 @@ mod tests {
             let observed = relay_core.remote.observe(relay_core.map, &mut budget);
             assert_eq!(observed.messages, if exhausted { 0 } else { 2 });
             assert_eq!(observed.message_objects, if exhausted { 0 } else { 2 });
+            if !exhausted {
+                let mut one_message = 1;
+                let partial = relay_core.remote.observe(relay_core.map, &mut one_message);
+                assert_eq!(one_message, 0);
+                assert_eq!(partial.messages, 1);
+                assert_eq!(partial.message_objects, 1);
+                assert!(!partial.complete);
+                let mut no_messages = 0;
+                let partial = relay_core.remote.observe(relay_core.map, &mut no_messages);
+                assert_eq!(partial.messages, 0);
+                assert!(!partial.complete);
+            }
             relay_core.flush();
             target_core.flush();
             // One message remains retained by each queue until another
@@ -1207,7 +1264,7 @@ mod tests {
         let mut map = ReallocMap::new();
         let first = classes::CHUNK;
         let set = ReallocMap::set(first);
-        let mut colliding = (2..)
+        let mut colliding = (2..=256)
             .map(|index| index * classes::CHUNK)
             .filter(|&chunk| ReallocMap::set(chunk) == set);
         let second = colliding.next().unwrap();

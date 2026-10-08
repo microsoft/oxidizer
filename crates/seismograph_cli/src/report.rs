@@ -2196,6 +2196,30 @@ fn escape_html(value: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn estimate_totals_sum_each_bound_and_saturate_independently() {
+        let values = [
+            super::Estimate {
+                value: u64::MAX - 1,
+                lower_bound: 4,
+                upper_bound: u64::MAX,
+            },
+            super::Estimate {
+                value: 3,
+                lower_bound: 5,
+                upper_bound: 7,
+            },
+        ];
+        assert_eq!(
+            super::sum_estimates(values.into_iter()),
+            super::Estimate {
+                value: u64::MAX,
+                lower_bound: 9,
+                upper_bound: u64::MAX,
+            }
+        );
+    }
+
+    #[test]
     fn frame_formatting_preserves_addresses_without_source_information() {
         use super::*;
         let mut lookup = AddressLookup::from_fields(AddressLookupFields {

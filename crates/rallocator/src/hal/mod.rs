@@ -104,6 +104,17 @@ mod tests {
     }
 
     #[test]
+    fn invalid_reservations_do_not_reach_the_platform() {
+        for (size, alignment) in [(0, RESERVE_MIN), (RESERVE_MIN - 1, RESERVE_MIN), (RESERVE_MIN, 0), (RESERVE_MIN, 3)] {
+            fail_next(Failure::Reserve);
+            assert!(reserve(size, alignment).is_null());
+            assert_eq!(FAILURE.with(Cell::get), Some(Failure::Reserve));
+            assert!(reserve(RESERVE_MIN, RESERVE_MIN).is_null());
+            assert_eq!(FAILURE.with(Cell::get), None);
+        }
+    }
+
+    #[test]
     fn reserve_commit_decommit_recommit_zero() {
         let size = 2 * RESERVE_MIN;
         let ptr = reserve(size, size);

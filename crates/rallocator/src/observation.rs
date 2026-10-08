@@ -258,7 +258,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inventory_buffer_stops_exactly_at_its_capacity() {
+        for capacity in [1, 2] {
+            let mut buffer = OwnerBuffer::new(capacity).unwrap();
+            for id in 1..=capacity {
+                assert!(!buffer.full());
+                buffer.push(&seismograph_rallocator::native::Owner {
+                    id: id as u64,
+                    ..Default::default()
+                });
+            }
+            assert!(buffer.full());
+            assert_eq!(buffer.as_slice().len(), capacity);
+            assert_eq!(buffer.as_slice()[capacity - 1].id, capacity as u64);
+            let layout = buffer.layout;
+            let pointer = buffer.pointer.as_ptr().addr();
+            drop(buffer);
+            assert_eq!(LAST_DEALLOCATION.with(std::cell::Cell::get), Some((pointer, layout)));
+        }
+    }
+
+    #[test]
     fn contended_publisher_preserves_the_previous_round_and_retries_after_unlock() {
+        const CASE: &str = "RALLOCATOR_PUBLICATION_CASE";
+        if std::env::var_os(CASE).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "observation::tests::contended_publisher_preserves_the_previous_round_and_retries_after_unlock",
+                ])
+                .env(CASE, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+            return;
+        }
         seismograph_rallocator::native::set_publication_enabled(true);
         seismograph::recorder(seismograph::recorder::Configuration {
             allocations: seismograph::recorder::RecordingPolicy::all(true),
@@ -274,6 +308,14 @@ mod tests {
             // SAFETY: The existing current-thread lease remains live throughout
             // this callback, which retains no core borrow across publication.
             let slot = unsafe { owner.observation().slot() }.unwrap();
+            let original = *slot.value.lock().unwrap();
+            let second_layout = Layout::from_size_align(64, 16).unwrap();
+            let second = crate::recording::allocate(second_layout, false);
+            assert!(!second.is_null());
+            assert_eq!(*slot.value.lock().unwrap(), original);
+            // SAFETY: This distinct allocation is uniquely owned and retired once.
+            unsafe { crate::recording::deallocate(second, second_layout) };
+            assert_eq!(*slot.value.lock().unwrap(), original);
             let previous = slot.value.lock().unwrap();
             let round = slot.round.load(Ordering::Relaxed);
             let generation = slot.generation.load(Ordering::Relaxed);
@@ -359,6 +401,7 @@ mod tests {
 
     thread_local! {
         static FAIL_NEXT_ALLOCATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static LAST_DEALLOCATION: std::cell::Cell<Option<(usize, Layout)>> = const { std::cell::Cell::new(None) };
     }
 
     pub(super) struct FailingSystem;
@@ -375,6 +418,7 @@ mod tests {
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            LAST_DEALLOCATION.with(|last| last.set(Some((ptr.addr(), layout))));
             // SAFETY: Every nonnull allocation originated from System with this layout.
             unsafe { std::alloc::System.dealloc(ptr, layout) };
         }

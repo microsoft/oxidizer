@@ -594,6 +594,14 @@ mod tests {
         );
         let filtered = index.render(&FilterSpec::parse("crate:app", "crate:noise", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(
+            filtered.filter_summary.allocations,
+            FilterCounts {
+                total: 2,
+                shown: 1,
+                unknown: 0,
+            }
+        );
+        assert_eq!(
             filtered
                 .allocations
                 .unwrap()

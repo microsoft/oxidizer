@@ -3491,6 +3491,8 @@ mod tests {
             crate::allocator_topology::SliceKind::Medium,
             crate::allocator_topology::SliceKind::Medium,
             crate::allocator_topology::SliceKind::Bump,
+            crate::allocator_topology::SliceKind::Unknown,
+            crate::allocator_topology::SliceKind::Unknown,
         ] {
             let mut slice = crate::allocator_topology::Slice {
                 kind,
@@ -3549,7 +3551,7 @@ mod tests {
                 small_slices: 1,
                 medium_slices: 2,
                 bump_slices: 1,
-                unknown_slices: 0,
+                unknown_slices: 2,
                 regions: vec![MemoryRegion {
                     index: 0,
                     reserved_bytes: 1_024,
@@ -3872,7 +3874,10 @@ mod tests {
         }));
 
         let mut actual = AllocationSnapshot::from_snapshot(&snapshot);
-        assert_eq!(actual.records.len(), 4);
+        assert_eq!(
+            actual.records.iter().map(|record| record.operation).collect::<Vec<_>>(),
+            ["alloc", "alloc", "free", "alloc"]
+        );
         actual.records.clear();
         assert_eq!(
             actual,

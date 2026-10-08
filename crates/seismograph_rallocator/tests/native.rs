@@ -59,6 +59,47 @@ fn decoded_inventory_count_must_agree_with_capture_metadata() {
     encoded[44] = 1;
     assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::Malformed);
 }
+
+#[test]
+fn idle_observations_reject_each_inconsistent_provenance_field() {
+    for (leased, generation, session_id, thread_id) in [(true, 1, 0, 0), (false, 2, 0, 0), (false, 1, 1, 0), (false, 1, 0, 1)] {
+        let snapshot = Snapshot {
+            owner_count: 1,
+            owners_complete: true,
+            owners: vec![Owner {
+                id: 1,
+                generation: 1,
+                leased,
+                source: ObservationSource::IdleInspection,
+                observation: Some(Observation {
+                    generation,
+                    session_id,
+                    thread_id,
+                    ..Observation::EMPTY
+                }),
+            }],
+            ..Snapshot::default()
+        };
+        assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::Malformed);
+    }
+}
+
+#[test]
+#[cfg(not(miri))]
+fn maximum_valid_inventory_round_trips() {
+    let snapshot = Snapshot {
+        owner_count: seismograph_rallocator::MAX_OWNERS as u64,
+        owners_complete: true,
+        owners: (1..=seismograph_rallocator::MAX_OWNERS)
+            .map(|id| Owner {
+                id: id as u64,
+                ..Owner::default()
+            })
+            .collect(),
+        ..Snapshot::default()
+    };
+    assert_eq!(decode(&bytes(&snapshot)).unwrap(), snapshot);
+}
 fn fixture() -> Snapshot {
     let ranges = Ranges {
         counts: core::array::from_fn(|index| index as u64 + 1),
@@ -441,6 +482,21 @@ fn stale_session_round_and_future_are_distinct() {
         .freshness(&snapshot),
         Freshness::NewerThanCapture
     );
+    observation.round = snapshot.round;
+    for (captured_nanos, expected) in [
+        (snapshot.captured_nanos, Freshness::Current),
+        (snapshot.captured_nanos + 1, Freshness::NewerThanCapture),
+    ] {
+        observation.captured_nanos = captured_nanos;
+        assert_eq!(
+            Owner {
+                observation: Some(observation),
+                ..owner
+            }
+            .freshness(&snapshot),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -455,9 +511,13 @@ fn native_capacity_sum_does_not_overflow_u64() {
 #[test]
 fn controls_advance_without_background_work() {
     let round = seismograph_rallocator::native::observation_round();
-    assert!(seismograph_rallocator::native::request_observation() >= round);
+    assert_eq!(seismograph_rallocator::native::request_observation(), round + 1);
+    assert_eq!(seismograph_rallocator::native::observation_round(), round + 1);
+    assert_eq!(seismograph_rallocator::native::request_observation(), round + 2);
+    assert_eq!(seismograph_rallocator::native::observation_round(), round + 2);
     let before = seismograph_rallocator::native::captured_nanos();
-    assert!(seismograph_rallocator::native::captured_nanos() >= before);
+    std::thread::sleep(std::time::Duration::from_millis(1));
+    assert!(seismograph_rallocator::native::captured_nanos() > before);
     assert!(seismograph_rallocator::native::publication_enabled());
     seismograph_rallocator::native::set_publication_enabled(false);
     assert!(!seismograph_rallocator::native::publication_enabled());
