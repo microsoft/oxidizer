@@ -11,10 +11,6 @@ use crate::error::{Error, Result};
 /// be larger than its payload. Without a floor, a legitimate two-byte stream would look like an
 /// infinitely bad expansion ratio and be rejected. 32 KiB is far below any size at which a
 /// decompression bomb becomes a memory-exhaustion risk.
-#[cfg_attr(
-    not(any(test, any_format)),
-    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
-)]
 const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 
 /// The cap the buffering conveniences put on total decompressed output.
@@ -216,6 +212,27 @@ impl DecompressorLimits {
         self
     }
 
+    /// Fills bounds that are unset in `self` from `fallbacks`.
+    ///
+    /// Explicit bounds and explicit removals in `self` take precedence. This lets a higher-level
+    /// API provide safe defaults without replacing a caller's format-specific choices.
+    #[must_use]
+    pub const fn with_fallbacks(mut self, fallbacks: Self) -> Self {
+        if self.ratio.is_none() {
+            self.ratio = fallbacks.ratio;
+        }
+
+        if self.output_len.is_none() {
+            self.output_len = fallbacks.output_len;
+        }
+
+        if self.streams.is_none() {
+            self.streams = fallbacks.streams;
+        }
+
+        self
+    }
+
     /// Adds the bounds an API that buffers a whole result needs, wherever the caller left them open.
     ///
     /// A decompressor that hands each chunk back keeps nothing, so it carries no cumulative bounds
@@ -293,10 +310,6 @@ impl DecompressorLimits {
 ///
 /// One value rather than two accessors so a caller that applies these cannot pick up one bound and
 /// silently drop the other.
-#[cfg_attr(
-    not(any(test, any_format)),
-    expect(dead_code, reason = "only a decompressor's pump carries these, and no format is enabled")
-)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct BufferedFallbacks {
     /// Stands in for an unset total-output bound.
@@ -309,10 +322,6 @@ pub(crate) struct BufferedFallbacks {
 /// A format's bounds after the caller's overrides have been applied.
 ///
 /// Private: formats declare their defaults as constants of this type, and the decompressors enforce it.
-#[cfg_attr(
-    not(any(test, any_format)),
-    expect(dead_code, reason = "only the decompressors resolve and enforce bounds, and no format is enabled")
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FormatLimits {
     ratio: Option<u32>,

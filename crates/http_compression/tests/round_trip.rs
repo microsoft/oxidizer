@@ -15,7 +15,9 @@ use compressors::{CompressionStream, CompressorBuilder, DecompressorLimits, Leve
 use futures::StreamExt as _;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, VARY};
 use http::{HeaderValue, StatusCode};
-use http_compression::{Client, Compression, CompressionLayer, OriginalBody, Server, UnsupportedCompression};
+use http_compression::{
+    Client, Compression, CompressionLayer, DEFAULT_MAX_DECOMPRESSED_BODY_LEN, OriginalBody, Server, UnsupportedCompression,
+};
 use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
 use ohno::Labeled as _;
@@ -572,6 +574,43 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
     let server = server().decompress_requests(&[Format::Gzip]).limits(limits).layer(echo());
     let error = server.execute(request(compressed, Some("gzip"))).await.unwrap_err();
     assert_eq!(error.label(), "compression_limit_exceeded");
+}
+
+#[test]
+fn default_decompressed_body_limit_is_64_mib() {
+    assert_eq!(DEFAULT_MAX_DECOMPRESSED_BODY_LEN, 67_108_864);
+}
+
+#[tokio::test]
+async fn default_layer_rejects_output_beyond_its_decompressed_body_limit() {
+    let output_len = usize::try_from(DEFAULT_MAX_DECOMPRESSED_BODY_LEN).unwrap() + 1;
+    let compressed = compress(Format::Zstd, &vec![0_u8; output_len]);
+    let handler = client().decompress_responses(&[Format::Zstd]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("zstd"))
+            .bytes(compressed.clone())
+            .build()
+    }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+    let error = response.into_body().into_bytes().await.unwrap_err();
+
+    assert_eq!(error.label(), "compression_limit_exceeded");
+}
+
+#[tokio::test]
+async fn raw_deflate_is_not_used_as_an_http_content_coding() {
+    let handler = server().compress_responses(&[Format::Deflate]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake().status(StatusCode::OK).text("unchanged").build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("deflate"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert!(response.headers().get(CONTENT_ENCODING).is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), "unchanged");
 }
 
 #[tokio::test]

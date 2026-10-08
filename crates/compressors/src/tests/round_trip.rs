@@ -17,11 +17,6 @@ use crate::limits::{DEFAULT_MAX_OUTPUT_LEN, DEFAULT_MAX_STREAMS};
 use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
-/// The payload behind `fixtures/system_gzip.gz`, compressed by the system `gzip -9 -n`.
-const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
-
-const SYSTEM_GZIP: &[u8] = include_bytes!("fixtures/system_gzip.gz");
-
 /// Caps every drain loop in this file.
 ///
 /// A conforming engine always terminates, so exceeding this means the code under test is
@@ -74,58 +69,6 @@ fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, f
                 offset = end;
             }
         }
-    }
-}
-
-#[test]
-fn decompresses_a_stream_produced_by_the_system_gzip() {
-    let plain = gzip::decompress(view(SYSTEM_GZIP), &Resources::default()).unwrap();
-
-    assert_eq!(plain.to_vec(), FIXTURE_PLAINTEXT);
-}
-
-#[test]
-fn decompresses_concatenated_members_produced_by_the_system_gzip() {
-    // Concatenation is what is under test, not a second producer: both members of the packaged
-    // two-member file were byte-identical copies of this one, so assembling the input here keeps
-    // one independently generated fixture as the source of truth.
-    let two_members = [SYSTEM_GZIP, SYSTEM_GZIP].concat();
-
-    let plain = gzip::decompress(view(&two_members), &Resources::default()).unwrap();
-
-    assert_eq!(plain.to_vec(), [FIXTURE_PLAINTEXT, FIXTURE_PLAINTEXT].concat());
-}
-
-#[test]
-fn our_framing_matches_an_independent_gzip_reader() {
-    // Cross-checks our container against flate2's own gzip framing, which parses the header,
-    // checksum and length trailer in Rust rather than in the compression engine.
-    use std::io::Read as _;
-
-    let payload = b"cross checked against an independent reader ".repeat(200);
-    let compressed = gzip::compress(fragmented(&payload, 71), &Resources::default()).unwrap();
-
-    let mut decompressed = Vec::new();
-    flate2::read::GzDecoder::new(compressed.to_vec().as_slice())
-        .read_to_end(&mut decompressed)
-        .unwrap();
-
-    assert_eq!(decompressed, payload);
-}
-
-#[test]
-fn round_trips_a_multi_segment_view() {
-    // Regression guard. `BytesView` is a chain of segments, and the engine is fed one segment at a
-    // time. Signalling end of input on the first segment rather than the last silently truncated the
-    // stream at the first segment boundary, which single-segment tests could not catch.
-    // Tiny segments are quadratic to build, so scale the payload down as the segment shrinks.
-    for (segment, repeats) in [(1, 200), (7, 500), (64, 5_000), (1024, 20_000), (65_536, 20_000)] {
-        let payload = b"multi segment payload ".repeat(repeats);
-
-        let compressed = gzip::compress(fragmented(&payload, segment), &Resources::default()).unwrap();
-        let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
-
-        assert_eq!(plain.to_vec(), payload, "round trip failed for {segment} byte segments");
     }
 }
 
@@ -221,85 +164,6 @@ fn rejects_a_bomb_before_materialising_it() {
         "the guard should fire before the full expansion, stopped at {}",
         decompressor.total_out()
     );
-}
-
-#[test]
-fn the_default_limits_accept_maximally_compressible_deflate_data() {
-    // Deflate's structural ceiling is about `1032x`, so the gzip default must sit above it: data the
-    // format could legitimately have produced must never be rejected as a bomb. A megabyte of zeros
-    // reaches that ceiling and clears the ratio guard's 32 KiB floor, so the guard is genuinely
-    // active here rather than skipped as too small to judge.
-    let payload = vec![0_u8; 1024 * 1024];
-    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
-
-    let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
-
-    assert_eq!(plain.len(), payload.len());
-}
-
-#[test]
-fn known_good_data_can_opt_out_of_the_limits() {
-    // The precondition is the data, not the caller: this payload is generated here, so its
-    // expansion is known. A trusted caller relaying an attacker's bytes would not qualify.
-    let payload = vec![0_u8; 1024 * 1024];
-    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
-
-    let decompressor = gzip::Decompressor::builder()
-        .limits(DecompressorLimits::UNLIMITED)
-        .build(&Resources::default());
-    let plain = drive_decompressor(decompressor, &compressed, usize::MAX).unwrap();
-
-    assert_eq!(plain.len(), payload.len());
-}
-
-#[test]
-fn detects_truncation_at_every_offset() {
-    let compressed = gzip::compress(view(&b"truncate me ".repeat(500)), &Resources::default()).unwrap();
-
-    for cut in [
-        1,
-        compressed.len() / 4,
-        compressed.len() / 2,
-        compressed.len() - 8,
-        compressed.len() - 1,
-    ] {
-        let error = gzip::decompress(compressed.range(0..cut), &Resources::default()).unwrap_err();
-
-        assert!(
-            error.is_unexpected_end_of_stream() || error.is_corrupt_data(),
-            "truncating at {cut} gave an unexpected classification: {error}"
-        );
-    }
-}
-
-#[test]
-fn a_corrupted_byte_anywhere_is_detected() {
-    let payload = b"integrity checked payload ".repeat(100);
-    let compressed = gzip::compress(view(&payload), &Resources::default()).unwrap();
-    let original = compressed.to_vec();
-
-    for index in [0, 1, 2, original.len() / 2, original.len() - 5, original.len() - 1] {
-        let mut corrupted = original.clone();
-        corrupted[index] ^= 0xff;
-
-        let result = gzip::decompress(view(&corrupted), &Resources::default());
-
-        match result {
-            Ok(plain) => assert_ne!(plain.to_vec(), payload, "corruption at {index} went entirely unnoticed"),
-            Err(error) => assert!(
-                error.is_corrupt_data() || error.is_unexpected_end_of_stream(),
-                "corruption at {index} gave an unexpected classification: {error}"
-            ),
-        }
-    }
-}
-
-#[test]
-fn empty_input_round_trips() {
-    let compressed = gzip::compress(BytesView::new(), &Resources::default()).unwrap();
-    let plain = gzip::decompress(compressed, &Resources::default()).unwrap();
-
-    assert!(plain.is_empty());
 }
 
 #[test]

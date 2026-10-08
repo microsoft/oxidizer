@@ -62,6 +62,8 @@
 //!
 //! ```
 //! # #[cfg(feature = "gzip")] {
+//! use std::num::NonZeroU64;
+//!
 //! use compressors::DecompressorLimits;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
@@ -70,7 +72,9 @@
 //! # fn configure(body_builder: HttpBodyBuilder) {
 //! let client = Compression::client(body_builder.clone())
 //!     .decompress_responses(&[Format::Gzip])
-//!     .limits(DecompressorLimits::new());
+//!     .limits(
+//!         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
+//!     );
 //!
 //! let server = Compression::server(body_builder)
 //!     .decompress_requests(&[Format::Gzip])
@@ -96,10 +100,11 @@
 //!
 //! # Bounds
 //!
-//! The streaming decompressor applies no bounds of its own, so whatever is passed to
-//! [`limits`][CompressionLayer::limits] is the only thing standing between the
-//! reader and a decompression bomb. Anything that retains a decompressed body should
-//! set [`max_output_len`][compressors::DecompressorLimits].
+//! Decompressed request and response bodies are capped at
+//! [`DEFAULT_MAX_DECOMPRESSED_BODY_LEN`] by default, including when they are streamed rather than
+//! buffered. Use [`limits`][CompressionLayer::limits] to tighten the cap for an application's
+//! budget. Removing it requires an explicit
+//! [`unbounded_output_len`][compressors::DecompressorLimits::unbounded_output_len].
 //!
 //! # Errors
 //!
@@ -123,5 +128,8 @@ mod negotiate;
 pub(crate) const CONTENT_DIGEST_HEADER: &str = "content-digest";
 pub(crate) const REPR_DIGEST_HEADER: &str = "repr-digest";
 
-pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
+pub use compression::{
+    Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, DEFAULT_MAX_DECOMPRESSED_BODY_LEN, OriginalBody, Server,
+    UnsupportedCompression,
+};
 pub use error::CompressibleTypeError;
