@@ -102,15 +102,24 @@ pub(crate) unsafe fn release(address: *mut u8, size: usize) {
 
 pub(crate) fn wait(word: &AtomicU32, expected: u32) {
     while word.load(Ordering::Acquire) == expected {
+        // Bound broken wake protocols in unit tests so mutation runs fail rather
+        // than strand the test process. Production waits have no deadline.
+        #[cfg(test)]
+        let deadline = libc::timespec { tv_sec: 30, tv_nsec: 0 };
+        #[cfg(test)]
+        let timeout = &raw const deadline;
+        #[cfg(not(test))]
+        let timeout = std::ptr::null::<libc::timespec>();
         // SAFETY: AtomicU32 provides the aligned four-byte futex word, which
-        // stays live until this wait returns. Null timeout means no deadline.
+        // stays live until this wait returns. The optional timeout stays live
+        // through the syscall.
         let result = unsafe {
             libc::syscall(
                 libc::SYS_futex,
                 word.as_ptr(),
                 libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
                 expected,
-                std::ptr::null::<libc::timespec>(),
+                timeout,
             )
         };
         check_wait_result(result);
@@ -122,7 +131,13 @@ pub(crate) fn wake_one(address: *const u32) {
     // SAFETY: FUTEX_WAKE uses the aligned numeric address as a private wait key,
     // not a Rust reference. A waiter may depart after its release notification.
     let result = unsafe { libc::syscall(libc::SYS_futex, address, libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG, 1_i32) };
-    crate::abort::require(result != -1 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EFAULT));
+    if result == -1 {
+        check_wake_error(std::io::Error::last_os_error().raw_os_error());
+    }
+}
+
+fn check_wake_error(error: Option<i32>) {
+    crate::abort::require(error == Some(libc::EFAULT));
 }
 
 fn check_wait_result(result: libc::c_long) {
@@ -160,6 +175,15 @@ mod tests {
         super::check_wait_result(result);
         super::check_wait_result(0);
         super::wait(&word, 0);
+    }
+
+    #[test]
+    fn unexpected_wake_error_aborts_but_departed_waiters_are_tolerated() {
+        crate::abort::assert_aborts(
+            "hal::linux::tests::unexpected_wake_error_aborts_but_departed_waiters_are_tolerated",
+            || super::wake_one(std::ptr::without_provenance(1)),
+        );
+        super::check_wake_error(Some(libc::EFAULT));
     }
 
     #[test]

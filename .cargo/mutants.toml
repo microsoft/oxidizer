@@ -82,6 +82,14 @@ exclude_re = [
     'crates/rallocator/src/remote.rs:1[56]:\d+: replace \* with (\+|/)$',
     'crates/rallocator/src/remote.rs:\d+:\d+: replace > with >= in Cache::reserve$',
     'crates/rallocator/src/thread.rs:\d+:\d+: replace < with <= in flush_for_teardown$',
+    # Extra reservation padding is immediately unmapped by retain_mapping.
+    # This mutation changes transient address-space demand, not retained size.
+    'crates/rallocator/src/hal/linux/mod.rs:27:56: replace - with \+ in reserve_with_page_size$',
+    # These Linux flags have disjoint bits, so OR and XOR are identical.
+    'crates/rallocator/src/hal/linux/mod.rs:38:(31|53): replace \| with \^ in reserve_with_page_size$',
+    'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace \| with \^ in (wait|wake_one)$',
+    # MAP_ANONYMOUS ignores the file descriptor; -1 and 1 behave identically.
+    'crates/rallocator/src/hal/linux/mod.rs:39:13: delete - in reserve_with_page_size$',
     # Legacy domain markup, CSS names and SVG stroke widths are presentation only.
     # View-local IDs have no fixed numbering: index and index+1 are injective
     # relabelings that preserve pairing, orphan identity and histogram membership.
