@@ -37,11 +37,15 @@ has started executing, the only thing that can terminate it is the task itself, 
 In a steady state, the executor is allocation-free, as all memory used by the executor is
 reused for new tasks when old ones complete.
 
+Cloned task wakers retain independently pooled wake metadata. Completing or canceling a task
+retires that metadata before releasing task storage, so an escaped waker remains callable but
+becomes an inert no-op and cannot delay executor shutdown.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbgDrZK4cg32obonbv_V8cWDUb4c6WkcNN8nAbqlbxKZ6n4Y1hZIGCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle

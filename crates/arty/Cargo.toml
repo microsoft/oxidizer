@@ -3,7 +3,7 @@
 
 [package]
 name = "arty"
-description = "Single-threaded, thread-aware application runtime."
+description = "Multi-worker runtime with thread-affine async tasks."
 version = "0.4.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
@@ -92,7 +92,7 @@ mutants = { workspace = true }
 nonempty = { workspace = true }
 observed = { path = "../observed", features = ["test-util"] }
 observed_testing = { path = "../observed_testing" }
-ohno = { workspace = true, features = ["app-err"] }
+ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables" }
 pin-project = { workspace = true }
 scopeguard = { workspace = true }

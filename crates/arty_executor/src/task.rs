@@ -2,13 +2,15 @@
 // Licensed under the MIT License.
 
 use std::any::Any;
+#[cfg(all(debug_assertions, test))]
+use std::backtrace::Backtrace;
 use std::cell::UnsafeCell;
 use std::marker::{PhantomData, PhantomPinned};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
-use std::task;
 #[cfg(debug_assertions)]
-use std::{backtrace::Backtrace, sync::Arc};
+use std::sync::Arc;
+use std::task;
 
 use events_once::RawLocalPooledSender;
 
@@ -113,35 +115,38 @@ where
         // goes lost in the whole `UnsafeCell` and `Option` layering.
         let wake_signal = unsafe { Pin::new_unchecked(wake_signal) };
 
-        // SAFETY: We must keep the wake signal alive until all cloned wakers have been dropped.
-        // We enforce this via an equivalent safety requirement on the `Task::initialize()`.
-        let waker = unsafe { wake_signal.waker_ref() };
+        let poll_result = {
+            // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
+            // independently pooled state and may outlive both the poll and the task.
+            let waker = unsafe { wake_signal.waker_ref() };
 
-        // In debug builds, a diagnostic layer records where wakers were cloned.
-        #[cfg(debug_assertions)]
-        let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
+            // In debug builds, a diagnostic layer records where wakers were cloned.
+            #[cfg(debug_assertions)]
+            let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
 
-        let mut cx = task::Context::from_waker(&waker);
+            let mut cx = task::Context::from_waker(&waker);
 
-        // The future we are polling is user code outside our control. It may panic! The executor
-        // does not support recovering from such a panic - we terminate the process if that happens.
-        // However, the executor is only one layer of runtime logic - in fact, we expect that
-        // some higher layer (the task scheduler) will wrap the user code with a panic-handler
-        // so we will never actually encounter a panic on this level. The panic trap here is simply
-        // a last-chance handler to terminate the application instead of allowing a safety
-        // violation to take place - if higher layers do their job, this panic trap will never
-        // activate.
-        //
-        // We `AssertUnwindSafe` here because as we are terminating the process, there is no
-        // validity violation that can occur no matter what the type of the future we are dealing
-        // with.
-        let poll_result = match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
-            Ok(x) => x,
-            Err(panic) => on_unhandled_task_panic(panic),
+            // The future we are polling is user code outside our control. It may panic! The executor
+            // does not support recovering from such a panic - we terminate the process if that happens.
+            // However, the executor is only one layer of runtime logic - in fact, we expect that
+            // some higher layer (the task scheduler) will wrap the user code with a panic-handler
+            // so we will never actually encounter a panic on this level. The panic trap here is simply
+            // a last-chance handler to terminate the application instead of allowing a safety
+            // violation to take place - if higher layers do their job, this panic trap will never
+            // activate.
+            //
+            // We `AssertUnwindSafe` here because as we are terminating the process, there is no
+            // validity violation that can occur no matter what the type of the future we are dealing
+            // with.
+            match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
+                Ok(x) => x,
+                Err(panic) => on_unhandled_task_panic(panic),
+            }
         };
 
         match poll_result {
             task::Poll::Ready(result) => {
+                wake_signal.retire();
                 let result_tx = payload
                     .result_tx
                     .take()
@@ -165,13 +170,14 @@ where
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes infinite loops as executor will never shut down.
+    #[cfg(test)]
     fn is_inert(&self) -> bool {
-        // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
-        // shared references to the wake signal, so creating a shared reference here is valid.
-        // Before initialization, we do not create any escaping references to the wake signal.
-        let wake_signal = unsafe { self.wake_signal.get().as_ref().expect("UnsafeCell pointer cannot be null").as_ref() };
-
-        wake_signal.is_none_or(WakeSignal::is_inert)
+        // SAFETY: The executor is the only owner that mutates the payload. Completion and abort
+        // retire independent wake state before clearing it, so an absent payload is sufficient to
+        // release task storage regardless of escaped wakers.
+        unsafe { self.payload.get().as_ref() }
+            .expect("UnsafeCell pointer cannot be null")
+            .is_none()
     }
 
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
@@ -190,8 +196,28 @@ where
         }
     }
 
+    fn clear_queued_notification(&self) {
+        // SAFETY: The executor calls this only for a live initialized task while draining its
+        // wake queue.
+        unsafe {
+            self.wake_signal
+                .get()
+                .as_ref()
+                .expect("UnsafeCell pointer cannot be null")
+                .as_ref()
+                .expect("task must be initialized before clearing a wake notification")
+                .clear_queued_notification();
+        }
+    }
+
     #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>) {
+        // SAFETY: Initialized wake metadata is retired only by the task's owner.
+        let wake_signal = unsafe { &*self.wake_signal.get() };
+        if let Some(wake_signal) = wake_signal {
+            wake_signal.retire();
+        }
+
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
@@ -220,7 +246,7 @@ where
         unsafe { std::ptr::write(maybe_wake_signal, Some(wake_signal)) };
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, test))]
     fn inspect_waker_backtraces(&self, f: &mut dyn FnMut(&Backtrace)) {
         self.diagnostic_waker_registry.inspect_backtraces(f);
     }
@@ -282,14 +308,10 @@ pub(crate) trait TypeErasedTask {
 
     /// Whether it is safe to drop the task.
     ///
-    /// This indicates whether all resources owned by the task have been released, as the task
-    /// may be the owner of memory referenced by other entities in the process, so cannot be
-    /// dropped while such resources are still in use by anyone.
-    ///
-    /// When `abort()` has been called or `poll()` has indicated task completion, there is nothing
-    /// else the owner of the task can do to bring this to a value of `true` - we rely on external
-    /// parties related to this task (e.g. being awaited by it) to release their resources on their
-    /// own initiative when they see the task is no longer executing (e.g. via a dropped future).
+    /// Completion and cancellation retire independently pooled wake metadata before releasing
+    /// task storage. Retained wakers may remain alive afterward, but they no longer reference the
+    /// task and therefore do not keep this value non-inert.
+    #[cfg(test)]
     fn is_inert(&self) -> bool;
 
     /// Swaps the task's "is awakened" flag to false and returns its previous value.
@@ -299,11 +321,13 @@ pub(crate) trait TypeErasedTask {
     /// Panics if the task has not been initialized.
     fn consume_awakened(&self) -> bool;
 
+    /// Records that the executor drained this task's queued wake notification.
+    fn clear_queued_notification(&self);
+
     /// Clears the inner state of the task, entering a form where no further polling is possible
     /// and any future-specific state is dropped.
     ///
-    /// The resources owned by the task may still remain in use - this has no implications with
-    /// regard to what `is_inert()` is expected to return.
+    /// Independently pooled wakers remain valid but become inert.
     fn abort(self: Pin<&Self>);
 
     /// Initializes the task, providing it the wake signal that it needs to enable polling
@@ -318,16 +342,18 @@ pub(crate) trait TypeErasedTask {
 
     /// Uses a closure to inspect the backtrace of every waker that is still alive,
     /// to help detect and diagnose waker leaks.
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, test))]
     fn inspect_waker_backtraces(&self, f: &mut dyn FnMut(&Backtrace));
 }
 
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::future::Ready;
+    use std::future::{Ready, pending};
     use std::pin::pin;
     use std::rc::Rc;
+    #[cfg(not(debug_assertions))]
+    use std::sync::Arc;
     use std::task::Waker;
 
     use events_once::{Disconnected, RawLocalEventPool};
@@ -402,6 +428,40 @@ mod tests {
     }
 
     #[test]
+    fn clear_queued_notification_forwards_to_the_wake_signal() {
+        let event_pool = pin!(RawLocalEventPool::<u64>::new());
+        // SAFETY: The task and receiver are dropped before their event pool.
+        let (tx, _rx) = unsafe { event_pool.as_ref().rent() };
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { crate::TaskRef::fake() };
+        let queue = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(1)));
+        let signal = WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Waker::noop().clone(),
+            fake_task_ref,
+        );
+        // SAFETY: The task is initialized once and remains pinned.
+        unsafe { task.initialize(signal) };
+        // SAFETY: Initialization populated the pinned wake-signal slot.
+        let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
+        // SAFETY: The signal remains pinned with the task.
+        let signal = unsafe { Pin::new_unchecked(signal) };
+        // SAFETY: The pinned signal remains alive for this borrow.
+        let waker = unsafe { signal.waker_ref() };
+        waker.wake_by_ref();
+        assert!(signal.has_queued_notification());
+
+        task.clear_queued_notification();
+
+        assert!(!signal.has_queued_notification());
+        drop(waker);
+        task.abort();
+    }
+
+    #[test]
     fn completed_future_is_destroyed_at_its_pinned_address() {
         check_pinned_future_destruction(true);
     }
@@ -444,10 +504,7 @@ mod tests {
             task.initialize(WakeSignal::fake());
         }
 
-        // The API contract does not guarantee that the task is inert after initialization,
-        // but we know it is because inertness is only invalidated by cloning more wakers.
-        // This may change in future versions, though, so be ready to update this test if so.
-        assert!(task.is_inert());
+        assert!(!task.is_inert());
 
         // The future is a trivial one that completes on the first poll.
         let task_result = task.poll();

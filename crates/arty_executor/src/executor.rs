@@ -50,8 +50,10 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor.
 ///
-/// The executor will only return [`CycleOutcome::Shutdown`] when none of its resources are
-/// referenced any more (e.g. all join handles have been dropped).
+/// The executor returns [`CycleOutcome::Shutdown`] after task storage is retired and all pooled
+/// result channels are no longer borrowed (for example, all join handles have been dropped).
+/// Retained task wakers do not delay shutdown: they keep only independently pooled metadata and
+/// become inert when their task completes or is cancelled.
 ///
 /// ## Troubleshooting shutdown failure
 ///
@@ -710,8 +712,8 @@ mod tests {
     }
 
     #[test]
-    fn completed_task_waker_survives_until_released() {
-        // SAFETY: The retained waker is released before the final shutdown cycle.
+    fn completed_task_waker_is_inert_after_executor_shutdown() {
+        // SAFETY: Shutdown reaches its terminal cycle before the executor is dropped.
         let executor = unsafe { Executor::builder().build() };
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
@@ -727,13 +729,11 @@ mod tests {
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         executor.begin_shutdown();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
 
         waker.borrow().as_ref().unwrap().wake_by_ref();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        drop(waker);
-
-        assert_eq!((executor.execute_cycle(), polls.get()), (CycleOutcome::Shutdown, 1));
+        assert_eq!(polls.get(), 1);
     }
 
     #[test]
@@ -821,45 +821,31 @@ mod tests {
     }
 
     #[test]
-    // The difficulty here is that while we could easily assert_panic!() the timeout, this test
-    // may also panic for other reasons after the timeout because the timeout is essentially a
-    // declaration of failure to clean up - the dirty state is invalid and may result in further
-    // panics or even memory safety violations in the test runner. This may break in the future,
-    // so be ready to adjust or remove as needed when additional complexity makes it impractical.
-    #[should_panic]
-    fn shutdown_times_out_with_leaked_waiter() {
-        // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
-        let executor = unsafe {
-            Executor::builder()
-                // No delay allowed - shutdown must either succeed or fail immediately.
-                .shutdown_timeout(Duration::ZERO)
-                // Override the default behavior for testing purposes.
-                .shutdown_timeout_behavior(ShutdownTimeoutBehavior::Panic)
-                .build()
-        };
+    fn retained_waiter_does_not_delay_shutdown() {
+        // SAFETY: The test drives the executor through a terminal shutdown cycle.
+        let executor = unsafe { Executor::builder().build() };
         let tasks = executor.tasks();
 
-        let leaked_waiter = Rc::new(RefCell::new(None));
+        let retained_waiter = Rc::new(RefCell::new(None));
 
-        tasks.add({
-            let leaked_waiter = Rc::clone(&leaked_waiter);
+        let task = tasks.add({
+            let retained_waiter = Rc::clone(&retained_waiter);
 
             poll_fn(move |cx| {
-                *leaked_waiter.borrow_mut() = Some(cx.waker().clone());
+                *retained_waiter.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending::<usize>
             })
         });
 
-        _ = executor.execute_cycle();
-
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        let retained_waiter = retained_waiter.borrow_mut().take().unwrap();
+        drop(task);
         executor.begin_shutdown();
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
 
-        // We expect this to panic.
-        _ = executor.execute_cycle();
-
-        // We only drop it after shutdown completes, which is a leak because shutdown
-        // will never complete like this.
-        drop(leaked_waiter);
+        retained_waiter.wake_by_ref();
+        retained_waiter.wake();
     }
 
     #[test]

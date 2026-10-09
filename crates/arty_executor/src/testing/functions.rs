@@ -1,13 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::collections::VecDeque;
+use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::Duration;
 use std::{env, thread};
 
+use infinity_pool::RawBlindPool;
+use plurality::{Box as PoolBox, Pool};
 use scopeguard::{Always, ScopeGuard};
 
-use crate::{CycleOutcome, Executor};
+use crate::wake::{WakeShared, WakerState};
+use crate::{CycleOutcome, Executor, RawPooledCastTypeErasedTask, TaskRef, TypeErasedTask, WakeSignal};
 
 /// We do not want the timeout panic to occur under mutation testing because that makes for slow
 /// mutation tests. Instead, we want the mutation test harness itself to time out! Therefore, this
@@ -53,4 +60,102 @@ pub fn new_guarded_executor(owner_waker: Waker) -> ScopeGuard<Executor, fn(Execu
             }
         },
     )
+}
+
+/// Benchmark-only fixture comparing pooled wake-state churn with fresh `Arc` allocation.
+#[derive(Debug)]
+pub struct WakerStateAllocationProbe {
+    pool: Pool<WakerState>,
+    pooled: Option<PoolBox<WakerState>>,
+    fresh: Option<Arc<WakerState>>,
+    shared: Arc<WakeShared>,
+    task_ref: TaskRef,
+    _task_storage: RawBlindPool,
+}
+
+impl WakerStateAllocationProbe {
+    /// Creates a probe and warms one pool slot so later pooled replacements reuse it.
+    #[must_use]
+    pub fn new() -> Self {
+        let mut task_storage = RawBlindPool::new();
+        let task = task_storage.insert(AllocationProbeTask { _nonzero: 0 });
+        let task_ref = TaskRef::new(
+            // SAFETY: The probe storage owns the task for the complete lifetime of every state
+            // carrying this opaque reference, and the benchmark never dereferences it.
+            unsafe { task.cast_type_erased_task() }.into_shared(),
+        );
+        let mut probe = Self {
+            pool: Pool::new(),
+            pooled: None,
+            fresh: None,
+            shared: Arc::new(WakeShared::new(
+                Arc::new(Mutex::new(VecDeque::new())),
+                Arc::new(AtomicBool::new(false)),
+                Waker::noop().clone(),
+            )),
+            task_ref,
+            _task_storage: task_storage,
+        };
+        probe.replace_pooled();
+        probe.pooled = None;
+        probe
+    }
+
+    fn state(&self) -> WakerState {
+        WakerState::new(Arc::downgrade(&self.shared), self.task_ref)
+    }
+
+    /// Replaces one pooled wake state, returning the previous slot before reusing capacity.
+    #[cfg_attr(test, mutants::skip)] // Benchmark operation; measured directly instead of unit-tested.
+    pub fn replace_pooled(&mut self) {
+        self.pooled = None;
+        let state = self.state();
+        self.pooled = Some(self.pool.alloc_box(state));
+    }
+
+    /// Replaces one freshly allocated `Arc` wake state.
+    #[cfg_attr(test, mutants::skip)] // Benchmark comparison; measured directly instead of unit-tested.
+    pub fn replace_fresh_arc(&mut self) {
+        self.fresh = None;
+        let state = self.state();
+        self.fresh = Some(Arc::new(state));
+    }
+}
+
+impl Default for WakerStateAllocationProbe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct AllocationProbeTask {
+    _nonzero: u8,
+}
+
+impl TypeErasedTask for AllocationProbeTask {
+    fn poll(self: Pin<&Self>) -> std::task::Poll<()> {
+        unreachable!("the allocation probe never polls its opaque task reference")
+    }
+
+    #[cfg(test)]
+    #[cfg_attr(test, mutants::skip)] // Opaque benchmark task is never exercised as an executor task.
+    fn is_inert(&self) -> bool {
+        true
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Opaque benchmark task is never exercised as an executor task.
+    fn consume_awakened(&self) -> bool {
+        false
+    }
+
+    fn clear_queued_notification(&self) {}
+
+    fn abort(self: Pin<&Self>) {}
+
+    unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
+        unreachable!("the allocation probe never initializes its opaque task reference")
+    }
+
+    #[cfg(all(debug_assertions, test))]
+    fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&std::backtrace::Backtrace)) {}
 }

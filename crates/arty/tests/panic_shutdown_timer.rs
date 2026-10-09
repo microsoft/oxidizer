@@ -68,7 +68,6 @@ impl Drop for CancellationTimer {
 }
 
 #[test]
-#[ignore = "independent waker behavior is deferred for separate discussion"]
 fn final_timer_panic_reports_worker_failure_after_joining_blocking_work() {
     timer_case(true);
 }

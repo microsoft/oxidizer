@@ -28,6 +28,10 @@
 //!
 //! In a steady state, the executor is allocation-free, as all memory used by the executor is
 //! reused for new tasks when old ones complete.
+//!
+//! Cloned task wakers retain independently pooled wake metadata. Completing or canceling a task
+//! retires that metadata before releasing task storage, so an escaped waker remains callable but
+//! becomes an inert no-op and cannot delay executor shutdown.
 
 mod builder;
 mod constants;
