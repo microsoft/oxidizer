@@ -1005,6 +1005,33 @@ mod tests {
     }
 
     #[test]
+    fn usable_size_reads_local_and_foreign_allocations() {
+        let target = fresh_owner();
+        let observer = fresh_owner();
+        // SAFETY: Both fresh endpoints remain persistent throughout this test.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The test exclusively leases the target core.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: The observer is a distinct fresh persistent endpoint.
+        let observer_owner = unsafe { &*(observer as *const Owner) };
+        // SAFETY: The test exclusively leases the distinct observer core.
+        let observer_core = unsafe { &mut *observer_owner.core_ptr() };
+        for (size, expected) in [(48, 48), (70_000, 131_072)] {
+            let request = Request::new(std::alloc::Layout::from_size_align(size, 16).unwrap()).unwrap();
+            let pointer = target_core.allocate(request);
+            assert!(!pointer.is_null());
+            // SAFETY: The checked allocation remains live under its sole owner's lease.
+            assert_eq!(unsafe { target_core.usable_size(pointer.addr()) }, expected);
+            // SAFETY: The foreign allocation remains live and is not concurrently freed.
+            assert_eq!(unsafe { observer_core.usable_size(pointer.addr()) }, expected);
+            // SAFETY: The lookups ended; the owner returns the live allocation exactly once.
+            unsafe { target_core.deallocate(pointer.addr()) };
+        }
+        observer_core.flush();
+        target_core.flush();
+    }
+
+    #[test]
     fn observations_classify_large_ranges_and_report_bounded_walks() {
         let address = fresh_owner();
         // SAFETY: The test owns the freshly initialized persistent endpoint.
