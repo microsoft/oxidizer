@@ -79,7 +79,7 @@ impl RuntimeTelemetry {
         self.runtime_registration.stopped();
     }
 
-    pub(crate) fn task<T: 'static>(&self, worker_index: usize) -> (TaskTelemetry, WorkerHandle) {
+    pub(crate) fn task<T: 'static>(&self, worker_index: usize) -> TaskTelemetryPlacement {
         let worker = self
             .worker_handles
             .get(worker_index)
@@ -87,7 +87,19 @@ impl RuntimeTelemetry {
             .clone();
         let telemetry = TaskTelemetry::spawned::<T>(&self.runtime_handle);
         telemetry.enqueued(Some(worker.id()));
-        (telemetry, worker)
+        TaskTelemetryPlacement { telemetry, worker }
+    }
+}
+
+pub(crate) struct TaskTelemetryPlacement {
+    telemetry: TaskTelemetry,
+    worker: WorkerHandle,
+}
+
+impl TaskTelemetryPlacement {
+    pub(crate) fn materialized(mut self) -> TaskTelemetry {
+        self.telemetry.materialized(self.worker);
+        self.telemetry
     }
 }
 

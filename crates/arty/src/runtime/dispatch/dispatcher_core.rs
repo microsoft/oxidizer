@@ -14,7 +14,7 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetry};
+use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetryPlacement};
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -206,10 +206,7 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
-    pub(in crate::runtime) fn register_task<F: 'static>(
-        &self,
-        worker_index: WorkerIndex,
-    ) -> (TaskTelemetry, seismograph_runtime::worker::WorkerHandle) {
+    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
         self.runtime_telemetry.task::<F>(usize::from(worker_index))
     }
 
@@ -235,7 +232,7 @@ impl<WFS> DispatcherCore<WFS> {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let (task_telemetry, worker_telemetry) = self.register_task::<F>(worker_index);
+        let task_telemetry = self.register_task::<F>(worker_index);
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
@@ -244,7 +241,6 @@ impl<WFS> DispatcherCore<WFS> {
             self.sink.clone(),
             Arc::clone(&self.shutdown_started),
             task_telemetry,
-            worker_telemetry,
         );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
@@ -276,11 +272,9 @@ where
     /// Safe to call multiple times.
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
-        if self.wait_for_shutdown.is_complete() {
-            self.runtime_telemetry.stopped();
-            if !self.stopped_reported.swap(true, Ordering::Relaxed) {
-                emit!(&self.sink, RuntimeStopped);
-            }
+        self.runtime_telemetry.stopped();
+        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
+            emit!(&self.sink, RuntimeStopped);
         }
         outcome
     }

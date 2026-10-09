@@ -255,7 +255,7 @@ mod tests {
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
         let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1);
-        let (task_telemetry, _worker_telemetry) = runtime_telemetry.task::<std::future::Ready<u32>>(0);
+        let task_telemetry = runtime_telemetry.task::<std::future::Ready<u32>>(0).materialized();
         let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
             std::future::ready(42),
             sender,

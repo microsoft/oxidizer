@@ -201,7 +201,7 @@ impl Scheduler {
             }
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
-            let (task_telemetry, worker_telemetry) = self.dispatcher.register_task::<F>(self.binding.worker_index);
+            let task_telemetry = self.dispatcher.register_task::<F>(self.binding.worker_index);
             let join_handle = prepare_remote_on_worker(
                 future_factory,
                 current.builtins.clone(),
@@ -210,7 +210,6 @@ impl Scheduler {
                 self.dispatcher.shutdown_signal(),
                 &current.tasks,
                 task_telemetry,
-                worker_telemetry,
             );
             observed::emit!(
                 &sink,

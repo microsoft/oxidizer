@@ -11,7 +11,7 @@ use performables::arc::Arc;
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-use crate::runtime::seismograph::TaskTelemetry;
+use crate::runtime::seismograph::TaskTelemetryPlacement;
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -64,10 +64,7 @@ impl DispatcherClient {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
 
-    pub(crate) fn register_task<F: 'static>(
-        &self,
-        worker_index: WorkerIndex,
-    ) -> (TaskTelemetry, seismograph_runtime::worker::WorkerHandle) {
+    pub(crate) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
         self.core.register_task::<F>(worker_index)
     }
 }
