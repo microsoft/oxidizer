@@ -822,21 +822,14 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_timeout_then_completes_after_waiter_release() {
-        // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
-        let executor = unsafe {
-            Executor::builder()
-                // No delay allowed - shutdown must either succeed or fail immediately.
-                .shutdown_timeout(Duration::ZERO)
-                // Override the default behavior for testing purposes.
-                .shutdown_timeout_behavior(ShutdownTimeoutBehavior::Panic)
-                .build()
-        };
+    fn retained_waiter_does_not_delay_shutdown() {
+        // SAFETY: The test drives the executor through a terminal shutdown cycle.
+        let executor = unsafe { Executor::builder().build() };
         let tasks = executor.tasks();
 
         let retained_waiter = Rc::new(RefCell::new(None));
 
-        tasks.add({
+        let task = tasks.add({
             let retained_waiter = Rc::clone(&retained_waiter);
 
             poll_fn(move |cx| {
@@ -845,17 +838,15 @@ mod tests {
             })
         });
 
-        _ = executor.execute_cycle();
-
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        let retained_waiter = retained_waiter.borrow_mut().take().unwrap();
+        drop(task);
         executor.begin_shutdown();
-
-        let panic = catch_unwind(AssertUnwindSafe(|| executor.execute_cycle())).unwrap_err();
-        assert_eq!(panic.downcast_ref::<&str>(), Some(&"executor shutdown timed out"));
-
-        // Releasing the retained waiter lets shutdown complete and keeps this test from leaking
-        // the task when the expected panic unwinds.
-        drop(retained_waiter);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
+
+        retained_waiter.wake_by_ref();
+        retained_waiter.wake();
     }
 
     #[test]
