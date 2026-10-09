@@ -13,9 +13,11 @@ use std::collections::HashSet;
 use std::pin::{Pin, pin};
 use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
+use std::time::Instant;
 
 use arty::runtime::{Runtime, RuntimeOperations, WorkersPolicy};
 use arty::task::Scheduler;
+use many_cpus::SystemHardware;
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::runtime::RuntimeId;
 use seismograph::recorder::{Configuration, RecordingPolicy};
@@ -86,6 +88,15 @@ struct PendingDropPanic {
     started: Option<mpsc::Sender<()>>,
 }
 
+struct QueuedDropPanic;
+
+impl Drop for QueuedDropPanic {
+    #[expect(clippy::panic, reason = "this scenario verifies queued factory destructor-panic classification")]
+    fn drop(&mut self) {
+        std::panic::panic_any("Seismograph queued factory destructor panic");
+    }
+}
+
 struct BorrowedSizedFuture<'a, const N: usize> {
     data: &'a [u8; N],
     padding: [u8; N],
@@ -151,8 +162,48 @@ fn exercise_join_notification_ordering() {
     runtime.stop().expect("the join-ordering runtime stops cleanly");
 }
 
+#[expect(clippy::panic, reason = "the canceled join must be ready before its wake callback returns")]
+fn exercise_cancellation_notification_ordering() {
+    let previous = runtime_ids();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .expect("the cancellation-ordering runtime requires one available worker");
+    let mut task = pin!(
+        runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { std::future::pending::<()>().await })
+    );
+    let (notified, wake_started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        notified,
+        release: Mutex::new(released),
+    }));
+    assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+    RuntimeOperations::from(&runtime).request_stop();
+    wake_started
+        .recv_timeout(testing_aids::TEST_TIMEOUT)
+        .expect("task cancellation wakes the blocked join");
+
+    let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+        panic!("the canceled join is ready before its wake callback returns");
+    };
+    assert!(error.is_shutdown());
+    let (_, snapshot) = capture();
+    let runtime_snapshot = new_runtime(&snapshot, &previous);
+    assert_eq!(
+        (runtime_snapshot.counters.live_tasks, runtime_snapshot.counters.canceled_tasks,),
+        (0, 1)
+    );
+
+    release.send(()).expect("the blocked wake retains its release receiver");
+    runtime.stop().expect("the cancellation-ordering runtime stops cleanly");
+}
+
 #[expect(clippy::panic, reason = "this scenario verifies Seismograph panic classification")]
 fn exercise_primary_runtime() -> Scheduler {
+    let previous = runtime_ids();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .build()
@@ -192,6 +243,16 @@ fn exercise_primary_runtime() -> Scheduler {
             .expect_err("the intentional panic reaches the join handle")
             .is_panic()
     );
+    assert!(
+        runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| -> std::future::Ready<()> {
+                std::panic::panic_any("seismograph factory panic contract")
+            })
+            .join()
+            .expect_err("the intentional factory panic reaches the join handle")
+            .is_panic()
+    );
     let (started, materialized) = mpsc::channel();
     let canceled = runtime
         .scheduler()
@@ -204,6 +265,19 @@ fn exercise_primary_runtime() -> Scheduler {
         .expect("the pending task materializes before shutdown");
     runtime.stop().expect("the primary runtime stops cleanly");
     assert!(canceled.join().expect_err("shutdown cancels the pending task").is_shutdown());
+    let (decoded, snapshot) = capture();
+    let primary = new_runtime(&snapshot, &previous);
+    assert_eq!(
+        (
+            primary.counters.live_tasks,
+            primary.counters.completed_tasks,
+            primary.counters.panicked_tasks,
+            primary.counters.canceled_tasks,
+        ),
+        (0, 3, 2, 1)
+    );
+    assert!(primary.counters.poll_count >= 7);
+    assert_primary_events(&decoded, primary);
     retained_scheduler
 }
 
@@ -221,6 +295,7 @@ fn exercise_stopped_runtime() {
 }
 
 fn exercise_owner_drop_runtime() -> Scheduler {
+    let previous = runtime_ids();
     let owner_dropped = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .build()
@@ -233,10 +308,25 @@ fn exercise_owner_drop_runtime() -> Scheduler {
         .spawn(async move |_| drop(owner_dropped))
         .join()
         .expect("dropping the owner on its worker does not unwind");
+    let deadline = Instant::now() + testing_aids::TEST_TIMEOUT;
+    loop {
+        let (decoded, snapshot) = capture();
+        let runtime = new_runtime(&snapshot, &previous);
+        if runtime.state == RuntimeState::Stopped
+            && decoded.events.events.iter().any(|event| {
+                event.kind == EventKind::RuntimeStopped && event.runtime().is_some_and(|payload| payload.runtime_id == runtime.id)
+            })
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "owner-drop shutdown must report stopped");
+        std::thread::yield_now();
+    }
     owner_drop_scheduler
 }
 
 fn exercise_unpolled_cancellation_runtime() {
+    let previous = runtime_ids();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .build()
@@ -252,9 +342,12 @@ fn exercise_unpolled_cancellation_runtime() {
         .expect("the parent returns the unpolled child handle");
     runtime.stop().expect("the unpolled-cancellation runtime stops cleanly");
     assert!(child.join().expect_err("shutdown cancels the unpolled child").is_shutdown());
+    let (decoded, snapshot) = capture();
+    assert_unpolled_cancellation(&decoded, new_runtime(&snapshot, &previous));
 }
 
 fn exercise_destructor_panic_runtime() {
+    let previous = runtime_ids();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .build()
@@ -272,9 +365,60 @@ fn exercise_destructor_panic_runtime() {
             .expect_err("the destructor panic occurs during shutdown cancellation")
             .is_shutdown()
     );
+    let (_, snapshot) = capture();
+    let runtime = new_runtime(&snapshot, &previous);
+    assert_eq!(
+        (
+            runtime.counters.live_tasks,
+            runtime.counters.panicked_tasks,
+            runtime.counters.canceled_tasks,
+        ),
+        (0, 1, 0)
+    );
+}
+
+fn exercise_queued_factory_destructor_panic_runtime() {
+    let previous = runtime_ids();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .expect("the queued-factory runtime requires one available worker");
+    let (started, worker_blocked) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let blocker = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((started, released)), |_, Unaware((started, released))| async move {
+            started.send(()).expect("the test retains the blocker start receiver");
+            released
+                .recv_timeout(testing_aids::TEST_TIMEOUT)
+                .expect("the test releases the blocked worker");
+        });
+    worker_blocked
+        .recv_timeout(testing_aids::TEST_TIMEOUT)
+        .expect("the first task blocks its worker");
+    let queued = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(QueuedDropPanic), |_, Unaware(capture)| async move { drop(capture) });
+    RuntimeOperations::from(&runtime).request_stop();
+    release.send(()).expect("the blocked worker retains its release receiver");
+    blocker.join().expect("the blocker completes after release");
+    runtime.stop().expect("the queued-factory runtime stops cleanly");
+    assert!(queued.join().expect_err("shutdown discards the queued factory").is_shutdown());
+    let (_, snapshot) = capture();
+    let runtime = new_runtime(&snapshot, &previous);
+    assert_eq!(
+        (
+            runtime.counters.spawned_tasks,
+            runtime.counters.completed_tasks,
+            runtime.counters.canceled_tasks,
+            runtime.counters.panicked_tasks,
+        ),
+        (2, 1, 0, 1)
+    );
 }
 
 fn exercise_block_on_metadata_runtime() {
+    let previous = runtime_ids();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .build()
@@ -302,6 +446,46 @@ fn exercise_block_on_metadata_runtime() {
         514
     );
     runtime.stop().expect("the block-on metadata runtime stops cleanly");
+    let (decoded, snapshot) = capture();
+    assert_block_on_metadata(&decoded, new_runtime(&snapshot, &previous));
+}
+
+fn exercise_multiworker_placement_runtime() {
+    if SystemHardware::current().processors().len() < 2 {
+        return;
+    }
+    let previous = runtime_ids();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .expect("two available processors are required for placement attribution");
+    let scheduler = runtime
+        .scheduler()
+        .block_on(async |cx| cx.scheduler().clone())
+        .expect("the runtime returns a worker-local scheduler");
+    for task in scheduler.spawn_everywhere((), |()| async {}) {
+        task.join().expect("each worker-local task completes");
+    }
+    runtime.stop().expect("the multi-worker runtime stops cleanly");
+
+    let (decoded, snapshot) = capture();
+    let runtime = new_runtime(&snapshot, &previous);
+    let workers = runtime.workers.iter().map(|worker| worker.id).collect::<HashSet<_>>();
+    assert_eq!(workers.len(), 2);
+    for kind in [EventKind::TaskMaterialized, EventKind::TaskCompleted] {
+        let attributed = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| event.kind == kind)
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id == runtime.id).then_some(payload.worker_id)
+            })
+            .flatten()
+            .collect::<HashSet<_>>();
+        assert_eq!(attributed, workers);
+    }
 }
 
 fn assert_default_recording_contract() {
@@ -349,24 +533,25 @@ fn assert_primary_events(decoded: &DecodedSnapshot, primary: &RuntimeSnapshot) {
         .collect();
     let count = |kind| events.iter().filter(|(event_kind, _, _)| *event_kind == kind).count();
     assert_eq!(count(EventKind::RuntimeStopping), 1);
-    assert_eq!(count(EventKind::RuntimeStopped), 1);
+    assert_eq!(count(EventKind::RuntimeStopped), 1, "primary events: {events:?}");
     assert_eq!(count(EventKind::WorkerStarted), 1);
     assert_eq!(count(EventKind::WorkerStopped), 1);
-    assert_eq!(count(EventKind::TaskEnqueued), 5);
-    assert_eq!(count(EventKind::TaskMaterialized), 5);
+    assert_eq!(count(EventKind::TaskEnqueued), 6);
+    assert_eq!(count(EventKind::TaskMaterialized), 6);
     assert_eq!(count(EventKind::TaskCompleted), 3);
-    assert_eq!(count(EventKind::TaskPanicked), 1);
+    assert_eq!(count(EventKind::TaskPanicked), 2);
     assert_eq!(count(EventKind::TaskCanceled), 1);
     assert_eq!(count(EventKind::TaskPollStarted), count(EventKind::TaskPollFinished));
     let spawned: Vec<_> = events
         .iter()
         .filter_map(|(kind, task, _)| (*kind == EventKind::TaskSpawned).then_some(*task))
         .collect();
-    assert_eq!(spawned.len(), 5);
+    assert_eq!(spawned.len(), 6);
     let expected_terminals = [
         EventKind::TaskCompleted,
         EventKind::TaskCompleted,
         EventKind::TaskCompleted,
+        EventKind::TaskPanicked,
         EventKind::TaskPanicked,
         EventKind::TaskCanceled,
     ];
@@ -468,72 +653,29 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
         ..Configuration::default()
     });
     exercise_join_notification_ordering();
+    exercise_cancellation_notification_ordering();
     let retained_scheduler = exercise_primary_runtime();
     exercise_stopped_runtime();
     let owner_drop_scheduler = exercise_owner_drop_runtime();
     exercise_unpolled_cancellation_runtime();
     exercise_destructor_panic_runtime();
+    exercise_queued_factory_destructor_panic_runtime();
     exercise_block_on_metadata_runtime();
-    let (decoded, runtime_snapshot) = capture();
+    exercise_multiworker_placement_runtime();
+    let (_, runtime_snapshot) = capture();
     let arty_runtimes: Vec<_> = runtime_snapshot.runtimes.iter().filter(|entry| entry.name == "arty").collect();
 
     let unique_ids: HashSet<_> = arty_runtimes.iter().map(|runtime| runtime.id).collect();
     assert_eq!(unique_ids.len(), arty_runtimes.len());
-    assert_eq!(
-        (
-            arty_runtimes.iter().filter(|entry| entry.state == RuntimeState::Stopped).count(),
-            arty_runtimes.iter().filter(|entry| entry.state == RuntimeState::Stopping).count(),
-        ),
-        (arty_runtimes.len() - 1, 1)
-    );
-    assert!(
-        arty_runtimes.iter().all(|entry| {
-            entry.workers.len() == 1 && entry.workers[0].thread_id.is_some() && entry.workers[0].processor_index.is_some()
-        })
-    );
+    assert!(arty_runtimes.iter().all(|entry| entry.state == RuntimeState::Stopped));
+    assert!(arty_runtimes.iter().all(|entry| {
+        !entry.workers.is_empty()
+            && entry
+                .workers
+                .iter()
+                .all(|worker| worker.thread_id.is_some() && worker.processor_index.is_some())
+    }));
 
-    let primary = arty_runtimes
-        .iter()
-        .find(|entry| entry.counters.spawned_tasks == 5)
-        .expect("the primary runtime records every public async spawn path");
-    assert_eq!(
-        (
-            primary.counters.live_tasks,
-            primary.counters.completed_tasks,
-            primary.counters.panicked_tasks,
-            primary.counters.canceled_tasks,
-        ),
-        (0, 3, 1, 1)
-    );
-    assert!(primary.counters.poll_count >= 6);
-    assert_primary_events(&decoded, primary);
-    let unpolled = arty_runtimes
-        .iter()
-        .find(|entry| {
-            entry.state == RuntimeState::Stopped
-                && entry.counters.spawned_tasks == 2
-                && entry.counters.completed_tasks == 1
-                && entry.counters.canceled_tasks == 1
-        })
-        .expect("the unpolled-cancellation runtime is retained");
-    assert_unpolled_cancellation(&decoded, unpolled);
-    let destructor_panic = arty_runtimes
-        .iter()
-        .find(|entry| entry.counters.spawned_tasks == 1 && entry.counters.panicked_tasks == 1)
-        .expect("the destructor-panic runtime is retained");
-    assert_eq!(
-        (
-            destructor_panic.counters.live_tasks,
-            destructor_panic.counters.panicked_tasks,
-            destructor_panic.counters.canceled_tasks,
-        ),
-        (0, 1, 0)
-    );
-    let block_on_metadata = arty_runtimes
-        .iter()
-        .find(|entry| entry.state == RuntimeState::Stopped && entry.counters.spawned_tasks == 2 && entry.counters.completed_tasks == 2)
-        .expect("the block-on metadata runtime is retained");
-    assert_block_on_metadata(&decoded, block_on_metadata);
     drop(retained_scheduler);
     drop(owner_drop_scheduler);
     assert_default_recording_contract();

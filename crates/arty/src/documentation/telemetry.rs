@@ -26,11 +26,11 @@
 //! high-frequency task events; runtime metadata and counters remain available
 //! in snapshots when event recording is disabled.
 //!
-//! Applications configuring recording or capturing snapshots need a direct
-//! dependency on `seismograph`:
+//! Applications configuring recording and decoding runtime diagnostics need
+//! direct dependencies on `seismograph` and `seismograph_runtime`:
 //!
 //! ```sh
-//! cargo add seismograph
+//! cargo add seismograph seismograph_runtime
 //! ```
 //!
 //! Enable runtime-task events before starting runtimes, then capture and decode
@@ -40,6 +40,7 @@
 //! use arty::runtime::{Runtime, WorkersPolicy};
 //! use seismograph::recorder::{Configuration, RecordingPolicy};
 //! use seismograph::snapshot::SnapshotOptions;
+//! use seismograph_runtime::snapshot::source;
 //!
 //! seismograph::recorder(Configuration {
 //!     runtime_tasks: RecordingPolicy::all(false),
@@ -53,7 +54,20 @@
 //!
 //! let snapshot = seismograph::snapshot(SnapshotOptions::default())?;
 //! let decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
-//! assert!(!decoded.sources.is_empty());
+//! let runtime_source = decoded
+//!     .sources
+//!     .iter()
+//!     .find(|entry| entry.id == source::ID)
+//!     .expect("Arty registers the runtime diagnostics source");
+//! let diagnostics = seismograph_runtime::snapshot::decode(&runtime_source.data)?;
+//! assert_eq!(
+//!     diagnostics
+//!         .runtimes
+//!         .last()
+//!         .expect("the Arty runtime is retained in diagnostics")
+//!         .name,
+//!     "arty"
+//! );
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

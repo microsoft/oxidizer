@@ -14,8 +14,8 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskEnqueued, TaskTelemetryRegistration};
-use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
+use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskTelemetryPlacement};
+use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::task::Builtins;
@@ -58,7 +58,6 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
-    stopped_reported: AtomicBool,
     runtime_telemetry: RuntimeTelemetry,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
@@ -79,7 +78,7 @@ impl<WFS> DispatcherCore<WFS> {
     #[cfg(test)]
     pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
         let worker_count = u32::try_from(worker_endpoints.len()).expect("test dispatchers cannot configure more than u32::MAX workers");
-        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(0..worker_count);
+        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(0..worker_count, sink.clone());
         Self::new_with_shutdown(
             wait_for_shutdown,
             worker_endpoints,
@@ -114,7 +113,6 @@ impl<WFS> DispatcherCore<WFS> {
         Self {
             wait_for_shutdown,
             shutdown_started,
-            stopped_reported: AtomicBool::new(false),
             runtime_telemetry,
             worker_endpoints,
             worker_indices,
@@ -215,12 +213,8 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
-    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryRegistration {
+    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
         self.runtime_telemetry.register_task::<F>(usize::from(worker_index))
-    }
-
-    pub(in crate::runtime) fn task_enqueued(&self, enqueued: TaskEnqueued) {
-        self.runtime_telemetry.task_enqueued(enqueued);
     }
 
     pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
@@ -254,7 +248,6 @@ impl<WFS> DispatcherCore<WFS> {
         let task_telemetry = self
             .runtime_telemetry
             .register_task_with_descriptor(usize::from(worker_index), descriptor);
-        let (task_telemetry, enqueued) = task_telemetry.into_parts();
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
@@ -272,7 +265,6 @@ impl<WFS> DispatcherCore<WFS> {
         });
 
         if send_result.is_ok() {
-            self.runtime_telemetry.task_enqueued(enqueued);
             emit!(
                 &self.sink,
                 TaskSpawned {
@@ -296,9 +288,6 @@ where
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
         self.runtime_telemetry.stopped();
-        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
-        }
         outcome
     }
 }

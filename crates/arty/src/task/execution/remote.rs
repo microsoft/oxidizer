@@ -99,12 +99,19 @@ where
         let result_tx = this.result_tx.take();
         if this.inner.is_live() {
             let _guard = this.parent_task_enrichment.apply_current_thread();
-            if let Err(panic) = this.inner.destroy_pinned() {
-                if let Some(telemetry) = this.telemetry.as_mut() {
-                    telemetry.panicked();
+            match this.inner.destroy_pinned() {
+                Ok(()) => {
+                    if let Some(telemetry) = this.telemetry.as_mut() {
+                        telemetry.canceled();
+                    }
                 }
-                emit!(this.sink, TaskPanicked);
-                discard_panic(panic);
+                Err(panic) => {
+                    if let Some(telemetry) = this.telemetry.as_mut() {
+                        telemetry.panicked();
+                    }
+                    emit!(this.sink, TaskPanicked);
+                    discard_panic(panic);
+                }
             }
         }
         if let Some(sender) = result_tx {
@@ -125,6 +132,22 @@ where
         let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
+            if this.inner.is_live() {
+                match this.inner.as_mut().destroy_pinned() {
+                    Ok(()) => {
+                        if let Some(telemetry) = this.telemetry.as_mut() {
+                            telemetry.canceled();
+                        }
+                    }
+                    Err(panic) => {
+                        if let Some(telemetry) = this.telemetry.as_mut() {
+                            telemetry.panicked();
+                        }
+                        emit!(this.sink, TaskPanicked);
+                        discard_panic(panic);
+                    }
+                }
+            }
             let _ = this.result_tx.take().map(|sender| dispose_sender(|| drop(sender)));
             return Poll::Ready(());
         }
@@ -254,8 +277,8 @@ mod tests {
         let sink = Sink::noop();
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
-        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1);
-        let (task_telemetry, _enqueued) = runtime_telemetry.register_task::<std::future::Ready<u32>>(0).into_parts();
+        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
+        let task_telemetry = runtime_telemetry.register_task::<std::future::Ready<u32>>(0);
         let task_telemetry = task_telemetry.materialized();
         let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
             std::future::ready(42),

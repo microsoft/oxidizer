@@ -79,7 +79,7 @@ pub(in crate::runtime) fn build(
         );
     })?;
     let (runtime_telemetry, worker_telemetries) =
-        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()));
+        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()), sink.clone());
 
     for ((worker_index, processor), worker_telemetry) in processors.into_iter().enumerate().zip(worker_telemetries) {
         let (command_tx, command_rx) = channel::unbounded();
