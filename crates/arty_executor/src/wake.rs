@@ -408,10 +408,10 @@ fn enqueue_wake(
 }
 
 fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_ref: TaskRef) {
-    if !queued.load(atomic::Ordering::Acquire) {
-        return;
-    }
-    if !queued.swap(false, atomic::Ordering::AcqRel) {
+    if queued
+        .compare_exchange(true, false, atomic::Ordering::AcqRel, atomic::Ordering::Acquire)
+        .is_err()
+    {
         return;
     }
     queue
@@ -824,7 +824,7 @@ mod tests {
         let parent_waker = Arc::new(TestWaker::new());
 
         // We hold the lock - the signal cannot use the set.
-        let _awakened_set_lock_guard = awakened_queue.lock().unwrap();
+        let awakened_set_lock_guard = awakened_queue.lock().unwrap();
 
         let signal = pin!(WakeSignal::new(
             Arc::clone(&awakened_queue),
@@ -850,6 +850,7 @@ mod tests {
 
         // Verify that it is now consumed.
         assert!(!signal.consume_awakened());
+        drop(awakened_set_lock_guard);
     }
 
     #[test]
