@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Verifies warmed public executor churn adds no allocations beyond debug-only waker diagnostics.
+//! Verifies warmed spawn-and-complete operations add no allocations beyond debug-only waker diagnostics.
 
 #![cfg(not(miri))]
 #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
@@ -41,7 +41,7 @@ fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
 }
 
 #[test]
-fn warmed_task_churn_only_allocates_debug_diagnostics() {
+fn spawn_and_complete_one_only_allocates_debug_diagnostics() {
     // SAFETY: The test drives shutdown to `CycleOutcome::Shutdown` before dropping the executor.
     let executor = unsafe { Executor::builder().build() };
     let tasks = executor.tasks();
@@ -52,7 +52,7 @@ fn warmed_task_churn_only_allocates_debug_diagnostics() {
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
     let session = Session::new().no_stdout().no_file();
-    let operation = session.operation("warmed_task_churn");
+    let operation = session.operation("spawn_and_complete_one");
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
@@ -60,11 +60,11 @@ fn warmed_task_churn_only_allocates_debug_diagnostics() {
         }
     }
 
-    let (allocations, bytes) = allocation_totals(&session, "warmed_task_churn");
+    let (allocations, bytes) = allocation_totals(&session, "spawn_and_complete_one");
     assert_eq!(
         allocations,
         EXPECTED_ALLOCATIONS_PER_OPERATION * MEASURED_OPERATIONS as u64,
-        "warmed executor churn must allocate only the three per-task debug diagnostic objects, and nothing in release builds"
+        "warmed spawn-and-complete operations must allocate only the three per-task debug diagnostic objects, and nothing in release builds"
     );
     #[cfg(not(debug_assertions))]
     assert_eq!(

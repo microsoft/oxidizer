@@ -816,9 +816,9 @@ mod tests {
         Completed,
     }
 
-    struct SignalOnDrop(Rc<Cell<bool>>);
+    struct SetSignalOnDrop(Rc<Cell<bool>>);
 
-    impl Drop for SignalOnDrop {
+    impl Drop for SetSignalOnDrop {
         fn drop(&mut self) {
             self.0.set(true);
         }
@@ -838,7 +838,7 @@ mod tests {
     /// `inert` controls the reclamation decision; every other lifecycle operation is outside this
     /// fixture's boundary and therefore rejects calls.
     struct DirtyDropTask {
-        _signal: SignalOnDrop,
+        _signal: SetSignalOnDrop,
         inert: bool,
     }
 
@@ -870,12 +870,12 @@ mod tests {
         }
     }
 
-    struct PanickingDropTask {
+    struct PanicOnDropTask {
         _panic_on_drop: PanicOnDrop,
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    impl TypeErasedTask for PanickingDropTask {
+    impl TypeErasedTask for PanicOnDropTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()> {
             unreachable!("panicking-drop fixture is never polled")
         }
@@ -912,7 +912,7 @@ mod tests {
         // dirty-teardown ownership behavior before the programming error is reported.
         let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
         let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(DirtyDropTask {
-            _signal: SignalOnDrop(Rc::clone(&dropped)),
+            _signal: SetSignalOnDrop(Rc::clone(&dropped)),
             inert,
         });
         let task_ref = TaskRef::new(task);
@@ -990,7 +990,7 @@ mod tests {
         // SAFETY: The executor is deliberately dropped during an existing unwind to verify that
         // its double-panic guard retains raw task owners instead of running their destructors.
         let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
-        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PanickingDropTask {
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PanicOnDropTask {
             _panic_on_drop: PanicOnDrop(Rc::clone(&dropped)),
         });
         let task_ref = TaskRef::new(task);
