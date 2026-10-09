@@ -173,6 +173,11 @@ impl WakeSignal {
         unsafe { self.state.load(atomic::Ordering::Acquire).as_ref() }
     }
 
+    fn state_ptr(&self) -> *mut WakerState {
+        _ = self.state();
+        self.state.load(atomic::Ordering::Acquire)
+    }
+
     #[inline]
     pub(crate) fn retire(&self) {
         let state = self.state.load(atomic::Ordering::Acquire);
@@ -484,10 +489,13 @@ static BORROWED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(borrowed_clon
 static OWNED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone_waker, waker_wake, waker_wake_by_ref, waker_drop_waker);
 
 fn borrowed_clone(ptr: *const ()) -> RawWaker {
-    let state = resurrect_signal_ref(ptr).state();
+    let signal = resurrect_signal_ref(ptr);
+    let state_ptr = signal.state_ptr();
+    // SAFETY: `state_ptr` owns one intrusive reference until `WakeSignal::drop`.
+    let state = unsafe { state_ptr.as_ref() }.expect("initialized wake state pointer is never null");
     increment_waker_count(&state.waker_count, std::process::abort);
     increment_reference_count(&state.ref_count, std::process::abort);
-    RawWaker::new(std::ptr::from_ref(state).cast(), &OWNED_WAKER_VTABLE)
+    RawWaker::new(state_ptr.cast_const().cast(), &OWNED_WAKER_VTABLE)
 }
 
 fn borrowed_wake_by_ref(ptr: *const ()) {
