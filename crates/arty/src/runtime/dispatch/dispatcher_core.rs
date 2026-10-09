@@ -14,6 +14,7 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetry};
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -58,6 +59,7 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
     stopped_reported: AtomicBool,
+    runtime_telemetry: RuntimeTelemetry,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
 
@@ -76,7 +78,14 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
 impl<WFS> DispatcherCore<WFS> {
     #[cfg(test)]
     pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
+        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(worker_endpoints.len());
+        Self::new_with_shutdown(
+            wait_for_shutdown,
+            worker_endpoints,
+            sink,
+            Arc::new(AtomicBool::new(false)),
+            runtime_telemetry,
+        )
     }
 
     pub(in crate::runtime) fn new_with_shutdown(
@@ -84,6 +93,7 @@ impl<WFS> DispatcherCore<WFS> {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
+        runtime_telemetry: RuntimeTelemetry,
     ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -104,6 +114,7 @@ impl<WFS> DispatcherCore<WFS> {
             wait_for_shutdown,
             shutdown_started,
             stopped_reported: AtomicBool::new(false),
+            runtime_telemetry,
             worker_endpoints,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
@@ -119,6 +130,7 @@ impl<WFS> DispatcherCore<WFS> {
             return;
         }
 
+        self.runtime_telemetry.stopping();
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
@@ -193,6 +205,13 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
+    pub(in crate::runtime) fn register_task<F: 'static>(
+        &self,
+        worker_index: WorkerIndex,
+    ) -> (TaskTelemetry, seismograph_runtime::worker::WorkerHandle) {
+        self.runtime_telemetry.task::<F>(usize::from(worker_index))
+    }
+
     pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -215,6 +234,7 @@ impl<WFS> DispatcherCore<WFS> {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
+        let (task_telemetry, worker_telemetry) = self.register_task::<F>(worker_index);
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
@@ -222,6 +242,8 @@ impl<WFS> DispatcherCore<WFS> {
             parent_task_enrichment,
             self.sink.clone(),
             Arc::clone(&self.shutdown_started),
+            task_telemetry,
+            worker_telemetry,
         );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
@@ -253,8 +275,11 @@ where
     /// Safe to call multiple times.
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
-        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
+        if self.wait_for_shutdown.is_complete() {
+            self.runtime_telemetry.stopped();
+            if !self.stopped_reported.swap(true, Ordering::Relaxed) {
+                emit!(&self.sink, RuntimeStopped);
+            }
         }
         outcome
     }

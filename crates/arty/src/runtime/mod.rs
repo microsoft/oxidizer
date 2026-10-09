@@ -44,6 +44,7 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod operations;
+pub(crate) mod seismograph;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;

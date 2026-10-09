@@ -23,6 +23,7 @@ use crate::runtime::context::RuntimeBuiltins;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::seismograph::{RuntimeTelemetry, WorkerTelemetry};
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
@@ -54,6 +55,7 @@ pub(in crate::runtime) fn build(
     // processor's ID so startup endpoints and service slots share a stable worker ordering.
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
     processors.sort_by_key(|processor| processor.processors().first().id());
+    let (runtime_telemetry, worker_telemetries) = RuntimeTelemetry::register(processors.len());
 
     let mut async_worker_command_txs = Vec::with_capacity(processors.len());
     let mut async_worker_start_txs = Vec::with_capacity(processors.len());
@@ -100,6 +102,7 @@ pub(in crate::runtime) fn build(
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
+                worker_telemetry: worker_telemetries[worker_index].clone(),
             }
             .start(),
         );
@@ -123,6 +126,7 @@ pub(in crate::runtime) fn build(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
         shutdown_started,
+        runtime_telemetry,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -168,6 +172,7 @@ struct AsyncWorkerStartInfo {
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
     sink: Sink,
+    worker_telemetry: WorkerTelemetry,
 }
 
 impl AsyncWorkerStartInfo {
@@ -195,6 +200,7 @@ impl AsyncWorkerStartInfo {
             blocking_pools,
             shutdown_started,
             sink,
+            worker_telemetry,
         } = self;
 
         let worker_sink = sink.clone();
@@ -202,6 +208,7 @@ impl AsyncWorkerStartInfo {
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
+        worker_telemetry.attach_current_thread();
 
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
@@ -272,6 +279,7 @@ impl AsyncWorkerStartInfo {
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
         blocking_worker.join();
+        drop(worker_telemetry);
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }

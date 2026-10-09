@@ -19,6 +19,13 @@
 //! context automatically. A task cancelled at shutdown need not emit an outcome
 //! event, so task events are not an exactly-once completion record.
 //!
+//! Arty also registers every runtime, async worker, and async task with
+//! [`seismograph`]. Seismograph records worker/thread association, placement,
+//! materialization, poll duration, and exactly one completed, panicked, or
+//! cancelled terminal state. Enable its `runtime_tasks` recording policy for
+//! high-frequency task events; runtime metadata and counters remain available
+//! in snapshots when event recording is disabled.
+//!
 //! Routine classified runtime fields use the `arty` / `SystemMetadata`
 //! identifier when configuring redaction. Panic diagnostics use the separate
 //! `arty` / `PanicMessage` identifier, so configure both classes when panic

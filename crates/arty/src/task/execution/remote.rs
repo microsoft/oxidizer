@@ -13,6 +13,7 @@ use performables::arc::Arc;
 use pin_project::{pin_project, pinned_drop};
 
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
+use crate::runtime::seismograph::TaskTelemetry;
 use crate::task::execution::TaskResult;
 use crate::task::execution::storage::{TaskStorage, discard_panic};
 
@@ -38,6 +39,8 @@ where
 
     /// Task wrappers check shutdown again before invoking their deferred factory.
     shutdown_signal: Option<Arc<AtomicBool>>,
+
+    telemetry: Option<TaskTelemetry>,
 }
 
 fn dispose_sender<F>(drop_sender: F)
@@ -56,7 +59,14 @@ where
 {
     #[cfg(test)]
     pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
-        Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None)
+        Self {
+            inner: TaskStorage::new(inner),
+            parent_task_enrichment,
+            sink,
+            result_tx: Some(result_tx),
+            shutdown_signal: None,
+            telemetry: None,
+        }
     }
 
     pub(super) fn new_with_shutdown(
@@ -65,6 +75,7 @@ where
         parent_task_enrichment: Transfer,
         sink: Sink,
         shutdown_signal: Option<Arc<AtomicBool>>,
+        telemetry: TaskTelemetry,
     ) -> Self {
         Self {
             inner: TaskStorage::new(inner),
@@ -72,6 +83,7 @@ where
             sink,
             result_tx: Some(result_tx),
             shutdown_signal,
+            telemetry: Some(telemetry),
         }
     }
 }
@@ -88,6 +100,9 @@ where
         if this.inner.is_live() {
             let _guard = this.parent_task_enrichment.apply_current_thread();
             if let Err(panic) = this.inner.destroy_pinned() {
+                if let Some(telemetry) = this.telemetry.as_mut() {
+                    telemetry.panicked();
+                }
                 emit!(this.sink, TaskPanicked);
                 discard_panic(panic);
             }
@@ -114,11 +129,13 @@ where
             return Poll::Ready(());
         }
 
+        let poll_telemetry = this.telemetry.as_ref().map(|telemetry| telemetry.poll());
         // We AssertUnwindSafe here because we consider the task completed on panic, which means
         // it will never be polled again - whatever it did to its internal state is now
         // irrelevant and if it corrupted some shared state, that is not really something we
         // can do anything about (a conscientious service will abort on panic to avoid that).
         let inner_poll_result = catch_unwind(AssertUnwindSafe(|| this.inner.as_mut().poll(cx)));
+        drop(poll_telemetry);
 
         match inner_poll_result {
             Ok(Poll::Ready(result)) => {
@@ -128,6 +145,9 @@ where
                     // The task completed successfully; a receiver notification panic must not
                     // change that outcome or its telemetry classification.
                     discard_panic(panic);
+                }
+                if let Some(telemetry) = this.telemetry.as_mut() {
+                    telemetry.completed();
                 }
                 emit!(this.sink, TaskSucceeded);
                 Poll::Ready(())
@@ -145,6 +165,9 @@ where
                     discard_panic(disposal);
                 }
 
+                if let Some(telemetry) = this.telemetry.as_mut() {
+                    telemetry.panicked();
+                }
                 emit!(this.sink, TaskPanicked);
 
                 Poll::Ready(())
@@ -164,6 +187,7 @@ mod tests {
     use events_once::Event;
 
     use super::*;
+    use crate::runtime::seismograph::RuntimeTelemetry;
 
     struct PanicOnPoll {
         dropped: StdArc<AtomicBool>,
@@ -230,12 +254,15 @@ mod tests {
         let sink = Sink::noop();
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
+        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(1);
+        let (task_telemetry, _worker_telemetry) = runtime_telemetry.task::<std::future::Ready<u32>>(0);
         let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
             std::future::ready(42),
             sender,
             sink.transfer_context(),
             sink,
             Some(signal),
+            task_telemetry,
         ));
 
         assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));

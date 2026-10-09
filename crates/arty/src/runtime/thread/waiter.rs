@@ -15,6 +15,8 @@ use crate::task::execution::discard_panic;
 #[cfg_attr(test, mockall::automock)]
 pub(in crate::runtime) trait WaitForShutdown {
     fn wait(&self) -> Result<(), Error>;
+
+    fn is_complete(&self) -> bool;
 }
 
 /// Joins workers on one waiting caller; other callers wait for that join to finish.
@@ -107,6 +109,10 @@ impl WaitForShutdown for ThreadWaiter {
         let (state, _) = &*self.shared;
         let state_guard = state.lock();
         self.wait_locked(state_guard)
+    }
+
+    fn is_complete(&self) -> bool {
+        matches!(*self.shared.0.lock(), State::Completed(_))
     }
 }
 

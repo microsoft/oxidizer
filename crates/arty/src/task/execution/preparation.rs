@@ -9,7 +9,9 @@ use events_once::{BoxedSender, Event};
 use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
+use seismograph_runtime::worker::WorkerHandle;
 
+use crate::runtime::seismograph::TaskTelemetry;
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
 use crate::task::execution::remote::RemoteTaskFuture;
@@ -35,6 +37,8 @@ pub(crate) fn prepare_remote<C, FF, F, R>(
     parent_task_enrichment: Transfer,
     sink: Sink,
     shutdown_signal: Arc<AtomicBool>,
+    task_telemetry: TaskTelemetry,
+    worker_telemetry: WorkerHandle,
 ) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
 where
     C: 'static,
@@ -45,6 +49,8 @@ where
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
+        let mut task_telemetry = task_telemetry;
+        task_telemetry.materialized(&worker_telemetry);
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
         let inner = async move { future_factory(cx).await };
@@ -57,6 +63,7 @@ where
             parent_task_enrichment,
             sink,
             Some(shutdown_signal),
+            task_telemetry,
         )));
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -69,12 +76,15 @@ pub(crate) fn prepare_remote_on_worker<FF, F, R>(
     sink: Sink,
     shutdown_signal: Arc<AtomicBool>,
     tasks: &TaskSet,
+    mut task_telemetry: TaskTelemetry,
+    worker_telemetry: WorkerHandle,
 ) -> JoinHandle<R>
 where
     FF: FnOnce(Builtins) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
+    task_telemetry.materialized(&worker_telemetry);
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let inner = async move { future_factory(builtins).await };
     drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
@@ -83,6 +93,7 @@ where
         parent_task_enrichment,
         sink,
         Some(shutdown_signal),
+        task_telemetry,
     )));
     JoinHandle::new(result_rx)
 }
@@ -165,6 +176,13 @@ mod tests {
     use performables::arc::Arc as PArc;
 
     use super::*;
+    use crate::runtime::seismograph::RuntimeTelemetry;
+
+    fn telemetry() -> (RuntimeTelemetry, TaskTelemetry, WorkerHandle) {
+        let (runtime, _workers) = RuntimeTelemetry::register(1);
+        let (task, worker) = runtime.task::<()>(0);
+        (runtime, task, worker)
+    }
 
     #[test]
     fn remote_factory_remains_deferred_until_poll() {
@@ -172,6 +190,7 @@ mod tests {
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
         let shutdown_signal = PArc::new(AtomicBool::new(false));
+        let (_telemetry, task_telemetry, worker_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             move |()| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
@@ -186,6 +205,8 @@ mod tests {
             sink.transfer_context(),
             sink,
             shutdown_signal,
+            task_telemetry,
+            worker_telemetry,
         );
 
         let executor = new_guarded_executor(Waker::noop().clone());
@@ -202,6 +223,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let shutdown_signal = PArc::new(AtomicBool::new(false));
         let sink = Sink::noop();
+        let (_telemetry, task_telemetry, worker_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             {
                 let invoked = Arc::clone(&invoked);
@@ -213,6 +235,8 @@ mod tests {
             sink.transfer_context(),
             sink,
             PArc::clone(&shutdown_signal),
+            task_telemetry,
+            worker_telemetry,
         );
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
@@ -260,11 +284,14 @@ mod tests {
 
         let sink = Sink::noop();
         let shutdown_signal = PArc::new(AtomicBool::new(false));
+        let (_telemetry, task_telemetry, worker_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             |()| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             sink,
             shutdown_signal,
+            task_telemetry,
+            worker_telemetry,
         );
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
