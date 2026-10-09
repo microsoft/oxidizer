@@ -132,23 +132,21 @@ where
         let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
-            if this.inner.is_live() {
-                match this.inner.as_mut().destroy_pinned() {
-                    Ok(()) => {
-                        if let Some(telemetry) = this.telemetry.as_mut() {
-                            telemetry.canceled();
-                        }
-                    }
-                    Err(panic) => {
-                        if let Some(telemetry) = this.telemetry.as_mut() {
-                            telemetry.panicked();
-                        }
-                        emit!(this.sink, TaskPanicked);
-                        discard_panic(panic);
+            match this.inner.as_mut().destroy_pinned() {
+                Ok(()) => {
+                    if let Some(telemetry) = this.telemetry.as_mut() {
+                        telemetry.canceled();
                     }
                 }
+                Err(panic) => {
+                    if let Some(telemetry) = this.telemetry.as_mut() {
+                        telemetry.panicked();
+                    }
+                    emit!(this.sink, TaskPanicked);
+                    discard_panic(panic);
+                }
             }
-            let _ = this.result_tx.take().map(|sender| dispose_sender(|| drop(sender)));
+            dispose_sender(|| drop(this.result_tx.take()));
             return Poll::Ready(());
         }
 
@@ -290,6 +288,30 @@ mod tests {
         ));
 
         assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+    }
+
+    #[test]
+    fn shutdown_signal_contains_task_destructor_panic() {
+        let sink = Sink::noop();
+        let dropped = StdArc::new(AtomicBool::new(false));
+        let (sender, _receiver) = Event::<TaskResult<()>>::boxed();
+        let signal = Arc::new(AtomicBool::new(true));
+        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
+        let task_telemetry = runtime_telemetry.register_task::<PanicOnPollAndDrop>(0);
+        let task_telemetry = task_telemetry.materialized();
+        let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
+            PanicOnPollAndDrop {
+                dropped: StdArc::clone(&dropped),
+            },
+            sender,
+            sink.transfer_context(),
+            sink,
+            Some(signal),
+            task_telemetry,
+        ));
+
+        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert!(dropped.load(Ordering::Acquire));
     }
 
     #[test]

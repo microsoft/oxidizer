@@ -3,7 +3,7 @@
 
 use std::any::TypeId;
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use foldhash::{HashMap, HashMapExt};
@@ -11,18 +11,24 @@ use nonempty::NonEmpty;
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use seismograph::recorder::SuppressionGuard;
-use seismograph::recorder::runtime::{TaskId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeId as SeismographRuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph_runtime::task::{TaskHandle, TaskPoll};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
-use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, register_runtime};
+use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, allocate_type_descriptor_id, register_runtime};
 
 use crate::runtime::telemetry::events::RuntimeStopped;
 
 static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
-static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static LAST_TYPE_DESCRIPTOR: Cell<Option<(TypeId, TypeDescriptorId)>> = const { Cell::new(None) };
+    static ACTIVE_TASK: Cell<Option<ActiveTask>> = const { Cell::new(None) };
+}
+
+#[derive(Clone, Copy)]
+struct ActiveTask {
+    runtime_id: SeismographRuntimeId,
+    task_id: TaskId,
 }
 
 #[derive(Debug)]
@@ -38,6 +44,10 @@ impl WorkerTelemetry {
             .as_ref()
             .expect("a live worker retains its registration")
             .attach_current_thread();
+    }
+
+    pub(crate) fn handle(&self) -> WorkerHandle {
+        self.handle.clone()
     }
 }
 
@@ -125,8 +135,7 @@ impl RuntimeTelemetry {
         self.lifecycle.stopped();
     }
 
-    #[cfg(test)]
-    pub(crate) fn id(&self) -> seismograph::recorder::runtime::RuntimeId {
+    pub(crate) fn id(&self) -> SeismographRuntimeId {
         self.lifecycle.registration.id()
     }
 
@@ -197,7 +206,11 @@ pub(crate) struct TaskTelemetry {
 
 impl TaskTelemetry {
     fn spawned(runtime: &RuntimeHandle, descriptor: TaskDescriptor) -> Self {
-        let task = runtime.register_task_with_size(descriptor.type_descriptor, None, descriptor.future_size_bytes);
+        let parent = ACTIVE_TASK
+            .get()
+            .filter(|active| active.runtime_id == runtime.id())
+            .map(|active| active.task_id);
+        let task = runtime.register_task_with_size(descriptor.type_descriptor, parent, descriptor.future_size_bytes);
         Self {
             runtime: runtime.clone(),
             worker: None,
@@ -214,7 +227,7 @@ impl TaskTelemetry {
         self.task.as_ref().expect("new tasks retain their task handle").woken();
     }
 
-    pub(crate) fn materialized(&mut self, worker: WorkerHandle) {
+    fn materialized(&mut self, worker: WorkerHandle) {
         debug_assert!(self.worker.is_none(), "a task may only be materialized once");
         let worker_id = worker.id();
         self.worker = Some(worker);
@@ -227,10 +240,16 @@ impl TaskTelemetry {
             .as_ref()
             .expect("tasks are materialized before their futures are polled");
         let task = self.task.as_ref().expect("terminal tasks are never polled");
+        let poll = task.poll_started(worker);
+        let previous_task = ACTIVE_TASK.replace(Some(ActiveTask {
+            runtime_id: self.runtime.id(),
+            task_id: task.id(),
+        }));
         TaskPollGuard {
             worker,
             task,
-            poll: Some(task.poll_started(worker)),
+            poll: Some(poll),
+            previous_task,
         }
     }
 
@@ -271,10 +290,12 @@ pub(crate) struct TaskPollGuard<'a> {
     worker: &'a WorkerHandle,
     task: &'a TaskHandle,
     poll: Option<TaskPoll>,
+    previous_task: Option<ActiveTask>,
 }
 
 impl Drop for TaskPollGuard<'_> {
     fn drop(&mut self) {
+        ACTIVE_TASK.set(self.previous_task);
         self.task.poll_finished(
             self.worker,
             self.poll.take().expect("a task poll telemetry guard is finished exactly once"),
@@ -297,24 +318,25 @@ fn type_descriptor_id<T: 'static>() -> TypeDescriptorId {
     descriptor
 }
 
-fn allocate_type_descriptor_id() -> TypeDescriptorId {
-    let raw = NEXT_TYPE_DESCRIPTOR_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
-        .expect("a process cannot register u64::MAX task types");
-    TypeDescriptorId::from_raw(raw).expect("the type descriptor counter starts at one")
-}
-
 #[cfg(test)]
 mod tests {
     use observed_testing::{TEST_ID, test_emitter};
+    use seismograph_runtime::allocate_type_descriptor_id;
     use seismograph_runtime::snapshot::{RuntimeState, source};
 
     use super::{TaskDescriptor, type_descriptor_id};
 
     #[test]
     fn type_descriptor_cache_is_stable_and_type_specific() {
+        struct ArtyDescriptor;
+
+        let before = allocate_type_descriptor_id();
+        let arty = type_descriptor_id::<ArtyDescriptor>();
+        let after = allocate_type_descriptor_id();
         assert_eq!(type_descriptor_id::<u8>(), type_descriptor_id::<u8>());
         assert_ne!(type_descriptor_id::<u8>(), type_descriptor_id::<u16>());
+        assert!(before.get() < arty.get());
+        assert!(arty.get() < after.get());
     }
 
     #[test]

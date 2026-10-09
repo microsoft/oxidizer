@@ -8,11 +8,11 @@ use std::thread::ThreadId;
 
 use performables::arc::Arc;
 
-use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::seismograph::{TaskDescriptor, TaskTelemetryPlacement};
 use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::{Error, RuntimeId};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -40,6 +40,10 @@ impl DispatcherClient {
 
     pub(crate) fn owns(&self, thread: &thread_aware::Thread) -> bool {
         self.core.owns(thread)
+    }
+
+    pub(crate) fn runtime_id(&self) -> RuntimeId {
+        self.core.runtime_id()
     }
 
     pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {

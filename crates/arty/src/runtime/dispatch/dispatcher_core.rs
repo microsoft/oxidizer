@@ -14,6 +14,7 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::identity::RuntimeId;
 use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskTelemetryPlacement};
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
@@ -183,6 +184,10 @@ impl<WFS> DispatcherCore<WFS> {
 
     pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
+    }
+
+    pub(in crate::runtime) fn runtime_id(&self) -> RuntimeId {
+        RuntimeId::from_seismograph(self.runtime_telemetry.id())
     }
 
     pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {

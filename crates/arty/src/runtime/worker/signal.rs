@@ -8,12 +8,14 @@ use std::time::Duration;
 use performables::arc::Arc;
 use performables::sync::condition::Condvar;
 use performables::sync::mutex::Mutex;
+use seismograph_runtime::worker::WorkerHandle;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
+    telemetry: Option<WorkerHandle>,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -40,9 +42,25 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
+    pub(in crate::runtime) fn with_telemetry(telemetry: WorkerHandle) -> Self {
+        Self {
+            notified: Mutex::new(false),
+            ready: Condvar::new(),
+            telemetry: Some(telemetry),
+        }
+    }
+
     pub(in crate::runtime) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
+        let notification = notified.as_mut().expect("the wait starts with its notification guard");
+        if **notification {
+            **notification = false;
+            return;
+        }
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.parked();
+        }
         wait_until_deadline(
             &mut notified,
             timeout,
@@ -65,6 +83,9 @@ impl WorkerSignal {
         );
         let mut notified = notified.expect("the final timed wait always replaced its notification guard");
         *notified = false;
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.unparked();
+        }
     }
 
     pub(in crate::runtime) fn waker(signal: &Arc<Self>) -> Waker {

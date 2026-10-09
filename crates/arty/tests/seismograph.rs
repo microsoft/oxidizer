@@ -15,14 +15,15 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Instant;
 
-use arty::runtime::{Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{Runtime, RuntimeId as ArtyRuntimeId, RuntimeOperations, WorkersPolicy};
 use arty::task::Scheduler;
+use events_once::Event;
 use many_cpus::SystemHardware;
 use seismograph::recorder::event::EventKind;
-use seismograph::recorder::runtime::RuntimeId;
+use seismograph::recorder::runtime::RuntimeId as SeismographRuntimeId;
 use seismograph::recorder::{Configuration, RecordingPolicy};
 use seismograph::snapshot::{DecodedSnapshot, SnapshotOptions};
-use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot as RuntimeSourceSnapshot, source};
+use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot as RuntimeSourceSnapshot, WorkerState, source};
 use support::JoinHandleExt as _;
 use thread_aware::Unaware;
 
@@ -62,7 +63,7 @@ fn capture() -> (DecodedSnapshot, RuntimeSourceSnapshot) {
     (decoded, runtime_snapshot)
 }
 
-fn runtime_ids() -> HashSet<RuntimeId> {
+fn runtime_ids() -> HashSet<SeismographRuntimeId> {
     let snapshot = seismograph::snapshot(SnapshotOptions::default()).expect("the Seismograph snapshot encodes");
     let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).expect("the Seismograph snapshot decodes");
     let Some(runtime_source) = decoded.sources.iter().find(|entry| entry.id == source::ID) else {
@@ -76,12 +77,20 @@ fn runtime_ids() -> HashSet<RuntimeId> {
         .collect()
 }
 
-fn new_runtime<'a>(snapshot: &'a RuntimeSourceSnapshot, previous: &HashSet<RuntimeId>) -> &'a RuntimeSnapshot {
+fn new_runtime<'a>(snapshot: &'a RuntimeSourceSnapshot, previous: &HashSet<SeismographRuntimeId>) -> &'a RuntimeSnapshot {
     snapshot
         .runtimes
         .iter()
         .find(|runtime| runtime.name == "arty" && !previous.contains(&runtime.id))
         .expect("the scenario registers one new Arty runtime")
+}
+
+fn runtime_by_id(snapshot: &RuntimeSourceSnapshot, id: ArtyRuntimeId) -> &RuntimeSnapshot {
+    snapshot
+        .runtimes
+        .iter()
+        .find(|runtime| runtime.id.get() == id.get())
+        .expect("the public Arty runtime identity matches its Seismograph snapshot")
 }
 
 struct PendingDropPanic {
@@ -135,7 +144,15 @@ fn exercise_join_notification_ordering() {
         .workers(WorkersPolicy::exactly(1))
         .build()
         .expect("the join-ordering runtime requires one available worker");
-    let mut task = pin!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42u32 }));
+    let (release_task, task_gate) = Event::boxed();
+    let mut task = pin!(
+        runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(task_gate), |_, Unaware(task_gate)| async move {
+                task_gate.await.expect("the test releases task completion");
+                42u32
+            })
+    );
     let (notified, wake_started) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let waker = Waker::from(Arc::new(BlockingWake {
@@ -143,6 +160,7 @@ fn exercise_join_notification_ordering() {
         release: Mutex::new(released),
     }));
     assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+    release_task.send(());
     wake_started
         .recv_timeout(testing_aids::TEST_TIMEOUT)
         .expect("task completion wakes the blocked join");
@@ -217,21 +235,21 @@ fn exercise_primary_runtime() -> Scheduler {
     runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move {
-            cx.scheduler()
-                .spawn(async |_| {
-                    let mut first_poll = true;
-                    std::future::poll_fn(move |poll| {
-                        if std::mem::replace(&mut first_poll, false) {
-                            poll.waker().wake_by_ref();
-                            Poll::Pending
-                        } else {
-                            Poll::Ready(())
-                        }
-                    })
-                    .await;
+            let direct = cx.scheduler().spawn(async |_| {
+                let mut first_poll = true;
+                std::future::poll_fn(move |poll| {
+                    if std::mem::replace(&mut first_poll, false) {
+                        poll.waker().wake_by_ref();
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(())
+                    }
                 })
-                .await
-                .expect("the direct worker-local child completes");
+                .await;
+            });
+            let anywhere = cx.scheduler().spawn_anywhere((), |()| async {});
+            direct.await.expect("the direct worker-local child completes");
+            anywhere.await.expect("the runtime-placed child completes");
         })
         .join()
         .expect("the parent of the direct worker-local child completes");
@@ -274,9 +292,32 @@ fn exercise_primary_runtime() -> Scheduler {
             primary.counters.panicked_tasks,
             primary.counters.canceled_tasks,
         ),
-        (0, 3, 2, 1)
+        (0, 4, 2, 1)
     );
     assert!(primary.counters.poll_count >= 7);
+    let nested: Vec<_> = decoded
+        .events
+        .events
+        .iter()
+        .filter_map(|event| {
+            let payload = event.runtime()?;
+            (event.kind == EventKind::TaskSpawned && payload.runtime_id == primary.id && payload.related_id != 0).then_some(payload)
+        })
+        .collect();
+    assert_eq!(nested.len(), 2, "both task-originated spawn paths retain the active parent");
+    for nested in nested {
+        assert!(
+            decoded.events.events.iter().any(|event| {
+                event.runtime().is_some_and(|payload| {
+                    event.kind == EventKind::TaskSpawned
+                        && payload.runtime_id == primary.id
+                        && payload.subject_id == nested.related_id
+                        && payload.related_id == 0
+                })
+            }),
+            "the nested task's parent identity belongs to the same runtime"
+        );
+    }
     assert_primary_events(&decoded, primary);
     retained_scheduler
 }
@@ -488,6 +529,51 @@ fn exercise_multiworker_placement_runtime() {
     }
 }
 
+fn exercise_runtime_identity_and_idle_worker() {
+    let first = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .expect("the first identity runtime requires one available worker");
+    let second = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .expect("the second identity runtime requires one available worker");
+    assert_ne!(first.id(), second.id());
+    assert_eq!(first.id().to_string(), first.id().get().to_string());
+
+    for id in [first.id(), second.id()] {
+        let deadline = Instant::now() + testing_aids::TEST_TIMEOUT;
+        loop {
+            let (_, snapshot) = capture();
+            if runtime_by_id(&snapshot, id).workers[0].state == WorkerState::Parked {
+                break;
+            }
+            assert!(Instant::now() < deadline, "idle Arty workers report the parked state");
+            std::thread::yield_now();
+        }
+    }
+
+    let first_id = first.id();
+    let second_id = second.id();
+    first.stop().expect("the first identity runtime stops cleanly");
+    second.stop().expect("the second identity runtime stops cleanly");
+    let (decoded, snapshot) = capture();
+    for id in [first_id, second_id] {
+        assert_eq!(runtime_by_id(&snapshot, id).state, RuntimeState::Stopped);
+        let events: Vec<_> = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id.get() == id.get()).then_some(event.kind)
+            })
+            .collect();
+        assert!(events.contains(&EventKind::WorkerParked));
+        assert!(events.contains(&EventKind::WorkerUnparked));
+    }
+}
+
 fn assert_default_recording_contract() {
     seismograph::recorder(Configuration::default());
     let previous = runtime_ids();
@@ -536,9 +622,9 @@ fn assert_primary_events(decoded: &DecodedSnapshot, primary: &RuntimeSnapshot) {
     assert_eq!(count(EventKind::RuntimeStopped), 1, "primary events: {events:?}");
     assert_eq!(count(EventKind::WorkerStarted), 1);
     assert_eq!(count(EventKind::WorkerStopped), 1);
-    assert_eq!(count(EventKind::TaskEnqueued), 6);
-    assert_eq!(count(EventKind::TaskMaterialized), 6);
-    assert_eq!(count(EventKind::TaskCompleted), 3);
+    assert_eq!(count(EventKind::TaskEnqueued), 7);
+    assert_eq!(count(EventKind::TaskMaterialized), 7);
+    assert_eq!(count(EventKind::TaskCompleted), 4);
     assert_eq!(count(EventKind::TaskPanicked), 2);
     assert_eq!(count(EventKind::TaskCanceled), 1);
     assert_eq!(count(EventKind::TaskPollStarted), count(EventKind::TaskPollFinished));
@@ -546,8 +632,9 @@ fn assert_primary_events(decoded: &DecodedSnapshot, primary: &RuntimeSnapshot) {
         .iter()
         .filter_map(|(kind, task, _)| (*kind == EventKind::TaskSpawned).then_some(*task))
         .collect();
-    assert_eq!(spawned.len(), 6);
+    assert_eq!(spawned.len(), 7);
     let expected_terminals = [
+        EventKind::TaskCompleted,
         EventKind::TaskCompleted,
         EventKind::TaskCompleted,
         EventKind::TaskCompleted,
@@ -662,6 +749,7 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
     exercise_queued_factory_destructor_panic_runtime();
     exercise_block_on_metadata_runtime();
     exercise_multiworker_placement_runtime();
+    exercise_runtime_identity_and_idle_worker();
     let (_, runtime_snapshot) = capture();
     let arty_runtimes: Vec<_> = runtime_snapshot.runtimes.iter().filter(|entry| entry.name == "arty").collect();
 

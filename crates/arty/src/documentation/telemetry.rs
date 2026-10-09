@@ -49,6 +49,7 @@
 //! let runtime = Runtime::builder()
 //!     .workers(WorkersPolicy::exactly(1))
 //!     .build()?;
+//! let runtime_id = runtime.id();
 //! runtime.scheduler().block_on(async |_| ())?;
 //! runtime.stop()?;
 //!
@@ -60,14 +61,12 @@
 //!     .find(|entry| entry.id == source::ID)
 //!     .expect("Arty registers the runtime diagnostics source");
 //! let diagnostics = seismograph_runtime::snapshot::decode(&runtime_source.data)?;
-//! assert_eq!(
-//!     diagnostics
-//!         .runtimes
-//!         .last()
-//!         .expect("the Arty runtime is retained in diagnostics")
-//!         .name,
-//!     "arty"
-//! );
+//! let runtime_diagnostics = diagnostics
+//!     .runtimes
+//!     .iter()
+//!     .find(|entry| entry.id.get() == runtime_id.get())
+//!     .expect("the public Arty identity matches its retained diagnostics");
+//! assert_eq!(runtime_diagnostics.name, "arty");
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

@@ -103,10 +103,27 @@ use snapshot::{Counters, Runtime, RuntimeState, Snapshot, Task, Worker, WorkerSt
 
 mod activity;
 
+/// Allocates a process-monotonic task type descriptor identity.
+///
+/// Instrumented runtimes that contribute to this crate's shared process source
+/// must allocate descriptors here rather than maintaining runtime-local
+/// counters. Callers remain responsible for caching stable descriptors for
+/// reusable concrete types.
+///
+/// # Panics
+///
+/// Panics if the process exhausts all nonzero `u64` descriptor identities.
+#[must_use]
+pub fn allocate_type_descriptor_id() -> TypeDescriptorId {
+    TypeDescriptorId::from_raw(next_id(&NEXT_TYPE_DESCRIPTOR_ID).get())
+        .expect("next_id always returns a nonzero type descriptor identifier")
+}
+
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
 static ADDRESS_LOOKUPS: OnceLock<Mutex<HashMap<u64, snapshot::AddressLookup>>> = OnceLock::new();
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
@@ -942,6 +959,13 @@ mod tests {
 
     fn type_descriptor_id(value: u64) -> TypeDescriptorId {
         TypeDescriptorId::from_raw(value).unwrap()
+    }
+
+    #[test]
+    fn allocated_type_descriptors_are_process_monotonic() {
+        let first = allocate_type_descriptor_id();
+        let second = allocate_type_descriptor_id();
+        assert!(first.get() < second.get());
     }
 
     fn source_snapshot() -> Snapshot {
