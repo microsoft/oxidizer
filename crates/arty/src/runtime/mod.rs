@@ -43,7 +43,9 @@ pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+mod identity;
 mod operations;
+pub(crate) mod seismograph;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -56,6 +58,8 @@ pub use config::{BlockingPoolPolicy, WorkersPolicy};
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
+#[doc(inline)]
+pub use identity::RuntimeId;
 #[doc(inline)]
 pub use operations::RuntimeOperations;
 

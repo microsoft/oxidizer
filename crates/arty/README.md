@@ -115,8 +115,8 @@ The [guides][__link16] explain Arty’s capabilities in more detail:
   stable task placement and explicit relocation of values.
 * [Time][__link21] explains worker-driven timers, timeouts,
   and controlled time in tests.
-* [Telemetry][__link22] explains runtime events
-  and links to [`observed`][__link23] for further details.
+* [Telemetry][__link22] explains application events
+  through [`observed`][__link23] and automatic runtime diagnostics through [`seismograph`][__link24].
 
 The `documentation` module is included only for docs.rs builds and
 doc-test collection with all documentation features, including `test-util`;
@@ -127,9 +127,9 @@ it is not part of the public API available to applications.
 The default feature set enables `rt` and `macros`.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
-* **`macros`** - Enables [`main`][__link24] and [`test`][__link25], and implies `rt`.
+* **`macros`** - Enables [`main`][__link25] and [`test`][__link26], and implies `rt`.
 * **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link26] with `time`.
+* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link27] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -138,7 +138,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGTvrvo-fV-8bX71dk0Y2kEQby4ruQUuQ1Kgb3ChN6fCifzRhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbne2Z04kEVBUblC9SRHZF_Qwb3wZfxFR-rG8b0QwoSvgMUIJhZISCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjCCa3NlaXNtb2dyYXBoZTAuMi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
@@ -156,9 +156,10 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link21]: https://docs.rs/arty/0.4.0/arty/?search=documentation::time
  [__link22]: https://docs.rs/arty/0.4.0/arty/?search=documentation::telemetry
  [__link23]: https://crates.io/crates/observed/0.27.0
- [__link24]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
- [__link25]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
- [__link26]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
+ [__link24]: https://crates.io/crates/seismograph/0.2.0
+ [__link25]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
+ [__link26]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
+ [__link27]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
  [__link3]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link4]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
  [__link5]: https://docs.rs/arty/0.4.0/arty/?search=runtime::Runtime

@@ -8,10 +8,11 @@ use std::thread::ThreadId;
 
 use performables::arc::Arc;
 
-use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
+use crate::runtime::seismograph::{TaskDescriptor, TaskTelemetryPlacement};
 use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::{Error, RuntimeId};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -41,6 +42,10 @@ impl DispatcherClient {
         self.core.owns(thread)
     }
 
+    pub(crate) fn runtime_id(&self) -> RuntimeId {
+        self.core.runtime_id()
+    }
+
     pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
         self.core.shutdown_signal()
     }
@@ -61,6 +66,10 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn_on_worker(worker_index, future_factory)
+    }
+
+    pub(crate) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
+        self.core.register_task::<F>(worker_index)
     }
 }
 
@@ -88,6 +97,15 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_with_descriptor<FF, F, R>(&self, descriptor: TaskDescriptor, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_with_descriptor(descriptor, future_factory)
     }
 
     pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, make_factory: M) -> Vec<JoinHandle<R>>

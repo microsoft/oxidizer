@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime telemetry through [`observed`].
+//! Runtime telemetry through [`observed`] and [`seismograph`].
 //!
 //! Arty emits runtime events through an [`observed::Sink`]. The default sink is
 //! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
@@ -18,6 +18,57 @@
 //! while polling. Blocking callbacks and unrelated threads do not inherit that
 //! context automatically. A task cancelled at shutdown need not emit an outcome
 //! event, so task events are not an exactly-once completion record.
+//!
+//! Arty also registers every runtime, async worker, and async task with
+//! [`seismograph`]. Seismograph records worker/thread association, placement,
+//! materialization, poll duration, and exactly one completed, panicked, or
+//! cancelled terminal state. Enable its `runtime_tasks` recording policy for
+//! high-frequency task events; runtime metadata and counters remain available
+//! in snapshots when event recording is disabled.
+//!
+//! Applications configuring recording and decoding runtime diagnostics need
+//! direct dependencies on `seismograph` and `seismograph_runtime`:
+//!
+//! ```sh
+//! cargo add seismograph seismograph_runtime
+//! ```
+//!
+//! Enable runtime-task events before starting runtimes, then capture and decode
+//! a process snapshot:
+//!
+//! ```
+//! use arty::runtime::{Runtime, WorkersPolicy};
+//! use seismograph::recorder::{Configuration, RecordingPolicy};
+//! use seismograph::snapshot::SnapshotOptions;
+//! use seismograph_runtime::snapshot::source;
+//!
+//! seismograph::recorder(Configuration {
+//!     runtime_tasks: RecordingPolicy::all(false),
+//!     ..Configuration::default()
+//! });
+//! let runtime = Runtime::builder()
+//!     .workers(WorkersPolicy::exactly(1))
+//!     .build()?;
+//! let runtime_id = runtime.id();
+//! runtime.scheduler().block_on(async |_| ())?;
+//! runtime.stop()?;
+//!
+//! let snapshot = seismograph::snapshot(SnapshotOptions::default())?;
+//! let decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
+//! let runtime_source = decoded
+//!     .sources
+//!     .iter()
+//!     .find(|entry| entry.id == source::ID)
+//!     .expect("Arty registers the runtime diagnostics source");
+//! let diagnostics = seismograph_runtime::snapshot::decode(&runtime_source.data)?;
+//! let runtime_diagnostics = diagnostics
+//!     .runtimes
+//!     .iter()
+//!     .find(|entry| entry.id.get() == runtime_id.get())
+//!     .expect("the public Arty identity matches its retained diagnostics");
+//! assert_eq!(runtime_diagnostics.name, "arty");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 //!
 //! Routine classified runtime fields use the `arty` / `SystemMetadata`
 //! identifier when configuring redaction. Panic diagnostics use the separate

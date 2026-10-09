@@ -11,6 +11,7 @@ use std::task::{Context, Poll};
 use observed::context::Transfer;
 use observed::{Sink, emit};
 
+use crate::runtime::seismograph::TaskTelemetryPlacement;
 use crate::runtime::telemetry::events::TaskPanicked;
 
 pub(crate) type Panic = Box<dyn Any + Send + 'static>;
@@ -96,24 +97,27 @@ pub(super) struct TaskFactory<F> {
     inner: Option<F>,
     enrichment: Option<Transfer>,
     sink: Option<Sink>,
+    telemetry: Option<TaskTelemetryPlacement>,
 }
 
 impl<F> TaskFactory<F> {
-    pub(super) fn new(inner: F, enrichment: Transfer, sink: Sink) -> Self {
+    pub(super) fn new(inner: F, enrichment: Transfer, sink: Sink, telemetry: Option<TaskTelemetryPlacement>) -> Self {
         Self {
             inner: Some(inner),
             enrichment: Some(enrichment),
             sink: Some(sink),
+            telemetry,
         }
     }
 
-    pub(super) fn into_parts(mut self) -> (F, Transfer, Sink) {
+    pub(super) fn into_parts(mut self) -> (F, Transfer, Sink, Option<TaskTelemetryPlacement>) {
         (
             self.inner.take().expect("a queued factory is consumed exactly once"),
             self.enrichment
                 .take()
                 .expect("a queued factory retains enrichment until invocation"),
             self.sink.take().expect("a queued factory retains its sink until invocation"),
+            self.telemetry.take(),
         )
     }
 }
@@ -129,6 +133,9 @@ impl<F> Drop for TaskFactory<F> {
             .expect("a queued factory retains enrichment until disposal")
             .apply_current_thread();
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
+            if let Some(telemetry) = self.telemetry.take() {
+                telemetry.panicked();
+            }
             emit!(
                 self.sink.as_ref().expect("a queued factory retains its sink until disposal"),
                 TaskPanicked
@@ -209,7 +216,7 @@ mod tests {
             }
 
             let sink = Sink::noop();
-            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context(), sink));
+            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context(), sink, None));
         }));
         result.unwrap();
         assert!(dropped.load(std::sync::atomic::Ordering::Acquire));

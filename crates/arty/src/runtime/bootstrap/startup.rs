@@ -23,6 +23,7 @@ use crate::runtime::context::RuntimeBuiltins;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::seismograph::{RuntimeTelemetry, WorkerTelemetry};
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
@@ -77,8 +78,10 @@ pub(in crate::runtime) fn build(
             }
         );
     })?;
+    let (runtime_telemetry, worker_telemetries) =
+        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()), sink.clone());
 
-    for (worker_index, processor) in processors.into_iter().enumerate() {
+    for ((worker_index, processor), worker_telemetry) in processors.into_iter().enumerate().zip(worker_telemetries) {
         let (command_tx, command_rx) = channel::unbounded();
         let (worker_endpoint_tx, worker_endpoint_rx) = channel::unbounded();
         let (start_tx, start_rx) = channel::oneshot();
@@ -100,6 +103,7 @@ pub(in crate::runtime) fn build(
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
+                worker_telemetry,
             }
             .start(),
         );
@@ -123,6 +127,7 @@ pub(in crate::runtime) fn build(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
         shutdown_started,
+        runtime_telemetry,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -168,6 +173,7 @@ struct AsyncWorkerStartInfo {
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
     sink: Sink,
+    worker_telemetry: WorkerTelemetry,
 }
 
 impl AsyncWorkerStartInfo {
@@ -195,6 +201,7 @@ impl AsyncWorkerStartInfo {
             blocking_pools,
             shutdown_started,
             sink,
+            worker_telemetry,
         } = self;
 
         let worker_sink = sink.clone();
@@ -202,6 +209,7 @@ impl AsyncWorkerStartInfo {
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
+        worker_telemetry.attach_current_thread();
 
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
@@ -210,7 +218,7 @@ impl AsyncWorkerStartInfo {
         // Use shared blocking worker pool if shared, otherwise use a new one
         let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
 
-        let signal = Arc::new(WorkerSignal::default());
+        let signal = Arc::new(WorkerSignal::with_telemetry(worker_telemetry.handle()));
 
         worker_endpoint_tx
             .send((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
@@ -272,6 +280,7 @@ impl AsyncWorkerStartInfo {
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
         blocking_worker.join();
+        drop(worker_telemetry);
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }
