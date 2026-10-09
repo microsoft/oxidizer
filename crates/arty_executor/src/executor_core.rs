@@ -16,6 +16,7 @@ use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use tick::SimpleClock;
 
+use crate::wake::WakeShared;
 use crate::{
     BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
     WakeSignal,
@@ -67,9 +68,8 @@ struct ReentrancySafeState {
     /// task itself knowing the specific type of the future and the type of the result it produces.
     task_storage: RawBlindPool,
 
-    /// In shutdown mode (`Some`), all tasks are considered completed and the only thing we do is
-    /// wait for them to become inert (which may be driven by uncontrollable actions of foreign
-    /// threads). New tasks can no longer be scheduled in this mode (a panic will occur). If the
+    /// In shutdown mode (`Some`), all tasks are cancelled and retired. New tasks can no longer be
+    /// scheduled in this mode (a panic will occur). If the
     /// deadline is reached without a successful shutdown, we terminate the process and try to report
     /// the underlying reasons.
     shutdown_deadline: Option<Instant>,
@@ -98,9 +98,8 @@ struct ExclusiveState {
     /// that `TaskRef` is a thin wrapper around a pointer.
     inactive: HashSet<TaskRef, BuildPointerHasher>,
 
-    /// These tasks have completed and we are waiting for them to become inert before we can release
-    /// their resources. Tasks can sit here forever, although that suggests some resource leak and
-    /// will degrade executor cycle performance. These tasks block the shutdown process.
+    /// Tasks that completed during this cycle and can be released after their independently pooled
+    /// wake state has been retired.
     completed: VecDeque<TaskRef>,
 
     /// Used to measure the time spent during/between executor cycle processing and during shutdown.
@@ -118,26 +117,9 @@ struct ExclusiveState {
 /// We could just put all this stuff into `Executor` itself but let's follow the pattern above.
 #[derive(Debug)]
 struct SharedState {
-    /// The primary mechanism used to signal that a task has awoken and needs to be moved from the
-    /// inactive queue to the active queue. We ONLY add entries to this list if we can do so without
-    /// waiting on the lock, to minimize time we spend blocked on cross-thread synchronization. We
-    /// also only add entries if we do not need to increase the capacity, to avoid allocating the new
-    /// data structure on a different thread from the consuming thread (and therefore potentially in
-    /// a different memory region, which would lead to inefficiency). If an entry cannot be added to
-    /// this queue for any reason, the `probe_embedded_wake_signals` is set instead and the next cycle
-    /// of the executor will probe the awakened status of every inactive task.
-    ///
-    /// This is a `VecDeque` because we need to be able to preallocate the capacity (insertions are
-    /// always allocation-free because they may come from a different thread, so we cannot allocate).
-    awakened: Arc<Mutex<VecDeque<TaskRef>>>,
-
-    /// When a waker cannot lock the `awakened` queue or when the queue is full, it will set this
-    /// flag to indicate that the awakened status of every inactive task should be directly probed.
-    probe_embedded_wake_signals: Arc<AtomicBool>,
-
-    /// This is used to wake up the owner of the executor when more work has
-    /// been enqueued for the executor and calling `execute_cycle()` is desirable.
-    owner_waker: task::Waker,
+    /// Queue, probe flag, owner notification, and independent wake-state pool shared by every
+    /// task in this executor.
+    wake: Arc<WakeShared>,
 
     /// If the executor fails to shut down after this much time has passed from the start of the
     /// shutdown process, we panic and report whatever debug information we have available.
@@ -190,9 +172,11 @@ impl ExecutorCore {
                 last_cycle_ended: None,
             }),
             shared: SharedState {
-                awakened: Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
-                probe_embedded_wake_signals: Arc::new(AtomicBool::new(false)),
-                owner_waker,
+                wake: Arc::new(WakeShared::new(
+                    Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
+                    Arc::new(AtomicBool::new(false)),
+                    owner_waker,
+                )),
                 shutdown_timeout,
                 shutdown_timeout_behavior,
             },
@@ -229,12 +213,7 @@ impl ExecutorCore {
             unsafe { task.cast_type_erased_task() }.into_shared(),
         );
 
-        let wake_signal = WakeSignal::new(
-            Arc::clone(&self.shared.awakened),
-            Arc::clone(&self.shared.probe_embedded_wake_signals),
-            self.shared.owner_waker.clone(),
-            task_ref,
-        );
+        let wake_signal = WakeSignal::new_pooled(Arc::clone(&self.shared.wake), task_ref);
 
         // SAFETY: The task is alive (we own it and just created it) and we are on the thread
         // where it was created (because we just created it). The executor is the only thing that
@@ -338,13 +317,16 @@ impl ExecutorCore {
             // First, we simply drain the "awakened" queue, which is the preferred
             // way to wake up tasks. This is a fast TaskRef move, so the lock here is
             // hopefully short and mostly uncontended.
-            let mut awakened = self.shared.awakened.lock().expect(ERR_POISONED_LOCK);
+            let mut awakened = self.shared.wake.awakened.lock().expect(ERR_POISONED_LOCK);
 
             if !awakened.is_empty() {
                 // Process each contiguous slice in FIFO order, avoiding per-task ring-buffer
                 // bookkeeping. TaskRef is Copy, so clearing once also avoids drain cleanup.
                 for slice in <[_; 2]>::from(awakened.as_slices()) {
                     for &task_ref in slice {
+                        // SAFETY: Retirement removes every queued notification before task
+                        // storage is released, so every queued reference still targets a live task.
+                        unsafe { task_ref.as_task() }.clear_queued_notification();
                         // It is theoretically possible for a completed task to be awakened, in which case
                         // we do nothing. We detect this by ensuring that the task was in the "inactive" set
                         // before we react to the wake notification. This also eliminates spurious wakes.
@@ -368,7 +350,7 @@ impl ExecutorCore {
         //
         // We use Acquire ordering as we are acquiring the synchronization block for the
         // wake-up flags inside the task wake signals.
-        if !self.shared.probe_embedded_wake_signals.swap(false, atomic::Ordering::Acquire) {
+        if !self.shared.wake.probe_embedded_wake_signals.swap(false, atomic::Ordering::Acquire) {
             return;
         }
 
@@ -409,11 +391,8 @@ impl ExecutorCore {
 
             match task.poll() {
                 task::Poll::Ready(()) => {
-                    // The task has completed, so we can move it to the completed list.
-                    // It will sit there until it signals `is_inert()` at which point it is dropped.
-                    // It may sit in the `completed` list essentially forever, for example if
-                    // something is still holding its waker. We generally hope this is not the
-                    // case, though, since that would be wasteful, but we allow it technically.
+                    // The task has completed and retired its independently pooled wake state, so it
+                    // can move to the completed list for release at the end of this cycle.
                     state_exclusive.completed.push_back(task_ref);
                 }
                 task::Poll::Pending => {
@@ -453,8 +432,8 @@ impl ExecutorCore {
     fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
         let completed_before = state_exclusive.completed.len();
 
-        // We drop all completed tasks that are inert, which means they have
-        // 1) been polled to completion (or aborted); 2) no remaining demands on their resources.
+        // We drop all completed tasks after their completion/cancellation path has retired any
+        // independently held wake metadata.
         state_exclusive.completed.retain(|task_ref| {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
@@ -507,8 +486,8 @@ impl ExecutorCore {
         );
 
         !state_reentrant.new_tasks.is_empty()
-            || !self.shared.awakened.lock().expect(ERR_POISONED_LOCK).is_empty()
-            || self.shared.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed)
+            || !self.shared.wake.awakened.lock().expect(ERR_POISONED_LOCK).is_empty()
+            || self.shared.wake.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed)
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
@@ -528,12 +507,9 @@ impl ExecutorCore {
                 .expect("shutdown timeout must be representable as an Instant after shutdown starts"),
         );
 
-        // We call `abort()` on all tasks that we are canceling. This will drop the maximum amount
-        // of internal state such as any captured variables that may be holding on to join handles
-        // and/or wakers, making it possible to start dropping the tasks. Not all tasks become inert
-        // because of this - there may also be callers on other threads holding on to our wakers, in
-        // which case the shutdown process will take longer (up to infinity/timeout, e.g. if some
-        // external thread is holding on to a waker forever).
+        // We call `abort()` on every task being cancelled. This drops captured state and retires
+        // its pooled wake metadata, making retained external wakers inert without delaying task
+        // storage retirement.
 
         // Needed for split borrowing.
         let state_exclusive_real: &mut ExclusiveState = &mut state_exclusive;
@@ -616,7 +592,7 @@ impl ExecutorCore {
 
     #[cfg(debug_assertions)]
     #[cfg_attr(test, mutants::skip)] // Purely telemetry, nothing worth testing.
-    fn report_shutdown_diagnostics(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
+    fn report_shutdown_diagnostics(&self, _state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
         // There are different shutdown-blocking states possible with join handles:
         // 1. The join handle's owner is not awaiting it, they just put it in their pocket and
         //    never used it.
@@ -644,34 +620,6 @@ impl ExecutorCore {
         if let Some(blocking_join_handle_count) = NonZero::new(state_reentrant.result_events.len()) {
             eprintln!("{blocking_join_handle_count} total JoinHandles blocking shutdown (awaited or not)");
         }
-
-        // In addition to being blocked by join handles, we can simply be blocked by other resources
-        // of tasks being held by external parties. Most commonly this would be the wakers held by
-        // the targets of await operations started in these tasks. The general expectation is that
-        // when an awaited future is dropped (as is guaranteed by the shutdown process), it also
-        // clears all the state associated with that await and drops any registered wakers. However,
-        // if the code being awaited is defective or sloppy with its resource management, it may
-        // fail to do so.
-        //
-        // The complexity of the matter here is that a task may await many things over its
-        // lifecycle - one task can be the source of many wakers. Therefore, in debug builds we
-        // wrap the true waker in a diagnostic waker, remembering the backtrace identifying where
-        // it was created. These are what we log here - where was every (remaining) waker cloned.
-        state_exclusive.completed.iter().for_each(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
-            // where it was created (because we just created it). The executor is the only thing that
-            // creates references to the tasks and it only ever creates temporary non-overlapping
-            // references narrowly bounded to individual code blocks, ensuring that aliasing rules
-            // are upheld. Anything outside `ExecutorCore` only passes `TaskRef` by value, never
-            // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
-            let task = unsafe { task_ref.as_task() };
-
-            task.inspect_waker_backtraces(&mut |bt| {
-                // We write to standard error stream because the logging system is going to stop
-                // functioning shortly, so any data written to logs might not survive.
-                eprintln!("Task waker still alive at shutdown. Backtrace of where the waker was created: {bt}");
-            });
-        });
     }
 }
 

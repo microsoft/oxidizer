@@ -50,8 +50,10 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor.
 ///
-/// The executor will only return [`CycleOutcome::Shutdown`] when none of its resources are
-/// referenced any more (e.g. all join handles have been dropped).
+/// The executor returns [`CycleOutcome::Shutdown`] after task storage is retired and all pooled
+/// result channels are no longer borrowed (for example, all join handles have been dropped).
+/// Retained task wakers do not delay shutdown: they keep only independently pooled metadata and
+/// become inert when their task completes or is cancelled.
 ///
 /// ## Troubleshooting shutdown failure
 ///
@@ -710,8 +712,8 @@ mod tests {
     }
 
     #[test]
-    fn completed_task_waker_survives_until_released() {
-        // SAFETY: The retained waker is released before the final shutdown cycle.
+    fn completed_task_waker_is_inert_after_executor_shutdown() {
+        // SAFETY: Shutdown reaches its terminal cycle before the executor is dropped.
         let executor = unsafe { Executor::builder().build() };
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
@@ -727,13 +729,11 @@ mod tests {
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         executor.begin_shutdown();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
 
         waker.borrow().as_ref().unwrap().wake_by_ref();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        drop(waker);
-
-        assert_eq!((executor.execute_cycle(), polls.get()), (CycleOutcome::Shutdown, 1));
+        assert_eq!(polls.get(), 1);
     }
 
     #[test]
