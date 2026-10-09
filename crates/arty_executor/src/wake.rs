@@ -408,12 +408,16 @@ fn enqueue_wake(
 }
 
 fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_ref: TaskRef) {
-    if queued.load(atomic::Ordering::Acquire) && queued.swap(false, atomic::Ordering::AcqRel) {
-        queue
-            .lock()
-            .expect("wake queue is never held while invoking user code")
-            .retain(|queued_task_ref| *queued_task_ref != task_ref);
+    if !queued.load(atomic::Ordering::Acquire) {
+        return;
     }
+    if !queued.swap(false, atomic::Ordering::AcqRel) {
+        return;
+    }
+    queue
+        .lock()
+        .expect("wake queue is never held while invoking user code")
+        .retain(|queued_task_ref| *queued_task_ref != task_ref);
 }
 
 struct WakerStateRef(NonNull<WakerState>);
@@ -704,19 +708,24 @@ mod tests {
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let shared = Arc::new(WakeShared {
+            awakened: Arc::clone(&awakened_queue),
+            probe_embedded_wake_signals: Arc::new(AtomicBool::new(false)),
+            parent_waker: Waker::noop().clone(),
+            waker_states: Mutex::new(Pool::builder().chunk_size(1).max_chunks(1).build()),
+        });
         let retained = {
-            let signal = pin!(WakeSignal::new(
-                Arc::clone(&awakened_queue),
-                Arc::new(AtomicBool::new(false)),
-                Waker::noop().clone(),
-                fake_task_ref
-            ));
+            let signal = pin!(WakeSignal::new_pooled(Arc::clone(&shared), fake_task_ref));
             // SAFETY: The signal remains pinned until the clone owns independent state.
             unsafe { signal.as_ref().waker() }
         };
 
         retained.wake_by_ref();
         assert!(awakened_queue.lock().unwrap().is_empty());
+        drop(retained);
+
+        let state = WakerState::new(Arc::downgrade(&shared), fake_task_ref);
+        drop(shared.waker_states.lock().unwrap().try_alloc_box(state).unwrap());
     }
 
     #[test]
@@ -756,6 +765,18 @@ mod tests {
         assert!(enqueue_wake(&queue, &queued, fake_task_ref, Waker::noop(), || false));
         assert!(queue.lock().unwrap().is_empty());
         assert!(!queued.load(atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn untracked_notification_is_not_removed() {
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+        let queue = Arc::new(Mutex::new(VecDeque::from([fake_task_ref])));
+        let queued = AtomicBool::new(false);
+
+        remove_queued_notification(&queue, &queued, fake_task_ref);
+
+        assert_eq!(queue.lock().unwrap().len(), 1);
     }
 
     #[test]
