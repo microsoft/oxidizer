@@ -672,17 +672,25 @@ impl Drop for ExecutorCore {
             state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty();
 
         if !shutdown_complete {
-            for task_ref in state_reentrant
-                .new_tasks
+            for task_ref in state_reentrant.new_tasks.drain(..) {
+                // SAFETY: New tasks have not been initialized, so no waker or other external
+                // reference can point into them. Each appears exactly once in `new_tasks`.
+                unsafe { task_ref.release() };
+            }
+
+            for task_ref in state_exclusive
+                .active
                 .drain(..)
-                .chain(state_exclusive.active.drain(..))
                 .chain(state_exclusive.inactive.drain())
                 .chain(state_exclusive.completed.drain(..))
             {
-                // SAFETY: Each task has exactly one entry across these canonical scheduling
-                // collections. Dirty executor teardown violates the public lifetime contract, but
-                // reclaiming those unique owners preserves the previous owning-pool drop behavior.
-                unsafe { task_ref.release() };
+                // SAFETY: Tasks in these collections have been initialized and remain alive.
+                let task = unsafe { task_ref.as_task() };
+                if task.is_inert() {
+                    // SAFETY: `is_inert` proves no external reference still needs the embedded
+                    // wake signal. Each task appears exactly once across these collections.
+                    unsafe { task_ref.release() };
+                }
             }
         }
 
@@ -790,7 +798,6 @@ thread_local! {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::future::pending;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::Pin;
     use std::rc::Rc;
@@ -816,61 +823,65 @@ mod tests {
         }
     }
 
-    struct PoolOnlyTask {
+    struct DirtyDropTask {
         _signal: SignalOnDrop,
+        inert: bool,
     }
 
-    impl TypeErasedTask for PoolOnlyTask {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    impl TypeErasedTask for DirtyDropTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()> {
-            unreachable!("pool-only dirty-drop fixture is never polled")
+            unreachable!("dirty-drop fixture is never polled")
         }
 
         fn is_inert(&self) -> bool {
-            unreachable!("pool-only dirty-drop fixture is never inspected")
+            self.inert
         }
 
         fn consume_awakened(&self) -> bool {
-            unreachable!("pool-only dirty-drop fixture is never awakened")
+            unreachable!("dirty-drop fixture is never awakened")
         }
 
         fn abort(self: Pin<&Self>) {
-            unreachable!("pool-only dirty-drop fixture is never aborted")
+            unreachable!("dirty-drop fixture is never aborted")
         }
 
         unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
-            unreachable!("pool-only dirty-drop fixture is never initialized")
+            unreachable!("dirty-drop fixture is never initialized")
         }
 
         #[cfg(debug_assertions)]
         fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
-            unreachable!("pool-only dirty-drop fixture is never inspected")
+            unreachable!("dirty-drop fixture is never inspected")
         }
     }
 
-    fn assert_dirty_drop_reclaims_task(location: TaskLocation) {
+    fn dirty_drop_fixture(location: TaskLocation, inert: bool) -> (ExecutorCore, TaskRef, Rc<Cell<bool>>) {
         let dropped = Rc::new(Cell::new(false));
 
         // SAFETY: This test intentionally violates the graceful-shutdown requirement to verify
-        // that dirty teardown reclaims the task before reporting the programming error.
+        // dirty-teardown ownership behavior before the programming error is reported.
         let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
-        let signal = SignalOnDrop(Rc::clone(&dropped));
-        drop(executor.add_task(async move {
-            pending::<()>().await;
-            drop(signal);
-        }));
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(DirtyDropTask {
+            _signal: SignalOnDrop(Rc::clone(&dropped)),
+            inert,
+        });
+        let task_ref = TaskRef::new(task);
 
-        if !matches!(location, TaskLocation::New) {
-            let task_ref = executor.reentrancy_safe.borrow_mut().new_tasks.pop_front().unwrap();
-            let mut exclusive = executor.exclusive.borrow_mut();
-            match location {
-                TaskLocation::New => unreachable!("handled without moving the task"),
-                TaskLocation::Active => exclusive.active.push_back(task_ref),
-                TaskLocation::Inactive => {
-                    exclusive.inactive.insert(task_ref);
-                }
-                TaskLocation::Completed => exclusive.completed.push_back(task_ref),
+        match location {
+            TaskLocation::New => executor.reentrancy_safe.borrow_mut().new_tasks.push_back(task_ref),
+            TaskLocation::Active => executor.exclusive.borrow_mut().active.push_back(task_ref),
+            TaskLocation::Inactive => {
+                executor.exclusive.borrow_mut().inactive.insert(task_ref);
             }
+            TaskLocation::Completed => executor.exclusive.borrow_mut().completed.push_back(task_ref),
         }
+
+        (executor, task_ref, dropped)
+    }
+
+    fn assert_dirty_drop_reclaims_task(location: TaskLocation) {
+        let (executor, _task_ref, dropped) = dirty_drop_fixture(location, true);
 
         let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
 
@@ -900,19 +911,26 @@ mod tests {
 
     #[test]
     fn dirty_drop_reclaims_task_without_result_event() {
-        let dropped = Rc::new(Cell::new(false));
-
-        // SAFETY: This test intentionally violates the graceful-shutdown requirement to verify
-        // that dirty teardown consults task storage independently of result-event storage.
-        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
-        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PoolOnlyTask {
-            _signal: SignalOnDrop(Rc::clone(&dropped)),
-        });
-        executor.reentrancy_safe.borrow_mut().new_tasks.push_back(TaskRef::new(task));
+        let (executor, _task_ref, dropped) = dirty_drop_fixture(TaskLocation::New, true);
 
         let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
 
         assert!(result.is_err());
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn dirty_drop_retains_non_inert_task() {
+        let (executor, task_ref, dropped) = dirty_drop_fixture(TaskLocation::Inactive, false);
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(!dropped.get());
+
+        // SAFETY: Dirty teardown retained this unique raw owner, and the fixture has no external
+        // references. Reconstructing it exactly once prevents the test itself from leaking.
+        unsafe { task_ref.release() };
         assert!(dropped.get());
     }
 
