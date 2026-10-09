@@ -352,6 +352,8 @@ mod tests {
     use std::future::{Ready, pending};
     use std::pin::pin;
     use std::rc::Rc;
+    #[cfg(not(debug_assertions))]
+    use std::sync::Arc;
     use std::task::Waker;
 
     use events_once::{Disconnected, RawLocalEventPool};
