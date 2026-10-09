@@ -105,6 +105,13 @@ exclude_re = [
     'crates/seismograph_cli/src/report.rs:\d+:\d+: replace slice_kind_class -> &.static str with (""|"xyzzy")$',
     'crates/seismograph_cli/src/report.rs:1878:\d+: replace (\+|/|\*) with (-|\*|%|\+|/) in render_thread_flow_diagram$',
 
+    # Native ARM reproduction: subtracting the small-class index turns a 64KiB
+    # fixture into 8TiB allocations; the test process exceeded 55GiB RSS.
+    'crates/rallocator/src/classes.rs:103:34: replace \+ with - in Request::with_size$',
+    # Removing the incoming drain spins flush indefinitely with queued returns.
+    # Both exact mutations exhausted the native ARM test timeout.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace Core::drain with \(\)$',
+
     # Known hanging mutations from PR #764. Keep other mutations in these functions.
     # Reconfirmed native Linux deadlocks: invert combiner admission, prevent probe
     # progress, drain a retained tail, or route every cache message to one bucket.
@@ -132,9 +139,6 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
 
     # Windows host only.
-    # Removing the incoming drain strands remote returns; the native Windows
-    # mutation run times out. Keep every arithmetic and queue-budget mutation.
-    'crates/rallocator/src/core.rs:\d+:\d+: replace Core::drain with \(\)$',
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
     "\\brun_perf\\b",
