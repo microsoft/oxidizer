@@ -1,0 +1,87 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Self-wake notifications queued before a panic cannot repoll a completed future.
+
+#![cfg(feature = "rt")]
+#![cfg(test)]
+
+use std::pin::Pin;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
+
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use thread_aware::Unaware;
+
+testing_aids::init_tracing!();
+
+struct SelfWakePanic {
+    polls: Arc<AtomicUsize>,
+    drops: Arc<AtomicUsize>,
+    owner: std::thread::ThreadId,
+    _local: Rc<()>,
+}
+
+impl Future for SelfWakePanic {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        for _ in 0..8 {
+            cx.waker().wake_by_ref();
+            let consuming = cx.waker().clone();
+            consuming.wake();
+        }
+        panic!("self-waking task poll");
+    }
+}
+
+impl Drop for SelfWakePanic {
+    fn drop(&mut self) {
+        assert_eq!(std::thread::current().id(), self.owner);
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
+    let repetitions = if cfg!(miri) { 2 } else { 32 };
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+        .build()
+        .unwrap();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    runtime
+        .scheduler()
+        .block_on({
+            let polls = Arc::clone(&polls);
+            let drops = Arc::clone(&drops);
+            async move |cx| {
+                for _ in 0..repetitions {
+                    let tasks = cx.scheduler().spawn_everywhere(
+                        (cx.clone(), Unaware((Arc::clone(&polls), Arc::clone(&drops)))),
+                        |(child, Unaware((polls, drops)))| SelfWakePanic {
+                            polls,
+                            drops,
+                            owner: child.thread().id(),
+                            _local: Rc::new(()),
+                        },
+                    );
+                    for task in tasks {
+                        assert!(task.await.unwrap_err().is_panic());
+                    }
+                    for task in cx.scheduler().spawn_everywhere((), |()| async { 42 }) {
+                        assert_eq!(task.await.unwrap(), 42);
+                    }
+                }
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+    assert_eq!(polls.load(Ordering::SeqCst), 2 * repetitions);
+    assert_eq!(drops.load(Ordering::SeqCst), 2 * repetitions);
+}
