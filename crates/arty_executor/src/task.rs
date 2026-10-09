@@ -170,6 +170,7 @@ where
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes infinite loops as executor will never shut down.
+    #[cfg(test)]
     fn is_inert(&self) -> bool {
         // SAFETY: The executor is the only owner that mutates the payload. Completion and abort
         // retire independent wake state before clearing it, so an absent payload is sufficient to
@@ -310,6 +311,7 @@ pub(crate) trait TypeErasedTask {
     /// Completion and cancellation retire independently pooled wake metadata before releasing
     /// task storage. Retained wakers may remain alive afterward, but they no longer reference the
     /// task and therefore do not keep this value non-inert.
+    #[cfg(test)]
     fn is_inert(&self) -> bool;
 
     /// Swaps the task's "is awakened" flag to false and returns its previous value.
@@ -347,7 +349,7 @@ pub(crate) trait TypeErasedTask {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::future::Ready;
+    use std::future::{Ready, pending};
     use std::pin::pin;
     use std::rc::Rc;
     use std::task::Waker;
@@ -421,6 +423,40 @@ mod tests {
         } else {
             assert_eq!(result, task::Poll::Ready(Err(Disconnected)));
         }
+    }
+
+    #[test]
+    fn clear_queued_notification_forwards_to_the_wake_signal() {
+        let event_pool = pin!(RawLocalEventPool::<u64>::new());
+        // SAFETY: The task and receiver are dropped before their event pool.
+        let (tx, _rx) = unsafe { event_pool.as_ref().rent() };
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { crate::TaskRef::fake() };
+        let queue = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(1)));
+        let signal = WakeSignal::new(
+            Arc::clone(&queue),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Waker::noop().clone(),
+            fake_task_ref,
+        );
+        // SAFETY: The task is initialized once and remains pinned.
+        unsafe { task.initialize(signal) };
+        // SAFETY: Initialization populated the pinned wake-signal slot.
+        let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
+        // SAFETY: The signal remains pinned with the task.
+        let signal = unsafe { Pin::new_unchecked(signal) };
+        // SAFETY: The pinned signal remains alive for this borrow.
+        let waker = unsafe { signal.waker_ref() };
+        waker.wake_by_ref();
+        assert!(signal.has_queued_notification());
+
+        task.clear_queued_notification();
+
+        assert!(!signal.has_queued_notification());
+        drop(waker);
+        task.abort();
     }
 
     #[test]

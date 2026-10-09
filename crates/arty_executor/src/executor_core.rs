@@ -425,33 +425,14 @@ impl ExecutorCore {
 
         // We drop all completed tasks after their completion/cancellation path has retired any
         // independently held wake metadata.
-        state_exclusive.completed.retain(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
-            // where it was created (because we just created it). The executor is the only thing that
-            // creates references to the tasks and it only ever creates temporary non-overlapping
-            // references narrowly bounded to individual code blocks, ensuring that aliasing rules
-            // are upheld. Anything outside `ExecutorCore` only passes `TaskRef` by value, never
-            // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
-            let task = unsafe { task_ref.as_task() };
+        for task_ref in state_exclusive.completed.drain(..) {
+            // SAFETY: Draining removes each completed task exactly once, after its wake metadata
+            // has been retired by completion or cancellation.
+            unsafe { task_ref.release() };
+        }
 
-            if task.is_inert() {
-                // SAFETY: This is the only time we release this task because that only happens
-                // when it is removed from the "completed" set, which can only happen once. The
-                // executor is single-threaded, and `is_inert` guarantees no references remain.
-                unsafe { task_ref.release() };
-
-                false
-            } else {
-                true
-            }
-        });
-
-        let dropped_count = completed_before
-            .checked_sub(state_exclusive.completed.len())
-            .expect("collection cannot grow during item removal");
-
-        if dropped_count > 0 {
-            TASKS_DROPPED.with(|x| x.observe(dropped_count));
+        if completed_before > 0 {
+            TASKS_DROPPED.with(|x| x.observe(completed_before));
         }
     }
 
