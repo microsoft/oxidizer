@@ -1009,11 +1009,11 @@ mod tests {
         let target = fresh_owner();
         let observer = fresh_owner();
         // SAFETY: Both fresh endpoints remain persistent throughout this test.
-        let target_owner = unsafe { &*(target as *const Owner) };
+        let target_owner = unsafe { (target as *const Owner).as_ref().unwrap() };
         // SAFETY: The test exclusively leases the target core.
         let target_core = unsafe { &mut *target_owner.core_ptr() };
         // SAFETY: The observer is a distinct fresh persistent endpoint.
-        let observer_owner = unsafe { &*(observer as *const Owner) };
+        let observer_owner = unsafe { (observer as *const Owner).as_ref().unwrap() };
         // SAFETY: The test exclusively leases the distinct observer core.
         let observer_core = unsafe { &mut *observer_owner.core_ptr() };
         for (size, expected) in [(48, 48), (70_000, 131_072)] {
