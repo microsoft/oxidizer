@@ -15,10 +15,13 @@ use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistrati
 use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, register_runtime};
 
 static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
+static SCOPED_TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<&'static str, TypeDescriptorId>>> =
+    LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
 static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static LAST_TYPE_DESCRIPTOR: Cell<Option<(TypeId, TypeDescriptorId)>> = const { Cell::new(None) };
+    static LAST_SCOPED_TYPE_DESCRIPTOR: Cell<Option<(&'static str, TypeDescriptorId)>> = const { Cell::new(None) };
 }
 
 #[derive(Debug)]
@@ -79,15 +82,66 @@ impl RuntimeTelemetry {
         self.runtime_registration.stopped();
     }
 
-    pub(crate) fn task<T: 'static>(&self, worker_index: usize) -> TaskTelemetryPlacement {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> seismograph::recorder::runtime::RuntimeId {
+        self.runtime_registration.id()
+    }
+
+    pub(crate) fn register_task<T: 'static>(&self, worker_index: usize) -> TaskTelemetryRegistration {
+        self.register_task_with_descriptor(worker_index, TaskDescriptor::of::<T>())
+    }
+
+    pub(crate) fn register_task_with_descriptor(&self, worker_index: usize, descriptor: TaskDescriptor) -> TaskTelemetryRegistration {
         let worker = self
             .worker_handles
             .get(worker_index)
             .expect("task placement must identify a registered Arty worker")
             .clone();
-        let telemetry = TaskTelemetry::spawned::<T>(&self.runtime_handle);
-        telemetry.enqueued(Some(worker.id()));
-        TaskTelemetryPlacement { telemetry, worker }
+        let worker_id = worker.id();
+        let (telemetry, task) = TaskTelemetry::spawned(&self.runtime_handle, descriptor);
+        TaskTelemetryRegistration {
+            placement: TaskTelemetryPlacement { telemetry, worker },
+            enqueued: TaskEnqueued { task, worker_id },
+        }
+    }
+
+    pub(crate) fn task_enqueued(&self, enqueued: TaskEnqueued) {
+        let TaskEnqueued { task, worker_id } = enqueued;
+        self.runtime_handle.task_enqueued(task.id(), Some(worker_id));
+        task.woken();
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TaskDescriptor {
+    type_descriptor: TypeDescriptorId,
+    future_size_bytes: usize,
+}
+
+impl TaskDescriptor {
+    pub(crate) fn of<T: 'static>() -> Self {
+        Self {
+            type_descriptor: type_descriptor::<T>(),
+            future_size_bytes: size_of::<T>(),
+        }
+    }
+
+    pub(crate) fn of_scoped<T>() -> Self {
+        Self {
+            type_descriptor: scoped_type_descriptor::<T>(),
+            future_size_bytes: size_of::<T>(),
+        }
+    }
+}
+
+pub(crate) struct TaskTelemetryRegistration {
+    placement: TaskTelemetryPlacement,
+    enqueued: TaskEnqueued,
+}
+
+impl TaskTelemetryRegistration {
+    pub(crate) fn into_parts(self) -> (TaskTelemetryPlacement, TaskEnqueued) {
+        (self.placement, self.enqueued)
     }
 }
 
@@ -103,6 +157,11 @@ impl TaskTelemetryPlacement {
     }
 }
 
+pub(crate) struct TaskEnqueued {
+    task: TaskHandle,
+    worker_id: WorkerId,
+}
+
 #[derive(Debug)]
 pub(crate) struct TaskTelemetry {
     runtime: RuntimeHandle,
@@ -111,22 +170,20 @@ pub(crate) struct TaskTelemetry {
 }
 
 impl TaskTelemetry {
-    fn spawned<T: 'static>(runtime: &RuntimeHandle) -> Self {
-        let task = runtime.register_task_with_size(type_descriptor::<T>(), None, size_of::<T>());
-        Self {
-            runtime: runtime.clone(),
-            worker: None,
-            task: Some(task),
-        }
+    fn spawned(runtime: &RuntimeHandle, descriptor: TaskDescriptor) -> (Self, TaskHandle) {
+        let task = runtime.register_task_with_size(descriptor.type_descriptor, None, descriptor.future_size_bytes);
+        (
+            Self {
+                runtime: runtime.clone(),
+                worker: None,
+                task: Some(task.clone()),
+            },
+            task,
+        )
     }
 
     fn id(&self) -> TaskId {
         self.task.as_ref().expect("terminal tasks are never instrumented again").id()
-    }
-
-    fn enqueued(&self, worker_id: Option<WorkerId>) {
-        self.runtime.task_enqueued(self.id(), worker_id);
-        self.task.as_ref().expect("new tasks retain their task handle").woken();
     }
 
     pub(crate) fn materialized(&mut self, worker: WorkerHandle) {
@@ -136,7 +193,7 @@ impl TaskTelemetry {
         self.runtime.task_materialized(self.id(), worker_id);
     }
 
-    pub(crate) fn poll(&self) -> TaskPollGuard<'_> {
+    pub(crate) fn poll_started(&self) -> TaskPollGuard<'_> {
         let worker = self
             .worker
             .as_ref()
@@ -208,6 +265,23 @@ fn type_descriptor<T: 'static>() -> TypeDescriptorId {
         .entry(type_id)
         .or_insert_with(allocate_type_descriptor_id);
     LAST_TYPE_DESCRIPTOR.with(|cached| cached.set(Some((type_id, descriptor))));
+    descriptor
+}
+
+fn scoped_type_descriptor<T>() -> TypeDescriptorId {
+    let type_name = std::any::type_name::<T>();
+    if let Some(descriptor) = LAST_SCOPED_TYPE_DESCRIPTOR
+        .with(Cell::get)
+        .filter(|(cached, _)| *cached == type_name)
+    {
+        return descriptor.1;
+    }
+    let descriptor = *SCOPED_TYPE_DESCRIPTORS
+        .lock()
+        .expect("the scoped type descriptor cache is never held across user code")
+        .entry(type_name)
+        .or_insert_with(allocate_type_descriptor_id);
+    LAST_SCOPED_TYPE_DESCRIPTOR.with(|cached| cached.set(Some((type_name, descriptor))));
     descriptor
 }
 

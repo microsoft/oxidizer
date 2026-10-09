@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime telemetry through [`observed`].
+//! Runtime telemetry through [`observed`] and [`seismograph`].
 //!
 //! Arty emits runtime events through an [`observed::Sink`]. The default sink is
 //! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
@@ -25,6 +25,37 @@
 //! cancelled terminal state. Enable its `runtime_tasks` recording policy for
 //! high-frequency task events; runtime metadata and counters remain available
 //! in snapshots when event recording is disabled.
+//!
+//! Applications configuring recording or capturing snapshots need a direct
+//! dependency on `seismograph`:
+//!
+//! ```sh
+//! cargo add seismograph
+//! ```
+//!
+//! Enable runtime-task events before starting runtimes, then capture and decode
+//! a process snapshot:
+//!
+//! ```
+//! use arty::runtime::{Runtime, WorkersPolicy};
+//! use seismograph::recorder::{Configuration, RecordingPolicy};
+//! use seismograph::snapshot::SnapshotOptions;
+//!
+//! seismograph::recorder(Configuration {
+//!     runtime_tasks: RecordingPolicy::all(false),
+//!     ..Configuration::default()
+//! });
+//! let runtime = Runtime::builder()
+//!     .workers(WorkersPolicy::exactly(1))
+//!     .build()?;
+//! runtime.scheduler().block_on(async |_| ())?;
+//! runtime.stop()?;
+//!
+//! let snapshot = seismograph::snapshot(SnapshotOptions::default())?;
+//! let decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
+//! assert!(!decoded.sources.is_empty());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 //!
 //! Routine classified runtime fields use the `arty` / `SystemMetadata`
 //! identifier when configuring redaction. Panic diagnostics use the separate

@@ -129,7 +129,7 @@ where
             return Poll::Ready(());
         }
 
-        let poll_telemetry = this.telemetry.as_ref().map(|telemetry| telemetry.poll());
+        let poll_telemetry = this.telemetry.as_ref().map(|telemetry| telemetry.poll_started());
         // We AssertUnwindSafe here because we consider the task completed on panic, which means
         // it will never be polled again - whatever it did to its internal state is now
         // irrelevant and if it corrupted some shared state, that is not really something we
@@ -141,13 +141,13 @@ where
             Ok(Poll::Ready(result)) => {
                 // An abandoned join destroys the result here, on the task's worker.
                 let sender = this.result_tx.take().expect("future polled after completion");
+                if let Some(telemetry) = this.telemetry.as_mut() {
+                    telemetry.completed();
+                }
                 if let Err(panic) = catch_unwind(AssertUnwindSafe(|| sender.send(TaskResult::Completed(result)))) {
                     // The task completed successfully; a receiver notification panic must not
                     // change that outcome or its telemetry classification.
                     discard_panic(panic);
-                }
-                if let Some(telemetry) = this.telemetry.as_mut() {
-                    telemetry.completed();
                 }
                 emit!(this.sink, TaskSucceeded);
                 Poll::Ready(())
@@ -157,6 +157,9 @@ where
                 if let Err(disposal) = this.inner.as_mut().destroy_pinned() {
                     discard_panic(disposal);
                 }
+                if let Some(telemetry) = this.telemetry.as_mut() {
+                    telemetry.panicked();
+                }
                 if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| {
                     if let Some(sender) = this.result_tx.take() {
                         sender.send(TaskResult::Panicked(panic));
@@ -165,9 +168,6 @@ where
                     discard_panic(disposal);
                 }
 
-                if let Some(telemetry) = this.telemetry.as_mut() {
-                    telemetry.panicked();
-                }
                 emit!(this.sink, TaskPanicked);
 
                 Poll::Ready(())
@@ -255,7 +255,8 @@ mod tests {
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
         let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1);
-        let task_telemetry = runtime_telemetry.task::<std::future::Ready<u32>>(0).materialized();
+        let (task_telemetry, _enqueued) = runtime_telemetry.register_task::<std::future::Ready<u32>>(0).into_parts();
+        let task_telemetry = task_telemetry.materialized();
         let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
             std::future::ready(42),
             sender,

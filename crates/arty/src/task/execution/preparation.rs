@@ -176,7 +176,7 @@ mod tests {
 
     fn telemetry() -> (RuntimeTelemetry, TaskTelemetryPlacement) {
         let (runtime, _workers) = RuntimeTelemetry::register(0..1);
-        let task = runtime.task::<()>(0);
+        let (task, _enqueued) = runtime.register_task::<()>(0).into_parts();
         (runtime, task)
     }
 

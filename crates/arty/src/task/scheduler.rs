@@ -202,6 +202,8 @@ impl Scheduler {
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
             let task_telemetry = self.dispatcher.register_task::<F>(self.binding.worker_index);
+            let (task_telemetry, enqueued) = task_telemetry.into_parts();
+            self.dispatcher.task_enqueued(enqueued);
             let join_handle = prepare_remote_on_worker(
                 future_factory,
                 current.builtins.clone(),

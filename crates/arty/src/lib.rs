@@ -119,8 +119,8 @@
 //!   stable task placement and explicit relocation of values.
 //! - [Time](crate::documentation::time) explains worker-driven timers, timeouts,
 //!   and controlled time in tests.
-//! - [Telemetry](crate::documentation::telemetry) explains runtime events
-//!   and links to [`observed`] for further details.
+//! - [Telemetry](crate::documentation::telemetry) explains application events
+//!   through [`observed`] and automatic runtime diagnostics through [`seismograph`].
 //!
 //! The `documentation` module is included only for docs.rs builds and
 //! doc-test collection with all documentation features, including `test-util`;

@@ -14,7 +14,7 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetryPlacement};
+use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskEnqueued, TaskTelemetryRegistration};
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -155,7 +155,16 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), "any", future_factory)
+        self.enqueue(self.next_worker_index(), "any", TaskDescriptor::of::<F>(), future_factory)
+    }
+
+    pub(in crate::runtime) fn spawn_with_descriptor<FF, F, R>(&self, descriptor: TaskDescriptor, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue(self.next_worker_index(), "any", descriptor, future_factory)
     }
 
     pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -170,7 +179,7 @@ impl<WFS> DispatcherCore<WFS> {
         R: Send + 'static,
     {
         (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
+            .map(|index| self.enqueue(WorkerIndex(index), "any", TaskDescriptor::of::<F>(), make_factory()))
             .collect()
     }
 
@@ -206,8 +215,12 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
-    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
-        self.runtime_telemetry.task::<F>(usize::from(worker_index))
+    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryRegistration {
+        self.runtime_telemetry.register_task::<F>(usize::from(worker_index))
+    }
+
+    pub(in crate::runtime) fn task_enqueued(&self, enqueued: TaskEnqueued) {
+        self.runtime_telemetry.task_enqueued(enqueued);
     }
 
     pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
@@ -216,10 +229,16 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, "same_thread", future_factory)
+        self.enqueue(worker_index, "same_thread", TaskDescriptor::of::<F>(), future_factory)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: &'static str, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: &'static str,
+        descriptor: TaskDescriptor,
+        future_factory: FF,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -232,7 +251,10 @@ impl<WFS> DispatcherCore<WFS> {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let task_telemetry = self.register_task::<F>(worker_index);
+        let task_telemetry = self
+            .runtime_telemetry
+            .register_task_with_descriptor(usize::from(worker_index), descriptor);
+        let (task_telemetry, enqueued) = task_telemetry.into_parts();
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
@@ -250,6 +272,7 @@ impl<WFS> DispatcherCore<WFS> {
         });
 
         if send_result.is_ok() {
+            self.runtime_telemetry.task_enqueued(enqueued);
             emit!(
                 &self.sink,
                 TaskSpawned {
@@ -287,6 +310,9 @@ mod tests {
     use std::task;
     use std::task::Poll;
 
+    use seismograph::recorder::event::EventKind;
+    use seismograph::recorder::{Configuration, RecordingPolicy};
+    use seismograph::snapshot::SnapshotOptions;
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
@@ -477,6 +503,56 @@ mod tests {
             panic!("a disconnected join must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    #[test]
+    fn failed_dispatch_cancels_without_reporting_enqueue_or_readiness() {
+        struct RecorderReset;
+
+        impl Drop for RecorderReset {
+            fn drop(&mut self) {
+                seismograph::recorder(Configuration::default());
+            }
+        }
+
+        let _reset = RecorderReset;
+        seismograph::recorder(Configuration {
+            runtime_tasks: RecordingPolicy::all(false),
+            ..Configuration::default()
+        });
+        let (worker_tx, worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(
+            MockWaitForShutdown::new(),
+            NonEmpty::new(endpoint(worker_tx, &threads[0])),
+            observed::Sink::noop(),
+        );
+        let runtime_id = dispatcher.runtime_telemetry.id();
+        drop(worker_rx);
+
+        let mut task = pin!(dispatcher.spawn(|_| async {}));
+        let Poll::Ready(Err(error)) = task.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
+            panic!("a failed dispatch must report shutdown");
+        };
+        assert!(error.is_shutdown());
+
+        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let task_kinds: Vec<_> = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id == runtime_id
+                    && matches!(
+                        event.kind,
+                        EventKind::TaskSpawned | EventKind::TaskEnqueued | EventKind::TaskReady | EventKind::TaskCanceled
+                    ))
+                .then_some(event.kind)
+            })
+            .collect();
+        assert_eq!(task_kinds, [EventKind::TaskSpawned, EventKind::TaskCanceled]);
     }
 
     #[cfg_attr(test, mutants::skip)]

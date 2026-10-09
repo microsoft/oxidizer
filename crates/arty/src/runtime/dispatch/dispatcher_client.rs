@@ -11,7 +11,7 @@ use performables::arc::Arc;
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-use crate::runtime::seismograph::TaskTelemetryPlacement;
+use crate::runtime::seismograph::{TaskDescriptor, TaskEnqueued, TaskTelemetryRegistration};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -64,8 +64,12 @@ impl DispatcherClient {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
 
-    pub(crate) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
+    pub(crate) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryRegistration {
         self.core.register_task::<F>(worker_index)
+    }
+
+    pub(crate) fn task_enqueued(&self, enqueued: TaskEnqueued) {
+        self.core.task_enqueued(enqueued);
     }
 }
 
@@ -93,6 +97,15 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_with_descriptor<FF, F, R>(&self, descriptor: TaskDescriptor, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_with_descriptor(descriptor, future_factory)
     }
 
     pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, make_factory: M) -> Vec<JoinHandle<R>>
