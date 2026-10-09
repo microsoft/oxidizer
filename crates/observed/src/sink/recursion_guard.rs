@@ -9,6 +9,8 @@
 //! ordinary user code - a field initializer may call a helper that emits
 //! telemetry of its own - so the guard is taken after the event has been
 //! constructed and only for the dispatch itself.
+//! Dispatch includes recipient interest checks and event sampling. Initial
+//! admission checks remain outside the guard for both typed and dynamic events.
 //!
 //! # Scope: thread-wide, not per-sink
 //!

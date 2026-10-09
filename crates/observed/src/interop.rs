@@ -25,7 +25,7 @@ use std::ops::ControlFlow;
 
 use crate::Sink;
 use crate::metadata::EventDescription;
-use crate::processing::{FieldVisitorFn, IntermediateEvent};
+use crate::processing::FieldVisitorFn;
 
 /// Adaptor for foreign event types that cannot implement [`Event`](crate::Event) directly.
 pub trait DynEvent: Send + Sync {
@@ -101,7 +101,7 @@ pub trait DynEvent: Send + Sync {
 /// The event still passes through the sink's normal pipeline. If the sink is a no-op or no
 /// processor is interested, the event is dropped without further work.
 pub fn emit_dyn_event(sink: &Sink, event: &dyn DynEvent) {
-    sink.emit_impl(IntermediateEvent::dynamic(event));
+    sink.emit_dynamic(event);
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
