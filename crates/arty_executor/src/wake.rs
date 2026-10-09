@@ -136,7 +136,6 @@ impl WakeSignal {
         let mut state = self.state.load(atomic::Ordering::Acquire);
         if state.is_null() {
             let value = WakerState::new(Arc::downgrade(&self.shared), self.task_ref);
-            // SAFETY: The executor's shared pool outlives every task-owned `WakeSignal`.
             let candidate = self
                 .shared
                 .waker_states
@@ -177,6 +176,8 @@ impl WakeSignal {
         } else {
             Retirement::WithState
         });
+        // SAFETY: A non-null atomic pointer owns one intrusive reference until
+        // `WakeSignal::drop`.
         if let Some(state) = unsafe { state.as_ref() } {
             state.retire();
         }
@@ -327,12 +328,12 @@ impl WakerState {
             return;
         }
 
-        if let Some(shared) = self.shared.upgrade() {
-            if enqueue_wake(&shared.awakened, &self.queued, self.task_ref, &shared.parent_waker, || {
+        if let Some(shared) = self.shared.upgrade()
+            && enqueue_wake(&shared.awakened, &self.queued, self.task_ref, &shared.parent_waker, || {
                 self.active.load(atomic::Ordering::Acquire)
-            }) {
-                return;
-            }
+            })
+        {
+            return;
         }
 
         if !self.active.load(atomic::Ordering::Acquire) {

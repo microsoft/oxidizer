@@ -87,6 +87,10 @@ impl Drop for ShutdownState {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "ownership ensures the executor drops only after this function completes shutdown"
+)]
 fn finish_executor(executor: Executor) {
     executor.begin_shutdown();
     while executor.execute_cycle() != CycleOutcome::Shutdown {
@@ -362,6 +366,46 @@ fn waker_state_fresh_arc(state: &mut WakerStateAllocationProbe) {
     state.replace_fresh_arc();
 }
 
+fn criterion_allocation_benchmarks(criterion: &mut Criterion) {
+    let mut allocation = criterion.benchmark_group(ALLOCATION);
+    macro_rules! allocation {
+        ($identity:ident, $case:literal, $body:ident) => {
+            allocation.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
+                bencher.iter_batched_ref(WakerStateAllocationProbe::new, |state| $body(black_box(state)), BATCH_SIZE);
+            });
+        };
+    }
+    allocation!(WAKER_STATE_POOLED, "warm", waker_state_pooled);
+    allocation!(WAKER_STATE_FRESH_ARC, "fresh", waker_state_fresh_arc);
+    allocation.finish();
+}
+
+fn criterion_slow_benchmarks(criterion: &mut Criterion) {
+    let mut slow = criterion.benchmark_group(SLOW);
+    macro_rules! repeated {
+        ($identity:ident, $case:literal, $setup:expr, $body:ident) => {
+            slow.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
+                let mut state = $setup;
+                bencher.iter(|| $body(black_box(&mut state)));
+            });
+        };
+    }
+    repeated!(
+        SLOW_SPAWN_AND_COMPLETE_ONE_TIMES_MANY,
+        "sequential_1000",
+        warmed_state(),
+        slow_spawn_and_complete_one_times_many
+    );
+    repeated!(
+        SLOW_SPAWN_AND_COMPLETE_10K,
+        "burst_10000",
+        warmed_burst_state(),
+        slow_spawn_and_complete_10k
+    );
+    repeated!(SLOW_YIELD_10K, "burst_10000", warmed_yield_burst_state(), slow_yield_10k);
+    slow.finish();
+}
+
 #[metabench::benchmark(BASIC_SPAWN_AND_COMPLETE_ONE, BASIC, "spawn_and_complete_one")]
 #[bench::warm(&warmed_state())]
 fn basic_spawn_and_complete_one(state: &State) -> Poll<()> {
@@ -526,35 +570,9 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     );
     decomposed.finish();
 
-    let mut allocation = criterion.benchmark_group(ALLOCATION);
-    macro_rules! allocation {
-        ($identity:ident, $case:literal, $body:ident) => {
-            allocation.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
-                bencher.iter_batched_ref(WakerStateAllocationProbe::new, |state| $body(black_box(state)), BATCH_SIZE);
-            });
-        };
-    }
-    allocation!(WAKER_STATE_POOLED, "warm", waker_state_pooled);
-    allocation!(WAKER_STATE_FRESH_ARC, "fresh", waker_state_fresh_arc);
-    allocation.finish();
+    criterion_allocation_benchmarks(criterion);
 
-    let mut slow = criterion.benchmark_group(SLOW);
-    repeated!(
-        slow,
-        SLOW_SPAWN_AND_COMPLETE_ONE_TIMES_MANY,
-        "sequential_1000",
-        warmed_state(),
-        slow_spawn_and_complete_one_times_many
-    );
-    repeated!(
-        slow,
-        SLOW_SPAWN_AND_COMPLETE_10K,
-        "burst_10000",
-        warmed_burst_state(),
-        slow_spawn_and_complete_10k
-    );
-    repeated!(slow, SLOW_YIELD_10K, "burst_10000", warmed_yield_burst_state(), slow_yield_10k);
-    slow.finish();
+    criterion_slow_benchmarks(criterion);
 }
 
 metabench::main!(
