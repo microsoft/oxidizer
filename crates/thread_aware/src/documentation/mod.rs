@@ -159,6 +159,39 @@
 //! the wrong worker. None of them produces a compile error, and most produce no runtime warning
 //! either, so they are worth recognizing by sight.
 //!
+//! ## Nominally thread-aware, actually shared-locked
+//!
+//! The giveaway is a hand-written [`ThreadAware`](crate::ThreadAware) impl whose
+//! [`relocate`](crate::ThreadAware::relocate) does nothing, on a type that keeps process-wide
+//! shared state behind a lock. It looks thread-aware to the type system, but the state every worker
+//! touches is still one shared hot-path lock.
+//!
+//! Look for all three signs together:
+//!
+//! * A manual impl, not [the derive macro](derive@crate::ThreadAware).
+//! * A `relocate` body that is empty, ignores every field, or never re-homes the shared field.
+//! * A hot-path field such as `Arc<Mutex<_>>`, `Arc<RwLock<_>>`, a `parking_lot` or
+//!   `tokio::sync` lock, `DashMap`, or another shared interior-mutability cell.
+//!
+//! In a thread-per-core runtime, `relocate` is the hook that lets a value split shared state so
+//! reads and writes stay core-local. A no-op `relocate` leaves every worker contending on one lock -
+//! the exact contention thread-awareness exists to remove - and nothing warns you, because the type
+//! still satisfies `ThreadAware`.
+//!
+//! Pick one fix:
+//!
+//! * Derive [`ThreadAware`](crate::ThreadAware) and let a per-worker strategy such as
+//!   [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html)
+//!   or [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html)
+//!   materialize a separate instance during `relocate`.
+//! * If the state is intentionally shared, make the read path lock-free, for example with an
+//!   `arc_swap::ArcSwap` snapshot.
+//! * If the type really needs a manual impl, make `relocate` re-home the state instead of
+//!   no-op'ing.
+//!
+//! The instance that prompted this entry was `oxidizer_config`'s config `View`, addressed in
+//! AB#7982033.
+//!
 //! ## `Clone` does not relocate
 //!
 //! This is the one to internalize first. A thread-aware type typically stores its affinity in a
@@ -201,6 +234,23 @@
 //! it.
 //! Relocating a subtree while its parent was built from a stale clone (see above) is how affinity
 //! goes stale in practice.
+//!
+//! ## Reviewer checklist
+//!
+//! Apply this to every manual [`ThreadAware`](crate::ThreadAware) impl and every
+//! `#[thread_aware(skip)]`:
+//!
+//! * Is [`ThreadAware`](crate::ThreadAware) derived where possible?
+//! * If the impl is manual, does `relocate` forward to fields, re-home per-thread or per-NUMA
+//!   state, or rebuild locality caches?
+//! * If `relocate` is empty, does the type hold no shared interior mutability?
+//! * If it does hold shared interior mutability, is cross-worker sharing intentional and is the
+//!   contention documented?
+//! * Could a per-worker
+//!   [`performables::arc::Arc`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html)
+//!   strategy, an `arc_swap::ArcSwap` snapshot, or per-worker cloning remove the lock?
+//! * Is every `#[thread_aware(skip)]` justified, and avoided on fields whose type already
+//!   implements [`ThreadAware`](crate::ThreadAware)?
 //!
 //! # Testing
 //!
