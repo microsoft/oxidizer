@@ -8,10 +8,10 @@ use std::sync::atomic::Ordering;
 
 use seismograph::recorder::RecordingSession;
 use seismograph::recorder::event::{EventClass, EventTimestamp};
-use seismograph::recorder::runtime::TaskId;
+use seismograph::recorder::runtime::{TaskId, WorkerId};
 
 use crate::worker::WorkerHandle;
-use crate::{TaskControl, duration_nanos};
+use crate::{RuntimeHandle, TaskControl, TaskOutcome, duration_nanos};
 
 /// Cheap task handle used to correlate wake notifications with subsequent polls.
 #[derive(Clone, Debug)]
@@ -28,6 +28,39 @@ impl TaskHandle {
     #[must_use]
     pub fn id(&self) -> TaskId {
         self.task.id
+    }
+
+    /// Reports successful task completion and retires this handle's live task.
+    ///
+    /// The first terminal report wins. Reporting through another cloned handle
+    /// or the runtime's compatibility APIs after retirement has no effect.
+    pub fn completed(self, worker: Option<WorkerId>) {
+        self.finish(worker, TaskOutcome::Completed);
+    }
+
+    /// Reports task cancellation and retires this handle's live task.
+    ///
+    /// Dropping a task handle does not imply cancellation; the task owner must
+    /// call this method when it abandons the task.
+    pub fn canceled(self, worker: Option<WorkerId>) {
+        self.finish(worker, TaskOutcome::Canceled);
+    }
+
+    /// Reports a task panic and retires this handle's live task.
+    ///
+    /// The first terminal report wins. Later reports through outstanding clones
+    /// are ignored.
+    pub fn panicked(self, worker: Option<WorkerId>) {
+        self.finish(worker, TaskOutcome::Panicked);
+    }
+
+    fn finish(self, worker: Option<WorkerId>, outcome: TaskOutcome) {
+        let control = self
+            .task
+            .runtime
+            .upgrade()
+            .expect("the process registry retains every registered runtime control");
+        RuntimeHandle { control }.complete_task_handle(self.task, worker, outcome);
     }
 
     /// Marks the task ready to run, retaining only the first wake before its next poll.

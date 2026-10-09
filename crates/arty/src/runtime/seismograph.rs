@@ -207,25 +207,25 @@ impl TaskTelemetry {
     }
 
     pub(crate) fn completed(&mut self) {
-        if let Some(task_id) = self.begin_terminal() {
-            self.runtime.task_completed(task_id, self.worker_id());
+        if let Some(task) = self.begin_terminal() {
+            task.completed(self.worker_id());
         }
     }
 
     pub(crate) fn panicked(&mut self) {
-        if let Some(task_id) = self.begin_terminal() {
-            self.runtime.task_panicked(task_id, self.worker_id());
+        if let Some(task) = self.begin_terminal() {
+            task.panicked(self.worker_id());
         }
     }
 
     fn canceled(&mut self) {
-        if let Some(task_id) = self.begin_terminal() {
-            self.runtime.task_canceled(task_id, self.worker_id());
+        if let Some(task) = self.begin_terminal() {
+            task.canceled(self.worker_id());
         }
     }
 
-    fn begin_terminal(&mut self) -> Option<TaskId> {
-        self.task.take().map(|task| task.id())
+    fn begin_terminal(&mut self) -> Option<TaskHandle> {
+        self.task.take()
     }
 
     fn worker_id(&self) -> Option<WorkerId> {
