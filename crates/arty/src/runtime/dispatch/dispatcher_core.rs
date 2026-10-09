@@ -78,7 +78,8 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
 impl<WFS> DispatcherCore<WFS> {
     #[cfg(test)]
     pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(worker_endpoints.len());
+        let worker_count = u32::try_from(worker_endpoints.len()).expect("test dispatchers cannot configure more than u32::MAX workers");
+        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(0..worker_count);
         Self::new_with_shutdown(
             wait_for_shutdown,
             worker_endpoints,

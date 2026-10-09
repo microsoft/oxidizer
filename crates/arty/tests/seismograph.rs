@@ -93,7 +93,7 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
     assert!(arty_runtimes.iter().all(|entry| entry.state == RuntimeState::Stopped));
     assert!(
         arty_runtimes.iter().all(|entry| {
-            entry.workers.len() == 1 && entry.workers[0].thread_id.is_some() && entry.workers[0].processor_index == Some(0)
+            entry.workers.len() == 1 && entry.workers[0].thread_id.is_some() && entry.workers[0].processor_index.is_some()
         })
     );
 

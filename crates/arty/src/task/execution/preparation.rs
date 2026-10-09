@@ -50,7 +50,7 @@ where
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         let mut task_telemetry = task_telemetry;
-        task_telemetry.materialized(&worker_telemetry);
+        task_telemetry.materialized(worker_telemetry);
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
         let inner = async move { future_factory(cx).await };
@@ -84,7 +84,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    task_telemetry.materialized(&worker_telemetry);
+    task_telemetry.materialized(worker_telemetry);
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let inner = async move { future_factory(builtins).await };
     drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
@@ -179,7 +179,7 @@ mod tests {
     use crate::runtime::seismograph::RuntimeTelemetry;
 
     fn telemetry() -> (RuntimeTelemetry, TaskTelemetry, WorkerHandle) {
-        let (runtime, _workers) = RuntimeTelemetry::register(1);
+        let (runtime, _workers) = RuntimeTelemetry::register(0..1);
         let (task, worker) = runtime.task::<()>(0);
         (runtime, task, worker)
     }

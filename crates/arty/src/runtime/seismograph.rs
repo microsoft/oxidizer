@@ -2,13 +2,13 @@
 // Licensed under the MIT License.
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
+use foldhash::{HashMap, HashMapExt};
 use nonempty::NonEmpty;
 use performables::arc::Arc;
-use performables::sync::mutex::Mutex;
-use performables::sync::once::LazyLock;
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId, WorkerId};
 use seismograph_runtime::task::{TaskHandle, TaskPoll};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
@@ -17,9 +17,13 @@ use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, r
 static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
 static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Debug)]
+thread_local! {
+    static LAST_TYPE_DESCRIPTOR: Cell<Option<(TypeId, TypeDescriptorId)>> = const { Cell::new(None) };
+}
+
+#[derive(Debug)]
 pub(crate) struct WorkerTelemetry {
-    worker_registration: Arc<WorkerRegistration>,
+    worker_registration: WorkerRegistration,
     _runtime_registration: Arc<RuntimeRegistration>,
     handle: WorkerHandle,
 }
@@ -32,22 +36,21 @@ impl WorkerTelemetry {
 
 #[derive(Debug)]
 pub(crate) struct RuntimeTelemetry {
-    worker_registrations: Mutex<Option<NonEmpty<WorkerTelemetry>>>,
     runtime_registration: Arc<RuntimeRegistration>,
     runtime_handle: RuntimeHandle,
     worker_handles: NonEmpty<WorkerHandle>,
 }
 
 impl RuntimeTelemetry {
-    pub(crate) fn register(worker_count: usize) -> (Self, Vec<WorkerTelemetry>) {
+    pub(crate) fn register(processor_indices: impl ExactSizeIterator<Item = u32>) -> (Self, Vec<WorkerTelemetry>) {
+        let worker_count = processor_indices.len();
         let configured_workers = u32::try_from(worker_count).expect("an Arty runtime cannot configure more than u32::MAX workers");
         let runtime_registration = Arc::new(register_runtime(RuntimeMetadata::new("arty", configured_workers)));
         let runtime_handle = runtime_registration.handle();
-        let workers: Vec<_> = (0..worker_count)
-            .map(|worker_index| {
-                let processor_index = u32::try_from(worker_index).expect("an Arty runtime cannot configure more than u32::MAX workers");
+        let workers: Vec<_> = processor_indices
+            .map(|processor_index| {
                 let worker_registration =
-                    Arc::new(runtime_registration.register_worker(WorkerMetadata::new(WorkerRole::Core).processor_index(processor_index)));
+                    runtime_registration.register_worker(WorkerMetadata::new(WorkerRole::Core).processor_index(processor_index));
                 WorkerTelemetry {
                     handle: worker_registration.handle(),
                     worker_registration,
@@ -55,14 +58,11 @@ impl RuntimeTelemetry {
                 }
             })
             .collect();
-        let worker_registrations =
-            NonEmpty::from_vec(workers.clone()).expect("the number of Arty workers is validated before Seismograph registration");
         let worker_handles = NonEmpty::from_vec(workers.iter().map(|worker| worker.handle.clone()).collect())
             .expect("the number of Arty workers is validated before Seismograph registration");
 
         (
             Self {
-                worker_registrations: Mutex::new(Some(worker_registrations)),
                 runtime_registration,
                 runtime_handle,
                 worker_handles,
@@ -76,7 +76,6 @@ impl RuntimeTelemetry {
     }
 
     pub(crate) fn stopped(&self) {
-        drop(self.worker_registrations.lock().take());
         self.runtime_registration.stopped();
     }
 
@@ -96,9 +95,7 @@ impl RuntimeTelemetry {
 pub(crate) struct TaskTelemetry {
     runtime: RuntimeHandle,
     worker: Option<WorkerHandle>,
-    task: TaskHandle,
-    terminal: bool,
-    materialized: bool,
+    task: Option<TaskHandle>,
 }
 
 impl TaskTelemetry {
@@ -107,26 +104,24 @@ impl TaskTelemetry {
         Self {
             runtime: runtime.clone(),
             worker: None,
-            task,
-            terminal: false,
-            materialized: false,
+            task: Some(task),
         }
     }
 
     fn id(&self) -> TaskId {
-        self.task.id()
+        self.task.as_ref().expect("terminal tasks are never instrumented again").id()
     }
 
     fn enqueued(&self, worker_id: Option<WorkerId>) {
         self.runtime.task_enqueued(self.id(), worker_id);
-        self.task.woken();
+        self.task.as_ref().expect("new tasks retain their task handle").woken();
     }
 
-    pub(crate) fn materialized(&mut self, worker: &WorkerHandle) {
-        debug_assert!(!self.materialized, "a task may only be materialized once");
-        self.worker = Some(worker.clone());
-        self.materialized = true;
-        self.runtime.task_materialized(self.id(), worker.id());
+    pub(crate) fn materialized(&mut self, worker: WorkerHandle) {
+        debug_assert!(self.worker.is_none(), "a task may only be materialized once");
+        let worker_id = worker.id();
+        self.worker = Some(worker);
+        self.runtime.task_materialized(self.id(), worker_id);
     }
 
     pub(crate) fn poll(&self) -> TaskPollGuard<'_> {
@@ -134,38 +129,34 @@ impl TaskTelemetry {
             .worker
             .as_ref()
             .expect("tasks are materialized before their futures are polled");
+        let task = self.task.as_ref().expect("terminal tasks are never polled");
         TaskPollGuard {
             worker,
-            task: &self.task,
-            poll: Some(self.task.poll_started(worker)),
+            task,
+            poll: Some(task.poll_started(worker)),
         }
     }
 
     pub(crate) fn completed(&mut self) {
-        if self.begin_terminal() {
-            self.runtime.task_completed(self.id(), self.worker_id());
+        if let Some(task_id) = self.begin_terminal() {
+            self.runtime.task_completed(task_id, self.worker_id());
         }
     }
 
     pub(crate) fn panicked(&mut self) {
-        if self.begin_terminal() {
-            self.runtime.task_panicked(self.id(), self.worker_id());
+        if let Some(task_id) = self.begin_terminal() {
+            self.runtime.task_panicked(task_id, self.worker_id());
         }
     }
 
     fn canceled(&mut self) {
-        if self.begin_terminal() {
-            self.runtime.task_canceled(self.id(), self.worker_id());
+        if let Some(task_id) = self.begin_terminal() {
+            self.runtime.task_canceled(task_id, self.worker_id());
         }
     }
 
-    fn begin_terminal(&mut self) -> bool {
-        if self.terminal {
-            false
-        } else {
-            self.terminal = true;
-            true
-        }
+    fn begin_terminal(&mut self) -> Option<TaskId> {
+        self.task.take().map(|task| task.id())
     }
 
     fn worker_id(&self) -> Option<WorkerId> {
@@ -195,10 +186,17 @@ impl Drop for TaskPollGuard<'_> {
 }
 
 fn type_descriptor<T: 'static>() -> TypeDescriptorId {
-    *TYPE_DESCRIPTORS
+    let type_id = TypeId::of::<T>();
+    if let Some(descriptor) = LAST_TYPE_DESCRIPTOR.with(Cell::get).filter(|(cached, _)| *cached == type_id) {
+        return descriptor.1;
+    }
+    let descriptor = *TYPE_DESCRIPTORS
         .lock()
-        .entry(TypeId::of::<T>())
-        .or_insert_with(allocate_type_descriptor_id)
+        .expect("the type descriptor cache is never held across user code")
+        .entry(type_id)
+        .or_insert_with(allocate_type_descriptor_id);
+    LAST_TYPE_DESCRIPTOR.with(|cached| cached.set(Some((type_id, descriptor))));
+    descriptor
 }
 
 fn allocate_type_descriptor_id() -> TypeDescriptorId {

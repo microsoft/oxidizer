@@ -78,9 +78,10 @@ pub(in crate::runtime) fn build(
             }
         );
     })?;
-    let (runtime_telemetry, worker_telemetries) = RuntimeTelemetry::register(processors.len());
+    let (runtime_telemetry, worker_telemetries) =
+        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()));
 
-    for (worker_index, processor) in processors.into_iter().enumerate() {
+    for ((worker_index, processor), worker_telemetry) in processors.into_iter().enumerate().zip(worker_telemetries) {
         let (command_tx, command_rx) = channel::unbounded();
         let (worker_endpoint_tx, worker_endpoint_rx) = channel::unbounded();
         let (start_tx, start_rx) = channel::oneshot();
@@ -102,7 +103,7 @@ pub(in crate::runtime) fn build(
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
-                worker_telemetry: worker_telemetries[worker_index].clone(),
+                worker_telemetry,
             }
             .start(),
         );
