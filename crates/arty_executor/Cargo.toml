@@ -33,6 +33,7 @@ scopeguard = { workspace = true, optional = true }
 tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 gungraun = { workspace = true, features = ["default"] }

@@ -664,6 +664,12 @@ impl ExecutorCore {
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
         let was_panicking = thread::panicking();
+        if was_panicking {
+            // Retain raw task owners while unwinding: releasing one may run an arbitrary task or
+            // future destructor that panics and would abort the process with a double panic.
+            return;
+        }
+
         let shutdown_started = self.reentrancy_safe.get_mut().shutdown_deadline.is_some();
 
         let state_exclusive = self.exclusive.get_mut();
@@ -693,12 +699,6 @@ impl Drop for ExecutorCore {
                     unsafe { task_ref.release() };
                 }
             }
-        }
-
-        if was_panicking {
-            // We skip the assertions if we are already panicking because a double panic more often
-            // does not help anything and may even obscure the initial panic in test runs.
-            return;
         }
 
         assert!(
@@ -824,6 +824,15 @@ mod tests {
         }
     }
 
+    struct PanicOnDrop(Rc<Cell<bool>>);
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            self.0.set(true);
+            panic!("panic from dirty-drop task destructor");
+        }
+    }
+
     /// Synthetic task that isolates dirty-teardown ownership from the task/waker lifecycle.
     ///
     /// `inert` controls the reclamation decision; every other lifecycle operation is outside this
@@ -858,6 +867,38 @@ mod tests {
         #[cfg(debug_assertions)]
         fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
             unreachable!("dirty-drop fixture is never inspected")
+        }
+    }
+
+    struct PanickingDropTask {
+        _panic_on_drop: PanicOnDrop,
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    impl TypeErasedTask for PanickingDropTask {
+        fn poll(self: Pin<&Self>) -> task::Poll<()> {
+            unreachable!("panicking-drop fixture is never polled")
+        }
+
+        fn is_inert(&self) -> bool {
+            unreachable!("panicking-drop fixture is never inspected")
+        }
+
+        fn consume_awakened(&self) -> bool {
+            unreachable!("panicking-drop fixture is never awakened")
+        }
+
+        fn abort(self: Pin<&Self>) {
+            unreachable!("panicking-drop fixture is never aborted")
+        }
+
+        unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
+            unreachable!("panicking-drop fixture is never initialized")
+        }
+
+        #[cfg(debug_assertions)]
+        fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
+            unreachable!("panicking-drop fixture is never inspected")
         }
     }
 
@@ -939,6 +980,36 @@ mod tests {
         // SAFETY: Dirty teardown retained this unique raw owner, and the fixture has no external
         // references. Reconstructing it exactly once prevents the test itself from leaking.
         unsafe { task_ref.release() };
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn unwind_retains_task_whose_destructor_panics() {
+        let dropped = Rc::new(Cell::new(false));
+
+        // SAFETY: The executor is deliberately dropped during an existing unwind to verify that
+        // its double-panic guard retains raw task owners instead of running their destructors.
+        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PanickingDropTask {
+            _panic_on_drop: PanicOnDrop(Rc::clone(&dropped)),
+        });
+        let task_ref = TaskRef::new(task);
+        executor.reentrancy_safe.borrow_mut().new_tasks.push_back(task_ref);
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _executor = executor;
+            panic!("original panic");
+        }))
+        .unwrap_err();
+
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"original panic"));
+        assert!(!dropped.get());
+
+        // SAFETY: The unwind path deliberately retained this unique raw owner. The fixture has no
+        // external references, so reconstructing it exactly once is valid; its expected destructor
+        // panic is contained by this test.
+        let release = catch_unwind(AssertUnwindSafe(|| unsafe { task_ref.release() }));
+        assert!(release.is_err());
         assert!(dropped.get());
     }
 
