@@ -39,5 +39,7 @@ exclude = true
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

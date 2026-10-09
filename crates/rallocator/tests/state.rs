@@ -127,7 +127,8 @@ fn owners_created_off_remain_visible_and_only_participants_publish() {
                 break;
             }
             if requested == handled {
-                std::hint::spin_loop();
+                // Quiet owners need not occupy a CPU while the collector captures snapshots.
+                std::thread::park_timeout(Duration::from_millis(1));
                 continue;
             }
             let active_layout = Layout::from_size_align(513, 16).unwrap();
