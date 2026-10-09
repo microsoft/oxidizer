@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::ptr::{self, NonNull};
 
-use plurality::Box as PoolBox;
+use plurality::{Box as PoolBox, coerce};
 
 use crate::TypeErasedTask;
 
@@ -21,7 +21,7 @@ pub(crate) struct TaskRef {
 
 impl TaskRef {
     pub(crate) fn new<T: TypeErasedTask + 'static>(inner: PoolBox<T>) -> Self {
-        let inner: PoolBox<dyn TypeErasedTask> = PoolBox::unsize(inner, plurality::coerce!(dyn TypeErasedTask));
+        let inner: PoolBox<dyn TypeErasedTask> = PoolBox::unsize(inner, coerce!(dyn TypeErasedTask));
         Self {
             inner: PoolBox::into_raw(inner),
         }
@@ -107,12 +107,14 @@ impl Hash for TaskRef {
 mod tests {
     use std::hash::DefaultHasher;
 
+    use plurality::MultiPool;
+
     use super::*;
     use crate::MockTypeErasedTask;
 
     #[test]
     fn same_task_refs_eq() {
-        let pool = plurality::MultiPool::new();
+        let pool = MultiPool::new();
         let task_ref1 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
         let task_ref2 = task_ref1;
 
@@ -135,7 +137,7 @@ mod tests {
 
     #[test]
     fn different_task_refs_not_eq() {
-        let pool = plurality::MultiPool::new();
+        let pool = MultiPool::new();
         let task_ref1 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
         let task_ref2 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
 

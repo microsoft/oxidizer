@@ -824,6 +824,10 @@ mod tests {
         }
     }
 
+    /// Synthetic task that isolates dirty-teardown ownership from the task/waker lifecycle.
+    ///
+    /// `inert` controls the reclamation decision; every other lifecycle operation is outside this
+    /// fixture's boundary and therefore rejects calls.
     struct DirtyDropTask {
         _signal: SignalOnDrop,
         inert: bool,
@@ -857,6 +861,9 @@ mod tests {
         }
     }
 
+    /// Inserts a raw pooled task directly into one scheduler collection, without normal
+    /// registration or wake initialization. The returned `TaskRef` lets the non-inert case clean
+    /// up its deliberately retained raw owner after observing executor teardown.
     fn dirty_drop_fixture(location: TaskLocation, inert: bool) -> (ExecutorCore, TaskRef, Rc<Cell<bool>>) {
         let dropped = Rc::new(Cell::new(false));
 
