@@ -62,3 +62,14 @@
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.
+//!
+//! # Retained task wakers
+//!
+//! A task waker may be cloned, retained, and invoked from any thread while its
+//! task is pending. Wake operations route back to the task's owning worker;
+//! they do not move the task between workers.
+//!
+//! Completion and cancellation retire the task's wake state before releasing
+//! task storage. Retained wakers stay memory-safe and callable after completion,
+//! cancellation, and runtime shutdown, but their wake operations are inert
+//! no-ops. They do not keep task storage or runtime shutdown alive.

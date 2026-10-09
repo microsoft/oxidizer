@@ -15,6 +15,9 @@
 //! Use `--allocations --test` for one-shot allocation probes rather than full
 //! Criterion timing runs for every case.
 //! Spawn measurements include allocator instructions, not just scheduler work.
+//! Lifecycle cases cover retired-waker no-ops and one pending-task shutdown.
+//! Allocation cases compare warmed pooled `WakerState` churn with a fresh `Arc`
+//! of the same state.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -31,7 +34,7 @@ use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::testing::{AWAKENED_CAPACITY, new_guarded_executor};
+use arty_executor::testing::{AWAKENED_CAPACITY, WakerStateAllocationProbe, new_guarded_executor};
 use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskSet};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -40,6 +43,7 @@ use testing_aids::YieldFuture;
 
 const BASIC: &str = "ae_basic_operations/basic";
 const DECOMPOSED: &str = "ae_basic_operations/decomposed";
+const ALLOCATION: &str = "ae_basic_operations/allocation";
 const SLOW: &str = "ae_basic_operations/slow";
 const SEQUENTIAL_COUNT: usize = 1_000;
 const BURST_COUNT: usize = 10_000;
@@ -63,6 +67,31 @@ struct State {
     handles: Vec<JoinHandle<()>>,
     tasks: TaskSet,
     executor: ScopeGuard<Executor, fn(Executor), Always>,
+}
+
+struct ShutdownState {
+    handle: Option<JoinHandle<()>>,
+    executor: Option<Executor>,
+    completed: bool,
+}
+
+impl Drop for ShutdownState {
+    fn drop(&mut self) {
+        self.handle = None;
+        let Some(executor) = self.executor.take() else {
+            return;
+        };
+        if !self.completed {
+            finish_executor(executor);
+        }
+    }
+}
+
+fn finish_executor(executor: Executor) {
+    executor.begin_shutdown();
+    while executor.execute_cycle() != CycleOutcome::Shutdown {
+        std::thread::yield_now();
+    }
 }
 
 fn executor_state() -> State {
@@ -217,6 +246,35 @@ fn overflow_cycle_state() -> State {
     state
 }
 
+fn retired_waker_state() -> State {
+    let mut state = warmed_state();
+    let retained = Rc::new(RefCell::new(None));
+    state.handles.push(state.tasks.add(poll_fn({
+        let retained = Rc::clone(&retained);
+        move |cx| {
+            *retained.borrow_mut() = Some(cx.waker().clone());
+            Poll::Ready(())
+        }
+    })));
+    assert_eq!(state.executor.execute_cycle(), CycleOutcome::Suspend);
+    state
+        .wakers
+        .push(retained.borrow_mut().take().expect("the completed task captured its waker"));
+    state
+}
+
+fn shutdown_pending_state() -> ShutdownState {
+    // SAFETY: `ShutdownState::drop` finishes shutdown unless the measured operation already did.
+    let executor = unsafe { Executor::builder().build() };
+    let handle = executor.tasks().add(pending::<()>());
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    ShutdownState {
+        handle: Some(handle),
+        executor: Some(executor),
+        completed: false,
+    }
+}
+
 #[metabench::benchmark(BASIC_NOOP, BASIC, "noop")]
 #[bench::cold(&executor_state())]
 #[bench::warm(&warmed_state())]
@@ -273,6 +331,35 @@ fn decomposed_wake_by_ref(state: &State) {
 #[bench::overflow(&overflow_cycle_state())]
 fn decomposed_cycle_awakened(state: &State) -> CycleOutcome {
     state.executor.execute_cycle()
+}
+
+#[metabench::benchmark(DECOMPOSED_RETIRED_WAKE, DECOMPOSED, "retired_wake_by_ref")]
+#[bench::after_completion(&retired_waker_state())]
+fn decomposed_retired_wake(state: &State) {
+    black_box(&state.wakers[0]).wake_by_ref();
+}
+
+#[metabench::benchmark(DECOMPOSED_SHUTDOWN_PENDING_ONE, DECOMPOSED, "shutdown_pending_one")]
+#[bench::pending_task(&mut shutdown_pending_state())]
+fn decomposed_shutdown_pending_one(state: &mut ShutdownState) -> CycleOutcome {
+    state.handle = None;
+    let executor = state.executor.as_ref().expect("benchmark executor is present");
+    executor.begin_shutdown();
+    let outcome = executor.execute_cycle();
+    state.completed = outcome == CycleOutcome::Shutdown;
+    outcome
+}
+
+#[metabench::benchmark(WAKER_STATE_POOLED, ALLOCATION, "waker_state_pooled")]
+#[bench::warm(&mut WakerStateAllocationProbe::new())]
+fn waker_state_pooled(state: &mut WakerStateAllocationProbe) {
+    state.replace_pooled();
+}
+
+#[metabench::benchmark(WAKER_STATE_FRESH_ARC, ALLOCATION, "waker_state_fresh_arc")]
+#[bench::fresh(&mut WakerStateAllocationProbe::new())]
+fn waker_state_fresh_arc(state: &mut WakerStateAllocationProbe) {
+    state.replace_fresh_arc();
 }
 
 #[metabench::benchmark(BASIC_SPAWN_AND_COMPLETE_ONE, BASIC, "spawn_and_complete_one")]
@@ -425,7 +512,31 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         overflow_cycle_state(),
         decomposed_cycle_awakened
     );
+    prepared!(
+        DECOMPOSED_RETIRED_WAKE,
+        "after_completion",
+        retired_waker_state(),
+        decomposed_retired_wake
+    );
+    prepared!(
+        DECOMPOSED_SHUTDOWN_PENDING_ONE,
+        "pending_task",
+        shutdown_pending_state(),
+        decomposed_shutdown_pending_one
+    );
     decomposed.finish();
+
+    let mut allocation = criterion.benchmark_group(ALLOCATION);
+    macro_rules! allocation {
+        ($identity:ident, $case:literal, $body:ident) => {
+            allocation.bench_function(BenchmarkId::new($identity.benchmark_name(), $case), |bencher| {
+                bencher.iter_batched_ref(WakerStateAllocationProbe::new, |state| $body(black_box(state)), BATCH_SIZE);
+            });
+        };
+    }
+    allocation!(WAKER_STATE_POOLED, "warm", waker_state_pooled);
+    allocation!(WAKER_STATE_FRESH_ARC, "fresh", waker_state_fresh_arc);
+    allocation.finish();
 
     let mut slow = criterion.benchmark_group(SLOW);
     repeated!(
@@ -464,6 +575,10 @@ metabench::main!(
         DECOMPOSED_YIELD_CYCLE,
         DECOMPOSED_WAKE_BY_REF,
         DECOMPOSED_CYCLE_AWAKENED,
+        DECOMPOSED_RETIRED_WAKE,
+        DECOMPOSED_SHUTDOWN_PENDING_ONE,
+        WAKER_STATE_POOLED,
+        WAKER_STATE_FRESH_ARC,
         BASIC_SPAWN_AND_COMPLETE_ONE,
         BASIC_YIELD_ONE,
         SLOW_SPAWN_AND_COMPLETE_ONE_TIMES_MANY,

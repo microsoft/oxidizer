@@ -36,6 +36,8 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.consume_awakened()
     }
 
+    fn clear_queued_notification(&self) {}
+
     fn abort(self: Pin<&Self>) {
         self.abort();
     }
@@ -47,6 +49,6 @@ impl TypeErasedTask for MockTypeErasedTask {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, test))]
     fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&std::backtrace::Backtrace)) {}
 }

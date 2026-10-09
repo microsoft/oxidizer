@@ -25,6 +25,8 @@ boundary is not permission to continue using panic-damaged state.
 
 Dropping a join neither resumes a panic nor cancels the task. Runtime shutdown
 cancels pending tasks; their joins return a shutdown error, not a task panic.
+Cloned task wakers do not retain task storage or delay shutdown. After their
+task completes or is cancelled, wake operations remain valid but are inert.
 
 `RuntimeScheduler::block_on` reports task failure through `runtime::Error`,
 with the `JoinError` retained as its source. It returns an error, rather than

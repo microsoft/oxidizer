@@ -28,6 +28,7 @@ all-features = true
 [dependencies]
 darling = { workspace = true }
 proc-macro2 = { workspace = true }
+proc-macro-crate = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro", "clone-impls", "extra-traits"] }
 

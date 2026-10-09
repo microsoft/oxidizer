@@ -16,6 +16,7 @@
 
 use darling::FromMeta;
 use darling::ast::NestedMeta;
+use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
@@ -28,16 +29,32 @@ struct Args {
 }
 
 impl Args {
-    fn runtime(&self, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        let runtime_path: syn::Path = parse_quote!(::arty::runtime);
+    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
         if self.workers.is_none() && clock.is_none() && !test {
-            return Ok(quote!(#runtime_path::Runtime::new()));
+            return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
         let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
-        let workers = workers.map(|count| quote!(.workers(#runtime_path::WorkersPolicy::at_most(#count))));
+        let workers = workers.map(|count| quote!(.workers(#runtime_path::runtime::WorkersPolicy::at_most(#count))));
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
-        Ok(quote!(#runtime_path::Runtime::builder() #workers #clock .build()))
+        Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #clock .build()))
+    }
+}
+
+fn runtime_path() -> TokenStream {
+    runtime_path_for(crate_name("arty").ok())
+}
+
+fn runtime_path_for(found: Option<FoundCrate>) -> TokenStream {
+    match found {
+        Some(FoundCrate::Name(name)) => {
+            let name = name.replace('-', "_");
+            let ident = syn::parse_str::<Ident>(&name)
+                .or_else(|_| syn::parse_str::<Ident>(&format!("r#{name}")))
+                .expect("Cargo dependency aliases are valid Rust identifiers, possibly requiring raw syntax");
+            quote!(::#ident)
+        }
+        Some(FoundCrate::Itself) | None => quote!(::arty),
     }
 }
 
@@ -128,7 +145,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let runtime_path: syn::Path = parse_quote!(::arty::runtime);
+    let runtime_path = runtime_path();
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -173,7 +190,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -187,7 +204,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let body = input.block;
     let (setup, body) = if let Some((ident, ty)) = clock {
         (
-            quote!(let #clock_binding = #runtime_path::__private::ClockControl::new();),
+            quote!(let #clock_binding = #runtime_path::runtime::__private::ClockControl::new();),
             quote!({
                 let #ident: #ty = #clock_binding;
                 #body
@@ -208,7 +225,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
             let #shutdown_binding = #runtime_binding.stop();
             #result_binding
                 .and_then(|#value_binding| #shutdown_binding.map(|()| #value_binding))
-                .unwrap_or_else(|error| #runtime_path::__private::resume_error(error))
+                .unwrap_or_else(|error| #runtime_path::runtime::__private::resume_error(error))
         }
     }
 }
@@ -220,6 +237,21 @@ mod tests {
     use testing_aids::render_expansion;
 
     use super::*;
+
+    #[test]
+    fn runtime_path_uses_a_renamed_dependency() {
+        assert_eq!(
+            runtime_path_for(Some(FoundCrate::Name("renamed-arty".to_owned()))).to_string(),
+            ":: renamed_arty"
+        );
+        assert_eq!(runtime_path_for(Some(FoundCrate::Itself)).to_string(), ":: arty");
+        assert_eq!(runtime_path_for(None).to_string(), ":: arty");
+    }
+
+    #[test]
+    fn runtime_path_supports_a_keyword_dependency_alias() {
+        assert_eq!(runtime_path_for(Some(FoundCrate::Name("type".to_owned()))).to_string(), ":: r#type");
+    }
 
     #[test]
     fn main_preserves_visibility_and_return_type() {
