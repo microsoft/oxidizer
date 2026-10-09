@@ -12,8 +12,8 @@ use observed::{Sink, emit};
 use performables::arc::Arc;
 use pin_project::{pin_project, pinned_drop};
 
-use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
 use crate::runtime::seismograph::TaskTelemetry;
+use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
 use crate::task::execution::TaskResult;
 use crate::task::execution::storage::{TaskStorage, discard_panic};
 

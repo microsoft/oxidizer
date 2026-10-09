@@ -14,8 +14,7 @@ use seismograph_runtime::task::{TaskHandle, TaskPoll};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
 use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, register_runtime};
 
-static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> =
-    LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
+static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
 static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
@@ -41,19 +40,14 @@ pub(crate) struct RuntimeTelemetry {
 
 impl RuntimeTelemetry {
     pub(crate) fn register(worker_count: usize) -> (Self, Vec<WorkerTelemetry>) {
-        let configured_workers =
-            u32::try_from(worker_count).expect("an Arty runtime cannot configure more than u32::MAX workers");
+        let configured_workers = u32::try_from(worker_count).expect("an Arty runtime cannot configure more than u32::MAX workers");
         let runtime_registration = Arc::new(register_runtime(RuntimeMetadata::new("arty", configured_workers)));
         let runtime_handle = runtime_registration.handle();
         let workers: Vec<_> = (0..worker_count)
             .map(|worker_index| {
-                let processor_index =
-                    u32::try_from(worker_index).expect("an Arty runtime cannot configure more than u32::MAX workers");
-                let worker_registration = Arc::new(
-                    runtime_registration.register_worker(
-                        WorkerMetadata::new(WorkerRole::Core).processor_index(processor_index),
-                    ),
-                );
+                let processor_index = u32::try_from(worker_index).expect("an Arty runtime cannot configure more than u32::MAX workers");
+                let worker_registration =
+                    Arc::new(runtime_registration.register_worker(WorkerMetadata::new(WorkerRole::Core).processor_index(processor_index)));
                 WorkerTelemetry {
                     handle: worker_registration.handle(),
                     worker_registration,
@@ -61,8 +55,8 @@ impl RuntimeTelemetry {
                 }
             })
             .collect();
-        let worker_registrations = NonEmpty::from_vec(workers.clone())
-            .expect("the number of Arty workers is validated before Seismograph registration");
+        let worker_registrations =
+            NonEmpty::from_vec(workers.clone()).expect("the number of Arty workers is validated before Seismograph registration");
         let worker_handles = NonEmpty::from_vec(workers.iter().map(|worker| worker.handle.clone()).collect())
             .expect("the number of Arty workers is validated before Seismograph registration");
 
@@ -195,9 +189,7 @@ impl Drop for TaskPollGuard<'_> {
     fn drop(&mut self) {
         self.task.poll_finished(
             self.worker,
-            self.poll
-                .take()
-                .expect("a task poll telemetry guard is finished exactly once"),
+            self.poll.take().expect("a task poll telemetry guard is finished exactly once"),
         );
     }
 }

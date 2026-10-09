@@ -3,6 +3,8 @@
 
 #![cfg(feature = "rt")]
 
+//! Public runtime and task lifecycle contracts exposed through Seismograph snapshots.
+
 testing_aids::init_tracing!();
 
 mod support;
@@ -16,6 +18,7 @@ use seismograph::recorder::{Configuration, RecordingPolicy};
 use seismograph::snapshot::SnapshotOptions;
 use seismograph_runtime::snapshot::{RuntimeState, source};
 use support::JoinHandleExt as _;
+use thread_aware::Unaware;
 
 struct RecorderReset;
 
@@ -33,18 +36,8 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
         ..Configuration::default()
     });
 
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
-    assert_eq!(
-        runtime
-            .scheduler()
-            .spawn_anywhere((), |_, ()| async { 17u32 })
-            .join()
-            .unwrap(),
-        17
-    );
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 17u32 }).join().unwrap(), 17);
     runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move {
@@ -75,18 +68,17 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
             .is_panic()
     );
     let (started, materialized) = mpsc::channel();
-    let canceled = runtime.scheduler().spawn_anywhere((), |_, ()| async move {
-        started.send(()).unwrap();
-        std::future::pending::<()>().await;
-    });
+    let canceled = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(started), |_, Unaware(started)| async move {
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
     materialized.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
     runtime.stop().unwrap();
     assert!(canceled.join().unwrap_err().is_shutdown());
 
-    let other = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let other = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     other.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap();
     other.stop().unwrap();
 
@@ -94,20 +86,16 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
     let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
     let runtime_source = decoded.sources.iter().find(|entry| entry.id == source::ID).unwrap();
     let runtime_snapshot = seismograph_runtime::snapshot::decode(&runtime_source.data).unwrap();
-    let arty_runtimes: Vec<_> = runtime_snapshot
-        .runtimes
-        .iter()
-        .filter(|entry| entry.name == "arty")
-        .collect();
+    let arty_runtimes: Vec<_> = runtime_snapshot.runtimes.iter().filter(|entry| entry.name == "arty").collect();
 
     assert_eq!(arty_runtimes.len(), 2);
     assert_ne!(arty_runtimes[0].id, arty_runtimes[1].id);
     assert!(arty_runtimes.iter().all(|entry| entry.state == RuntimeState::Stopped));
-    assert!(arty_runtimes.iter().all(|entry| {
-        entry.workers.len() == 1
-            && entry.workers[0].thread_id.is_some()
-            && entry.workers[0].processor_index == Some(0)
-    }));
+    assert!(
+        arty_runtimes.iter().all(|entry| {
+            entry.workers.len() == 1 && entry.workers[0].thread_id.is_some() && entry.workers[0].processor_index == Some(0)
+        })
+    );
 
     let primary = arty_runtimes
         .iter()

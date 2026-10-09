@@ -55,7 +55,6 @@ pub(in crate::runtime) fn build(
     // processor's ID so startup endpoints and service slots share a stable worker ordering.
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
     processors.sort_by_key(|processor| processor.processors().first().id());
-    let (runtime_telemetry, worker_telemetries) = RuntimeTelemetry::register(processors.len());
 
     let mut async_worker_command_txs = Vec::with_capacity(processors.len());
     let mut async_worker_start_txs = Vec::with_capacity(processors.len());
@@ -79,6 +78,7 @@ pub(in crate::runtime) fn build(
             }
         );
     })?;
+    let (runtime_telemetry, worker_telemetries) = RuntimeTelemetry::register(processors.len());
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         let (command_tx, command_rx) = channel::unbounded();
