@@ -11,7 +11,7 @@ mod support;
 
 use std::collections::HashSet;
 use std::pin::{Pin, pin};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Instant;
 
@@ -21,7 +21,7 @@ use events_once::Event;
 use many_cpus::SystemHardware;
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::runtime::RuntimeId as SeismographRuntimeId;
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
 use seismograph::snapshot::{DecodedSnapshot, SnapshotOptions};
 use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot as RuntimeSourceSnapshot, WorkerState, source};
 use support::JoinHandleExt as _;
@@ -29,24 +29,39 @@ use thread_aware::Unaware;
 
 struct RecorderReset;
 
+// The scenario asserts runtime lifecycle events, not recorder ring capacity.
+// This retains its complete per-worker event set without making Miri interpret
+// the default 65,536-slot buffer for every short-lived worker.
+const EVENT_CAPACITY: usize = 256;
+
 impl Drop for RecorderReset {
     fn drop(&mut self) {
         seismograph::recorder(Configuration::default());
     }
 }
 
+fn wait_for_notification(notification: &(Mutex<bool>, Condvar)) {
+    let (started, ready) = notification;
+    let mut started = started.lock().expect("the wake notification mutex is not poisoned");
+    while !*started {
+        started = ready.wait(started).expect("the wake notification mutex is not poisoned");
+    }
+}
+
 struct BlockingWake {
-    notified: mpsc::Sender<()>,
+    notified: Arc<(Mutex<bool>, Condvar)>,
     release: Mutex<mpsc::Receiver<()>>,
 }
 
 impl Wake for BlockingWake {
     fn wake(self: Arc<Self>) {
-        self.notified.send(()).expect("the test retains the wake notification receiver");
+        let (started, ready) = self.notified.as_ref();
+        *started.lock().expect("the wake notification mutex is not poisoned") = true;
+        ready.notify_one();
         self.release
             .lock()
             .expect("the wake release mutex is not poisoned")
-            .recv_timeout(testing_aids::TEST_TIMEOUT)
+            .recv()
             .expect("the test releases the blocked join wake");
     }
 }
@@ -153,17 +168,15 @@ fn exercise_join_notification_ordering() {
                 42u32
             })
     );
-    let (notified, wake_started) = mpsc::channel();
+    let wake_started = Arc::new((Mutex::new(false), Condvar::new()));
     let (release, released) = mpsc::channel();
     let waker = Waker::from(Arc::new(BlockingWake {
-        notified,
+        notified: Arc::clone(&wake_started),
         release: Mutex::new(released),
     }));
     assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     release_task.send(());
-    wake_started
-        .recv_timeout(testing_aids::TEST_TIMEOUT)
-        .expect("task completion wakes the blocked join");
+    wait_for_notification(&wake_started);
 
     let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("the task result is ready before its wake callback returns");
@@ -192,17 +205,15 @@ fn exercise_cancellation_notification_ordering() {
             .scheduler()
             .spawn_anywhere((), |_, ()| async { std::future::pending::<()>().await })
     );
-    let (notified, wake_started) = mpsc::channel();
+    let wake_started = Arc::new((Mutex::new(false), Condvar::new()));
     let (release, released) = mpsc::channel();
     let waker = Waker::from(Arc::new(BlockingWake {
-        notified,
+        notified: Arc::clone(&wake_started),
         release: Mutex::new(released),
     }));
     assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     RuntimeOperations::from(&runtime).request_stop();
-    wake_started
-        .recv_timeout(testing_aids::TEST_TIMEOUT)
-        .expect("task cancellation wakes the blocked join");
+    wait_for_notification(&wake_started);
 
     let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("the canceled join is ready before its wake callback returns");
@@ -737,6 +748,7 @@ fn public_spawn_paths_report_runtime_worker_task_and_poll_lifecycle() {
     let _reset = RecorderReset;
     seismograph::recorder(Configuration {
         runtime_tasks: RecordingPolicy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(EVENT_CAPACITY).expect("the test event capacity is a supported power of two"),
         ..Configuration::default()
     });
     exercise_join_notification_ordering();
