@@ -78,7 +78,7 @@ impl WakerStateAllocationProbe {
     #[must_use]
     pub fn new() -> Self {
         let mut task_storage = RawBlindPool::new();
-        let task = task_storage.insert(AllocationProbeTask(0));
+        let task = task_storage.insert(AllocationProbeTask { _nonzero: 0 });
         let task_ref = TaskRef::new(
             // SAFETY: The probe storage owns the task for the complete lifetime of every state
             // carrying this opaque reference, and the benchmark never dereferences it.
@@ -106,6 +106,7 @@ impl WakerStateAllocationProbe {
     }
 
     /// Replaces one pooled wake state, returning the previous slot before reusing capacity.
+    #[cfg_attr(test, mutants::skip)] // Benchmark operation; measured directly instead of unit-tested.
     pub fn replace_pooled(&mut self) {
         self.pooled = None;
         let state = self.state();
@@ -113,6 +114,7 @@ impl WakerStateAllocationProbe {
     }
 
     /// Replaces one freshly allocated `Arc` wake state.
+    #[cfg_attr(test, mutants::skip)] // Benchmark comparison; measured directly instead of unit-tested.
     pub fn replace_fresh_arc(&mut self) {
         self.fresh = None;
         let state = self.state();
@@ -126,18 +128,22 @@ impl Default for WakerStateAllocationProbe {
     }
 }
 
-struct AllocationProbeTask(u8);
+struct AllocationProbeTask {
+    _nonzero: u8,
+}
 
 impl TypeErasedTask for AllocationProbeTask {
     fn poll(self: Pin<&Self>) -> std::task::Poll<()> {
         unreachable!("the allocation probe never polls its opaque task reference")
     }
 
+    #[cfg(test)]
+    #[cfg_attr(test, mutants::skip)] // Opaque benchmark task is never exercised as an executor task.
     fn is_inert(&self) -> bool {
-        _ = self.0;
         true
     }
 
+    #[cfg_attr(test, mutants::skip)] // Opaque benchmark task is never exercised as an executor task.
     fn consume_awakened(&self) -> bool {
         false
     }

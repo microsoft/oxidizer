@@ -434,38 +434,18 @@ impl ExecutorCore {
 
         // We drop all completed tasks after their completion/cancellation path has retired any
         // independently held wake metadata.
-        state_exclusive.completed.retain(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
-            // where it was created (because we just created it). The executor is the only thing that
-            // creates references to the tasks and it only ever creates temporary non-overlapping
-            // references narrowly bounded to individual code blocks, ensuring that aliasing rules
-            // are upheld. Anything outside `ExecutorCore` only passes `TaskRef` by value, never
-            // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
-            let task = unsafe { task_ref.as_task() };
+        for task_ref in state_exclusive.completed.drain(..) {
+            // SAFETY: The task is alive, owned by this executor, and accessed on its owner thread.
+            let pool_ticket = unsafe { task_ref.into_pool_ticket() };
 
-            if task.is_inert() {
-                // SAFETY: The task is still alive (we own it) and we are accessing it from the
-                // same thread as it was created on (the executor is single-threaded). All is well.
-                let pool_ticket = unsafe { task_ref.into_pool_ticket() };
-
-                // SAFETY: This is the only time we are removing this task because that only happens
-                // when a task is removed from the "completed" set, which can only happen once.
-                unsafe {
-                    state_reentrant.task_storage.remove(pool_ticket);
-                }
-
-                false
-            } else {
-                true
+            // SAFETY: Draining removes each completed task exactly once.
+            unsafe {
+                state_reentrant.task_storage.remove(pool_ticket);
             }
-        });
+        }
 
-        let dropped_count = completed_before
-            .checked_sub(state_exclusive.completed.len())
-            .expect("collection cannot grow during item removal");
-
-        if dropped_count > 0 {
-            TASKS_DROPPED.with(|x| x.observe(dropped_count));
+        if completed_before > 0 {
+            TASKS_DROPPED.with(|x| x.observe(completed_before));
         }
     }
 
