@@ -575,6 +575,40 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
 }
 
 #[tokio::test]
+async fn default_layer_rejects_output_beyond_its_decompressed_body_limit() {
+    const DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN: usize = 64 * 1024 * 1024;
+
+    let output_len = DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN + 1;
+    let compressed = compress(Format::Zstd, &vec![0_u8; output_len]);
+    let handler = client().decompress_responses(&[Format::Zstd]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("zstd"))
+            .bytes(compressed.clone())
+            .build()
+    }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+    let error = response.into_body().into_bytes().await.unwrap_err();
+
+    assert_eq!(error.label(), "compression_limit_exceeded");
+}
+
+#[tokio::test]
+async fn raw_deflate_is_not_used_as_an_http_content_coding() {
+    let handler = server().compress_responses(&[Format::Deflate]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake().status(StatusCode::OK).text("unchanged").build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("deflate"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert!(response.headers().get(CONTENT_ENCODING).is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), "unchanged");
+}
+
+#[tokio::test]
 async fn a_no_content_response_is_never_given_a_body() {
     for status in [
         StatusCode::CONTINUE,

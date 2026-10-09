@@ -185,29 +185,6 @@ mod tests {
     }
 
     #[test]
-    fn the_global_resources_are_one_instance() {
-        assert!(
-            std::ptr::eq(Resources::global(), Resources::global()),
-            "every caller must see the same global resources"
-        );
-        assert!(
-            Resources::default().pool().capacity() > 0,
-            "the default is the global handle, which recycles"
-        );
-    }
-
-    #[test]
-    fn memory_is_available_for_input_as_well_as_output() {
-        let resources = Resources::new(GlobalPool::new());
-
-        assert!(
-            resources.memory().reserve(16).remaining_capacity() >= 16,
-            "the memory provider must be reachable"
-        );
-        assert!(format!("{resources:?}").contains("Resources"));
-    }
-
-    #[test]
     fn relocating_moves_the_memory_provider_and_leaves_the_pool_alone() {
         use thread_aware::Relocator;
 

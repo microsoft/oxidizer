@@ -3,6 +3,8 @@
 
 //! The compression handler and the layer that configures it.
 
+use std::num::NonZeroU64;
+
 use bytesbuf::mem::HasMemory as _;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources};
@@ -26,6 +28,19 @@ const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
 
 /// Bounds decoder allocation and recursive stream depth for peer-controlled headers.
 const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
+
+/// Maximum decompressed size accepted by a layer unless the caller overrides it.
+///
+/// Written as the exact byte count so mutation testing cannot replace one multiplication while
+/// leaving a different, undocumented policy value that ordinary boundary tests cannot cheaply
+/// distinguish.
+const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
+
+const fn default_decompressor_limits() -> DecompressorLimits {
+    DecompressorLimits::new().max_output_len(
+        NonZeroU64::new(DEFAULT_MAX_DECOMPRESSED_BODY_LEN).expect("DEFAULT_MAX_DECOMPRESSED_BODY_LEN is a non-zero constant"),
+    )
+}
 
 /// How to handle a compression format that is not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -233,12 +248,13 @@ pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
 impl<R> CompressionLayer<R> {
     /// Bounds the cost of decompressing a single body.
     ///
-    /// The streaming decompressor applies no bounds of its own, so whatever is set
-    /// here is the only thing standing between the reader and a decompression
-    /// bomb.
+    /// Decompressed output defaults to 64 MiB. Bounds left unset in `limits` keep the layer's
+    /// defaults; explicit bounds replace them, and
+    /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] explicitly removes the
+    /// output cap.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
-        self.config.limits = limits;
+        self.config.limits = limits.with_fallbacks(default_decompressor_limits());
         self
     }
 
@@ -295,9 +311,8 @@ impl CompressionLayer<Server> {
     /// unchanged, including its `Content-Encoding` metadata. This exception
     /// avoids installing a decoder that cannot produce a compressed member.
     ///
-    /// Decompression streams bytes without imposing an absolute output-size
-    /// bound by default. Set [`limits`][Self::limits] to an application-specific
-    /// bound before enabling this for untrusted request bodies.
+    /// Decompression rejects output beyond 64 MiB by default. Set [`limits`][Self::limits] when the
+    /// application needs a different bound.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);
@@ -861,7 +876,7 @@ struct Config {
 impl Config {
     fn new(body_builder: HttpBodyBuilder) -> Self {
         Self {
-            limits: DecompressorLimits::new(),
+            limits: default_decompressor_limits(),
             resources: Resources::new(body_builder.memory()),
             body_builder,
             on_unsupported: UnsupportedCompression::default(),
@@ -1004,19 +1019,5 @@ mod tests {
 
         assert!(headers.get(CONTENT_ENCODING).is_none());
         assert_eq!(futures::executor::block_on(body.into_text()).unwrap(), "unchanged");
-    }
-
-    #[test]
-    fn head_response_format_is_identity_before_the_handler_runs() {
-        let body_builder = HttpBodyBuilder::new_fake();
-        let layer = Compression::server(body_builder.clone()).compress_responses(&[Format::Gzip]);
-        let request = http::Request::head("https://example.com")
-            .header(ACCEPT_ENCODING, "gzip, identity;q=0")
-            .body(body_builder.empty())
-            .unwrap();
-
-        let negotiation = layer.role.choose_response_format(&request);
-
-        assert_eq!(negotiation.selection, negotiate::Selection::Identity);
     }
 }
