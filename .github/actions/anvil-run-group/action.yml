@@ -98,9 +98,10 @@ runs:
             }
           }
           core_pattern=""
+          restore_core_pattern=false
           cleanup_mutation() {
             stop_resources
-            if [[ -n "$core_pattern" ]]; then
+            if [[ "$restore_core_pattern" == true ]]; then
               sudo -n sysctl -w "kernel.core_pattern=$core_pattern" || echo "::warning::Could not restore mutation core-dump routing"
             fi
           }
@@ -109,6 +110,7 @@ runs:
             # Linux ignores ulimit for piped handlers such as Ubuntu's apport.
             # Only ephemeral hosted runners may change this host-wide setting.
             core_pattern="$(sysctl -n kernel.core_pattern)"
+            restore_core_pattern=true
             sudo -n sysctl -w kernel.core_pattern=core
           fi
         fi
