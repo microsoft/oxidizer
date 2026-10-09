@@ -673,8 +673,9 @@ impl Drop for ExecutorCore {
 
         if !shutdown_complete {
             for task_ref in state_reentrant.new_tasks.drain(..) {
-                // SAFETY: New tasks have not been initialized, so no waker or other external
-                // reference can point into them. Each appears exactly once in `new_tasks`.
+                // SAFETY: New tasks have been initialized but never polled, so their embedded
+                // waker has not escaped and no external reference can point into them. Each
+                // appears exactly once in `new_tasks`.
                 unsafe { task_ref.release() };
             }
 
