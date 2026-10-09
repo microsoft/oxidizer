@@ -826,7 +826,6 @@ mod tests {
     // declaration of failure to clean up - the dirty state is invalid and may result in further
     // panics or even memory safety violations in the test runner. This may break in the future,
     // so be ready to adjust or remove as needed when additional complexity makes it impractical.
-    #[should_panic]
     fn shutdown_times_out_with_leaked_waiter() {
         // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
         let executor = unsafe {
@@ -855,11 +854,12 @@ mod tests {
         executor.begin_shutdown();
 
         // We expect this to panic.
-        _ = executor.execute_cycle();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| executor.execute_cycle())).is_err());
 
-        // We only drop it after shutdown completes, which is a leak because shutdown
-        // will never complete like this.
+        // Releasing the leaked waiter lets shutdown complete and keeps this test from leaking
+        // the task when the expected panic unwinds.
         drop(leaked_waiter);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     }
 
     #[test]

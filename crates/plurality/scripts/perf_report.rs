@@ -68,8 +68,6 @@ const COMPARISON_OPS: &[(&str, &str)] = &[
     ("pool_comparison/churn/object_pool_pull", "object-pool"),
     ("pool_comparison/churn/opool_get", "opool"),
     ("pool_comparison/churn/deadpool_get", "deadpool"),
-    ("pool_comparison/churn/infinity_pinned", "infinity-pool — `PinnedPool`"),
-    ("pool_comparison/churn/infinity_raw", "infinity-pool — `RawPinnedPool`"),
 ];
 
 const DYN_BOX_OPS: &[(&str, &str)] = &[
@@ -77,22 +75,6 @@ const DYN_BOX_OPS: &[(&str, &str)] = &[
     (
         "dyn_box/plurality_multi_box",
         "plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_pinned",
-        "infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_local_pinned",
-        "infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_blind",
-        "infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_local_blind",
-        "infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous)",
     ),
     ("dyn_box/std_box", "standard library — `Box<dyn Trait>`"),
 ];
@@ -346,7 +328,7 @@ fn emit_handle_costs(out: &mut String, report: &ReportIndex) {
 fn emit_type_erasure(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, TYPE_ERASURE_OPS[0].0);
     out.push_str("## Cost of serving many types from one pool\n\n");
-    out.push_str("What dropping the element type costs. [`MultiPool`] accepts values of any type, and finds the right slot size by looking the value's layout up in a directory of the layouts it has seen; a `Pool<T>` knows its slot size at compile time and looks nothing up. The lookup is a linear scan, so the rows below hold the number of distinct layouts at one and at sixteen, the latter with the measured layout registered last so the scan runs its full length. Price type erasure at the step from the first row to either of the others, not at the difference between them: the longer scan executes materially more instructions, but the processor overlaps it with the pool's own pointer chasing, and what remains is smaller than the effect of heap and code placement, which this benchmark does not control. `cargo bench --bench plurality`.\n\n");
+    out.push_str("What dropping the element type from the pool costs. [`MultiPool`] accepts values of any type, and finds the right slot size by looking the value's layout up in a directory of the layouts it has seen; a `Pool<T>` knows its slot size at compile time and looks nothing up. The lookup is a linear scan, so the rows below hold the number of distinct layouts at one and at sixteen, the latter with the measured layout registered last so the scan runs its full length. Price runtime pool routing at the step from the first row to either of the others, not at the difference between them: the longer scan executes materially more instructions, but the processor overlaps it with the pool's own pointer chasing, and what remains is smaller than the effect of heap and code placement, which this benchmark does not control. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Pool | Allocate + free | Δ vs `Pool<T>` |\n|---|---:|---:|\n");
     for (key, label) in TYPE_ERASURE_OPS {
         let time = crit_per_op(report, key);
@@ -359,7 +341,7 @@ fn emit_type_erasure(out: &mut String, report: &ReportIndex) {
 fn emit_comparison(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, COMPARISON_OPS[0].0);
     out.push_str("## Against other pooling crates\n\n");
-    out.push_str("The same allocate-and-free workload run against every pooling crate we found with a comparable model. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the key-based pools offer. `cargo bench --bench plurality`.\n\n");
+    out.push_str("The same allocate-and-free workload run against the comparable pooling implementations retained in this report. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the retained key-based pools offer. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Pool | Allocate + free | Δ vs plurality `Box` |\n|---|---:|---:|\n");
     for (key, label) in COMPARISON_OPS {
         let time = crit_per_op(report, key);
@@ -408,7 +390,7 @@ fn emit_dyn_box(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, DYN_BOX_OPS[0].0);
     out.push_str("## Owning `dyn Trait` handles\n\n");
     out.push_str("Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.\n\n");
-    out.push_str("infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The rows marked heterogeneous accept values of any type in one pool and therefore pay for more capability; each row here also unsizes a handle and makes a virtual call, so the cost of type erasure alone is the one measured above rather than the difference between these rows. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
+    out.push_str("The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Both plurality rows perform the same handle unsizing and virtual call, so their difference isolates the pool-routing cost. The other implementations retained in this report return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Handle | Allocate, call, free | Δ vs plurality |\n|---|---:|---:|\n");
     for (key, label) in DYN_BOX_OPS {
         let time = crit_per_op(report, key);

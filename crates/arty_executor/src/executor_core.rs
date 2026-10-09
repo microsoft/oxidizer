@@ -12,14 +12,11 @@ use std::time::{Duration, Instant};
 use std::{mem, task, thread};
 
 use events_once::RawLocalEventLake;
-use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use plurality::MultiPool;
 use tick::SimpleClock;
 
-use crate::{
-    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
-    WakeSignal,
-};
+use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -65,7 +62,7 @@ struct ReentrancySafeState {
     /// Storage for all the tasks registered with the executor. Once a task has been registered,
     /// the executor only sees it as a [`TypeErasedTask`][crate::TypeErasedTask], with only the
     /// task itself knowing the specific type of the future and the type of the result it produces.
-    task_storage: RawBlindPool,
+    task_storage: MultiPool,
 
     /// In shutdown mode (`Some`), all tasks are considered completed and the only thing we do is
     /// wait for them to become inert (which may be driven by uncontrollable actions of foreign
@@ -179,7 +176,7 @@ impl ExecutorCore {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
                 result_events: RawLocalEventLake::new(),
-                task_storage: RawBlindPool::builder().drop_policy(DropPolicy::MustNotDropContents).build(),
+                task_storage: MultiPool::new(),
                 shutdown_deadline: None,
             }),
             exclusive: RefCell::new(ExclusiveState {
@@ -220,14 +217,8 @@ impl ExecutorCore {
         // have been dropped.
         let (result_tx, result_rx) = unsafe { state.result_events.rent::<R>() };
 
-        let task = state.task_storage.insert(Task::new(future, result_tx));
-
-        let task_ref = TaskRef::new(
-            // SAFETY: The task pool itself does not keep any references, so we as the currently
-            // only owner of the task have the freedom to create whatever references we desire.
-            // In this case we make a reference that lets us access it as a `dyn TypeErasedTask`.
-            unsafe { task.cast_type_erased_task() }.into_shared(),
-        );
+        let task = state.task_storage.alloc_box(Task::new(future, result_tx));
+        let task_ref = TaskRef::new(task);
 
         let wake_signal = WakeSignal::new(
             Arc::clone(&self.shared.awakened),
@@ -275,9 +266,9 @@ impl ExecutorCore {
         self.poll_active_tasks(&mut state_exclusive);
 
         {
-            let mut state_reentrant = self.reentrancy_safe.borrow_mut();
+            let state_reentrant = self.reentrancy_safe.borrow();
 
-            self.drop_inert_tasks(&mut state_exclusive, &mut state_reentrant);
+            self.drop_inert_tasks(&mut state_exclusive);
 
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
@@ -450,7 +441,7 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
+    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState) {
         let completed_before = state_exclusive.completed.len();
 
         // We drop all completed tasks that are inert, which means they have
@@ -465,15 +456,10 @@ impl ExecutorCore {
             let task = unsafe { task_ref.as_task() };
 
             if task.is_inert() {
-                // SAFETY: The task is still alive (we own it) and we are accessing it from the
-                // same thread as it was created on (the executor is single-threaded). All is well.
-                let pool_ticket = unsafe { task_ref.into_pool_ticket() };
-
-                // SAFETY: This is the only time we are removing this task because that only happens
-                // when a task is removed from the "completed" set, which can only happen once.
-                unsafe {
-                    state_reentrant.task_storage.remove(pool_ticket);
-                }
+                // SAFETY: This is the only time we release this task because that only happens
+                // when it is removed from the "completed" set, which can only happen once. The
+                // executor is single-threaded, and `is_inert` guarantees no references remain.
+                unsafe { task_ref.release() };
 
                 false
             } else {
@@ -677,21 +663,51 @@ impl ExecutorCore {
 
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
-        if thread::panicking() {
-            // We skip the assertions if we are already panicking because a double panic more often
-            // does not help anything and may even obscure the initial panic in test runs.
+        let was_panicking = thread::panicking();
+        if was_panicking {
+            // Retain raw task owners while unwinding: releasing one may run an arbitrary task or
+            // future destructor that panics and would abort the process with a double panic.
             return;
         }
 
-        assert!(
-            self.reentrancy_safe.borrow().shutdown_deadline.is_some(),
-            "Executor is being dropped without a shutdown process having been started. This is a programming error."
-        );
+        let shutdown_started = self.reentrancy_safe.get_mut().shutdown_deadline.is_some();
 
         let state_exclusive = self.exclusive.get_mut();
         let state_reentrant = self.reentrancy_safe.get_mut();
+        let shutdown_complete =
+            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty();
+
+        if !shutdown_complete {
+            for task_ref in state_reentrant.new_tasks.drain(..) {
+                // SAFETY: New tasks have been initialized but never polled, so their embedded
+                // waker has not escaped and no external reference can point into them. Each
+                // appears exactly once in `new_tasks`.
+                unsafe { task_ref.release() };
+            }
+
+            for task_ref in state_exclusive
+                .active
+                .drain(..)
+                .chain(state_exclusive.inactive.drain())
+                .chain(state_exclusive.completed.drain(..))
+            {
+                // SAFETY: Tasks in these collections have been initialized and remain alive.
+                let task = unsafe { task_ref.as_task() };
+                if task.is_inert() {
+                    // SAFETY: `is_inert` proves no external reference still needs the embedded
+                    // wake signal. Each task appears exactly once across these collections.
+                    unsafe { task_ref.release() };
+                }
+            }
+        }
+
         assert!(
-            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty(),
+            shutdown_started,
+            "Executor is being dropped without a shutdown process having been started. This is a programming error."
+        );
+
+        assert!(
+            shutdown_complete,
             "Executor is being dropped before execute_cycle() returned CycleOutcome::Shutdown. This violates ExecutorBuilder::build() safety requirements."
         );
     }
@@ -782,9 +798,220 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::pin::Pin;
+    use std::rc::Rc;
+
     use static_assertions::assert_not_impl_any;
 
     use super::*;
+    use crate::TypeErasedTask;
+
+    #[derive(Clone, Copy)]
+    enum TaskLocation {
+        New,
+        Active,
+        Inactive,
+        Completed,
+    }
+
+    struct SetSignalOnDrop(Rc<Cell<bool>>);
+
+    impl Drop for SetSignalOnDrop {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    struct PanicOnDrop(Rc<Cell<bool>>);
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            self.0.set(true);
+            panic!("panic from dirty-drop task destructor");
+        }
+    }
+
+    /// Synthetic task that isolates dirty-teardown ownership from the task/waker lifecycle.
+    ///
+    /// `inert` controls the reclamation decision; every other lifecycle operation is outside this
+    /// fixture's boundary and therefore rejects calls.
+    struct DirtyDropTask {
+        _signal: SetSignalOnDrop,
+        inert: bool,
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    impl TypeErasedTask for DirtyDropTask {
+        fn poll(self: Pin<&Self>) -> task::Poll<()> {
+            unreachable!("dirty-drop fixture is never polled")
+        }
+
+        fn is_inert(&self) -> bool {
+            self.inert
+        }
+
+        fn consume_awakened(&self) -> bool {
+            unreachable!("dirty-drop fixture is never awakened")
+        }
+
+        fn abort(self: Pin<&Self>) {
+            unreachable!("dirty-drop fixture is never aborted")
+        }
+
+        unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
+            unreachable!("dirty-drop fixture is never initialized")
+        }
+
+        #[cfg(debug_assertions)]
+        fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
+            unreachable!("dirty-drop fixture is never inspected")
+        }
+    }
+
+    struct PanicOnDropTask {
+        _panic_on_drop: PanicOnDrop,
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    impl TypeErasedTask for PanicOnDropTask {
+        fn poll(self: Pin<&Self>) -> task::Poll<()> {
+            unreachable!("panicking-drop fixture is never polled")
+        }
+
+        fn is_inert(&self) -> bool {
+            unreachable!("panicking-drop fixture is never inspected")
+        }
+
+        fn consume_awakened(&self) -> bool {
+            unreachable!("panicking-drop fixture is never awakened")
+        }
+
+        fn abort(self: Pin<&Self>) {
+            unreachable!("panicking-drop fixture is never aborted")
+        }
+
+        unsafe fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
+            unreachable!("panicking-drop fixture is never initialized")
+        }
+
+        #[cfg(debug_assertions)]
+        fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&Backtrace)) {
+            unreachable!("panicking-drop fixture is never inspected")
+        }
+    }
+
+    /// Inserts a raw pooled task directly into one scheduler collection, without normal
+    /// registration or wake initialization. The returned `TaskRef` lets the non-inert case clean
+    /// up its deliberately retained raw owner after observing executor teardown.
+    fn dirty_drop_fixture(location: TaskLocation, inert: bool) -> (ExecutorCore, TaskRef, Rc<Cell<bool>>) {
+        let dropped = Rc::new(Cell::new(false));
+
+        // SAFETY: This test intentionally violates the graceful-shutdown requirement to verify
+        // dirty-teardown ownership behavior before the programming error is reported.
+        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(DirtyDropTask {
+            _signal: SetSignalOnDrop(Rc::clone(&dropped)),
+            inert,
+        });
+        let task_ref = TaskRef::new(task);
+
+        match location {
+            TaskLocation::New => executor.reentrancy_safe.borrow_mut().new_tasks.push_back(task_ref),
+            TaskLocation::Active => executor.exclusive.borrow_mut().active.push_back(task_ref),
+            TaskLocation::Inactive => {
+                executor.exclusive.borrow_mut().inactive.insert(task_ref);
+            }
+            TaskLocation::Completed => executor.exclusive.borrow_mut().completed.push_back(task_ref),
+        }
+
+        (executor, task_ref, dropped)
+    }
+
+    fn assert_dirty_drop_reclaims_task(location: TaskLocation) {
+        let (executor, _task_ref, dropped) = dirty_drop_fixture(location, true);
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_new_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::New);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_active_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Active);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_inactive_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Inactive);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_completed_task() {
+        assert_dirty_drop_reclaims_task(TaskLocation::Completed);
+    }
+
+    #[test]
+    fn dirty_drop_reclaims_task_without_result_event() {
+        let (executor, _task_ref, dropped) = dirty_drop_fixture(TaskLocation::New, true);
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn dirty_drop_retains_non_inert_task() {
+        let (executor, task_ref, dropped) = dirty_drop_fixture(TaskLocation::Inactive, false);
+
+        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
+
+        assert!(result.is_err());
+        assert!(!dropped.get());
+
+        // SAFETY: Dirty teardown retained this unique raw owner, and the fixture has no external
+        // references. Reconstructing it exactly once prevents the test itself from leaking.
+        unsafe { task_ref.release() };
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn unwind_retains_task_whose_destructor_panics() {
+        let dropped = Rc::new(Cell::new(false));
+
+        // SAFETY: The executor is deliberately dropped during an existing unwind to verify that
+        // its double-panic guard retains raw task owners instead of running their destructors.
+        let executor = unsafe { ExecutorCore::new(task::Waker::noop().clone(), Duration::ZERO, ShutdownTimeoutBehavior::Panic) };
+        let task = executor.reentrancy_safe.borrow().task_storage.alloc_box(PanicOnDropTask {
+            _panic_on_drop: PanicOnDrop(Rc::clone(&dropped)),
+        });
+        let task_ref = TaskRef::new(task);
+        executor.reentrancy_safe.borrow_mut().new_tasks.push_back(task_ref);
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _executor = executor;
+            panic!("original panic");
+        }))
+        .unwrap_err();
+
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"original panic"));
+        assert!(!dropped.get());
+
+        // SAFETY: The unwind path deliberately retained this unique raw owner. The fixture has no
+        // external references, so reconstructing it exactly once is valid; its expected destructor
+        // panic is contained by this test.
+        let release = catch_unwind(AssertUnwindSafe(|| unsafe { task_ref.release() }));
+        assert!(release.is_err());
+        assert!(dropped.get());
+    }
 
     #[test]
     fn thread_safety() {
