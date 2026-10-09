@@ -3,11 +3,6 @@
 
 //! Consumer compilation contract for a Cargo-renamed Arty dependency.
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test setup and process failures should fail this compile-contract test"
-)]
-
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -40,13 +35,13 @@ renamed_arty = {{ package = "arty", path = "{}" }}
     .unwrap();
     fs::write(
         source.join("main.rs"),
-        r#"use renamed_arty::task::Builtins;
+        r"use renamed_arty::task::Builtins;
 
 #[renamed_arty::main]
 async fn main(cx: Builtins) {
     cx.scheduler().spawn(async |_| ()).await.unwrap();
 }
-"#,
+",
     )
     .unwrap();
 
