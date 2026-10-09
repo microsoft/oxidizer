@@ -148,7 +148,7 @@ futures-util = { version = "0.3.31", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 # Keep the library and summary parser aligned with gungraun-runner's schema.
 gungraun = { version = "=0.19.4", default-features = false }
-gungraun-summary = { version = "=6.0.0", default-features = false }
+gungraun-summary = { version = "=7.0.0", default-features = false }
 h3 = { version = "0.0.8", default-features = false }
 h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
