@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_macros_impl"
+description = "Implementation of Arty runtime entry-point macros."
+version = "0.4.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime", "proc-macro"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_macros_impl"
+
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["proc_macro2::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+darling = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro", "clone-impls", "extra-traits"] }
+
+[dev-dependencies]
+insta = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+
+[lints]
+workspace = true
