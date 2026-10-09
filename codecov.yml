@@ -26,3 +26,6 @@ ignore:
 - "crates/metabench/**/*"
 - "crates/metabench_macros/**/*"
 - "crates/metabench_macros_impl/**/*"
+- "crates/zygote_benchmarks/**/*"
+- "crates/zygote_control/**/*"
+- "crates/zygote_rt/**/*"

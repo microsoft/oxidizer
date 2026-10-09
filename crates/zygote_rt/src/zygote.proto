@@ -1,0 +1,146 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package microsoft.oxidizer.zygote.v1;
+
+// One SOCK_SEQPACKET datagram is exactly one Packet. File descriptors are sent
+// out-of-band with SCM_RIGHTS and must exactly match descriptor_roles in order.
+message Packet {
+  uint32 protocol_major = 1;
+  uint64 request_id = 2;
+  repeated uint32 required_features = 3 [packed = false];
+  repeated DescriptorRole descriptor_roles = 4 [packed = false];
+
+  oneof body {
+    Ready ready = 10;
+    Launch launch = 11;
+    Started started = 12;
+    Exited exited = 13;
+    Error error = 14;
+    Shutdown shutdown = 15;
+    PoolControl pool_control = 16;
+    PoolState pool_state = 17;
+  }
+}
+
+enum DescriptorRole {
+  DESCRIPTOR_ROLE_UNSPECIFIED = 0;
+  DESCRIPTOR_ROLE_STDIN = 1;
+  DESCRIPTOR_ROLE_STDOUT = 2;
+  DESCRIPTOR_ROLE_STDERR = 3;
+  DESCRIPTOR_ROLE_PIDFD = 4;
+  DESCRIPTOR_ROLE_CGROUP_PROCS = 5;
+  DESCRIPTOR_ROLE_LANDLOCK_RULESET = 6;
+  DESCRIPTOR_ROLE_NAMESPACE_CGROUP = 7;
+  DESCRIPTOR_ROLE_NAMESPACE_IPC = 8;
+  DESCRIPTOR_ROLE_NAMESPACE_UTS = 9;
+  DESCRIPTOR_ROLE_NAMESPACE_NETWORK = 10;
+  DESCRIPTOR_ROLE_NAMESPACE_TIME = 11;
+  DESCRIPTOR_ROLE_NAMESPACE_MOUNT = 12;
+  DESCRIPTOR_ROLE_CLOSED_STDIN = 13;
+  DESCRIPTOR_ROLE_CLOSED_STDOUT = 14;
+  DESCRIPTOR_ROLE_CLOSED_STDERR = 15;
+}
+
+message Ready {
+  bytes nonce = 1;
+}
+
+message Launch {
+  repeated bytes argv = 1;
+  repeated bytes environment = 2;
+  optional bytes cwd = 3;
+  UnixOptions unix = 4;
+  repeated Rlimit rlimits = 5;
+  LinuxSandbox sandbox = 6;
+}
+
+message UnixOptions {
+  optional uint32 uid = 1;
+  optional uint32 gid = 2;
+  SupplementaryGroups groups = 3;
+  optional sint32 process_group = 4;
+  bool new_session = 5;
+  optional uint32 umask = 6;
+}
+
+message SupplementaryGroups {
+  repeated uint32 gids = 1 [packed = false];
+}
+
+message Rlimit {
+  uint32 resource = 1;
+  uint64 soft = 2;
+  uint64 hard = 3;
+}
+
+message LinuxSandbox {
+  PrivilegeReduction privileges = 1;
+  SeccompPolicy seccomp = 2;
+  bool landlock = 3;
+  bool cgroup = 4;
+  repeated NamespaceKind namespaces = 5 [packed = false];
+  uint32 landlock_abi = 6;
+  uint64 landlock_handled_access = 7;
+}
+
+message PrivilegeReduction {
+  bool no_new_privs = 1;
+  bool disable_dumping = 2;
+  bool clear_capabilities = 3;
+  bool drop_capability_bounding_set = 4;
+  bool lock_securebits = 5;
+}
+
+message SeccompPolicy {
+  uint32 audit_architecture = 1;
+  repeated SeccompInstruction instructions = 2;
+}
+
+message SeccompInstruction {
+  uint32 code = 1;
+  uint32 jump_true = 2;
+  uint32 jump_false = 3;
+  uint32 value = 4;
+}
+
+enum NamespaceKind {
+  NAMESPACE_KIND_UNSPECIFIED = 0;
+  NAMESPACE_KIND_CGROUP = 1;
+  NAMESPACE_KIND_IPC = 2;
+  NAMESPACE_KIND_UTS = 3;
+  NAMESPACE_KIND_NETWORK = 4;
+  NAMESPACE_KIND_TIME = 5;
+  NAMESPACE_KIND_MOUNT = 6;
+}
+
+message Started {
+  uint32 pid = 1;
+  bool prefork_hit = 2;
+  uint32 idle_workers = 3;
+  uint64 prefork_refills = 4;
+  uint64 prefork_refill_nanoseconds = 5;
+}
+
+message Exited {
+  uint32 wait_status = 1;
+}
+
+message Error {
+  uint32 stage = 1;
+  uint32 error_number = 2;
+}
+
+message Shutdown {}
+
+message PoolControl {
+  uint32 idle_workers = 1;
+}
+
+message PoolState {
+  uint32 idle_workers = 1;
+  uint64 prefork_refills = 2;
+  uint64 prefork_refill_nanoseconds = 3;
+}

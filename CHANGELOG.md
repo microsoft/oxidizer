@@ -55,3 +55,5 @@ Please see each crate's change log below:
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/CHANGELOG.md)
 - [`tick`](./crates/tick/CHANGELOG.md)
 - [`uniflight`](./crates/uniflight/CHANGELOG.md)
+- [`zygote_control`](./crates/zygote_control/CHANGELOG.md)
+- [`zygote_rt`](./crates/zygote_rt/CHANGELOG.md)

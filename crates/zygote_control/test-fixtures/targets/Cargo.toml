@@ -1,0 +1,43 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "zygote-test-targets"
+version = "0.0.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[workspace]
+
+[[bin]]
+name = "zygote-transparent-fixture"
+path = "src/bin/transparent.rs"
+
+[[bin]]
+name = "zygote-prepared-fixture"
+path = "src/bin/prepared.rs"
+
+[dependencies]
+zygote_control = { path = "../.." }
+zygote_rt = { path = "../../../zygote_rt", features = ["private-test-util"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[build-dependencies]
+zygote_rt = { path = "../../../zygote_rt", features = ["build"] }
+
+[[example]]
+name = "controller"
+path = "examples/controller.rs"

@@ -22,6 +22,11 @@ exclude_globs = [
     "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/ui.rs",
     "crates/testing_aids/**",
+    # These process runtimes contain mutually exclusive OS backends and
+    # intentionally fatal child-side paths that package-local mutation tests
+    # cannot exercise portably.
+    "crates/zygote_control/src/**",
+    "crates/zygote_rt/src/**",
 ]
 all_features = true
 cap_lints = true

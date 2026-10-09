@@ -1,0 +1,22 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "zygote_bench_plain"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zygote_rt = { path = "../../../zygote_rt" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(zygote_bench_wrapped)"] }
+
+[[bin]]
+name = "plain_minimal"
+path = "../shared/minimal.rs"
+
+[[bin]]
+name = "plain_representative"
+path = "../shared/representative.rs"
