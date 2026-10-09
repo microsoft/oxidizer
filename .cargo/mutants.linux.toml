@@ -42,7 +42,23 @@ cap_lints = true
 profile = "mutants"
 
 # Only run unit tests and integration tests, not doctests, benchmarks or examples.
-additional_cargo_test_args = [ "--locked", "--tests" ]
+# Fatal-path subprocess tests deliberately abort; run them in ordinary tests and
+# coverage, not once per mutation.
+additional_cargo_test_args = [
+    "--locked", "--tests", "--",
+    "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
+    "--skip", "abort::tests::subprocess_oracle_accepts_genuine_abort",
+    "--skip", "abort::tests::failed_invariant_aborts_without_unwinding",
+    "--skip", "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
+    "--skip", "combining::tests::unwinding_action_aborts_without_leaving_a_queue_owner",
+    "--skip", "combining::tests::consumed_action_aborts_instead_of_running_twice",
+    "--skip", "observation::tests::poisoned_publication_copy_aborts_instead_of_reporting_empty_state",
+    "--skip", "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
+    "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
+    "--skip", "hal::linux::tests::unexpected_wake_error_aborts_but_departed_waiters_are_tolerated",
+    "--skip", "hal::linux::tests::unexpected_wait_error_aborts_instead_of_retrying_forever",
+    "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
+]
 
 exclude_re = [
     # Shared exclusions copied from mutants.toml.
