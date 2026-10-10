@@ -69,6 +69,12 @@ but other parallel allocator tests then hang until the suite timeout. An isolate
 Windows run catches this candidate immediately. The assertions remain enabled, and
 the default and Linux configurations continue testing this mutation.
 
+The known-hanging mutation exclusions also include inversion of the Linux futex
+wait predicate. With a changed word, this candidate spins on immediate `EAGAIN`
+responses, so the per-syscall test timeout cannot stop it. An isolated native Linux
+run passes baseline but times out with this exact mutation. Other wait mutations
+and the ordinary changed-word and wake-notification tests remain enabled.
+
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
 inactive source, produce an unchanged test binary, and report the surviving

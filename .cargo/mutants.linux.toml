@@ -140,6 +140,9 @@ exclude_re = [
     'crates/rallocator/src/remote.rs:\d+:\d+: replace Cache::slot -> usize with (0|1)$',
     # Removing the Windows wake call strands native waiters (reconfirmed on Windows).
     'crates/rallocator/src/hal/win64/mod.rs:\d+:\d+: replace wake_one with \(\)$',
+    # Inverting the Linux wait predicate spins on immediate EAGAIN responses,
+    # so the per-syscall timeout cannot bound it. Reproduced in an isolated test.
+    'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace == with != in wait$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
     'crates/rallocator/src/tuning_telemetry.rs:50:48: replace - with (\+|/)$',
