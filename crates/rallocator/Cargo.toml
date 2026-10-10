@@ -32,7 +32,8 @@ targets = [
 
 [package.metadata.anvil.miri]
 # Native VM reservations and CPU prefetch instructions have no Miri backend.
-# Native tests, coverage, cargo careful and mutation testing remain enabled.
+# Native tests, coverage and cargo careful remain enabled.
+# Mutation testing is excluded by the workspace mutation configurations.
 exclude = true
 
 [dependencies]
