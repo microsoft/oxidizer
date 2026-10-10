@@ -151,6 +151,10 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
 
     # Windows host only.
+    # Returning address 1 fails the reserved-refill assertions, but leaves other
+    # parallel Windows allocator tests stuck until the suite timeout. The exact
+    # mutant is caught by the isolated reserved-refill failure test.
+    'crates/rallocator/src/backend.rs:\d+:\d+: replace global_alloc_reserved -> usize with 1$',
     # Linux perf is unavailable on Windows. `run_perf` exits before entering
     # its Linux implementation, and the worker definitions share one name.
     "\\brun_perf\\b",

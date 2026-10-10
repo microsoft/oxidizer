@@ -63,6 +63,12 @@ and runtime-analysis selection remain unchanged. Hosted Linux mutation jobs
 disable crash-handler forwarding so expected aborts do not launch crash reporters.
 Other tests still run against mutated allocator code and may detect bugs by crashing.
 
+The Windows mutation configuration also excludes the exact candidate that replaces
+`global_alloc_reserved` with address `1`. It fails existing reserved-refill assertions,
+but other parallel allocator tests then hang until the suite timeout. An isolated
+Windows run catches this candidate immediately. The assertions remain enabled, and
+the default and Linux configurations continue testing this mutation.
+
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
 inactive source, produce an unchanged test binary, and report the surviving
