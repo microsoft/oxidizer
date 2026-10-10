@@ -8,12 +8,18 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use seismograph_rallocator::snapshot::Snapshot;
+use seismograph_rallocator::native::Snapshot;
 use seismograph_rallocator::{encode, encoded_len};
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn render_html(snapshot: &Snapshot, test_name: &str) -> String {
+    let mut bytes = vec![0; encoded_len(snapshot).unwrap()];
+    encode(snapshot, &mut bytes).unwrap();
+    render_capture(&bytes, test_name)
+}
+
+pub(crate) fn render_capture(bytes: &[u8], test_name: &str) -> String {
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
         "integration-{test_name}-{}-{}",
         std::process::id(),
@@ -23,8 +29,6 @@ pub(crate) fn render_html(snapshot: &Snapshot, test_name: &str) -> String {
 
     let input = directory.join("capture.rallocator");
     let output = directory.join("report.html");
-    let mut bytes = vec![0; encoded_len(snapshot).unwrap()];
-    encode(snapshot, &mut bytes).unwrap();
     fs::write(&input, bytes).unwrap();
 
     let result = Command::new(env!("CARGO_BIN_EXE_seismograph"))

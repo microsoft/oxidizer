@@ -23,13 +23,72 @@ macro_rules! section {
         }
     };
 }
-
+const NATIVE_KEYS: &Section = section!("Navigation";
+    "Enter" => "Focus the selected subsystem, class list, class detail or memory category detail. Cyan borders identify keyboard focus; Escape from memory detail returns to the category selector.",
+    "Escape / Backspace" => "Move up one level. Escape disconnects or leaves an offline capture only at the allocator root.",
+    "Up/Down / Home/End" => "Select list rows; in focused details, scroll text. Lists retain global indices when longer than the viewport.",
+    "PgUp / PgDn" => "Move five rows in lists or scroll focused details by five rendered lines. Mouse rows select and focus their list; Enter opens the selection.",
+);
+const NATIVE_MEMORY: &Section = section!("Memory measurements";
+    "OS reserved" => "Native allocator virtual reservations: cumulative successful OS object/range reservations plus the separate sparse page-map VA reservation. The sum uses 128-bit arithmetic. This is not physical RAM or app-live memory.",
+    "Allocator ranges" => "Cumulative successful native OS reservations, including native metadata backing. They exclude the sparse page map and are not a current live-allocation census.",
+    "Page-map VA" => "Sparse virtual address reservation, normally 256 GiB. Virtual address space is not committed or resident physical memory.",
+    "Committed / Resident / Swapped" => "Not recorded by this source. Unknown (dash) is not zero. No process polling or inferred physical-memory ratios are used.",
+    "Breakdown" => "The reserved breakdown contains only the two recorded reservation counters. Independently captured owner capacities must not be summed into an accurate global pie or subtracted to invent allocated/unaccounted memory.",
+);
+const NATIVE_GLOBAL: &Section = section!("Global backend";
+    "Shared backend" => "Shared range supply beneath owner frontends. The chart shows observed range counts by power-of-two size.",
+    "Cached capacity" => "Observed cached range capacity, not guaranteed physically decommitted memory. Partial walks report a lower observed count, not complete occupancy.",
+    "Local boundary / Refill ceiling" => "Range-cache policy thresholds, not amounts of app-live memory or pending bytes.",
+);
+const NATIVE_OWNERS: &Section = section!("Owner frontends";
+    "Owner" => "A reusable native allocator endpoint with small-class slabs, large ranges, local caches and remote returns. Owner numbers follow the current inventory order and can change on refresh; selection follows stable endpoint identity. Endpoint identity appears only in Observation detail.",
+    "Active / Idle" => "Active means leased. Idle endpoints can be freshly inspected under the pool lock; active endpoints are read from immutable published summaries, never by inspecting their borrowed core.",
+    "Contributor" => "The recorder thread that last published the observation, not necessarily the current lease holder. Idle inspection has no recorder contributor.",
+    "Quiet owners" => "Publication follows an accepted recorded allocation/free operation. Sampled-out operations do not publish. Never-contributing active endpoints remain explicitly Unknown.",
+);
+const NATIVE_COVERAGE: &Section = section!("Observation coverage";
+    "Observed" => "Published in this session, lease generation and requested observation round, or freshly inspected while idle. Matching round means contributed this round, not an exact simultaneous census.",
+    "Older" => "Stored evidence from an older session, lease generation or round. It describes the earlier observation, not an unobserved current lease.",
+    "Unknown / Busy / Unavailable" => "No observation / publication slot busy / System slot allocation failed. Missing evidence is never displayed as zero.",
+    "Complete" => "Inventory or structure walk finished its bounded collection. This describes collection coverage, not observation freshness; a complete owner inventory can contain Older or Unknown endpoints.",
+    "Partial" => "The bounded owner inventory or structure walk did not finish. Shown capacities and counts include only observed entries.",
+    "Inventory statistics" => "Active/Idle and evidence counts describe captured owner rows, not omitted endpoints. Evidence categories count each row once; Busy or Unavailable takes priority over stored freshness. Busy rows can retain older evidence.",
+    "Independent observations" => "Owners may have different observation times and transfer ranges between them. Their capacities can overlap across time; do not add them into app-live totals.",
+    "Polling" => "Capture requests the next observation round after collection. No timers or background publication threads are added; quiet owners can retain older evidence.",
+);
+const NATIVE_CLASSES: &Section = section!("Small classes";
+    "Object / Slab / Slots" => "Nominal allocation-class size and slab geometry. Capacity is class-rounded allocator storage, not requested application bytes or live object count.",
+    "Available / Empty / Fast" => "Observed slab-list membership and fast-list state. These describe allocator structures, not who allocated or freed objects; use Allocations for event correlation and stacks.",
+    "Partial" => "Slab walks are bounded. Counts from incomplete walks are observed entries only.",
+);
+const NATIVE_RANGES: &Section = section!("Large ranges";
+    "Range capacity" => "Outstanding native allocator ranges include retained and pending frees. Range counts are not application-live allocation counts.",
+    "Bars" => "Relative observed range counts within this selected structure. They are not physical memory percentages.",
+);
+const NATIVE_CACHES: &Section = section!("Local caches";
+    "Local ranges" => "Owner-local backend range cache, grouped by power-of-two capacity.",
+    "Metadata cache" => "Observed native metadata backing cache. Other metadata pools are not exhaustively inventoried.",
+    "Capacity" => "Allocator capacity only; physical residency and decommit state are not recorded.",
+);
+const NATIVE_RETURNS: &Section = section!("Remote returns";
+    "Flow" => "Cross-owner frees enter open rings, outgoing message buckets, and the destination owner's incoming queue.",
+    "Message capacity" => "Class-rounded storage represented by observed messages, not requested bytes or a precise pending-live-memory count.",
+    "Batch budget" => "Allocator remote-return batching budget, not pending bytes and not telemetry publication policy.",
+    "Inbox work" => "Different front/back pointers indicate potential work, not queue depth or guaranteed ready links. Equal pointers do not establish emptiness.",
+);
 pub(super) const fn title(context: Context) -> &'static str {
     match context {
         Context::Browser => "Applications",
         Context::Info => "Info and activity",
-        Context::HeapBuckets => "Heaps: summary, tiers and buckets",
-        Context::HeapHotspots => "Heaps: allocation locations and stack",
+        Context::NativeMemory => "Native allocator memory",
+        Context::NativeGlobal => "Shared global backend",
+        Context::NativeOwner => "Native owner frontends",
+        Context::NativeClasses => "Small classes and slab geometry",
+        Context::NativeRanges => "Large allocator ranges",
+        Context::NativeCaches => "Owner-local range caches",
+        Context::NativeReturns => "Remote returns",
+        Context::NativeObservation => "Observation metadata",
         Context::Allocations => "Allocation hotspots and stack",
         Context::PrimitiveTypes => "Primitive types",
         Context::PrimitiveOperations => "Primitive operations",
@@ -64,8 +123,13 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
                 &[INFO, ACTIVITY, LIVE_THREADS, CAPTURE_SCOPE]
             }
         }
-        Context::HeapBuckets => &[HEAP_BUCKETS, HEAP_SUMMARY],
-        Context::HeapHotspots => &[HEAP_HOTSPOTS, STACK],
+        Context::NativeMemory => &[NATIVE_MEMORY, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::NativeGlobal => &[NATIVE_GLOBAL, NATIVE_MEMORY, NATIVE_KEYS],
+        Context::NativeOwner | Context::NativeObservation => &[NATIVE_OWNERS, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::NativeClasses => &[NATIVE_CLASSES, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::NativeRanges => &[NATIVE_RANGES, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::NativeCaches => &[NATIVE_CACHES, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::NativeReturns => &[NATIVE_RETURNS, NATIVE_COVERAGE, NATIVE_KEYS],
         Context::Allocations => &[ALLOCATIONS, STACK],
         Context::PrimitiveTypes => &[PRIMITIVE_TYPES],
         Context::PrimitiveOperations => &[PRIMITIVE_OPERATIONS],
@@ -158,9 +222,9 @@ const LIVE_THREADS: &Section = section!("LIVE THREAD ACTIVITY";
 const CAPTURE_SCOPE: &Section = section!("CAPTURE METRIC SCOPE";
     "Accepted / overwritten" => "Counts exclude suppressed, sampled-out, disabled and non-producing activity. Source accepted/overwritten counters span event classes; they are not allocation populations.",
     "Unmatched allocations" => "Unmatched retained allocations are not proven live allocations or leaks, even with zero overwrites.",
-    "General counters" => "Availability/start epoch are unencoded; cumulative totals are not session/workload deltas.",
-    "Memory / classes" => "Region assignment is virtual; mapped/backing bytes are not portable committed memory or RSS. Published-class totals cover small classes only; class estimates are not per-segment occupancy.",
-    "Sampled maxima" => "Sampled live maxima use independent counter reads and are not guaranteed lifetime bounds.",
+    "Native capacity" => "Outstanding native ranges and slab capacity are not application-live memory. Global caches are not guaranteed physically decommitted.",
+    "Native coverage" => "Unobserved and busy owners are unknown, not zero. Lease/session/round freshness is explicit; bounded inventories can be partial.",
+    "Native returns" => "Remaining batching budget is not pending bytes; sampled incoming front != back means potential work only, not guaranteed ready links or queue depth. Equality does not prove emptiness.",
 );
 
 const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
@@ -169,49 +233,6 @@ const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
     "Source events" => "All-class accepted and overwritten source counts, plus the number of thread summaries; not an allocation population or a live rate.",
     "Heap errors" => "Heap decoding may fail while other telemetry remains available.",
     "Offline" => "There is no live activity polling or process connection. Scope notes apply to saved data.",
-);
-
-const HEAP_SUMMARY: &Section = section!("HEAP SUMMARY / TOPOLOGY / PEAKS";
-    "Live" => "Allocator-reported live bytes / reported mapped bytes.",
-    "Lifetime peak" => "Peak live bytes / current mapped bytes, only when the source explicitly provides lifetime scope.",
-    "Max sampled live" => "Maximum of snapshot samples, not a guaranteed lifetime upper bound. Independent counter reads further limit consistency.",
-    "Peak scope unavailable" => "The capture omitted peak scope; a lifetime interpretation is not justified.",
-    "Gauge fill" => "Clamped to 0-100%; displayed values retain their actual numerator and denominator.",
-    "Reported mapped (not RSS/committed)" => "Mapped bytes / reserved virtual bytes. Neither is portable committed memory or resident set size.",
-    "Virtual regions" => "Region count, reserved bytes, slice size, and counts of small, medium, bump and other assigned slices.",
-    "Rn / assigned / free" => "Region ID, reserved bytes and assigned/total virtual slices. Assignment is virtual, not physical residency.",
-    "cumulative allocations" => "Counter epoch and coverage are unknown; not a session/workload delta. Availability is unencoded, so zero is not proof of no allocations.",
-    "Filters" => "Whole-process counters and heap topology remain unfiltered.",
-);
-
-const HEAP_BUCKETS: &Section = section!("ALLOCATION TIERS / SIZE DISTRIBUTION";
-    "Small / Medium / Large / Direct (inferred)" => "Allocation routing tiers. Large/Direct is inferred from size/alignment, not confirmed route metadata.",
-    "Size" => "Allocation size or inclusive size range, in B/KiB/MiB/GiB.",
-    "Retained" => "Retained allocation-event count in the bucket.",
-    "Bytes" => "Sum of requested allocation bytes, not resident memory.",
-    "Hotspots" => "Number of captured stack groups.",
-    "Est. live" => "Small-tier published class live-allocation estimate when available; otherwise unmatched retained allocations.",
-    "Est. class" => "Estimated live blocks / class capacity when available. Otherwise falls back to this bucket's retained allocation count / largest bucket count.",
-    "Unmatched" => "Medium/Direct retained allocations without a matched retained free; not proven process-live allocations or leaks.",
-    "Event share" => "Bucket retained allocation count / largest bucket count in the tier, NOT a percentage of the tier total.",
-    "reported current" => "Small class count/byte estimates or Medium topology values. Small published classes do not cover all tiers; class estimates are not per-segment occupancy.",
-    "Medium details" => "Virtual slice spans; overhead = usable minus requested bytes; largest = largest requested allocation.",
-    "unmatched retained / retained" => "Direct current title values are unmatched retained count/bytes. retained title values sum allocation events, independently of topology.",
-    "[ / ]" => "Change tier.",
-    "Up/Down / Enter" => "Select a bucket / enter its locations. Nonfocusable summary and stack help appears on this same page.",
-    "Missing events" => "No retained allocation events does not imply an empty heap.",
-);
-
-const HEAP_HOTSPOTS: &Section = section!("ALLOCATION LOCATIONS";
-    "Events" => "Retained allocation count at this stack, within the selected size bucket.",
-    "Bytes" => "Sum of requested allocation bytes at this stack.",
-    "Unmatched" => "Count without paired retained frees. Even with zero overwrites, sampling, recording boundaries and missing frees prevent a process-live/leak conclusion.",
-    "Location" => "First displayed frame of the captured stack.",
-    "unmatched retained" => "Bucket-wide unmatched count/bytes in the title.",
-    "class estimate" => "Estimated live blocks / class capacity from topology, not filtered stack totals.",
-    "requested / waste" => "Estimated requested bytes / usable minus requested bytes.",
-    "Up/Down / Backspace" => "Select a location and its stack / return to the size distribution.",
-    "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
 );
 
 const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
@@ -226,6 +247,9 @@ const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
     "Up/Down" => "Select a hotspot.",
     "[ / ] / r" => "Change sort column / reverse sort.",
     "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
+    "e" => "Switch hotspots / individual allocation-free records. Records include actor names, requested sizes, addresses, operation stacks and view-local lifetime IDs.",
+    "Orphan free" => "No retained allocation origin in the original capture. Filtering does not create orphan status or recompute lifetime IDs.",
+    "Repeated addresses" => "View-local IDs distinguish each retained lifetime. Source keys/addresses may repeat and missing events prevent global lifetime reconstruction.",
 );
 
 const STACK: &Section = section!("STACK TRACE";
@@ -465,7 +489,7 @@ const FILTERS: &Section = section!("STACK FILTERS - WHOLE RECORDS";
     "Runtime stack" => "Select event stack or spawn provenance. Spawn attribution does not imply execution at the spawn site.",
     "Events / Allocations / Tasks" => "Filter banner shown/total counts describe retained indexed populations. unknown counts incomplete attribution, not source loss.",
     "Background filtering" => "Current view remains available until rebuilding finishes. Help keeps its original topic even when completion resets focus.",
-    "Unfiltered values" => "Source accepted/overwritten counters, whole-process counters and heap topology remain unfiltered.",
+    "Unfiltered values" => "Source accepted/overwritten counters and native owner/backend inventory remain unfiltered.",
     "f versus F" => "Lowercase f only changes displayed stack frames; uppercase F filters whole records.",
     "Tab / Up/Down" => "Select a field.",
     "Typing / Backspace / Delete" => "Append Include/Exclude text / remove its last character.",
@@ -512,7 +536,7 @@ const COMMON: &Section = section!("UNITS / SCOPE / MISSING DATA";
     "Loss percentage" => "Overwritten / accepted is ring loss, not sampling rate or percentage of all application work.",
     "Zero loss" => "Does not prove complete history.",
     "Zero / '-' / unavailable" => "Zero may mean no samples, disabled recording or unavailable counter coverage. '-' and unavailable messages explicitly mean missing data.",
-    "Global versus filtered" => "Whole-process counters and heap topology remain unfiltered. Record totals can change with F filters; compare only matching scope and denominator.",
+    "Global versus filtered" => "Native owner/backend inventory remains unfiltered. Record totals can change with F filters; compare only matching scope and denominator.",
 );
 
 const HELP_CONTROLS: &Section = section!("HELP CONTROLS";
@@ -547,11 +571,17 @@ const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
 mod tests {
     use super::*;
 
-    const CONTEXTS: [Context; 25] = [
+    const CONTEXTS: [Context; 31] = [
         Context::Browser,
         Context::Info,
-        Context::HeapBuckets,
-        Context::HeapHotspots,
+        Context::NativeMemory,
+        Context::NativeGlobal,
+        Context::NativeOwner,
+        Context::NativeClasses,
+        Context::NativeRanges,
+        Context::NativeCaches,
+        Context::NativeReturns,
+        Context::NativeObservation,
         Context::Allocations,
         Context::PrimitiveTypes,
         Context::PrimitiveOperations,
@@ -638,8 +668,8 @@ mod tests {
     #[test]
     fn focused_help_excludes_focusable_siblings_and_keeps_passive_children() {
         for (context, sections) in [
-            (Context::HeapBuckets, vec![HEAP_BUCKETS, HEAP_SUMMARY]),
-            (Context::HeapHotspots, vec![HEAP_HOTSPOTS, STACK]),
+            (Context::NativeOwner, vec![NATIVE_OWNERS, NATIVE_COVERAGE, NATIVE_KEYS]),
+            (Context::NativeReturns, vec![NATIVE_RETURNS, NATIVE_COVERAGE, NATIVE_KEYS]),
             (Context::Allocations, vec![ALLOCATIONS, STACK]),
             (Context::PrimitiveTypes, vec![PRIMITIVE_TYPES]),
             (Context::PrimitiveOperations, vec![PRIMITIVE_OPERATIONS, PRIMITIVE_VALUES]),
@@ -685,27 +715,20 @@ mod tests {
             ],
         ),
         (
-            Context::HeapBuckets,
+            Context::NativeOwner,
             &[
-                "Size",
-                "Retained",
-                "Bytes",
-                "Hotspots",
-                "Est. live",
-                "Est. class",
-                "Unmatched",
-                "Event share",
-                "Live",
-                "Lifetime peak",
-                "Max sampled live",
-                "Reported mapped (not RSS/committed)",
-                "Virtual regions",
-                "cumulative allocations",
+                "Owner",
+                "Active / Idle",
+                "Contributor",
+                "Quiet owners",
+                "Observed",
+                "Older",
+                "Partial",
             ],
         ),
         (
-            Context::HeapHotspots,
-            &["Events", "Bytes", "Unmatched", "Location", "class estimate"],
+            Context::NativeReturns,
+            &["Flow", "Batch budget", "Inbox work", "Independent observations"],
         ),
         (
             Context::Allocations,
@@ -824,12 +847,12 @@ mod tests {
                 &["process-live", "zero overwrites", "without a matched", "Sampling"][..],
             ),
             (
-                Context::HeapBuckets,
+                Context::NativeReturns,
                 &[
-                    "not a guaranteed lifetime",
-                    "not per-segment occupancy",
-                    "not physical residency",
-                    "NOT a percentage of the tier total",
+                    "not pending bytes",
+                    "not queue depth",
+                    "never displayed as zero",
+                    "not an exact simultaneous census",
                 ][..],
             ),
             (

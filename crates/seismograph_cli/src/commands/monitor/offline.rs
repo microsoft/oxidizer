@@ -83,7 +83,7 @@ mod tests {
         bytes.extend_from_slice(&0_u32.to_le_bytes());
         bytes.extend_from_slice(&1_u32.to_le_bytes());
         bytes.extend_from_slice(&id.get().to_le_bytes());
-        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&3_u16.to_le_bytes());
         bytes.extend_from_slice(&4_u16.to_le_bytes());
         bytes.extend_from_slice(&u64::try_from(data.len()).unwrap().to_le_bytes());
         bytes.extend_from_slice(&0_u32.to_le_bytes());
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn loads_native_allocator_file_without_inventing_a_capture_time() {
-        let allocator = seismograph_rallocator::snapshot::Snapshot::new(seismograph_rallocator::snapshot::Version::new(0, 1, 0));
+        let allocator = seismograph_rallocator::native::Snapshot::default();
         let mut data = vec![0; seismograph_rallocator::encoded_len(&allocator).unwrap()];
         seismograph_rallocator::encode(&allocator, &mut data).unwrap();
         let bytes = native_bytes(seismograph_rallocator::source::ID, &data);
@@ -117,7 +117,7 @@ mod tests {
                 snapshot.captured_at,
                 snapshot.captured_instant,
             ),
-            (true, true, None, None, None),
+            (false, true, None, None, None),
         );
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         std::fs::remove_file(path).unwrap();
@@ -216,8 +216,8 @@ mod tests {
                     "ReleaseInput",
                     "AllocationIndex",
                     "Heaps",
-                    "Allocations",
                     "Symbols",
+                    "Allocations",
                     "Primitives",
                     "Runtime",
                     "Io",
@@ -229,7 +229,7 @@ mod tests {
                 .map(String::from)
                 .to_vec(),
                 true,
-                true,
+                false,
                 true,
                 None,
                 None,

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crossterm::event::KeyCode;
 use ratatui::layout::Rect;
@@ -10,15 +10,15 @@ use ratatui::widgets::{Block, Borders};
 use super::app::{
     App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus, TaskHistogram, ThreadFocus,
 };
-use super::data::MemoryTier;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ListTarget {
     Applications,
     InfoThreads,
-    HeapTier(MemoryTier),
     HeapBuckets,
-    HeapHotspots,
+    NativeSubsystems,
+    NativeClasses,
+    NativeMemory,
     Allocations,
     PrimitiveTypes,
     PrimitiveOperations,
@@ -44,7 +44,7 @@ impl ListTarget {
         match self {
             Self::Applications => None,
             Self::InfoThreads => Some(MonitorTab::Info),
-            Self::HeapTier(_) | Self::HeapBuckets | Self::HeapHotspots => Some(MonitorTab::Heaps),
+            Self::HeapBuckets | Self::NativeSubsystems | Self::NativeClasses | Self::NativeMemory => Some(MonitorTab::Heaps),
             Self::Allocations => Some(MonitorTab::Allocations),
             Self::PrimitiveTypes | Self::PrimitiveOperations | Self::PrimitiveHotspots => Some(MonitorTab::Primitives),
             Self::Threads | Self::ThreadOperations | Self::ThreadParticipants | Self::ThreadObjects => Some(MonitorTab::Threads),
@@ -64,6 +64,7 @@ impl ListTarget {
 pub(super) struct MouseRows {
     frame: RefCell<Rect>,
     rows: RefCell<Vec<(Rect, ListTarget, usize)>>,
+    pub(super) native_scroll_limit: Cell<usize>,
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -131,9 +132,9 @@ impl MouseRows {
 #[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
-        let tab = match self.screen {
-            Screen::Browse => None,
-            Screen::Connected { tab, .. } | Screen::Offline { tab, .. } => Some(tab),
+        let (tab, snapshot) = match &self.screen {
+            Screen::Browse => (None, None),
+            Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => (Some(*tab), snapshot.as_deref()),
         };
         if target.tab() != tab {
             return;
@@ -150,11 +151,14 @@ impl App {
             self.info_thread_selected = index.min(self.live_activity.threads.len().saturating_sub(1));
             return;
         }
-        if let ListTarget::HeapTier(tier) = target {
-            while self.heap_view.tier != tier {
-                self.handle_key(KeyCode::Char(']'));
-            }
-            self.handle_key(KeyCode::Enter);
+        if matches!(
+            target,
+            ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
+        ) {
+            self.heap_view.native.click(target, index);
+            self.heap_view
+                .native
+                .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
             return;
         }
         if target == ListTarget::RuntimeActivity {
@@ -176,10 +180,6 @@ impl App {
             ListTarget::HeapBuckets => {
                 self.heap_view.focus = HeapFocus::Buckets;
                 &mut self.heap_view.bucket_selected
-            }
-            ListTarget::HeapHotspots => {
-                self.heap_view.focus = HeapFocus::Hotspots;
-                &mut self.heap_view.hotspot_selected
             }
             ListTarget::Allocations => &mut self.allocation_view.selected,
             ListTarget::PrimitiveTypes => {
@@ -246,8 +246,10 @@ impl App {
                 &mut self.cache_view.operation_selected
             }
             ListTarget::Applications
+            | ListTarget::NativeSubsystems
+            | ListTarget::NativeClasses
+            | ListTarget::NativeMemory
             | ListTarget::InfoThreads
-            | ListTarget::HeapTier(_)
             | ListTarget::RuntimeActivity
             | ListTarget::RuntimeHistogram(_) => return,
         };
@@ -325,13 +327,45 @@ mod tests {
     }
 
     #[test]
+    fn mouse_dispatch_rejects_stale_tabs_and_selects_runtime_histograms() {
+        let mut app = App::new();
+        app.screen = Screen::Offline {
+            path: "capture.seismograph".into(),
+            tab: MonitorTab::Runtime,
+            snapshot: None,
+        };
+        for target in [
+            ListTarget::HeapBuckets,
+            ListTarget::NativeSubsystems,
+            ListTarget::NativeClasses,
+            ListTarget::NativeMemory,
+        ] {
+            assert_eq!(target.tab(), Some(MonitorTab::Heaps));
+            app.activate_mouse_row(target, usize::MAX);
+        }
+        app.activate_mouse_row(ListTarget::InfoThreads, 7);
+        assert_eq!(app.info_thread_selected, 0);
+        app.activate_mouse_row(ListTarget::RuntimeActivity, 7);
+        assert_eq!(app.runtime_view.activity_scroll, 7);
+        app.activate_mouse_row(ListTarget::RuntimeHistogram(TaskHistogram::Poll), 0);
+        assert_eq!(app.runtime_view.task_histogram, TaskHistogram::Poll);
+        assert_eq!(app.runtime_view.focus, RuntimeFocus::Activity);
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Info;
+        }
+        app.activate_mouse_row(ListTarget::InfoThreads, usize::MAX);
+        assert_eq!(app.info_thread_selected, 0);
+        app.activate_selectable_mouse_row(ListTarget::HeapBuckets, 0);
+        assert_eq!(app.heap_view.focus, HeapFocus::Buckets);
+    }
+
+    #[test]
     fn passive_mouse_targets_do_not_change_selection() {
         let mut app = App::new();
         app.activate_mouse_row(ListTarget::Applications, 7);
         for target in [
             ListTarget::Applications,
             ListTarget::InfoThreads,
-            ListTarget::HeapTier(MemoryTier::Small),
             ListTarget::RuntimeActivity,
             ListTarget::RuntimeHistogram(TaskHistogram::Poll),
         ] {

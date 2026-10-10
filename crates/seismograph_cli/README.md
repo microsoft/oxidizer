@@ -19,6 +19,39 @@ The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
 
+**Native v4**, immediately left of Allocations, explores the global backend
+and every inventoried owner endpoint, including active never-observed owners.
+The top diagram follows OS reservations through the shared backend to owners,
+slabs, ranges, caches and returns. Select Memory, Global backend or an owner
+with Up/Down, then Enter to focus category details, subsystem choices and class details.
+Escape/Backspace returns one level without leaving the capture; Escape exits
+only at the root. Home/End and PgUp/PgDn navigate long lists or focused details.
+Mouse rows focus their list, and cyan borders identify keyboard focus.
+Contextual F1 help contains metric meanings and coverage limitations; regular
+panels show only structures, concise metrics and observation badges.
+OS reserved combines cumulative native OS reservations (including metadata
+backing) and separate sparse page-map virtual address space using 128-bit
+arithmetic. Committed, resident and swapped memory are explicitly Unknown.
+Observed, Older, Unknown, Busy, Unavailable and Partial badges preserve missing
+evidence without inventing zero measurements or current-lease attribution.
+Native capacity is not application-live memory, batching budget is not pending
+bytes, and global cached ranges are not guaranteed physically decommitted.
+Self-publication defaults on but costs nothing with recording off. Capture
+requests the next publication round only after collection. Operations publish
+only after an accepted recorded allocation/free event and the native operation
+completes; sampled-out events and merely enabled attempts do not contribute.
+Explicit app-side requests also work, without timers or background workers.
+Offline files never request new publications.
+
+In **Allocations**, press `e` to switch between grouped hotspots and individual
+allocation/free records, including actor names, operation stacks, requested
+sizes, addresses, view-local lifetime IDs and explicit orphan frees.
+Address reuse does not merge retained lifetimes; filtering preserves original
+correlation IDs and whether a free had a retained allocation origin.
+Export the same native inventory with
+`seismograph snapshot html capture.seismograph report.html`.
+Schema 3 is required; older allocator payload schemas are rejected.
+
 Run `seismograph monitor` to capture a running application, or
 `seismograph view "C:\captures\capture.seismograph"` to inspect a native
 snapshot in the same interactive tabs without connecting to a process.
@@ -95,11 +128,11 @@ independently of the unknown-stack option. Applied rules persist across live
 captures. Only one filter worker runs at a time; newer requests replace the
 queued request while the current worker finishes, including after reconnect.
 Filtering never rewrites the original file; source accepted/overwritten
-counters, whole-process counters, and heap topology remain unfiltered, as
+counters and native owner/backend inventory remain unfiltered, as
 indicated in the filter banner.
 
 Drag a shared panel border with the left mouse button to resize the panes.
-Click a tab header (Info, Heaps, and so on) to select that tab.
+Click a tab header (Info, Native v4, and so on) to select that tab.
 Click a list row to select and activate it, as with keyboard selection and Enter.
 Sizes are retained per tab for the current monitor or viewer session.
 The Threads tab includes same-thread object activity, marked `(self)`.

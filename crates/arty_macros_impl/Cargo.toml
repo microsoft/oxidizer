@@ -35,5 +35,7 @@ syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro
 insta = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

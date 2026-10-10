@@ -21,8 +21,9 @@ use std::sync::Arc;
 
 use seismograph::recorder::event::EventKind as RuntimeEventKind;
 use seismograph_rallocator::callers::{AddressLookup, Callers, Event, EventKind, HeapKind};
-use seismograph_rallocator::snapshot::{Domain, Estimate, PeakLiveBytesScope, Snapshot, Stats};
-use seismograph_rallocator::topology::{Slice, SliceKind, TopologyRegion};
+
+use crate::allocator_topology::{Slice, SliceKind, TopologyRegion};
+use crate::allocator_view::{Domain, Estimate, Snapshot};
 
 const SNAPSHOT_TEMPLATE: &str = include_str!("templates/snapshot.html");
 #[cfg(test)]
@@ -30,7 +31,66 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
     render_html_with_sources(snapshot, &[])
 }
 
+fn render_event_only(snapshot: &Snapshot, sources: &[seismograph::snapshot::SourceSnapshot]) -> String {
+    let mut html = String::from(
+        "<div class=\"hero\"><h1>seismograph snapshot</h1></div>\
+         <section><h2>Application allocation event evidence</h2>\
+         <p>Native state is shown separately below, never inferred from application events. \
+         Recorded objects without matching frees are retained event evidence, not a live-memory census. \
+         A free may have no retained allocation. Address reuse and gaps prevent definitive lifetime reconstruction. \
+         Event pairs use view-local identities; container threads identify actors, and native heap identities are unavailable.</p></section>",
+    );
+    html.push_str(&crate::native_view::render_html(snapshot.native.as_deref()));
+    render_sources(&mut html, sources);
+    render_recording_coverage(&mut html, snapshot);
+    render_runtime_events(&mut html, snapshot);
+    if let Some(callers) = &snapshot.callers {
+        html.push_str("<section><h2>Retained allocation events</h2>");
+        render_allocation_records(&mut html, callers, &snapshot.addresses);
+        render_hotspots(&mut html, callers, &snapshot.addresses);
+        render_thread_histograms(&mut html, callers);
+        render_callers(&mut html, callers, &snapshot.addresses);
+        html.push_str("</section>");
+    }
+    SNAPSHOT_TEMPLATE.replace("{{REPORT_BODY}}", &html)
+}
+
+fn render_allocation_records(html: &mut String, callers: &Callers, addresses: &[AddressLookup]) {
+    const MAX_ROWS: usize = 4096;
+    let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
+    let names = thread_name_map(callers);
+    let freed = callers
+        .events
+        .iter()
+        .filter(|event| event.kind == EventKind::Deallocated)
+        .map(|event| (event.thread_log_id, event.allocation_id))
+        .collect::<HashSet<_>>();
+    write!(html, "<h3>Allocation/free records</h3><p>Showing {} of {} retained records. \
+        View-local IDs distinguish repeated addresses within this capture only; unmatched allocation evidence is NOT proven live. \
+        Orphan frees have no retained allocation origin. Event gaps and sampling can hide counterparts.</p>\
+        <table><tr><th>Operation</th><th>Actor</th><th>View ID / origin log</th><th>Address / requested bytes</th><th>Correlation</th><th>Stack</th></tr>",
+        callers.events.len().min(MAX_ROWS), callers.events.len()).unwrap();
+    for event in callers.events.iter().take(MAX_ROWS) {
+        let operation = if event.kind == EventKind::Allocated { "alloc" } else { "free" };
+        let status = if event.kind == EventKind::Deallocated && !event.allocation_recorded {
+            "orphan free"
+        } else if freed.contains(&(event.thread_log_id, event.allocation_id)) {
+            "matched retained pair"
+        } else {
+            "unmatched allocation evidence"
+        };
+        write!(html, "<tr><td>{operation}</td><td>{}</td><td>#{} / {}</td><td>0x{:x} / {} B</td><td>{status}</td><td><details><summary>Operation stack</summary>",
+            escape_html(&thread_label(event.event_thread_id, &names)), event.allocation_id, event.thread_log_id, event.address, event.size).unwrap();
+        render_stack(html, &event.call_stack, &lookups);
+        html.push_str("</details></td></tr>");
+    }
+    html.push_str("</table>");
+}
+
 pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismograph::snapshot::SourceSnapshot]) -> String {
+    if !snapshot.allocator_state_available {
+        return render_event_only(snapshot, sources);
+    }
     let stats = snapshot.stats;
     let mut html = String::with_capacity(64 * 1024);
     write!(
@@ -87,7 +147,7 @@ pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismogra
         r"<section><h2>{}</h2><p>Counters are producer-reported and independently sampled. Their collection-start epoch and general collection availability are not encoded; zero values alone do not prove inactivity.</p><table>
 <tr><th>Metric</th><th>Value</th></tr>
 <tr><td>{}</td><td>{}</td></tr>
-<tr><td>{}</td><td>{}</td></tr>
+<tr><td>{}</td><td>Lifetime peak unavailable</td></tr>
 <tr><td>{}</td><td>{}</td></tr>
 <tr><td>{}</td><td>{:.3} ms</td></tr>
 <tr><td>{}</td><td>{} / {}</td></tr>
@@ -106,7 +166,6 @@ pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismogra
             "Live-byte high-water mark",
             "A lifetime peak is available only when explicitly tracked. Aggregate-query sample maxima can miss allocations between queries; legacy scope is unavailable."
         ),
-        format_peak_live_bytes(stats),
         concept(
             "Mapped / backing bytes",
             "Allocator-reported mapped or backing capacity, not RSS or a portable measure of committed memory."
@@ -190,17 +249,6 @@ pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismogra
     }
     html.push_str("</details></section>");
     SNAPSHOT_TEMPLATE.replace("{{REPORT_BODY}}", &html)
-}
-
-fn format_peak_live_bytes(stats: Stats) -> String {
-    match stats.peak_live_bytes_scope {
-        PeakLiveBytesScope::Lifetime => format!("{} (lifetime)", format_bytes(stats.peak_live_bytes)),
-        PeakLiveBytesScope::SnapshotSamples => format!(
-            "Lifetime peak unavailable; max sampled live: {}",
-            format_bytes(stats.peak_live_bytes)
-        ),
-        _ => "Lifetime peak unavailable".to_owned(),
-    }
 }
 
 fn render_recording_coverage(html: &mut String, snapshot: &Snapshot) {
@@ -976,9 +1024,9 @@ fn render_domains(html: &mut String, snapshot: &Snapshot) {
     .unwrap();
     for domain in &snapshot.domains {
         let label = if domain.is_default {
-            format!("#{} <span class=\"muted\">default</span>", domain.domain_id)
+            format!("#{} <span class=\"muted\">default</span>", domain.id)
         } else {
-            format!("#{}", domain.domain_id)
+            format!("#{}", domain.id)
         };
         let regions = if domain.region_indices.is_empty() {
             "—".to_owned()
@@ -1053,7 +1101,7 @@ fn render_physical_topology(html: &mut String, snapshot: &Snapshot) {
             write!(
                 html,
                 "<tr><td>#{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                region.region_index,
+                region.index,
                 format_bytes(region.reserved_bytes),
                 format_count(region.used_slices),
                 format_count(region.free_slices),
@@ -1134,11 +1182,7 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
     let used_slices = region.used_bitmap.iter().map(|word| u64::from(word.count_ones())).sum::<u64>();
     let width = grid_width(total_slices);
     let height = total_slices.div_ceil(width);
-    let details = region
-        .slices
-        .iter()
-        .map(|slice| (slice.slice_index, slice))
-        .collect::<HashMap<_, _>>();
+    let details = region.slices.iter().map(|slice| (slice.index, slice)).collect::<HashMap<_, _>>();
 
     write!(
         html,
@@ -1147,7 +1191,7 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
         domain.map_or_else(String::new, |domain| {
             format!(
                 " <span class=\"muted\">· domain #{}{}</span>",
-                domain.domain_id,
+                domain.id,
                 if domain.is_default { " default" } else { "" }
             )
         })
@@ -1285,7 +1329,7 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
                 if segment.utilization_tracked {
                     format!(
                         "{}: class #{}{} · {} / {} live ({:.1}%)",
-                        segment.segment_index,
+                        segment.index,
                         segment.class_index,
                         if segment.context { " context" } else { "" },
                         segment.live_blocks,
@@ -1299,7 +1343,7 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
                 } else {
                     format!(
                         "{}: class #{}{} · utilization unavailable",
-                        segment.segment_index,
+                        segment.index,
                         segment.class_index,
                         if segment.context { " context" } else { "" }
                     )
@@ -1310,10 +1354,10 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
         write!(
             html,
             "<tr><td>{}</td><td><code>0x{:016x}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{} / {}</td><td>{}</td></tr>",
-            slice.slice_index,
+            slice.index,
             region
                 .base_address
-                .saturating_add(u64::from(slice.slice_index).saturating_mul(region.slice_bytes)),
+                .saturating_add(u64::from(slice.index).saturating_mul(region.slice_bytes)),
             slice_kind_label(slice.kind),
             slice.span_slices,
             format_owner(slice.owner),
@@ -1420,7 +1464,7 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
             html,
             "<tr><td>#{} / {}</td><td>{}</td><td>{} slices</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             region.region_index,
-            slice.slice_index,
+            slice.index,
             if slice.owner == 0 {
                 "Retained free span"
             } else {
@@ -1543,12 +1587,10 @@ fn render_size_classes(html: &mut String, snapshot: &Snapshot) {
 }
 
 fn sum_estimates(values: impl Iterator<Item = Estimate>) -> Estimate {
-    values.fold(Estimate::default(), |total, value| {
-        Estimate::from_fields(seismograph_rallocator::snapshot::EstimateFields {
-            value: total.value.saturating_add(value.value),
-            lower_bound: total.lower_bound.saturating_add(value.lower_bound),
-            upper_bound: total.upper_bound.saturating_add(value.upper_bound),
-        })
+    values.fold(Estimate::default(), |total, value| Estimate {
+        value: total.value.saturating_add(value.value),
+        lower_bound: total.lower_bound.saturating_add(value.lower_bound),
+        upper_bound: total.upper_bound.saturating_add(value.upper_bound),
     })
 }
 
@@ -1830,7 +1872,11 @@ fn render_thread_flow_diagram(html: &mut String, callers: &Callers, flows: &BTre
     for (&(source, destination), &(count, bytes)) in flows {
         let source_y = rows[&source];
         let destination_y = rows[&destination];
-        let width = 1.5 + 8.5 * (bytes as f64).ln_1p() / (maximum as f64).ln_1p();
+        let width = if maximum == 0 {
+            1.5
+        } else {
+            1.5 + 8.5 * (bytes as f64).ln_1p() / (maximum as f64).ln_1p()
+        };
         let class = if source == destination { "local" } else { "cross" };
         let label_y = f64::midpoint(source_y, destination_y) - 7.0;
         write!(
@@ -1922,7 +1968,6 @@ fn slice_kind_class(kind: SliceKind) -> &'static str {
         SliceKind::Unknown => "unknown",
         SliceKind::Small => "small",
         SliceKind::Medium => "medium",
-        SliceKind::MediumContinuation => "medium-continuation",
         SliceKind::Bump => "bump",
     }
 }
@@ -1932,7 +1977,6 @@ fn slice_kind_label(kind: SliceKind) -> &'static str {
         SliceKind::Unknown => "Allocated / transitional",
         SliceKind::Small => "Small slab slice",
         SliceKind::Medium => "Medium span start",
-        SliceKind::MediumContinuation => "Medium span continuation",
         SliceKind::Bump => "Bump chunk",
     }
 }
@@ -2028,7 +2072,7 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
         "<details><summary>Retained unmatched allocation candidates (showing {} of {})</summary><p class=\"muted\">Session {} · {} shared recorder events · {} shared overwritten records · {} thread logs. Unmatched records are not proof of live allocations or leaks: recording boundaries, sampling, suppression and overwrite can hide endpoints even when the lost counter is zero.</p><ol>",
         totals.len().min(8),
         totals.len(),
-        callers.session_id,
+        if callers.session_id == 0 { "unknown".to_owned() } else { callers.session_id.to_string() },
         format_count(callers.total_events),
         format_count(callers.lost_events),
         callers.threads.len(),
@@ -2151,12 +2195,344 @@ fn escape_html(value: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn estimate_totals_sum_each_bound_and_saturate_independently() {
+        let values = [
+            super::Estimate {
+                value: u64::MAX - 1,
+                lower_bound: 4,
+                upper_bound: u64::MAX,
+            },
+            super::Estimate {
+                value: 3,
+                lower_bound: 5,
+                upper_bound: 7,
+            },
+        ];
+        assert_eq!(
+            super::sum_estimates(values.into_iter()),
+            super::Estimate {
+                value: u64::MAX,
+                lower_bound: 9,
+                upper_bound: u64::MAX,
+            }
+        );
+    }
+
+    #[test]
+    fn frame_formatting_preserves_addresses_without_source_information() {
+        use super::*;
+        let mut lookup = AddressLookup::from_fields(AddressLookupFields {
+            address: 3,
+            symbol: None,
+            filename: None,
+            line: Some(12),
+            column: Some(3),
+        });
+        assert_eq!(format_frame(3, None), "0x0000000000000003");
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003");
+        lookup.symbol = Some("app::allocate".into());
+        assert_eq!(format_frame(3, Some(&lookup)), "app::allocate [0x0000000000000003]");
+        lookup.filename = Some("unknown.rs".into());
+        assert_eq!(
+            format_frame(3, Some(&lookup)),
+            "app::allocate (unknown.rs:12:3) [0x0000000000000003]"
+        );
+    }
+
+    #[test]
+    fn event_only_report_does_not_present_fake_allocator_counters() {
+        let snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));
+        let html = super::render_html(&snapshot);
+        assert!(html.contains("Application allocation event evidence"));
+        assert!(html.contains("Native allocator source unavailable"));
+        assert!(!html.contains("Process totals"));
+        assert!(!html.contains("Remote frees and reclamation"));
+        assert!(!html.contains("Mapped / backing"));
+    }
+
     use seismograph::recorder::event::{Event, EventClock, EventKind as RuntimeEventKind, EventPayload, EventTimestamp, Events};
     use seismograph::recorder::thread::ThreadLog;
     use seismograph_rallocator::callers::AddressLookupFields;
-    use seismograph_rallocator::snapshot::Version;
 
     use super::*;
+    use crate::allocator_view::Version;
+
+    #[test]
+    fn legacy_reports_keep_unmatched_stacks_and_source_locations() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        let mut callers = Callers::default();
+        for (allocation_id, size, address) in [(1, 64, 0x1000), (2, 128, 0x2000)] {
+            let mut allocation = seismograph_rallocator::callers::Event::default();
+            allocation.allocation_id = allocation_id;
+            allocation.size = size;
+            allocation.call_stack = vec![address];
+            callers.events.push(allocation);
+        }
+        snapshot.callers = Some(callers);
+        snapshot.addresses.push(AddressLookup::from_fields(AddressLookupFields {
+            address: 0x1000,
+            symbol: Some("app::allocate".into()),
+            filename: Some("allocation.rs".into()),
+            line: Some(12),
+            column: Some(3),
+        }));
+        let html = render_html(&snapshot);
+        assert!(html.contains("Retained unmatched allocation candidates (showing 2 of 2)"));
+        assert!(html.contains("allocation.rs:12:3"));
+        assert!(html.contains("app::allocate"));
+        assert!(html.contains("64 B unmatched"));
+        assert!(html.contains("128 B unmatched"));
+        let lookup = AddressLookup::from_fields(AddressLookupFields {
+            address: 3,
+            symbol: None,
+            filename: Some("unknown.rs".into()),
+            line: None,
+            column: None,
+        });
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs)");
+        let mut lookup = lookup;
+        lookup.line = Some(12);
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12)");
+        lookup.column = Some(3);
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs:12:3)");
+        lookup.line = None;
+        assert_eq!(format_frame(3, Some(&lookup)), "0x0000000000000003 (unknown.rs)");
+        assert_eq!(format_count(1_234_567), "1,234,567");
+        assert_eq!(
+            escape_html("plain & <tag> \"quoted\""),
+            "plain &amp; &lt;tag&gt; &quot;quoted&quot;"
+        );
+        assert_eq!(
+            format_estimate_bytes(Estimate {
+                value: 32,
+                lower_bound: 16,
+                upper_bound: 64
+            }),
+            "32 B (16 B–64 B)"
+        );
+    }
+
+    #[test]
+    fn legacy_domain_and_structure_fixtures_keep_classifications_distinct() {
+        use crate::allocator_topology::Segment;
+        use crate::allocator_view::SizeClass;
+
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.domains = vec![
+            Domain {
+                id: 9,
+                is_default: true,
+                region_indices: vec![3],
+                region_count: 1,
+                small_slices: 2,
+                medium_slices: 2,
+                bump_slices: 1,
+                unknown_slices: 1,
+                ..Default::default()
+            },
+            Domain {
+                id: 10,
+                ..Default::default()
+            },
+        ];
+        snapshot.size_classes.push(SizeClass {
+            class_index: 1,
+            block_bytes: 64,
+            requested_bytes: Estimate {
+                value: 30,
+                lower_bound: 20,
+                upper_bound: 40,
+            },
+            usable_bytes: Estimate {
+                value: 64,
+                lower_bound: 64,
+                upper_bound: 64,
+            },
+            ..Default::default()
+        });
+        snapshot.topology.push(TopologyRegion {
+            region_index: 3,
+            base_address: 0x10000,
+            region_bytes: 8 * 65536,
+            slice_bytes: 65536,
+            used_bitmap: vec![0b0011_1111],
+            slices: vec![
+                Slice {
+                    kind: SliceKind::Small,
+                    owner: 1,
+                    segments: vec![Segment {
+                        class_index: 1,
+                        live_blocks: 1,
+                        usable_blocks: 2,
+                        utilization_tracked: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                Slice {
+                    index: 1,
+                    kind: SliceKind::Small,
+                    segments: vec![Segment {
+                        class_index: 99,
+                        context: true,
+                        utilization_tracked: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                Slice {
+                    index: 2,
+                    kind: SliceKind::Medium,
+                    owner: 1,
+                    span_slices: 1,
+                    ..Default::default()
+                },
+                Slice {
+                    index: 3,
+                    kind: SliceKind::Medium,
+                    span_slices: 1,
+                    ..Default::default()
+                },
+                Slice {
+                    index: 4,
+                    kind: SliceKind::Bump,
+                    owner: 2,
+                    ..Default::default()
+                },
+            ],
+        });
+        let html = render_html(&snapshot);
+        for text in [
+            "domain #9 default",
+            "Small slab slice",
+            "Allocated / transitional",
+            "Context",
+            "Retained free span",
+            "Live allocation",
+            "Bump chunk",
+            "50.0%",
+            "30 B (20 B–40 B)",
+            "Unknown",
+        ] {
+            assert!(html.contains(text), "missing classified fixture output: {text}");
+        }
+
+        assert_eq!(slice_runs(&[0b0011_1111], 8), [(true, 0, 6), (false, 6, 2)]);
+        assert!(slice_runs(&[], 0).is_empty());
+        assert_eq!(grid_width(16384), 128);
+        let mut empty = String::new();
+        render_region(&mut empty, &TopologyRegion::default(), None);
+        assert!(empty.contains("0.00%"));
+    }
+
+    #[test]
+    fn region_summary_remains_available_without_slice_topology() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.regions.push(crate::allocator_view::Region {
+            index: 23,
+            reserved_bytes: 4096,
+            used_slices: 3,
+            free_slices: 5,
+        });
+        let mut html = String::new();
+        render_physical_topology(&mut html, &snapshot);
+        assert!(html.contains("Detailed slice topology is unavailable"));
+        assert!(html.contains("<td>#23</td><td>4.00 KiB</td><td>3</td><td>5</td>"), "{html}");
+    }
+
+    #[test]
+    fn event_report_matches_cross_thread_bump_frees_without_claiming_orphans_are_live() {
+        let mut callers = Callers::default();
+        for id in 1..=3 {
+            let mut allocation = seismograph_rallocator::callers::Event::default();
+            allocation.allocation_id = id;
+            allocation.thread_log_id = 7;
+            allocation.event_thread_id = 1;
+            allocation.size = id * 64;
+            allocation.call_stack = vec![0x1234];
+            let mut free = allocation.clone();
+            free.kind = EventKind::Deallocated;
+            free.allocation_recorded = true;
+            free.event_thread_id = if id == 1 { 1 } else { 2 };
+            free.heap_kind = HeapKind::Bump;
+            free.freed_after_heap_release = true;
+            callers.events.extend([allocation, free]);
+        }
+        let mut orphan = seismograph_rallocator::callers::Event::default();
+        orphan.kind = EventKind::Deallocated;
+        orphan.allocation_id = 99;
+        orphan.allocation_recorded = false;
+        callers.events.push(orphan);
+        let mut unmatched = seismograph_rallocator::callers::Event::default();
+        unmatched.allocation_id = 100;
+        callers.events.push(unmatched);
+        let mut log = seismograph_rallocator::callers::ThreadLog::default();
+        log.thread_log_id = 7;
+        log.allocated_histogram = vec![1, 0, 2];
+        log.live_histogram = vec![0, 1];
+        callers.threads.push(log);
+        let mut name = seismograph_rallocator::callers::ThreadName::default();
+        name.thread_id = 1;
+        name.name = "<producer>".to_owned();
+        callers.thread_names.push(name);
+        let mut snapshot = Snapshot::event_only(Version::new(0, 1, 0));
+        snapshot.callers = Some(callers);
+        let html = render_html(&snapshot);
+        for (operation, id, actor, status) in [
+            ("alloc", 1, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("alloc", 2, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("alloc", 3, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("free", 1, "&lt;producer&gt; · #1", "matched retained pair"),
+            ("free", 2, "Thread #2", "matched retained pair"),
+            ("free", 3, "Thread #2", "matched retained pair"),
+            ("free", 99, "Thread #0", "orphan free"),
+            ("alloc", 100, "Thread #0", "unmatched allocation evidence"),
+        ] {
+            let row = html
+                .split("<tr>")
+                .find(|row| row.starts_with(&format!("<td>{operation}</td><td>{actor}</td><td>#{id} /")))
+                .unwrap()
+                .split("</tr>")
+                .next()
+                .unwrap();
+            assert!(row.contains(&format!("<td>{status}</td>")), "{row}");
+        }
+        for text in [
+            "matched retained pair",
+            "orphan free",
+            "unmatched allocation evidence",
+            "&lt;producer&gt;",
+            "<path class=\"thread-flow-link local\" data-source=\"1\" data-destination=\"1\"",
+            "<path class=\"thread-flow-link cross\" data-source=\"1\" data-destination=\"2\"",
+            "320 B across 2 allocations",
+            "384 B across 3 allocations",
+        ] {
+            assert!(html.contains(text), "missing event evidence: {text}");
+        }
+        assert_eq!(histogram_height(0, 1).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(histogram_height(1, 0).to_bits(), 0.0_f64.to_bits());
+        assert!((histogram_height(2, 2) - 100.0).abs() < 1e-12);
+        assert_eq!(histogram_label(0), "0 B");
+        assert_eq!(histogram_label(100), format_bytes(u64::MAX));
+        assert_eq!(
+            format_estimate(Estimate {
+                value: 2,
+                lower_bound: 1,
+                upper_bound: 3
+            }),
+            "2 (1–3)"
+        );
+        assert_eq!(format!("{}", crate::allocator_view::PeakLiveBytesScope::Unavailable), "unavailable");
+        let mut zero_flow = String::new();
+        render_thread_flow_diagram(
+            &mut zero_flow,
+            snapshot.callers.as_ref().unwrap(),
+            &BTreeMap::from([((1, 2), (1, 0))]),
+        );
+        assert!(zero_flow.contains("stroke-width:1.5"));
+        assert!(!zero_flow.contains("NaN"));
+    }
 
     fn runtime_event(thread: u64, sequence: u64, kind: RuntimeEventKind, object: u64, stack: &[u64]) -> Event {
         Event {
@@ -2204,6 +2580,8 @@ mod tests {
         assert!(html.contains("Retained unmatched allocation candidates"));
         assert!(html.contains("not proof of live allocations or leaks"));
         assert!(!html.contains("General live-allocation hotspots"));
+        assert!(html.contains("Session unknown"));
+        assert!(!html.contains("Session 0"));
     }
 
     #[test]
@@ -2266,36 +2644,20 @@ mod tests {
     fn reporting_size_class_totals_are_explicitly_partial() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot.stats.live_bytes = 128;
-        let mut class = seismograph_rallocator::snapshot::SizeClass::default();
-        class.requested_bytes = Estimate::from_fields(seismograph_rallocator::snapshot::EstimateFields {
-            value: 32,
-            lower_bound: 32,
-            upper_bound: 32,
+        snapshot.size_classes.push(crate::allocator_view::SizeClass {
+            requested_bytes: Estimate {
+                value: 32,
+                lower_bound: 32,
+                upper_bound: 32,
+            },
+            ..crate::allocator_view::SizeClass::default()
         });
-        snapshot.size_classes.push(class);
         let mut html = String::new();
 
         render_size_classes(&mut html, &snapshot);
 
         assert!(html.contains("not process-wide live/usable totals"));
         assert!(html.contains("128 B"));
-    }
-
-    #[test]
-    fn reporting_peak_scope_distinguishes_samples_from_explicit_lifetime_tracking() {
-        let mut stats = Stats::default();
-        stats.peak_live_bytes = 262_144;
-        stats.peak_live_bytes_scope = PeakLiveBytesScope::SnapshotSamples;
-        let sampled = format_peak_live_bytes(stats);
-        stats.peak_live_bytes_scope = PeakLiveBytesScope::Lifetime;
-
-        assert_eq!(
-            (sampled, format_peak_live_bytes(stats)),
-            (
-                "Lifetime peak unavailable; max sampled live: 256.00 KiB".to_owned(),
-                "256.00 KiB (lifetime)".to_owned(),
-            )
-        );
     }
 
     #[test]
@@ -2372,19 +2734,22 @@ mod tests {
     #[test]
     fn reporting_untracked_utilization_is_not_rendered_as_empty_or_full() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
-        let mut region = TopologyRegion::default();
-        region.region_bytes = 64;
-        region.slice_bytes = 64;
-        region.used_bitmap = vec![1];
-        let mut slice = Slice::default();
-        slice.kind = SliceKind::Small;
-        let mut segment = seismograph_rallocator::topology::Segment::default();
-        segment.live_blocks = 99;
-        segment.usable_blocks = 100;
-        segment.utilization_tracked = false;
-        slice.segments.push(segment);
-        region.slices.push(slice);
-        snapshot.topology.push(region);
+        snapshot.topology.push(TopologyRegion {
+            region_bytes: 64,
+            slice_bytes: 64,
+            used_bitmap: vec![1],
+            slices: vec![Slice {
+                kind: SliceKind::Small,
+                segments: vec![crate::allocator_topology::Segment {
+                    live_blocks: 99,
+                    usable_blocks: 100,
+                    utilization_tracked: false,
+                    ..crate::allocator_topology::Segment::default()
+                }],
+                ..Slice::default()
+            }],
+            ..TopologyRegion::default()
+        });
         let mut html = String::new();
 
         render_physical_topology(&mut html, &snapshot);
@@ -2801,8 +3166,10 @@ mod tests {
 
     #[test]
     fn empty_regions_and_boundary_grids_render_safely() {
-        let mut region = TopologyRegion::default();
-        region.slice_bytes = 1;
+        let region = TopologyRegion {
+            slice_bytes: 1,
+            ..TopologyRegion::default()
+        };
         let mut html = String::new();
 
         render_region(&mut html, &region, None);
@@ -2816,12 +3183,16 @@ mod tests {
     #[test]
     fn physical_topology_renders_one_selectable_region_at_a_time() {
         let mut snapshot = Snapshot::new(Version::new(1, 0, 0));
-        let mut first = TopologyRegion::default();
-        first.region_index = 3;
-        first.slice_bytes = 1;
-        let mut second = TopologyRegion::default();
-        second.region_index = 7;
-        second.slice_bytes = 1;
+        let first = TopologyRegion {
+            region_index: 3,
+            slice_bytes: 1,
+            ..TopologyRegion::default()
+        };
+        let second = TopologyRegion {
+            region_index: 7,
+            slice_bytes: 1,
+            ..TopologyRegion::default()
+        };
         snapshot.topology = vec![first, second];
 
         let html = render_html(&snapshot);

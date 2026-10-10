@@ -8,7 +8,6 @@ use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, Even
 use seismograph::recorder::thread::ThreadId;
 use seismograph::snapshot::DecodedSnapshot;
 use seismograph_rallocator::callers::{AddressLookup, Event as AllocationEvent, EventKind as AllocationEventKind};
-use seismograph_rallocator::snapshot::Snapshot as AllocatorSource;
 use seismograph_runtime::snapshot::Snapshot as RuntimeSource;
 
 use super::data::{
@@ -16,6 +15,7 @@ use super::data::{
 };
 use super::filter::{FilterSpec, Match, RuntimeStackMode, StackProvenance};
 use super::runtime_timeline::TimeWindow;
+use crate::allocator_view::Snapshot as AllocatorSource;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct FilterCounts {
@@ -212,7 +212,6 @@ impl FilterIndex {
                 retained_allocation_events = u64::try_from(callers.events.len()).unwrap_or(u64::MAX);
                 std::mem::take(&mut callers.events)
                     .into_iter()
-                    .filter(|event| event.kind == AllocationEventKind::Allocated)
                     .map(|mut event| {
                         let stack = intern(std::mem::take(&mut event.call_stack));
                         IndexedAllocation { event, stack }
@@ -241,7 +240,12 @@ impl FilterIndex {
         FilterSummary {
             active: false,
             events: FilterCounts::unfiltered(self.events.len()),
-            allocations: FilterCounts::unfiltered(self.allocations.len()),
+            allocations: FilterCounts::unfiltered(
+                self.allocations
+                    .iter()
+                    .filter(|allocation| allocation.event.kind == AllocationEventKind::Allocated)
+                    .count(),
+            ),
             tasks: FilterCounts::unfiltered(self.task_stacks.len()),
         }
     }
@@ -307,21 +311,11 @@ impl FilterIndex {
         drop(decoded);
         drop(source);
 
-        let mut allocation_events = self
-            .allocations
-            .iter()
-            .filter_map(|allocation| {
-                if !summary.allocations.observe(filter, matches[allocation.stack.0]) {
-                    return None;
-                }
-                let mut event = allocation.event.clone();
-                event.call_stack = self.stacks[allocation.stack.0].addresses.to_vec();
-                Some(event)
-            })
-            .collect::<Vec<_>>();
+        let mut allocation_events = self.filtered_allocations(filter, &matches, &mut summary);
         let memory = self
             .allocator
             .as_ref()
+            .filter(|source| source.allocator_state_available)
             .map(|source| MemorySnapshot::from_snapshot_with_events(source, &self.deallocated, &allocation_events));
         let allocations = self.allocator.as_ref().map(|source| {
             let mut snapshot = AllocationSnapshot::from_snapshot_with_events(source, &self.deallocated, &allocation_events);
@@ -332,9 +326,10 @@ impl FilterIndex {
         });
         super::snapshot::release_stacks(&mut allocation_events, |event| drop(std::mem::take(&mut event.call_stack)));
         Box::new(CapturedSnapshot {
+            native: self.allocator.as_ref().and_then(|source| source.native.clone()),
             memory,
             allocations,
-            heap_error: self.allocator.is_none().then(|| super::Error::MissingMemorySource.to_string()),
+            heap_error: super::snapshot::heap_error(self.allocator.as_ref()),
             primitives: runtime.primitives,
             runtime: runtime.runtime,
             io: runtime.io,
@@ -409,6 +404,25 @@ impl FilterIndex {
         event.stack
     }
 
+    fn filtered_allocations(&self, filter: &FilterSpec, matches: &[Match], summary: &mut FilterSummary) -> Vec<AllocationEvent> {
+        self.allocations
+            .iter()
+            .filter_map(|allocation| {
+                let shown = if allocation.event.kind == AllocationEventKind::Allocated {
+                    summary.allocations.observe(filter, matches[allocation.stack.0])
+                } else {
+                    filter.accepts(matches[allocation.stack.0])
+                };
+                if !shown {
+                    return None;
+                }
+                let mut event = allocation.event.clone();
+                event.call_stack = self.stacks[allocation.stack.0].addresses.to_vec();
+                Some(event)
+            })
+            .collect()
+    }
+
     fn runtime_source(&self, filter: &FilterSpec, visible_tasks: &HashSet<(u64, u64)>, events: &[Event]) -> Option<RuntimeSource> {
         let mut source = self.runtime.clone()?;
         let mut visible_workers = events
@@ -460,9 +474,9 @@ mod tests {
     use seismograph::recorder::thread::ThreadLog;
     use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
     use seismograph_rallocator::callers::{AddressLookupFields, Callers};
-    use seismograph_rallocator::snapshot::Version;
 
     use super::*;
+    use crate::allocator_view::Version;
 
     fn lookup(address: u64, symbol: &str) -> AddressLookup {
         AddressLookup::from_fields(AddressLookupFields {
@@ -579,6 +593,14 @@ mod tests {
             }
         );
         let filtered = index.render(&FilterSpec::parse("crate:app", "crate:noise", false, RuntimeStackMode::Event).unwrap());
+        assert_eq!(
+            filtered.filter_summary.allocations,
+            FilterCounts {
+                total: 2,
+                shown: 1,
+                unknown: 0,
+            }
+        );
         assert_eq!(
             filtered
                 .allocations

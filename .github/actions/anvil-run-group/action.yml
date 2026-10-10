@@ -61,6 +61,59 @@ runs:
         # Capture the group result before propagating failure so the
         # best-effort reporter can consume both outputs.
         log="$RUNNER_TEMP/anvil-$ANVIL_GROUP.log"
+        resource_pid=""
+        if [[ "$ANVIL_GROUP" == "pr-mutants" && "$RUNNER_OS" == "Linux" ]]; then
+          # Mutants intentionally crash. Core files are not used by this check.
+          ulimit -c 0
+          (
+            sleep_pid=""
+            trap 'if [[ -n "$sleep_pid" ]]; then kill "$sleep_pid"; fi; exit 143' TERM
+            while true; do
+              {
+                sample_time="$(date -u +%FT%TZ)" || echo "::warning::Mutation clock probe failed"
+                echo "[anvil-resources] $sample_time"
+                free -m || echo "::warning::Mutation memory probe failed"
+                df -m . || echo "::warning::Mutation disk probe failed"
+                ps -eo pid,ppid,rss,pcpu,comm --sort=-rss | sed -n '1,12p' || echo "::warning::Mutation process probe failed"
+                if [[ -f mutants.out/debug.log ]]; then
+                  tail -n 1 mutants.out/debug.log || echo "::warning::Mutation debug-log probe failed"
+                fi
+              } 2>&1 | tee -a "$RUNNER_TEMP/anvil-$ANVIL_GROUP-resources.log" || echo "::warning::Mutation resource log write failed"
+              sleep 30 &
+              sleep_pid=$!
+              wait "$sleep_pid"
+              sleep_pid=""
+            done
+          ) &
+          resource_pid=$!
+          stop_resources() {
+            if ! kill "$resource_pid" 2>/dev/null; then
+              echo "::warning::Mutation resource sampler exited before cleanup"
+            fi
+            wait "$resource_pid" || {
+              sampler_status=$?
+              if [[ "$sampler_status" != 143 ]]; then
+                echo "::warning::Mutation resource sampler exited with status $sampler_status"
+              fi
+            }
+          }
+          core_pattern=""
+          restore_core_pattern=false
+          cleanup_mutation() {
+            stop_resources
+            if [[ "$restore_core_pattern" == true ]]; then
+              sudo -n sysctl -w "kernel.core_pattern=$core_pattern" || echo "::warning::Could not restore mutation core-dump routing"
+            fi
+          }
+          trap cleanup_mutation EXIT
+          if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; then
+            # Linux ignores ulimit for piped handlers such as Ubuntu's apport.
+            # Only ephemeral hosted runners may change this host-wide setting.
+            core_pattern="$(sysctl -n kernel.core_pattern)"
+            restore_core_pattern=true
+            sudo -n sysctl -w kernel.core_pattern=core
+          fi
+        fi
         set +e
         just "anvil-$ANVIL_GROUP" 2>&1 | tee "$log"
         # Preserve Just's status rather than tee's pipeline status.
@@ -73,6 +126,18 @@ runs:
         echo "failed_recipe=${failed_recipe:-anvil-$ANVIL_GROUP}" >> "$GITHUB_OUTPUT"
         echo "exit_code=$status" >> "$GITHUB_OUTPUT"
         exit "$status"
+
+    - name: Upload mutation diagnostics
+      if: always() && inputs.group == 'pr-mutants'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: anvil-mutants-${{ runner.os }}-${{ runner.arch }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/anvil-pr-mutants*.log
+          ${{ github.workspace }}/mutants.out/
+        retention-days: 3
+        if-no-files-found: warn
 
     # Reporting is supplemental: run after success or failure, but never let
     # an API outage determine the authoritative workflow-job result.

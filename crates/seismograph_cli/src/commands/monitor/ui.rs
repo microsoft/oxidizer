@@ -9,21 +9,23 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{
-    Axis, Block, Borders, Cell, Chart, Clear, Dataset, Gauge, GraphType, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
-};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, Gauge, GraphType, List, ListItem, ListState, Paragraph, Tabs};
 use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, RecordingPolicy};
 use seismograph_protocol::monitor::MonitorDescriptor;
 
+#[cfg(test)]
+use super::app::HeapFocus;
 use super::app::{
-    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapFocus, HeapViewState, IoFocus,
-    IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus,
-    ThreadViewState, format_sampling_percentage, recording_policy_label,
+    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState, IoFocus, IoViewState,
+    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus, ThreadViewState,
+    format_sampling_percentage, recording_policy_label,
 };
 use super::data::{
-    AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, MemorySnapshot, MemoryTier,
-    PrimitiveSnapshot, PrimitiveSort, ThreadSnapshot, cache_event_label,
+    AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
+    ThreadSnapshot, cache_event_label,
 };
+#[cfg(test)]
+use super::data::{MemorySnapshot, MemoryTier};
 use super::live_activity::LiveActivity;
 use super::mouse::{ListTarget, MouseRows};
 
@@ -302,14 +304,13 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
     let panels = view.panels.arrange(view.tab, content).areas;
     match view.tab {
         MonitorTab::Info => draw_snapshot_info(frame, content, view),
-        MonitorTab::Heaps => draw_memory(
+        MonitorTab::Heaps => draw_native(
             frame,
             &view.panels.rows,
-            panels,
-            view.snapshot.and_then(|capture| capture.memory.as_ref()),
-            view.snapshot
-                .and_then(|capture| capture.heap_error.as_deref())
-                .or(view.snapshot_error),
+            content,
+            view.snapshot.and_then(|capture| capture.native.as_deref()),
+            view.snapshot_error
+                .or_else(|| view.snapshot.and_then(|capture| capture.heap_error.as_deref())),
             view.heap_view,
         ),
         MonitorTab::Allocations => draw_allocations(
@@ -317,9 +318,7 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             &view.panels.rows,
             [panels[0], panels[1]],
             view.snapshot.and_then(|capture| capture.allocations.as_ref()),
-            view.snapshot
-                .and_then(|capture| capture.heap_error.as_deref())
-                .or(view.snapshot_error),
+            view.snapshot_error,
             view.allocation_view,
         ),
         MonitorTab::Primitives => {
@@ -759,6 +758,10 @@ fn draw_allocations(
         draw_empty_panel_with_message(frame, stack_area, " Stack Trace ", unavailable);
         return;
     };
+    if view.events {
+        draw_allocation_records(frame, mouse_rows, [hotspots_area, stack_area], allocations, view);
+        return;
+    }
     let hotspots = allocations.sorted_hotspots(view.sort, view.descending);
     let selected = view.selected.min(hotspots.len().saturating_sub(1));
     let visible_hotspots = usize::from(hotspots_area.height.saturating_sub(3));
@@ -818,7 +821,7 @@ fn draw_allocations(
         Paragraph::new(lines).block(
             Block::default()
                 .title(Line::from(vec![
-                    Span::raw(" Hotspots • sort "),
+                    Span::raw(" Hotspots · e events • sort "),
                     key_span("["),
                     Span::raw(" previous • "),
                     key_span("]"),
@@ -842,6 +845,85 @@ fn draw_allocations(
         return;
     };
     draw_allocation_stack(frame, stack_area, hotspot, view);
+}
+
+fn draw_allocation_records(
+    frame: &mut ratatui::Frame<'_>,
+    mouse_rows: &MouseRows,
+    [records_area, stack_area]: [Rect; 2],
+    allocations: &AllocationSnapshot,
+    view: AllocationViewState,
+) {
+    let selected = view.selected.min(allocations.records.len().saturating_sub(1));
+    let visible = usize::from(records_area.height.saturating_sub(2));
+    let first = selected.saturating_sub(visible.saturating_sub(1));
+    let mut state = ListState::default().with_selected(Some(selected.saturating_sub(first)));
+    frame.render_stateful_widget(
+        List::new(
+            allocations
+                .records
+                .iter()
+                .skip(first)
+                .take(visible)
+                .map(|record| ListItem::new(record.label())),
+        )
+        .block(
+            Block::default()
+                .title(" Retained allocation/free records · e hotspots · ↑↓ select ")
+                .title_bottom(" View IDs correlate retained evidence only; orphan frees remain explicit ")
+                .borders(Borders::ALL),
+        )
+        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
+        .highlight_symbol("> "),
+        records_area,
+        &mut state,
+    );
+    mouse_rows.register(records_area, 0, first, allocations.records.len(), ListTarget::Allocations);
+    let Some(record) = allocations.records.get(selected) else {
+        draw_empty_panel_with_message(
+            frame,
+            stack_area,
+            " Allocation/free evidence ",
+            Some("No retained allocation or free records."),
+        );
+        return;
+    };
+    let mut lines = record.details();
+    lines.push("Captured operation stack:".into());
+    lines.extend(record.stack(view.stack_filter).iter().cloned());
+    if record.stack(view.stack_filter).is_empty() {
+        lines.push("Backtraces were not captured for this operation.".into());
+    }
+    frame.render_widget(
+        wrapped_detail_paragraph(
+            &lines,
+            Block::default()
+                .title(" Operation detail / stack · f frames · PgUp/PgDn scroll ")
+                .borders(Borders::ALL),
+            stack_area,
+            view.stack_scroll,
+        ),
+        stack_area,
+    );
+}
+
+pub(super) fn wrapped_detail_paragraph(lines: &[String], block: Block<'static>, area: Rect, scroll: usize) -> Paragraph<'static> {
+    wrapped_detail_with_limit(lines, block, area, scroll).0
+}
+
+pub(super) fn wrapped_detail_with_limit(lines: &[String], block: Block<'static>, area: Rect, scroll: usize) -> (Paragraph<'static>, usize) {
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(lines.join("\n")).wrap(ratatui::widgets::Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(inner.width)
+        .saturating_sub(usize::from(inner.height))
+        .min(usize::from(u16::MAX));
+    (
+        paragraph
+            .scroll((u16::try_from(scroll.min(max_scroll)).unwrap_or(u16::MAX), 0))
+            .block(block),
+        max_scroll,
+    )
 }
 
 fn draw_allocation_stack(
@@ -1621,66 +1703,15 @@ fn primitive_selection_line(line: Line<'static>, selected: bool, focused: bool) 
     }
 }
 
-fn draw_memory(
+fn draw_native(
     frame: &mut ratatui::Frame<'_>,
     mouse_rows: &MouseRows,
-    [summary_area, tiers_area, buckets_area, hotspots_area, stack_area]: [Rect; 5],
-    memory: Option<&MemorySnapshot>,
+    area: Rect,
+    snapshot: Option<&seismograph_rallocator::native::Snapshot>,
     unavailable: Option<&str>,
     view: HeapViewState,
 ) {
-    let Some(memory) = memory else {
-        draw_empty_panel_with_message(frame, summary_area, " Heap Summary ", unavailable);
-        draw_empty_panel_with_message(frame, tiers_area, " Allocation Tiers ", unavailable);
-        draw_empty_panel_with_message(frame, buckets_area, " Size Distribution ", unavailable);
-        draw_empty_panel_with_message(frame, hotspots_area, " Allocation Locations ", unavailable);
-        draw_empty_panel_with_message(frame, stack_area, " Stack Trace ", unavailable);
-        return;
-    };
-    draw_memory_summary(frame, summary_area, memory);
-    let tier_inner = Block::default().borders(Borders::ALL).inner(tiers_area);
-    let mut x = tier_inner.x;
-    for (tier, title) in [
-        (MemoryTier::Small, " Small "),
-        (MemoryTier::Medium, " Medium "),
-        (MemoryTier::Direct, " Large / Direct (inferred) "),
-    ] {
-        // Tabs adds one space of padding on either side of each title by default.
-        let width = u16::try_from(Line::from(title).width()).unwrap_or(u16::MAX).saturating_add(2);
-        mouse_rows.register_tab(
-            Rect::new(x, tier_inner.y, width, 1).intersection(tier_inner),
-            ListTarget::HeapTier(tier),
-        );
-        x = x.saturating_add(width).saturating_add(1);
-    }
-    frame.render_widget(
-        Tabs::new([" Small ", " Medium ", " Large / Direct (inferred) "])
-            .select(view.tier.index())
-            .block(
-                Block::default()
-                    .title(Line::from(vec![
-                        Span::raw(" Allocation Tiers · "),
-                        key_span("["),
-                        Span::raw(" previous · "),
-                        key_span("]"),
-                        Span::raw(" next "),
-                    ]))
-                    .borders(Borders::ALL),
-            )
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .divider("│"),
-        tiers_area,
-    );
-    let tier = memory.tiers.iter().find(|tier| tier.kind == view.tier);
-    draw_memory_buckets(frame, mouse_rows, buckets_area, tier, memory, view);
-    let bucket = tier.and_then(|tier| tier.buckets.get(view.bucket_selected.min(tier.buckets.len().saturating_sub(1))));
-    draw_memory_hotspots(frame, mouse_rows, hotspots_area, bucket, view);
-    let hotspot = bucket.and_then(|bucket| {
-        bucket
-            .hotspots
-            .get(view.hotspot_selected.min(bucket.hotspots.len().saturating_sub(1)))
-    });
-    draw_memory_stack(frame, stack_area, hotspot, view);
+    super::native_ui::draw(frame, mouse_rows, area, snapshot, unavailable, view.native);
 }
 
 fn draw_empty_panel(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, title: &'static str) {
@@ -1703,349 +1734,6 @@ fn draw_empty_panel_with_message(
             .block(Block::default().title(title).borders(Borders::ALL)),
         area,
     );
-}
-
-fn draw_memory_summary(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, memory: &MemorySnapshot) {
-    let [gauges, regions] = Layout::vertical([Constraint::Length(3), Constraint::Length(3)]).areas(area);
-    let [live, peak, mapped] =
-        Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(33), Constraint::Percentage(33)]).areas(gauges);
-    frame.render_widget(memory_gauge(" Live ", memory.live_bytes, memory.mapped_bytes, Color::Green), live);
-    match memory.peak_live_bytes_scope {
-        seismograph_rallocator::snapshot::PeakLiveBytesScope::Lifetime => frame.render_widget(
-            memory_gauge(" Lifetime peak ", memory.peak_live_bytes, memory.mapped_bytes, Color::Yellow),
-            peak,
-        ),
-        seismograph_rallocator::snapshot::PeakLiveBytesScope::SnapshotSamples => frame.render_widget(
-            Paragraph::new(format!("Max sampled live: {}", format_bytes(memory.peak_live_bytes)))
-                .block(Block::default().title(" Lifetime peak unavailable ").borders(Borders::ALL)),
-            peak,
-        ),
-        _ => frame.render_widget(
-            Paragraph::new("Unavailable: capture did not record peak scope")
-                .block(Block::default().title(" Peak scope unavailable ").borders(Borders::ALL)),
-            peak,
-        ),
-    }
-    frame.render_widget(
-        memory_gauge(
-            " Reported mapped (not RSS/committed) ",
-            memory.mapped_bytes,
-            memory.reserved_bytes,
-            Color::Cyan,
-        ),
-        mapped,
-    );
-    let region_details = if memory.regions.is_empty() {
-        "No allocator regions".to_string()
-    } else {
-        memory
-            .regions
-            .iter()
-            .map(|region| {
-                format!(
-                    "R{}: {} · {}/{} slices",
-                    region.index,
-                    format_bytes(region.reserved_bytes),
-                    format_count(region.used_slices),
-                    format_count(region.used_slices.saturating_add(region.free_slices))
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("  ")
-    };
-    frame.render_widget(
-        Paragraph::new(format!(
-            "{} cumulative allocations (epoch/coverage unknown) · {} assigned / {} free virtual slices · {region_details}",
-            format_count(memory.allocations),
-            format_count(memory.used_slices),
-            format_count(memory.free_slices)
-        ))
-        .block(
-            Block::default()
-                .title(format!(
-                    " Virtual regions: {} • reserved {} • {} slices • small {} • medium {} • bump {} • other {} ",
-                    memory.regions.len(),
-                    format_bytes(memory.reserved_bytes),
-                    format_bytes(memory.slice_bytes),
-                    format_count(memory.small_slices),
-                    format_count(memory.medium_slices),
-                    format_count(memory.bump_slices),
-                    format_count(memory.unknown_slices),
-                ))
-                .borders(Borders::ALL),
-        ),
-        regions,
-    );
-}
-
-fn memory_gauge(title: &'static str, value: u64, maximum: u64, color: Color) -> Gauge<'static> {
-    Gauge::default()
-        .block(Block::default().title(title).borders(Borders::ALL))
-        .gauge_style(Style::default().fg(color).bg(Color::Black))
-        .percent(percent(value, maximum))
-        .label(format!("{} / {}", format_bytes(value), format_bytes(maximum)))
-}
-
-fn draw_memory_buckets(
-    frame: &mut ratatui::Frame<'_>,
-    mouse_rows: &MouseRows,
-    area: Rect,
-    tier: Option<&super::data::MemoryTierData>,
-    memory: &MemorySnapshot,
-    view: HeapViewState,
-) {
-    let selected = tier.map_or(0, |tier| view.bucket_selected.min(tier.buckets.len().saturating_sub(1)));
-    let visible = usize::from(area.height.saturating_sub(3));
-    let first = selected.saturating_sub(visible.saturating_sub(1));
-    let maximum = tier
-        .into_iter()
-        .flat_map(|tier| &tier.buckets)
-        .map(|bucket| bucket.allocations)
-        .max()
-        .unwrap_or(0);
-    let title = memory_tier_title(tier, memory);
-    let block = Block::default()
-        .title(Line::from(vec![
-            Span::raw(title),
-            key_span("↑/↓"),
-            Span::raw(" select · "),
-            key_span("Enter"),
-            Span::raw(" locations "),
-        ]))
-        .borders(Borders::ALL);
-    let Some(tier) = tier.filter(|tier| !tier.buckets.is_empty()) else {
-        frame.render_widget(Paragraph::new("No retained allocation events for this tier.").block(block), area);
-        return;
-    };
-    let size_width = tier
-        .buckets
-        .iter()
-        .map(|bucket| memory_bucket_label(bucket).chars().count())
-        .max()
-        .unwrap_or("Size".len())
-        .max("Size".len());
-    let size_width = u16::try_from(size_width).unwrap_or(u16::MAX).min(30);
-    let rows = tier.buckets.iter().skip(first).take(visible).map(|bucket| {
-        let displayed_live = bucket.topology_live_allocations.unwrap_or(bucket.live_allocations);
-        let (bar_value, bar_total) = match (bucket.topology_live_allocations, bucket.capacity_blocks) {
-            (Some(live), Some(capacity)) => (live, capacity),
-            _ => (bucket.allocations, maximum),
-        };
-        Row::new(vec![
-            Cell::from(memory_bucket_label(bucket)),
-            Cell::from(format_count(bucket.allocations)),
-            Cell::from(format_bytes(bucket.allocated_bytes)),
-            Cell::from(format_count(displayed_live)),
-            Cell::from(format_count(u64::try_from(bucket.hotspots.len()).unwrap_or(u64::MAX))),
-            Cell::from(Line::from(utilization_bar(bar_value, bar_total, 10))),
-        ])
-    });
-    let (count_label, bar_label) = if tier.kind == MemoryTier::Small {
-        ("Est. live", "Est. class")
-    } else {
-        ("Unmatched", "Event share")
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(size_width),
-            Constraint::Length(10),
-            Constraint::Length(12),
-            Constraint::Length(9),
-            Constraint::Length(11),
-            Constraint::Min(12),
-        ],
-    )
-    .header(
-        Row::new(["Size", "Retained", "Bytes", count_label, "Hotspots", bar_label]).style(Style::default().add_modifier(Modifier::BOLD)),
-    )
-    .column_spacing(1)
-    .block(block)
-    .row_highlight_style(if view.focus == HeapFocus::Buckets {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().bg(Color::DarkGray)
-    });
-    let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
-    frame.render_stateful_widget(table, area, &mut state);
-    mouse_rows.register(
-        area,
-        1,
-        first.saturating_add(state.offset()),
-        tier.buckets.len(),
-        ListTarget::HeapBuckets,
-    );
-}
-
-fn memory_tier_title(tier: Option<&super::data::MemoryTierData>, memory: &MemorySnapshot) -> String {
-    let Some(tier) = tier else {
-        return " Size Distribution ".to_owned();
-    };
-    let live_label = if tier.kind == MemoryTier::Direct {
-        "unmatched retained"
-    } else {
-        "reported current"
-    };
-    let detail = match tier.kind {
-        MemoryTier::Small => format!("{} published small classes", memory.size_classes.len()),
-        MemoryTier::Medium => format!(
-            "{} virtual slice spans · overhead {} · largest {}",
-            format_count(memory.medium_allocations.span_slices),
-            format_bytes(
-                memory
-                    .medium_allocations
-                    .usable_bytes
-                    .saturating_sub(memory.medium_allocations.requested_bytes)
-            ),
-            format_bytes(memory.medium_allocations.largest_requested_bytes)
-        ),
-        MemoryTier::Direct => "routing inferred from size/alignment".to_owned(),
-    };
-    format!(
-        " {} · {live_label} {} / {} · retained {} / {} · {detail} ",
-        tier.kind.label(),
-        format_count(tier.current_allocations),
-        format_bytes(tier.current_bytes),
-        format_count(tier.retained_allocations()),
-        format_bytes(tier.retained_bytes()),
-    )
-}
-
-fn draw_memory_hotspots(
-    frame: &mut ratatui::Frame<'_>,
-    mouse_rows: &MouseRows,
-    area: Rect,
-    bucket: Option<&super::data::MemoryBucket>,
-    view: HeapViewState,
-) {
-    let selected = bucket.map_or(0, |bucket| view.hotspot_selected.min(bucket.hotspots.len().saturating_sub(1)));
-    let visible = usize::from(area.height.saturating_sub(3));
-    let first = selected.saturating_sub(visible.saturating_sub(1));
-    let mut lines = vec![Line::from(Span::styled(
-        format!("{:>9} {:>11} {:>9}  Location", "Events", "Bytes", "Unmatched"),
-        Style::default().add_modifier(Modifier::BOLD),
-    ))];
-    if let Some(bucket) = bucket {
-        mouse_rows.register(area, 1, first, bucket.hotspots.len(), ListTarget::HeapHotspots);
-        lines.extend(
-            bucket
-                .hotspots
-                .iter()
-                .skip(first)
-                .take(visible)
-                .enumerate()
-                .map(|(index, hotspot)| {
-                    primitive_selection_line(
-                        Line::from(format!(
-                            "{:>9} {:>11} {:>9}  {}",
-                            format_count(hotspot.allocations),
-                            format_bytes(hotspot.allocated_bytes),
-                            format_count(hotspot.live_allocations),
-                            hotspot.location(view.stack_filter),
-                        )),
-                        row_is_selected(first, index, selected),
-                        view.focus == HeapFocus::Hotspots,
-                    )
-                }),
-        );
-    }
-    if bucket.is_none_or(|bucket| bucket.hotspots.is_empty()) {
-        lines.push(Line::from("No retained allocation locations for this bucket."));
-    }
-    let bucket_detail = bucket.map_or_else(String::new, |bucket| {
-        let topology = match (bucket.topology_live_allocations, bucket.capacity_blocks) {
-            (Some(live), Some(capacity)) => {
-                let bytes = match (bucket.requested_bytes, bucket.usable_bytes) {
-                    (Some(requested), Some(usable)) => format!(
-                        " · requested {} · waste {}",
-                        format_bytes(requested),
-                        format_bytes(usable.saturating_sub(requested))
-                    ),
-                    _ => String::new(),
-                };
-                format!(" · class estimate {}/{}{bytes}", format_count(live), format_count(capacity))
-            }
-            _ => String::new(),
-        };
-        format!(
-            " · {} · unmatched retained {} / {}{topology}",
-            memory_bucket_label(bucket),
-            format_count(bucket.live_allocations),
-            format_bytes(bucket.live_bytes)
-        )
-    });
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(Line::from(vec![
-                    Span::raw(format!(" Allocation Locations{bucket_detail} · ")),
-                    key_span("↑/↓"),
-                    Span::raw(" select · "),
-                    key_span("Backspace"),
-                    Span::raw(" distribution "),
-                ]))
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
-}
-
-fn draw_memory_stack(frame: &mut ratatui::Frame<'_>, area: Rect, hotspot: Option<&AllocationHotspot>, view: HeapViewState) {
-    let Some(hotspot) = hotspot else {
-        draw_empty_panel(frame, area, " Stack Trace ");
-        return;
-    };
-    let stack = hotspot.stack(view.stack_filter);
-    let visible = usize::from(area.height.saturating_sub(2));
-    let scroll = view.stack_scroll.min(stack.len().saturating_sub(visible));
-    let lines = if stack.is_empty() {
-        vec![Line::from("Backtraces were not captured for this location.")]
-    } else {
-        stack
-            .iter()
-            .skip(scroll)
-            .take(visible)
-            .enumerate()
-            .map(|(index, frame)| Line::from(format!("{:>3}  {frame}", scroll + index)))
-            .collect()
-    };
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(Line::from(vec![
-                    Span::raw(" Stack Trace · "),
-                    key_span("[f]"),
-                    Span::raw(" application/all · "),
-                    key_span("PgUp/PgDn"),
-                    Span::raw(" scroll "),
-                ]))
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
-}
-
-fn memory_bucket_label(bucket: &super::data::MemoryBucket) -> String {
-    if bucket.lower_bytes == bucket.upper_bytes {
-        format_bytes(bucket.upper_bytes)
-    } else {
-        format!("{}–{}", format_bytes(bucket.lower_bytes), format_bytes(bucket.upper_bytes))
-    }
-}
-
-fn utilization_bar(used: u64, total: u64, width: usize) -> Span<'static> {
-    let filled = usize::from(percent(used, total)) * width / 100;
-    Span::styled(
-        format!("[{}{}]", "█".repeat(filled), "░".repeat(width.saturating_sub(filled))),
-        Style::default().fg(Color::Green),
-    )
-}
-
-fn percent(value: u64, maximum: u64) -> u16 {
-    if maximum == 0 {
-        return 0;
-    }
-    u16::try_from(value.min(maximum).saturating_mul(100) / maximum).unwrap_or(100)
 }
 
 fn metric_line(label: &'static str, value: String) -> Line<'static> {
@@ -2267,11 +1955,11 @@ mod tests {
         AddressLookup, AddressLookupFields, Callers, CallersFields, Event as AllocationEvent, EventFields as AllocationEventFields,
         EventKind as AllocationEventKind, HeapKind,
     };
-    use seismograph_rallocator::snapshot::{Estimate, EstimateFields, Region, SizeClass, SizeClassFields, Snapshot, Version};
-    use seismograph_rallocator::topology::{Segment, SegmentFields, Slice, SliceKind, TopologyRegion};
 
     use super::super::app::{RuntimeFocus, TaskEventsFocus, TaskHistogram};
     use super::*;
+    use crate::allocator_topology::{Segment, Slice, SliceKind, TopologyRegion};
+    use crate::allocator_view::{Estimate, Region, SizeClass, Snapshot, Version};
 
     fn descriptor() -> MonitorDescriptor {
         MonitorDescriptor {
@@ -2319,66 +2007,73 @@ mod tests {
         let mut allocator = Snapshot::new(Version::new(1, 0, 0));
         allocator.stats.live_bytes = 100_000;
         allocator.stats.peak_live_bytes = 200_000;
-        allocator.stats.peak_live_bytes_scope = seismograph_rallocator::snapshot::PeakLiveBytesScope::Lifetime;
         allocator.stats.mapped_bytes = 400_000;
         allocator.stats.allocations = 3;
-        let mut region = Region::default();
-        region.region_index = 1;
-        region.reserved_bytes = 1 << 30;
-        region.used_slices = 4;
-        region.free_slices = 12;
-        allocator.regions.push(region);
-        let mut small = Slice::default();
-        small.slice_index = 0;
-        small.kind = SliceKind::Small;
-        small.segments.push(Segment::from_fields(SegmentFields {
-            segment_index: 0,
-            class_index: 0,
-            context: false,
-            live_blocks: 1,
-            usable_blocks: 4,
-            utilization_tracked: true,
-        }));
-        let mut medium = Slice::default();
-        medium.slice_index = 1;
-        medium.kind = SliceKind::Medium;
-        medium.span_slices = 2;
-        medium.owner = 1;
-        medium.requested_bytes = 100_000;
-        medium.usable_bytes = 131_072;
-        let mut bump = Slice::default();
-        bump.slice_index = 2;
-        bump.kind = SliceKind::Bump;
-        let mut unknown = Slice::default();
-        unknown.slice_index = 3;
-        unknown.kind = SliceKind::Unknown;
-        let mut topology = TopologyRegion::default();
-        topology.region_index = 1;
-        topology.base_address = 0x1000;
-        topology.region_bytes = 1 << 30;
-        topology.slice_bytes = 64 * 1024;
-        topology.used_bitmap = vec![0b1111];
-        topology.slices = vec![small, medium, bump, unknown];
-        allocator.topology.push(topology);
-        allocator.size_classes.push(SizeClass::from_fields(SizeClassFields {
+        allocator.regions.push(Region {
+            index: 1,
+            reserved_bytes: 1 << 30,
+            used_slices: 4,
+            free_slices: 12,
+        });
+        let small = Slice {
+            index: 0,
+            kind: SliceKind::Small,
+            segments: vec![Segment {
+                index: 0,
+                class_index: 0,
+                context: false,
+                live_blocks: 1,
+                usable_blocks: 4,
+                utilization_tracked: true,
+            }],
+            ..Slice::default()
+        };
+        let medium = Slice {
+            index: 1,
+            kind: SliceKind::Medium,
+            span_slices: 2,
+            owner: 1,
+            requested_bytes: 100_000,
+            usable_bytes: 131_072,
+            ..Slice::default()
+        };
+        let bump = Slice {
+            index: 2,
+            kind: SliceKind::Bump,
+            ..Slice::default()
+        };
+        let unknown = Slice {
+            index: 3,
+            kind: SliceKind::Unknown,
+            ..Slice::default()
+        };
+        allocator.topology.push(TopologyRegion {
+            region_index: 1,
+            base_address: 0x1000,
+            region_bytes: 1 << 30,
+            slice_bytes: 64 * 1024,
+            used_bitmap: vec![0b1111],
+            slices: vec![small, medium, bump, unknown],
+        });
+        allocator.size_classes.push(SizeClass {
             class_index: 0,
             block_bytes: 64,
-            live_allocations: Estimate::from_fields(EstimateFields {
+            live_allocations: Estimate {
                 value: 1,
                 lower_bound: 1,
                 upper_bound: 1,
-            }),
-            requested_bytes: Estimate::from_fields(EstimateFields {
+            },
+            requested_bytes: Estimate {
                 value: 32,
                 lower_bound: 32,
                 upper_bound: 32,
-            }),
-            usable_bytes: Estimate::from_fields(EstimateFields {
+            },
+            usable_bytes: Estimate {
                 value: 64,
                 lower_bound: 64,
                 upper_bound: 64,
-            }),
-        }));
+            },
+        });
         allocator.callers = Some(Callers::from_fields(CallersFields {
             session_id: 1,
             total_events: 4,
@@ -2573,6 +2268,7 @@ mod tests {
         let runtime = super::super::data::RuntimeSnapshot::from_events(&decoded, &addresses, None);
 
         Box::new(CapturedSnapshot {
+            native: Some(std::sync::Arc::new(crate::native_view::fixture::snapshot())),
             memory: Some(MemorySnapshot::from_snapshot(&allocator)),
             allocations: Some(AllocationSnapshot::from_snapshot(&allocator)),
             heap_error: None,
@@ -2758,44 +2454,37 @@ mod tests {
     #[test]
     fn mouse_heap_table_tracks_actual_visible_rows() {
         let mut capture = representative_capture();
-        let tier = capture
-            .memory
-            .as_mut()
-            .unwrap()
-            .tiers
-            .iter_mut()
-            .find(|tier| tier.kind == MemoryTier::Small)
-            .unwrap();
-        let bucket = tier.buckets[0].clone();
-        tier.buckets = (0..80)
-            .map(|index| {
-                let mut bucket = bucket.clone();
-                bucket.allocations = 1000 + index;
-                bucket
+        let native = std::sync::Arc::make_mut(capture.native.as_mut().unwrap());
+        native.owners = (1..81)
+            .map(|index| seismograph_rallocator::native::Owner {
+                id: index,
+                leased: true,
+                ..Default::default()
             })
             .collect();
+        native.owner_count = 80;
         let mut app = App::offline("click-test.seismograph".into());
         app.screen = Screen::Offline {
             path: "click-test.seismograph".into(),
             tab: MonitorTab::Heaps,
             snapshot: Some(capture),
         };
-        app.heap_view.bucket_selected = 65;
+        app.heap_view.native.root = 65;
         let area = Rect::new(0, 0, 180, 40);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
-        let pane = app.panels.arrange(MonitorTab::Heaps, Rect::new(0, 3, 180, 36)).areas[2];
-        for row in pane.y + 2..pane.bottom() - 1 {
-            let (target, index) = app.panels.rows.at(area, pane.x + 1, row).unwrap();
-            assert_eq!(target, ListTarget::HeapBuckets);
-            let text = (pane.x..pane.right())
+        let mut found = 0;
+        for row in 0..area.height {
+            let Some((ListTarget::HeapBuckets, index)) = app.panels.rows.at(area, 1, row) else {
+                continue;
+            };
+            let text = (0..58)
                 .map(|column| terminal.backend().buffer()[(column, row)].symbol())
                 .collect::<String>();
-            assert!(
-                text.contains(&format_count(1000 + u64::try_from(index).unwrap())),
-                "{index}: {text}"
-            );
+            assert!(text.contains(&format!("Owner {}", index - 1)), "{index}: {text}");
+            found += 1;
         }
+        assert!(found > 5);
     }
 
     fn rendered_target(app: &App, target: ListTarget) -> (u16, u16, usize) {
@@ -2819,7 +2508,6 @@ mod tests {
 
         for (tab, target) in [
             (MonitorTab::Heaps, ListTarget::HeapBuckets),
-            (MonitorTab::Heaps, ListTarget::HeapHotspots),
             (MonitorTab::Allocations, ListTarget::Allocations),
             (MonitorTab::Primitives, ListTarget::PrimitiveTypes),
             (MonitorTab::Primitives, ListTarget::PrimitiveOperations),
@@ -2847,7 +2535,6 @@ mod tests {
             let mut mouse = make_app();
             let mut keyboard = make_app();
             match target {
-                ListTarget::HeapHotspots => keyboard.heap_view.focus = HeapFocus::Hotspots,
                 ListTarget::PrimitiveOperations => keyboard.primitive_view.focus = PrimitiveFocus::Operations,
                 ListTarget::PrimitiveHotspots => keyboard.primitive_view.focus = PrimitiveFocus::Hotspots,
                 ListTarget::ThreadOperations => keyboard.thread_view.focus = ThreadFocus::Operations,
@@ -2864,7 +2551,9 @@ mod tests {
             for _ in 0..index {
                 keyboard.handle_key(KeyCode::Down);
             }
-            keyboard.handle_key(KeyCode::Enter);
+            if target != ListTarget::HeapBuckets {
+                keyboard.handle_key(KeyCode::Enter);
+            }
             mouse.handle_mouse(
                 mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
                 Rect::new(0, 0, 180, 60),
@@ -2922,7 +2611,7 @@ mod tests {
     }
 
     #[test]
-    fn mouse_heap_tiers_use_visible_tab_labels() {
+    fn native_owner_selection_and_detail_scrolling_are_functional() {
         use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
         let mut app = App::offline("click-test.seismograph".into());
         app.screen = Screen::Offline {
@@ -2930,23 +2619,413 @@ mod tests {
             tab: MonitorTab::Heaps,
             snapshot: Some(representative_capture()),
         };
-        for tier in [MemoryTier::Medium, MemoryTier::Direct, MemoryTier::Small] {
-            render(&app);
-            let (column, row, _) = rendered_target(&app, ListTarget::HeapTier(tier));
-            app.handle_mouse(
-                mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
-                Rect::new(0, 0, 180, 60),
-            );
-            assert_eq!((app.heap_view.tier, app.heap_view.focus), (tier, HeapFocus::Hotspots));
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        assert!(render(&app).contains("Small slabs"));
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::PageDown);
+        assert!(app.heap_view.native.scroll > 0);
+        for _ in 0..3 {
+            assert!(!app.handle_key(KeyCode::Esc));
         }
+        app.handle_key(KeyCode::Down);
+        assert!(render(&app).contains("Unknown"));
+        assert_eq!(app.heap_view.native.scroll, 0);
         render(&app);
-        let (column, row, _) = rendered_target(&app, ListTarget::HeapTier(MemoryTier::Medium));
-        app.handle_key(KeyCode::Char('3'));
+        let (column, row, index) = rendered_target(&app, ListTarget::HeapBuckets);
         app.handle_mouse(
             mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
             Rect::new(0, 0, 180, 60),
         );
-        assert_eq!(app.heap_view.tier, MemoryTier::Small);
+        assert_eq!(app.heap_view.native.root, index);
+    }
+
+    #[test]
+    fn native_wrapped_details_scroll_to_remote_state_on_narrow_terminals() {
+        let mut snapshot = crate::native_view::fixture::snapshot();
+        let observation = snapshot.owners[0].observation.as_mut().unwrap();
+        observation.classes.fill(seismograph_rallocator::native::ClassState {
+            object_bytes: 16,
+            slab_bytes: 16384,
+            capacity: 1024,
+            observed_slabs: 1,
+            ..Default::default()
+        });
+        let mut view = App::offline("native-scroll.seismograph".into()).heap_view;
+        view.native.root = 2;
+        view.native.subsystem = 4;
+        view.native.depth = super::super::native_ui::Depth::Detail;
+        let rows = MouseRows::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut reached_remote = false;
+        for scroll in (0..1000).step_by(5) {
+            view.native.scroll = scroll;
+            terminal
+                .draw(|frame| draw_native(frame, &rows, frame.area(), Some(&snapshot), None, view))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect();
+            if text.contains("Inbox work") {
+                reached_remote = true;
+            }
+        }
+        assert!(reached_remote, "wrapped native detail scrolling must reach incoming queue state");
+    }
+
+    #[test]
+    fn wrapped_operation_details_clamp_after_wrapping_without_hiding_the_last_frame() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                frame.render_widget(
+                    wrapped_detail_paragraph(
+                        &["operation detail ".repeat(100), "application::last_frame".into()],
+                        Block::default().borders(Borders::ALL),
+                        area,
+                        usize::MAX,
+                    ),
+                    area,
+                );
+            })
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        assert!(text.contains("application::last_frame"));
+        assert!(
+            text.contains("operation detail"),
+            "overscroll clamps to a full final viewport, not a blank panel"
+        );
+    }
+
+    #[test]
+    fn native_inventory_end_navigation_keeps_global_mouse_indices() {
+        use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+        let mut snapshot = representative_capture();
+        let native = std::sync::Arc::make_mut(snapshot.native.as_mut().unwrap());
+        let owner = native.owners[0];
+        native.owners = (0..1024)
+            .map(|index| seismograph_rallocator::native::Owner {
+                id: 0x1000 + index,
+                ..owner
+            })
+            .collect();
+        native.owner_count = 1024;
+        let mut app = App::offline("large-inventory.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "large-inventory.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::End);
+        assert_eq!(app.heap_view.native.root, 1025);
+        assert!(render(&app).contains("Owner 1024"));
+        let (column, row, index) = rendered_target(&app, ListTarget::HeapBuckets);
+        assert!(index > 900);
+        app.handle_mouse(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), column, row),
+            Rect::new(0, 0, 180, 60),
+        );
+        assert_eq!(app.heap_view.native.root, index);
+        app.handle_key(KeyCode::Home);
+        assert_eq!(app.heap_view.native.root, 0);
+        assert!(render(&app).contains("Global backend"));
+    }
+
+    fn render_native_sized(app: &App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect()
+    }
+
+    #[test]
+    fn native_end_then_page_up_and_resized_up_use_actual_wrapped_bounds() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut capture = representative_capture();
+        std::sync::Arc::make_mut(capture.native.as_mut().unwrap()).owners[0]
+            .observation
+            .as_mut()
+            .unwrap()
+            .classes
+            .fill(seismograph_rallocator::native::ClassState {
+                object_bytes: 65_536,
+                slab_bytes: 262_144,
+                capacity: 4,
+                observed_slabs: 2,
+                ..Default::default()
+            });
+        let mut app = App::offline("wrapped-native.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "wrapped-native.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        app.heap_view.native.root = 2;
+        app.heap_view.native.depth = Depth::Class;
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 5);
+        app.handle_key(KeyCode::PageUp);
+        assert_ne!(render_native_sized(&app, 80, 24), bottom);
+        assert_eq!(app.heap_view.native.scroll, limit - 5);
+        app.handle_key(KeyCode::End);
+        let resized = render_native_sized(&app, 80, 28);
+        let resized_limit = app.panels.rows.native_scroll_limit.get();
+        assert!(resized_limit > 0 && resized_limit < limit);
+        app.handle_key(KeyCode::Up);
+        assert_ne!(render_native_sized(&app, 80, 28), resized);
+        assert_eq!(app.heap_view.native.scroll, resized_limit - 1);
+    }
+
+    #[test]
+    fn native_end_then_page_up_moves_owner_return_details() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("returns-scroll.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "returns-scroll.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        app.heap_view.native.root = 2;
+        app.heap_view.native.subsystem = 4;
+        app.heap_view.native.depth = Depth::Detail;
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 0);
+        app.handle_key(KeyCode::PageUp);
+        assert_ne!(render_native_sized(&app, 80, 24), bottom);
+        assert_eq!(app.heap_view.native.scroll, limit.saturating_sub(5));
+    }
+
+    #[test]
+    fn native_memory_category_enter_focuses_scrollable_reserved_details() {
+        use crossterm::event::KeyCode;
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("memory-detail.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "memory-detail.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Memory);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::MemoryDetail);
+        render_native_sized(&app, 80, 24);
+        app.handle_key(KeyCode::End);
+        let bottom = render_native_sized(&app, 80, 24);
+        assert!(bottom.contains("Global cached"));
+        let limit = app.panels.rows.native_scroll_limit.get();
+        assert!(limit > 0);
+        app.handle_key(KeyCode::Up);
+        assert_eq!((app.heap_view.native.scroll, app.heap_view.native.memory), (limit - 1, 0));
+        assert!(!app.handle_key(KeyCode::Esc));
+        assert_eq!(app.heap_view.native.depth, Depth::Memory);
+    }
+
+    #[test]
+    fn native_source_decode_and_capture_errors_remain_visible() {
+        let mut capture = representative_capture();
+        capture.native = None;
+        capture.heap_error = Some("native payload decode failed: invalid class tag".into());
+        let mut app = App::offline("native-error.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "native-error.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        let output = render(&app);
+        assert!(output.contains("[Error]") && output.contains("native payload decode failed: invalid class tag"));
+        app.snapshot_error = Some("capture unavailable: transport disconnected".into());
+        let output = render(&app);
+        assert!(output.contains("capture unavailable: transport disconnected"));
+        assert!(!output.contains("native payload decode failed: invalid class tag"));
+    }
+
+    #[test]
+    fn native_slot_failure_is_explicit_in_owner_selection() {
+        use crossterm::event::KeyCode;
+        let mut snapshot = representative_capture();
+        let native = std::sync::Arc::make_mut(snapshot.native.as_mut().unwrap());
+        native.owners[1].source = seismograph_rallocator::native::ObservationSource::Unavailable;
+        let mut app = App::offline("slot-failure.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "slot-failure.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        let output = render(&app);
+        assert!(output.contains("Unavailable"));
+        assert!(!output.contains("allocation failed"));
+    }
+
+    #[test]
+    fn native_mouse_drilldowns_and_wheel_focus_the_actual_lists() {
+        use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+
+        use super::super::native_ui::Depth;
+        let mut app = App::offline("native-mouse.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "native-mouse.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(representative_capture()),
+        };
+        let area = Rect::new(0, 0, 180, 60);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeSubsystems);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        assert_eq!(app.heap_view.native.subsystem, index);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Detail);
+        assert!(!app.handle_key(KeyCode::Esc));
+        app.handle_key(KeyCode::Home);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::End);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeClasses);
+        assert_eq!(index, 43);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.heap_view.native.depth, Depth::Class);
+        render(&app);
+        let (column, row, _) = rendered_target(&app, ListTarget::NativeClasses);
+        app.handle_mouse(mouse_event(MouseEventKind::ScrollUp, column, row), area);
+        assert_eq!((app.heap_view.native.depth, app.heap_view.native.class), (Depth::Classes, 42));
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Esc);
+        app.handle_key(KeyCode::Home);
+        app.handle_key(KeyCode::Enter);
+        render(&app);
+        let (column, row, index) = rendered_target(&app, ListTarget::NativeMemory);
+        app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
+        assert_eq!(app.heap_view.native.memory, index);
+        assert!(render(&app).contains("— [Unknown]"));
+    }
+
+    #[test]
+    fn native_missing_source_navigation_preserves_unknown_and_back_hierarchy() {
+        use crossterm::event::KeyCode;
+        let mut capture = representative_capture();
+        capture.native = None;
+        let mut app = App::offline("missing-native.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "missing-native.seismograph".into(),
+            tab: MonitorTab::Heaps,
+            snapshot: Some(capture),
+        };
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::End);
+        assert!(render(&app).contains("Swapped · F1"));
+        assert!(render(&app).contains("— [Unknown]"));
+        assert!(!app.handle_key(KeyCode::Esc));
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        assert!(render(&app).contains("Global backend"));
+        assert!(!app.handle_key(KeyCode::Backspace));
+        assert!(app.handle_key(KeyCode::Esc));
+    }
+
+    #[test]
+    fn allocation_event_mode_renders_operation_identity_and_stack() {
+        use crossterm::event::KeyCode;
+        let mut app = App::offline("allocation-events.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "allocation-events.seismograph".into(),
+            tab: MonitorTab::Allocations,
+            snapshot: Some(representative_capture()),
+        };
+        app.handle_key(KeyCode::Char('e'));
+        assert!(app.allocation_view.events);
+        let output = render(&app);
+        for label in [
+            "Retained allocation/free records",
+            "actor recorder thread",
+            "View-local lifetime",
+            "Captured operation stack",
+        ] {
+            assert!(output.contains(label), "missing {label}");
+        }
+        app.handle_key(KeyCode::Down);
+        assert_eq!(app.allocation_view.selected, 1);
+        app.handle_key(KeyCode::Char('e'));
+        assert!(!app.allocation_view.events);
+        assert_eq!(app.allocation_view.selected, 0);
+    }
+
+    #[test]
+    fn allocation_event_mode_without_records_shows_missing_evidence() {
+        use crossterm::event::KeyCode;
+        let mut snapshot = representative_capture();
+        snapshot.allocations.as_mut().unwrap().records.clear();
+        let mut app = App::offline("empty-allocation-events.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "empty-allocation-events.seismograph".into(),
+            tab: MonitorTab::Allocations,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::Char('e'));
+        let output = render(&app);
+        assert!(output.contains("No retained allocation or free records."), "{output}");
+        assert!(!output.contains("Captured operation stack:"), "{output}");
+    }
+
+    #[test]
+    fn allocation_event_without_a_captured_stack_shows_missing_backtrace_evidence() {
+        use crossterm::event::KeyCode;
+        let snapshot = representative_capture();
+        let selected = snapshot
+            .allocations
+            .as_ref()
+            .unwrap()
+            .records
+            .iter()
+            .position(|record| record.stack(AllocationStackFilter::All).is_empty())
+            .unwrap();
+        let mut app = App::offline("allocation-without-backtrace.seismograph".into());
+        app.screen = Screen::Offline {
+            path: "allocation-without-backtrace.seismograph".into(),
+            tab: MonitorTab::Allocations,
+            snapshot: Some(snapshot),
+        };
+        app.handle_key(KeyCode::Char('e'));
+        app.allocation_view.selected = selected;
+        app.allocation_view.stack_filter = AllocationStackFilter::All;
+        let output = render(&app);
+        assert!(output.contains("Captured operation stack:"), "{output}");
+        assert!(output.contains("Backtraces were not captured for this operation."), "{output}");
     }
 
     #[test]
@@ -3120,33 +3199,6 @@ mod tests {
     }
 
     #[test]
-    fn memory_peak_labels_follow_the_recorded_scope() {
-        use seismograph_rallocator::snapshot::PeakLiveBytesScope;
-        for (scope, label, show_value) in [
-            (
-                PeakLiveBytesScope::Unavailable,
-                "Unavailable: capture did not record peak scope",
-                false,
-            ),
-            (PeakLiveBytesScope::SnapshotSamples, "Max sampled live:", true),
-            (PeakLiveBytesScope::Lifetime, "Lifetime peak", true),
-        ] {
-            let mut capture = representative_capture();
-            let memory = capture.memory.as_mut().unwrap();
-            memory.peak_live_bytes_scope = scope;
-            let output = render_frame(|frame| draw_memory_summary(frame, frame.area(), memory));
-            assert_eq!(
-                (output.contains(label), output.contains(&format_bytes(memory.peak_live_bytes))),
-                (true, show_value)
-            );
-            assert_eq!(
-                output.contains("Lifetime peak unavailable"),
-                scope == PeakLiveBytesScope::SnapshotSamples
-            );
-        }
-    }
-
-    #[test]
     fn live_info_shows_class_rates_and_graphical_threads_without_capturing_events() {
         use crossterm::event::{MouseButton, MouseEventKind};
         use seismograph_protocol::message::{EventClassCounts, RecorderActivity, ThreadRecorderStatistics};
@@ -3262,11 +3314,6 @@ mod tests {
         assert!(output.contains("all-class source:"));
         assert!(output.contains("not proven live allocations or leaks, even with zero overwrites"));
         assert!(!output.contains("Live bytes"));
-        let memory = capture.memory.as_ref().unwrap();
-        let direct = memory.tiers.iter().find(|tier| tier.kind == MemoryTier::Direct);
-        assert!(memory_tier_title(direct, memory).contains("unmatched retained"));
-        let small = memory.tiers.iter().find(|tier| tier.kind == MemoryTier::Small);
-        assert!(memory_tier_title(small, memory).contains("published small classes"));
     }
 
     fn render_debug(draw: impl FnOnce(&mut ratatui::Frame<'_>)) -> String {
@@ -3968,45 +4015,17 @@ mod tests {
                 "1.00 GiB".to_owned(),
             ]
         );
-        assert_eq!((percent(10, 0), percent(200, 100)), (0, 100));
     }
 
     #[test]
     fn labels_and_visual_helpers_cover_empty_and_active_states() {
-        let bucket = super::super::data::MemoryBucket {
-            lower_bytes: 1,
-            upper_bytes: 64,
-            allocations: 1,
-            allocated_bytes: 32,
-            live_allocations: 1,
-            live_bytes: 32,
-            topology_live_allocations: None,
-            capacity_blocks: None,
-            requested_bytes: None,
-            usable_bytes: None,
-            hotspots: Vec::new(),
-        };
-        let exact = super::super::data::MemoryBucket {
-            lower_bytes: 64,
-            ..bucket.clone()
-        };
         assert_eq!(
             (
-                memory_bucket_label(&bucket),
-                memory_bucket_label(&exact),
-                utilization_bar(1, 2, 4).content.into_owned(),
                 thread_label(7, "", 3),
                 thread_label(7, "worker", 5),
                 recording_configuration_label(RecordingConfiguration::default()),
             ),
-            (
-                "1 B–64 B".into(),
-                "64 B".into(),
-                "[██░░]".into(),
-                "#7".into(),
-                "#7 wo".into(),
-                "off",
-            )
+            ("#7".into(), "#7 wo".into(), "off",)
         );
         assert_eq!(
             (
@@ -4359,8 +4378,8 @@ mod tests {
             snapshot: Some(capture),
         };
         let rendered = render(&app);
-        assert!(rendered.contains("No allocator regions"));
-        assert!(rendered.contains("No retained allocation events"));
+        assert!(rendered.contains("Global backend"));
+        assert!(rendered.contains("7 / 9 [Partial]"));
 
         let mut capture = representative_capture();
         let bucket = &mut capture.memory.as_mut().unwrap().tiers[0].buckets[0];
@@ -4374,9 +4393,8 @@ mod tests {
             tab: MonitorTab::Heaps,
             snapshot: Some(capture),
         };
-        assert!(render(&app).contains("No retained allocation locations"));
+        assert!(render(&app).contains("Page-map VA"));
 
-        assert!(memory_tier_title(None, &representative_capture().memory.unwrap()).contains("Size Distribution"));
         assert!(
             render_frame(|frame| {
                 let area = frame.area();
@@ -4547,7 +4565,7 @@ mod tests {
                 tab: MonitorTab::Heaps,
                 snapshot: Some(representative_capture()),
             };
-            assert!(render(&app).contains(tier.label()));
+            assert!(render(&app).contains("Native v4"));
         }
 
         app.allocation_view.stack_filter = AllocationStackFilter::All;
@@ -4743,6 +4761,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (665_581, 17_551_044_085_115_674_945));
+        assert_eq!(stable_digest(&output), (691_592, 3_962_280_200_487_367_007));
     }
 }
