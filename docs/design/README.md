@@ -56,11 +56,12 @@ with `--config`, so the shared policy is intentionally duplicated across all
 three files. Selection is by operating system, not architecture, so both Linux
 runner architectures share the Linux configuration.
 
-The configurations also skip the allocator's twelve fatal-path subprocess tests
-when running mutation tests. These tests deliberately abort child processes;
-ordinary tests, coverage, and runtime-analysis selection remain unchanged.
-This avoids repeating intentional process crashes for every mutation. Other
-tests still run against mutated allocator code and may detect bugs by crashing.
+The configurations skip eight intentional-abort subprocess tests during mutation
+runs, but retain the four tests needed to catch mutations in fatal termination
+guards. These tests deliberately abort child processes; ordinary tests, coverage,
+and runtime-analysis selection remain unchanged. Hosted Linux mutation jobs
+disable crash-handler forwarding so expected aborts do not launch crash reporters.
+Other tests still run against mutated allocator code and may detect bugs by crashing.
 
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
