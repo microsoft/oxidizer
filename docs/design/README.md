@@ -56,24 +56,15 @@ with `--config`, so the shared policy is intentionally duplicated across all
 three files. Selection is by operating system, not architecture, so both Linux
 runner architectures share the Linux configuration.
 
-The configurations skip eight intentional-abort subprocess tests during mutation
-runs, but retain the four tests needed to catch mutations in fatal termination
-guards. These tests deliberately abort child processes; ordinary tests, coverage,
-and runtime-analysis selection remain unchanged. Hosted Linux mutation jobs
+The `rallocator` and `seismograph_rallocator` crates are excluded entirely from
+mutation testing in all three configurations, on every runner architecture.
+This includes allocator termination guards, platform backends, and Seismograph
+integration rather than only individual known-hanging candidates. Ordinary tests,
+coverage, and runtime-analysis selection remain unchanged.
+
+The mutation configurations retain intentional-abort test filters and known-hanging
+candidate exclusions as additional safeguards. Hosted Linux mutation jobs also
 disable crash-handler forwarding so expected aborts do not launch crash reporters.
-Other tests still run against mutated allocator code and may detect bugs by crashing.
-
-The Windows mutation configuration also excludes the exact candidate that replaces
-`global_alloc_reserved` with address `1`. It fails existing reserved-refill assertions,
-but other parallel allocator tests then hang until the suite timeout. An isolated
-Windows run catches this candidate immediately. The assertions remain enabled, and
-the default and Linux configurations continue testing this mutation.
-
-The known-hanging mutation exclusions also include inversion of the Linux futex
-wait predicate. With a changed word, this candidate spins on immediate `EAGAIN`
-responses, so the per-syscall test timeout cannot stop it. An isolated native Linux
-run passes baseline but times out with this exact mutation. Other wait mutations
-and the ordinary changed-word and wake-notification tests remain enabled.
 
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate

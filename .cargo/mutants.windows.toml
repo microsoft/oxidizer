@@ -10,8 +10,9 @@ exclude_globs = [
     "crates/http_headers/**",
     "crates/http_headers_simd/**",
     "crates/observed_testing/**",
-    # The Miri-only allocator backend is compiled out of native mutation runs.
-    "crates/rallocator/src/hal/miri.rs",
+    # Allocator and its Seismograph integration are outside mutation-testing scope.
+    "crates/rallocator/**",
+    "crates/seismograph_rallocator/**",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
     # Seismograph terminal rendering, layout, mouse routing, and presentation-only formatting.
