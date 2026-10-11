@@ -4,19 +4,27 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::io::{self, Write as _};
+#[cfg(test)]
+use std::io::{Read as _, Seek as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
 use command_group::{CommandGroup, GroupChild};
+#[cfg(target_os = "linux")]
+use nix::sys::stat::Mode as FileMode;
+#[cfg(target_os = "linux")]
+use nix::unistd::mkfifo;
 
 use crate::arguments::{Arguments, FailureMode, WORKER_MODE_ENV, WORKER_TOKEN_ENV, paths_alias};
 use crate::artifact::{self, ArtifactDirectory};
 use crate::error::Error;
 use crate::identity::BenchmarkIdentity;
 use crate::mode::Mode;
+use crate::probe::ProbeTarget;
 use crate::report::BenchmarkReport;
+use crate::worker_log::WorkerLog;
 use crate::{allocation, perf, vtune};
 
 const HELP: &str = "\
@@ -45,6 +53,7 @@ Metabench options:
   --no-baseline             Do not compare against an existing report
   --list                    Use each selected engine's native listing mode
                             (cross-engine canonical filtering is unavailable)
+  --test                    Run native smoke checks without publishing reports
   --timeout DURATION        Limit each engine worker (for example 30s or 5m)
   --fail-fast               Stop after the first engine failure
   --keep-going              Continue through engine failures (default)
@@ -53,6 +62,7 @@ Metabench options:
   -h, --help
 
 Arguments after -- are forwarded when exactly one engine is selected.
+No arguments also selects smoke mode (Cargo's harness-free test invocation).
 BENCH_ENGINE may select criterion, gungraun, perf, vtune, or allocations when no selector is present.
 CRITERION_HOME and GUNGRAUN_HOME retain the 20 most recent metabench runs
 under each home's .metabench-runs directory.
@@ -66,16 +76,23 @@ pub struct EngineSet {
     criterion: fn(),
     criterion_unit: Option<&'static str>,
     gungraun: fn(),
+    probe: fn() -> Result<(), String>,
 }
 
 impl EngineSet {
     /// Creates a target containing both native engines and Criterion unit metadata.
     #[must_use]
-    pub const fn both_with_unit(criterion: fn(), gungraun: fn(), criterion_unit: Option<&'static str>) -> Self {
+    pub const fn both_with_unit(
+        criterion: fn(),
+        gungraun: fn(),
+        criterion_unit: Option<&'static str>,
+        probe: fn() -> Result<(), String>,
+    ) -> Self {
         Self {
             criterion,
             criterion_unit,
             gungraun,
+            probe,
         }
     }
 
@@ -100,12 +117,6 @@ pub fn run(engines: EngineSet, identities: &'static [BenchmarkIdentity], benchma
 }
 
 fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], benchmark_target: &'static str) -> Result<(), Error> {
-    // Resolve the measurement gates before any engine starts collecting, so
-    // their one-time setup is not charged to the first workload invocation.
-    perf::prime();
-    allocation::prime();
-    vtune::prime();
-
     if env::args_os().nth(1).as_deref() == Some(OsStr::new("--gungraun-run")) {
         engines.run(Mode::Gungraun);
         return Ok(());
@@ -113,7 +124,20 @@ fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], bench
     if let Some(worker_mode) = env::var_os(WORKER_MODE_ENV) {
         consume_worker_token()?;
         let mode = Mode::from_os_str(&worker_mode)?;
-        engines.run(mode);
+        match mode {
+            Mode::Allocations => allocation::prime(),
+            Mode::Perf => perf::prime(),
+            Mode::Vtune => vtune::prime(),
+            Mode::Criterion | Mode::Gungraun => {}
+        }
+        if matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune) {
+            (engines.probe)().map_err(Error::Probe)?;
+            if env::args_os().nth(1).as_deref() == Some(OsStr::new("--metabench-probe-list")) {
+                return Ok(());
+            }
+        } else {
+            engines.run(mode);
+        }
         if mode == Mode::Allocations {
             allocation::write_worker_artifact()?;
         } else if mode == Mode::Perf {
@@ -132,14 +156,6 @@ fn run_inner(engines: EngineSet, identities: &'static [BenchmarkIdentity], bench
     run_parent(&mut arguments, engines, identities, benchmark_target)
 }
 
-/// Determines whether a `--list` invocation must add [`Mode::Criterion`] to the native modes so
-/// that a non-native engine (allocations, perf, or vtune) has a Criterion instance to list
-/// benchmark identities from.
-fn needs_criterion_for_listing(list: bool, modes: &[Mode], native_modes: &[Mode]) -> bool {
-    list && (modes.contains(&Mode::Allocations) || modes.contains(&Mode::Perf) || modes.contains(&Mode::Vtune))
-        && !native_modes.contains(&Mode::Criterion)
-}
-
 fn run_parent(
     arguments: &mut Arguments,
     engines: EngineSet,
@@ -149,18 +165,33 @@ fn run_parent(
     let modes = arguments.modes.clone();
     arguments.finalize_native_args(&modes)?;
     let executable = current_executable(env::current_exe)?;
-    let report_root = default_target_directory_with(|name| env::var_os(name), env::current_dir)?
+    if arguments.smoke() && !arguments.list {
+        let mut smoke_modes = modes
+            .iter()
+            .copied()
+            .filter(|mode| matches!(mode, Mode::Criterion | Mode::Gungraun))
+            .collect::<Vec<_>>();
+        if smoke_modes.is_empty() {
+            smoke_modes.push(Mode::Criterion);
+        }
+        let summary = orchestrate_modes(&smoke_modes, arguments.failure_mode, |mode| {
+            let status = launch_worker(mode, &executable, arguments.args_for(mode), None, true, arguments.timeout)?;
+            ensure_success(mode, status)
+        })?;
+        return finish_failures(summary.failures);
+    }
+    let report_root = effective_target_directory(&executable, |name| env::var_os(name))?
         .join("metabench")
         .join(benchmark_target);
-    let artifacts = (!arguments.list).then(|| ArtifactDirectory::create(&report_root)).transpose()?;
-    let mut native_modes = modes
+    let has_probes = modes
+        .iter()
+        .any(|mode| matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune));
+    let artifacts = create_run_artifacts(&report_root, arguments.list, has_probes)?;
+    let native_modes = modes
         .iter()
         .copied()
         .filter(|mode| !matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune))
         .collect::<Vec<_>>();
-    if needs_criterion_for_listing(arguments.list, &modes, &native_modes) {
-        native_modes.push(Mode::Criterion);
-    }
     let mut summary = orchestrate_modes(&native_modes, arguments.failure_mode, |mode| {
         if !arguments.list {
             print_progress(mode)?;
@@ -190,6 +221,13 @@ fn run_parent(
     let mut failures = std::mem::take(&mut summary.failures);
 
     if arguments.list {
+        if has_probes {
+            let artifacts = artifacts.as_ref().expect("probe listing creates an artifact directory above");
+            match discover_native_probe_targets(&executable, artifacts, arguments) {
+                Ok(targets) => print_probe_targets(&targets)?,
+                Err(error) => append_failure(&mut failures, error),
+            }
+        }
         return finish_failures(failures);
     }
 
@@ -198,7 +236,6 @@ fn run_parent(
         &executable,
         arguments,
         artifacts.as_ref().expect("non-list runs always create an artifact directory"),
-        identities,
         &mut summary,
         &mut failures,
     )?;
@@ -225,12 +262,27 @@ fn run_parent(
     finish_failures(failures)
 }
 
+fn create_run_artifacts(report_root: &Path, list: bool, has_probes: bool) -> Result<Option<ArtifactDirectory>, Error> {
+    (!list || has_probes).then(|| ArtifactDirectory::create(report_root)).transpose()
+}
+
+fn print_probe_targets(targets: &[ProbeTarget]) -> Result<(), Error> {
+    let mut stdout = io::stdout().lock();
+    write_probe_targets(&mut stdout, targets)
+}
+
+fn write_probe_targets(stdout: &mut impl io::Write, targets: &[ProbeTarget]) -> Result<(), Error> {
+    for target in targets {
+        writeln!(stdout, "{}: benchmark", terminal_text(&target.identity)).map_err(Error::ConsoleOutput)?;
+    }
+    Ok(())
+}
+
 fn run_probe_modes(
     modes: &[Mode],
     executable: &Path,
     arguments: &Arguments,
     artifacts: &ArtifactDirectory,
-    identities: &[BenchmarkIdentity],
     summary: &mut EngineRunSummary,
     failures: &mut Vec<String>,
 ) -> Result<Vec<crate::report::NativeResult>, Error> {
@@ -239,29 +291,12 @@ fn run_probe_modes(
         if !matches!(mode, Mode::Allocations | Mode::Perf | Mode::Vtune) {
             continue;
         }
+
         print_progress(mode)?;
         let measured = match mode {
-            Mode::Allocations => run_allocations(
-                executable,
-                arguments,
-                artifacts,
-                identities,
-                summary.completed.contains(&Mode::Criterion),
-            ),
-            Mode::Perf => run_perf(
-                executable,
-                arguments,
-                artifacts,
-                identities,
-                summary.completed.contains(&Mode::Criterion),
-            ),
-            Mode::Vtune => run_vtune(
-                executable,
-                arguments,
-                artifacts,
-                identities,
-                summary.completed.contains(&Mode::Criterion),
-            ),
+            Mode::Allocations => run_allocations(executable, arguments, artifacts),
+            Mode::Perf => run_perf(executable, arguments, artifacts),
+            Mode::Vtune => run_vtune(executable, arguments, artifacts),
             Mode::Criterion | Mode::Gungraun => unreachable!("the probe mode list is fixed above"),
         };
         match measured {
@@ -350,11 +385,13 @@ fn build_report(
     let mut results = probe_results;
     if completed.contains(&Mode::Criterion) {
         let criterion = artifact::parse_criterion(&artifacts.criterion_path(), artifacts.root(), identities, criterion_unit)?;
+        require_backend_results(&criterion, Mode::Criterion, &artifacts.criterion_path())?;
         artifact::record_discovered_identities(artifacts.path(), Mode::Criterion.as_str(), &criterion)?;
         results.extend(criterion);
     }
     if completed.contains(&Mode::Gungraun) {
         let gungraun = artifact::parse_gungraun(&artifacts.gungraun_path(), artifacts.root(), identities)?;
+        require_backend_results(&gungraun, Mode::Gungraun, &artifacts.gungraun_path())?;
         artifact::record_discovered_identities(artifacts.path(), Mode::Gungraun.as_str(), &gungraun)?;
         results.extend(gungraun);
     }
@@ -363,6 +400,12 @@ fn build_report(
         completed.iter().map(|mode| mode.as_str().to_owned()).collect(),
         artifacts.root().to_string_lossy().into_owned(),
     )?;
+    if report.entries.is_empty() {
+        return Err(Error::ArtifactFormat {
+            path: artifacts.path().to_owned(),
+            message: "no benchmark cases matched; existing reports were preserved".to_owned(),
+        });
+    }
     let (json_path, markdown_path) = report_paths(arguments, benchmark_target)?;
     let baseline = if let Some(path) = arguments.baseline.as_deref() {
         Some((path, false))
@@ -377,7 +420,17 @@ fn build_report(
     if let Some((path, automatic)) = baseline
         && let Some(baseline) = read_baseline(path, automatic)?
     {
-        report.apply_baseline(&baseline, arguments.regression_threshold)?;
+        if report.metadata.comparable_to(&baseline.metadata) {
+            report.apply_baseline(&baseline, arguments.regression_threshold)?;
+        } else {
+            write_baseline_warning(
+                &mut io::stderr(),
+                &format!(
+                    "skipping incompatible baseline {} (target, compiler, CPU, profile, or flags differ)",
+                    path.display()
+                ),
+            )?;
+        }
     }
     // A `--keep-going` run where some selected engine failed must not overwrite the
     // rolling automatic-baseline file with results from only the engines that
@@ -398,6 +451,19 @@ fn build_report(
     Ok((report, json_path, markdown_path))
 }
 
+fn require_backend_results(results: &[crate::report::NativeResult], mode: Mode, path: &Path) -> Result<(), Error> {
+    if results.is_empty() {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!(
+                "{} produced no benchmark measurements; existing reports were preserved",
+                mode.as_str()
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Derives a sibling path for partial-run diagnostics, e.g. `report.json` becomes
 /// `report.partial.json`, keeping such output clearly separate from the rolling
 /// baseline file at the original path.
@@ -409,66 +475,98 @@ fn partial_report_path(path: &Path) -> PathBuf {
 }
 
 fn read_baseline(path: &Path, automatic: bool) -> Result<Option<BenchmarkReport>, Error> {
+    read_baseline_with_output(path, automatic, &mut io::stderr())
+}
+
+fn write_baseline_warning(output: &mut impl io::Write, detail: &str) -> Result<(), Error> {
+    writeln!(output, "metabench: {}", terminal_text(detail)).map_err(Error::ConsoleOutput)
+}
+
+fn read_baseline_with_output(path: &Path, automatic: bool, output: &mut impl io::Write) -> Result<Option<BenchmarkReport>, Error> {
     match BenchmarkReport::read_json(path) {
         Ok(report) => Ok(Some(report)),
-        Err(Error::UnsupportedReportSchema { .. }) if automatic => Ok(None),
+        Err(error @ Error::UnsupportedReportSchema { .. }) if automatic => {
+            write_baseline_warning(output, &format!("skipping incompatible automatic baseline: {error}"))?;
+            Ok(None)
+        }
         Err(error) => Err(error),
     }
 }
 
-#[derive(Debug)]
-struct CriterionProbeTarget {
-    identity: String,
-    native_identity: String,
+fn probe_selection_arguments(criterion_arguments: &[OsString]) -> Result<Vec<OsString>, Error> {
+    let mut probe_arguments = Vec::new();
+    let mut value_expected = false;
+    let mut discard_value = false;
+    for argument in criterion_arguments {
+        if discard_value {
+            discard_value = false;
+            continue;
+        }
+        if value_expected {
+            probe_arguments.push(argument.clone());
+            value_expected = false;
+            continue;
+        }
+        let text = argument.to_string_lossy();
+        let option = text.split('=').next().unwrap_or(&text);
+        if criterion_measurement_only_option(option) {
+            discard_value = !text.contains('=');
+            continue;
+        }
+        if matches!(text.as_ref(), "--noplot" | "-n") {
+            continue;
+        }
+        if matches!(text.as_ref(), "--bench" | "--test" | "--list" | "--quick") {
+            continue;
+        }
+        if text.starts_with('-') {
+            value_expected = criterion_option_takes_value(&text);
+        }
+        probe_arguments.push(argument.clone());
+    }
+    if value_expected || discard_value {
+        return Err(Error::Probe("missing a value for a forwarded Criterion option".to_owned()));
+    }
+    Ok(probe_arguments)
 }
 
-fn criterion_probe_arguments(criterion_arguments: &[OsString], native_identity: &str) -> Vec<OsString> {
-    let mut probe_arguments = criterion_arguments.to_vec();
-    probe_arguments.push(native_identity.into());
-    if !probe_arguments.iter().any(|argument| argument == "--exact") {
-        probe_arguments.push("--exact".into());
-    }
-    probe_arguments
+fn criterion_measurement_only_option(option: &str) -> bool {
+    matches!(
+        option,
+        "--save-baseline" | "-s" | "--baseline" | "-b" | "--load-baseline" | "--baseline-lenient" | "--profile-time"
+    )
+}
+
+fn criterion_option_takes_value(option: &str) -> bool {
+    matches!(
+        option,
+        "--sample-size"
+            | "--warm-up-time"
+            | "--measurement-time"
+            | "--nresamples"
+            | "--noise-threshold"
+            | "--confidence-level"
+            | "--significance-level"
+            | "--plotting-backend"
+            | "--output-format"
+            | "--format"
+            | "--color"
+            | "-c"
+    )
 }
 
 fn run_allocations(
     executable: &Path,
     arguments: &Arguments,
     artifacts: &ArtifactDirectory,
-    identities: &[BenchmarkIdentity],
-    criterion_completed: bool,
 ) -> Result<Vec<crate::report::NativeResult>, Error> {
-    let targets = if criterion_completed {
-        artifact::parse_criterion(&artifacts.criterion_path(), artifacts.root(), identities, None)?
-            .into_iter()
-            .filter_map(|result| {
-                artifact::allocation_criterion_identity(&result.native_identity, identities).map(|identity| CriterionProbeTarget {
-                    identity,
-                    native_identity: result.native_identity,
-                })
-            })
-            .collect()
-    } else {
-        discover_criterion_probe_targets(
-            executable,
-            artifacts,
-            identities,
-            arguments.args_for(Mode::Criterion),
-            arguments.timeout,
-        )?
-    };
-    if targets.is_empty() {
-        return Err(Error::ArtifactFormat {
-            path: artifacts.path().to_owned(),
-            message: "contains no registered Criterion benchmarks for allocation tracking".to_owned(),
-        });
-    }
+    let targets = discover_native_probe_targets(executable, artifacts, arguments)?;
 
     let mut results = Vec::with_capacity(targets.len());
     for (index, target) in targets.into_iter().enumerate() {
         let artifact_path = artifacts.path().join("allocations").join(format!("{index}.json"));
         let criterion_home = artifacts.path().join("allocation-probes").join(index.to_string());
-        let native_arguments = criterion_probe_arguments(arguments.criterion_args(), &target.native_identity);
+        let native_arguments = target.arguments();
         let status = launch_worker_with(
             Mode::Allocations,
             executable,
@@ -491,102 +589,114 @@ fn run_allocations(
     Ok(results)
 }
 
-fn discover_criterion_probe_targets(
+fn discover_native_probe_targets(
     executable: &Path,
     artifacts: &ArtifactDirectory,
-    identities: &[BenchmarkIdentity],
-    criterion_arguments: &[OsString],
-    timeout: Option<Duration>,
-) -> Result<Vec<CriterionProbeTarget>, Error> {
-    let output_path = artifacts.path().join("criterion-probe-discovery.txt");
-    let criterion_home = artifacts.path().join("criterion-probe-discovery");
-    let mut discovery_arguments = criterion_arguments
-        .iter()
-        .filter(|argument| {
-            ![
-                OsStr::new("--bench"),
-                OsStr::new("--test"),
-                OsStr::new("--list"),
-                OsStr::new("--exact"),
-            ]
-            .contains(&argument.as_os_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    discovery_arguments.push("--list".into());
+    arguments: &Arguments,
+) -> Result<Vec<ProbeTarget>, Error> {
+    let home = tempfile::Builder::new()
+        .prefix("native-probe-discovery-")
+        .tempdir_in(artifacts.path())
+        .map_err(|source| Error::ArtifactIo {
+            path: artifacts.path().to_owned(),
+            source,
+        })?
+        .keep();
+    let output_path = home.join("cases.json");
     let status = launch_worker_with(
-        Mode::Criterion,
+        Mode::Allocations,
         executable,
-        &discovery_arguments,
+        &["--metabench-probe-list".into()],
         Some(artifacts),
         false,
-        timeout,
-        Some(&criterion_home),
+        arguments.timeout,
+        Some(&home),
         Some(&output_path),
         None,
     )?;
-    ensure_success(Mode::Criterion, status)?;
-    let output = fs::read_to_string(&output_path).map_err(|source| Error::ArtifactIo {
-        path: output_path.clone(),
-        source,
-    })?;
-    let targets = output
-        .lines()
-        .filter_map(|line| line.strip_suffix(": benchmark"))
-        .filter_map(|native_identity| {
-            artifact::allocation_criterion_identity(native_identity, identities).map(|identity| CriterionProbeTarget {
-                identity,
-                native_identity: native_identity.to_owned(),
-            })
-        })
-        .collect::<Vec<_>>();
+    ensure_success(Mode::Allocations, status)?;
+    let targets = read_probe_targets(&output_path)?;
+    let targets = select_native_probe_targets(targets, arguments.criterion_args())?;
     if targets.is_empty() {
         return Err(Error::ArtifactFormat {
             path: output_path,
-            message: "Criterion listing contained no benchmarks".to_owned(),
+            message: "no native benchmark cases matched; existing reports were preserved".to_owned(),
         });
     }
     Ok(targets)
 }
 
-fn run_perf(
-    executable: &Path,
-    arguments: &Arguments,
-    artifacts: &ArtifactDirectory,
-    identities: &[BenchmarkIdentity],
-    criterion_completed: bool,
-) -> Result<Vec<crate::report::NativeResult>, Error> {
+fn read_probe_targets(path: &Path) -> Result<Vec<ProbeTarget>, Error> {
+    let targets: Vec<ProbeTarget> = artifact::read_json(path)?;
+    if targets.len() > crate::probe::MAX_PROBE_CASES {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("native discovery exceeds the {}-case limit", crate::probe::MAX_PROBE_CASES),
+        });
+    }
+    Ok(targets)
+}
+
+fn select_native_probe_targets(targets: Vec<ProbeTarget>, arguments: &[OsString]) -> Result<Vec<ProbeTarget>, Error> {
+    let selection = probe_selection_arguments(arguments)?;
+    let mut filter = None;
+    let mut exact = false;
+    let mut value_expected = false;
+    for argument in &selection {
+        if value_expected {
+            value_expected = false;
+            continue;
+        }
+        let text = argument.to_string_lossy();
+        if text == "--exact" {
+            exact = true;
+        } else if text.starts_with('-') {
+            let option = text.split('=').next().unwrap_or(&text);
+            if criterion_option_takes_value(option) {
+                value_expected = !text.contains('=');
+            } else if !matches!(option, "--verbose" | "--quiet" | "--debug" | "--discard-baseline" | "-v") {
+                return Err(Error::Probe(format!(
+                    "unsupported Criterion option for native probe selection: {text}"
+                )));
+            }
+        } else if filter.replace(text.into_owned()).is_some() {
+            return Err(Error::Probe("only one case selection filter is supported".to_owned()));
+        }
+    }
+    let pattern = filter
+        .as_deref()
+        .filter(|_| !exact)
+        .map(regex::Regex::new)
+        .transpose()
+        .map_err(|error| Error::Probe(format!("invalid case filter: {error}")))?;
+    Ok(targets
+        .into_iter()
+        .filter(|target| {
+            filter.as_deref().is_none_or(|filter| {
+                if exact {
+                    target.identity == filter
+                } else {
+                    pattern.as_ref().is_some_and(|pattern| pattern.is_match(&target.identity))
+                }
+            })
+        })
+        .collect())
+}
+
+fn run_perf(executable: &Path, arguments: &Arguments, artifacts: &ArtifactDirectory) -> Result<Vec<crate::report::NativeResult>, Error> {
     if !cfg!(target_os = "linux") {
         return Err(Error::UnsupportedMode {
             mode: Mode::Perf.as_str(),
             reason: "Linux perf is supported only on Linux",
         });
     }
-    let targets = if criterion_completed {
-        artifact::parse_criterion(&artifacts.criterion_path(), artifacts.root(), identities, None)?
-            .into_iter()
-            .filter_map(|result| {
-                artifact::allocation_criterion_identity(&result.native_identity, identities).map(|identity| CriterionProbeTarget {
-                    identity,
-                    native_identity: result.native_identity,
-                })
-            })
-            .collect()
-    } else {
-        discover_criterion_probe_targets(executable, artifacts, identities, arguments.criterion_args(), arguments.timeout)?
-    };
-    if targets.is_empty() {
-        return Err(Error::ArtifactFormat {
-            path: artifacts.path().to_owned(),
-            message: "contains no registered Criterion benchmarks for perf measurement".to_owned(),
-        });
-    }
+    let targets = discover_native_probe_targets(executable, artifacts, arguments)?;
 
     let mut results = Vec::with_capacity(targets.len());
     for (index, target) in targets.into_iter().enumerate() {
         let artifact_path = artifacts.perf_path(index);
         let criterion_home = artifacts.path().join("perf-probes").join(index.to_string());
-        let native_arguments = criterion_probe_arguments(arguments.criterion_args(), &target.native_identity);
+        let native_arguments = target.arguments();
         let status = launch_perf_worker(
             executable,
             &native_arguments,
@@ -617,9 +727,6 @@ fn launch_perf_worker(
     show_output: bool,
     timeout: Option<Duration>,
 ) -> Result<ExitStatus, Error> {
-    use nix::sys::stat::Mode as FileMode;
-    use nix::unistd::mkfifo;
-
     validate_perf_arguments(perf_arguments)?;
     let fifo_directory = tempfile::Builder::new()
         .prefix("metabench-perf-")
@@ -663,6 +770,7 @@ fn launch_perf_worker(
 
     let control_argument = format!("fifo:{control_text},{acknowledgement_text}");
     let mut command = Command::new("perf");
+    clear_collector_environment(&mut command);
     command
         .arg("stat")
         .args(perf_arguments)
@@ -688,13 +796,12 @@ fn launch_perf_worker(
         .env_remove("CARGO_CRITERION_PORT")
         .env(perf::CONTROL_ENV, &control)
         .env(perf::ACK_ENV, &acknowledgement);
-    if !show_output {
-        command.stdout(Stdio::null()).stderr(Stdio::null());
-    }
+    let log_path = artifact_path.with_extension("log");
+    let log = capture_worker_output(&mut command, &log_path, show_output)?;
 
     let token = create_worker_token()?;
     command.env(WORKER_TOKEN_ENV, token.path());
-    let status = wait_for_worker(Mode::Perf, &mut command, timeout);
+    let status = wait_for_logged_worker(Mode::Perf, &mut command, timeout, &log_path, log);
     drop(control_guard);
     drop(acknowledgement_guard);
     let cleanup = match token.path().try_exists() {
@@ -750,39 +857,15 @@ fn validate_perf_arguments(arguments: &[OsString]) -> Result<(), Error> {
     Ok(())
 }
 
-fn run_vtune(
-    executable: &Path,
-    arguments: &Arguments,
-    artifacts: &ArtifactDirectory,
-    identities: &[BenchmarkIdentity],
-    criterion_completed: bool,
-) -> Result<Vec<crate::report::NativeResult>, Error> {
-    let targets = if criterion_completed {
-        artifact::parse_criterion(&artifacts.criterion_path(), artifacts.root(), identities, None)?
-            .into_iter()
-            .filter_map(|result| {
-                artifact::allocation_criterion_identity(&result.native_identity, identities).map(|identity| CriterionProbeTarget {
-                    identity,
-                    native_identity: result.native_identity,
-                })
-            })
-            .collect()
-    } else {
-        discover_criterion_probe_targets(executable, artifacts, identities, arguments.criterion_args(), arguments.timeout)?
-    };
-    if targets.is_empty() {
-        return Err(Error::ArtifactFormat {
-            path: artifacts.path().to_owned(),
-            message: "contains no registered Criterion benchmarks for vtune measurement".to_owned(),
-        });
-    }
+fn run_vtune(executable: &Path, arguments: &Arguments, artifacts: &ArtifactDirectory) -> Result<Vec<crate::report::NativeResult>, Error> {
+    let targets = discover_native_probe_targets(executable, artifacts, arguments)?;
 
     let mut results = Vec::with_capacity(targets.len());
     for (index, target) in targets.into_iter().enumerate() {
         let artifact_path = artifacts.vtune_path(index);
         let result_dir = artifacts.vtune_result_path(index);
         let criterion_home = artifacts.path().join("vtune-probes").join(index.to_string());
-        let native_arguments = criterion_probe_arguments(arguments.criterion_args(), &target.native_identity);
+        let native_arguments = target.arguments();
         let status = launch_vtune_worker(
             executable,
             &native_arguments,
@@ -847,6 +930,7 @@ fn launch_vtune_worker(
     }
 
     let mut command = Command::new("vtune");
+    clear_collector_environment(&mut command);
     command
         .arg("-collect-with")
         .arg("runsa")
@@ -861,13 +945,12 @@ fn launch_vtune_worker(
         .arg("--")
         .arg(executable)
         .args(native_arguments);
-    if !show_output {
-        command.stdout(Stdio::null()).stderr(Stdio::null());
-    }
+    let log_path = artifact_path.with_extension("log");
+    let log = capture_worker_output(&mut command, &log_path, show_output)?;
 
     let token = create_worker_token()?;
     command.env(WORKER_TOKEN_ENV, token.path());
-    let status = wait_for_worker(Mode::Vtune, &mut command, timeout);
+    let status = wait_for_logged_worker(Mode::Vtune, &mut command, timeout, &log_path, log);
     let cleanup = match token.path().try_exists() {
         Ok(true) => fs::remove_dir(token.path()).map_err(Error::ConsumeWorkerToken),
         Ok(false) => Ok(()),
@@ -879,15 +962,15 @@ fn launch_vtune_worker(
     }
 
     let mut report_command = Command::new("vtune");
+    clear_collector_environment(&mut report_command);
     report_command
         .args(["-report", "hw-events", "-r"])
         .arg(result_dir)
         .args(["-format", "csv", "-report-output"])
         .arg(artifact_path);
-    if !show_output {
-        report_command.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-    wait_for_worker(Mode::Vtune, &mut report_command, timeout)
+    let report_log = artifact_path.with_extension("report.log");
+    let log = capture_worker_output(&mut report_command, &report_log, show_output)?;
+    wait_for_logged_worker(Mode::Vtune, &mut report_command, timeout, &report_log, log)
 }
 
 fn validate_vtune_arguments(arguments: &[OsString]) -> Result<(), Error> {
@@ -960,10 +1043,11 @@ fn launch_worker_with(
     show_output: bool,
     timeout: Option<Duration>,
     criterion_home: Option<&Path>,
-    captured_stdout: Option<&Path>,
+    discovery_output: Option<&Path>,
     allocation_target: Option<(&str, &Path)>,
 ) -> Result<ExitStatus, Error> {
     let mut command = Command::new(executable);
+    clear_collector_environment(&mut command);
     command.args(native_arguments).env(WORKER_MODE_ENV, mode.as_str());
     if let Some(artifacts) = artifacts {
         match mode {
@@ -987,27 +1071,24 @@ fn launch_worker_with(
     if let Some((identity, path)) = allocation_target {
         command.env(allocation::IDENTITY_ENV, identity).env(allocation::ARTIFACT_ENV, path);
     }
-    if let Some(path) = captured_stdout {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
-                path: parent.to_owned(),
-                source,
-            })?;
-        }
-        let output = fs::File::create(path).map_err(|source| Error::ArtifactIo {
-            path: path.to_owned(),
-            source,
-        })?;
-        command.stdout(output);
-        if !show_output {
-            command.stderr(Stdio::null());
-        }
-    } else if !show_output {
-        command.stdout(Stdio::null()).stderr(Stdio::null());
+    if let Some(path) = discovery_output {
+        command.env(crate::probe::DISCOVERY_ENV, path);
     }
+    let log_root = criterion_home
+        .map(Path::to_owned)
+        .or_else(|| artifacts.map(|artifacts| artifacts.path().join("logs")));
+    let log_path = log_root.map(|root| root.join(format!("{}.log", mode.as_str())));
+    let log = log_path
+        .as_deref()
+        .map(|path| capture_worker_output(&mut command, path, show_output))
+        .transpose()?
+        .flatten();
     let token = create_worker_token()?;
     command.env(WORKER_TOKEN_ENV, token.path());
-    let status = wait_for_worker(mode, &mut command, timeout);
+    let status = match &log_path {
+        Some(path) => wait_for_logged_worker(mode, &mut command, timeout, path, log),
+        None => wait_for_worker(mode, &mut command, timeout),
+    };
     let cleanup = match token.path().try_exists() {
         Ok(true) => fs::remove_dir(token.path()).map_err(Error::ConsumeWorkerToken),
         Ok(false) => Ok(()),
@@ -1017,6 +1098,226 @@ fn launch_worker_with(
         (Ok(status), Ok(())) => Ok(status),
         (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
         (Err(worker), Err(cleanup)) => Err(multiple_failures([worker, cleanup])),
+    }
+}
+
+fn clear_collector_environment(command: &mut Command) {
+    for name in [
+        allocation::ARTIFACT_ENV,
+        allocation::IDENTITY_ENV,
+        perf::CONTROL_ENV,
+        perf::ACK_ENV,
+        vtune::RESULT_DIR_ENV,
+        crate::probe::DISCOVERY_ENV,
+    ] {
+        command.env_remove(name);
+    }
+}
+
+pub(crate) fn terminal_text(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control()
+            || matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            output.extend(character.escape_default());
+        } else {
+            output.push(character);
+        }
+    }
+    output
+}
+
+fn capture_worker_output(command: &mut Command, path: &Path, show_output: bool) -> Result<Option<WorkerLog>, Error> {
+    if show_output {
+        return Ok(None);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    let log = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|source| Error::ArtifactIo {
+            path: path.to_owned(),
+            source,
+        })?;
+    WorkerLog::new(log, command).map(Some).map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+fn wait_for_logged_worker(
+    mode: Mode,
+    command: &mut Command,
+    timeout: Option<Duration>,
+    path: &Path,
+    log: Option<WorkerLog>,
+) -> Result<ExitStatus, Error> {
+    wait_for_logged_worker_with_output(mode, command, timeout, path, log, &mut io::stderr())
+}
+
+fn wait_for_logged_worker_with_output(
+    mode: Mode,
+    command: &mut Command,
+    timeout: Option<Duration>,
+    path: &Path,
+    log: Option<WorkerLog>,
+    output: &mut impl io::Write,
+) -> Result<ExitStatus, Error> {
+    let Some(mut log) = log else {
+        return wait_for_worker(mode, command, timeout);
+    };
+    let result = wait_for_captured_worker(mode, command, timeout, path, &mut log);
+    let persisted = log.persist().map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    });
+    let result = combine_worker_results(mode, result, persisted);
+    if !result.as_ref().is_ok_and(ExitStatus::success) {
+        let diagnostics = write_worker_excerpt(output, mode, path, &log.excerpt(), log.truncated()).map_err(|source| Error::ArtifactIo {
+            path: path.to_owned(),
+            source,
+        });
+        return combine_worker_results(mode, result, diagnostics);
+    }
+    result
+}
+
+fn combine_worker_results(mode: Mode, result: Result<ExitStatus, Error>, supplemental: Result<(), Error>) -> Result<ExitStatus, Error> {
+    let result = if supplemental.is_err() {
+        result.and_then(|status| ensure_success(mode, status).map(|()| status))
+    } else {
+        result
+    };
+    combine_results(result, supplemental)
+}
+
+#[cfg(test)]
+fn write_worker_log(output: &mut impl io::Write, mode: Mode, path: &Path, mut log: &fs::File, truncated: bool) -> io::Result<()> {
+    let length = log.metadata()?.len();
+    log.seek(io::SeekFrom::Start(length.saturating_sub(8_192)))?;
+    let mut bytes = Vec::new();
+    log.take(8_192).read_to_end(&mut bytes)?;
+    write_worker_excerpt(output, mode, path, &bytes, truncated)
+}
+
+fn write_worker_excerpt(output: &mut impl io::Write, mode: Mode, path: &Path, bytes: &[u8], truncated: bool) -> io::Result<()> {
+    writeln!(
+        output,
+        "metabench: {} worker log: {}{}\n{}",
+        mode.as_str(),
+        terminal_text(&path.to_string_lossy()),
+        if truncated { " (output truncated; retained tail)" } else { "" },
+        terminal_text(&String::from_utf8_lossy(bytes))
+    )
+}
+
+fn wait_for_captured_worker(
+    mode: Mode,
+    command: &mut Command,
+    timeout: Option<Duration>,
+    path: &Path,
+    log: &mut WorkerLog,
+) -> Result<ExitStatus, Error> {
+    let spawned = command.group_spawn().map_err(|source| spawn_error(mode, source));
+    WorkerLog::release_command_writers(command);
+    let mut child = spawned?;
+    wait_for_captured_process(mode, &mut child, timeout, path, || log.drain(), &SystemClock)
+}
+
+/// Waits for worker completion and output EOF, bounding inherited writers' final drain.
+///
+/// Read errors terminate and reap immediately instead of entering the final-drain state.
+fn wait_for_captured_process(
+    mode: Mode,
+    child: &mut impl WorkerProcess,
+    timeout: Option<Duration>,
+    path: &Path,
+    mut drain: impl FnMut() -> io::Result<(bool, bool)>,
+    clock: &impl Clock,
+) -> Result<ExitStatus, Error> {
+    let started = clock.mark();
+    let mut completed = None;
+    let mut drain_started = None;
+    loop {
+        let (eof, had_output) = match drain() {
+            Ok(state) => state,
+            Err(source) => {
+                let error = Error::ArtifactIo {
+                    path: path.to_owned(),
+                    source,
+                };
+                let cleanup = kill_and_reap_worker(mode, child, clock);
+                return combine_results(Err(error), cleanup);
+            }
+        };
+        if completed.is_none() {
+            completed = match child.try_wait() {
+                Ok(Some(status)) => Some(Ok(status)),
+                Ok(None) => match timeout {
+                    Some(timeout) if clock.elapsed(&started) >= timeout => {
+                        // Termination and reaping consume the same grace as the remaining output drain.
+                        drain_started = Some(clock.mark());
+                        Some(terminate_timed_out_worker(mode, child, timeout, clock))
+                    }
+                    _ => None,
+                },
+                Err(source) => {
+                    let error = spawn_error(mode, source);
+                    drain_started = Some(clock.mark());
+                    let cleanup = kill_and_reap_worker(mode, child, clock);
+                    Some(combine_results(Err(error), cleanup))
+                }
+            };
+            if completed.is_some() && drain_started.is_none() {
+                drain_started = Some(clock.mark());
+            }
+        }
+        if (eof
+            || drain_started
+                .as_ref()
+                .is_some_and(|mark| clock.elapsed(mark) >= TERMINATION_REAP_GRACE))
+            && let Some(result) = completed.take()
+        {
+            if eof {
+                return result;
+            }
+            let error = Error::ArtifactIo {
+                path: path.to_owned(),
+                source: io::Error::new(io::ErrorKind::TimedOut, "worker output pipe remained open after the drain deadline"),
+            };
+            let cleanup = kill_and_reap_worker(mode, child, clock);
+            return combine_results(combine_results(result, Err(error)), cleanup);
+        }
+        clock.sleep(if had_output {
+            Duration::from_millis(1)
+        } else {
+            WORKER_POLL_INTERVAL
+        });
+    }
+}
+
+fn kill_and_reap_worker(mode: Mode, child: &mut impl WorkerProcess, clock: &impl Clock) -> Result<(), Error> {
+    child.kill().map_err(|source| termination_error(mode, source))?;
+    let started = clock.mark();
+    loop {
+        match child.try_wait().map_err(|source| termination_error(mode, source))? {
+            Some(_) => return Ok(()),
+            None if clock.elapsed(&started) < TERMINATION_REAP_GRACE => clock.sleep(WORKER_POLL_INTERVAL),
+            None => {
+                return Err(termination_error(
+                    mode,
+                    io::Error::new(io::ErrorKind::TimedOut, "worker did not exit before the termination reap deadline"),
+                ));
+            }
+        }
     }
 }
 
@@ -1177,7 +1478,7 @@ fn write_console_output(mut destination: impl io::Write, output: &str) -> Result
 }
 
 fn report_paths(arguments: &Arguments, benchmark_target: &str) -> Result<(Option<PathBuf>, Option<PathBuf>), Error> {
-    let root = default_target_directory_with(|name| env::var_os(name), env::current_dir)?
+    let root = effective_target_directory(&current_executable(env::current_exe)?, |name| env::var_os(name))?
         .join("metabench")
         .join(benchmark_target);
     report_paths_with_root(arguments, &root)
@@ -1199,27 +1500,41 @@ fn report_paths_with_root(arguments: &Arguments, root: &Path) -> Result<(Option<
     Ok(paths)
 }
 
-fn default_target_directory_with(
-    var_os: impl Fn(&str) -> Option<OsString>,
-    current_dir: impl FnOnce() -> io::Result<PathBuf>,
-) -> Result<PathBuf, Error> {
-    if let Some(directory) = var_os("CARGO_TARGET_DIR") {
-        return Ok(directory.into());
+fn effective_target_directory(executable: &Path, var_os: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, Error> {
+    let configured = var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+    let parent = executable.parent();
+    let profile = parent.and_then(|parent| {
+        if matches!(parent.file_name().and_then(OsStr::to_str), Some("deps" | "examples")) {
+            parent.parent()
+        } else {
+            Some(parent)
+        }
+    });
+    if let Some(profile) = profile
+        && (matches!(profile.file_name().and_then(OsStr::to_str), Some("debug" | "release")) || profile.join(".fingerprint").is_dir())
+        && let Some(root) = profile.parent()
+    {
+        return Ok(
+            if root.file_name() == Some(OsStr::new(env!("METABENCH_TARGET")))
+                && !configured.as_deref().is_some_and(|configured| paths_alias(configured, root))
+            {
+                root.parent().unwrap_or(root).to_owned()
+            } else {
+                root.to_owned()
+            },
+        );
     }
-    let current = current_dir().map_err(Error::CurrentDirectory)?;
-    let workspace = current
-        .ancestors()
-        .find(|directory| is_workspace_manifest(&directory.join("Cargo.toml")))
-        .unwrap_or(&current);
-    Ok(workspace.join("target"))
+    if let Some(directory) = configured {
+        return Ok(directory);
+    }
+    Err(Error::ArtifactFormat {
+        path: executable.to_owned(),
+        message: "cannot infer the Cargo target directory from this executable; set CARGO_TARGET_DIR for a relocated binary".to_owned(),
+    })
 }
 
 fn current_executable(current_exe: impl FnOnce() -> io::Result<PathBuf>) -> Result<PathBuf, Error> {
     current_exe().map_err(Error::CurrentExecutable)
-}
-
-fn is_workspace_manifest(path: &Path) -> bool {
-    fs::read_to_string(path).is_ok_and(|manifest| manifest.lines().any(|line| line.trim() == "[workspace]"))
 }
 
 struct WorkerToken {
@@ -1267,44 +1582,404 @@ fn consume_worker_token_from(token: Option<&OsStr>, temporary_directory: &Path) 
 mod tests {
     use std::cell::Cell;
     use std::collections::VecDeque;
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt as _;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt as _;
 
     use super::*;
 
     #[test]
-    fn criterion_probe_arguments_preserve_configuration_and_select_one_target() {
-        let configured = [OsString::from("--sample-size"), OsString::from("20"), OsString::from("--bench")];
-
-        assert_eq!(
-            criterion_probe_arguments(&configured, "group/benchmark"),
-            ["--sample-size", "20", "--bench", "group/benchmark", "--exact"]
-        );
+    fn artifacts_are_created_for_measurements_and_probe_listing_only() {
+        let directory = tempfile::tempdir_in(".").unwrap();
+        for (list, probes, expected) in [(false, false, true), (false, true, true), (true, false, false), (true, true, true)] {
+            let root = directory.path().join(format!("{list}-{probes}"));
+            let artifacts = create_run_artifacts(&root, list, probes).unwrap();
+            assert_eq!(artifacts.is_some(), expected);
+            assert_eq!(root.exists(), expected);
+            if let Some(artifacts) = artifacts {
+                assert!(artifacts.path().is_dir());
+            }
+        }
     }
 
     #[test]
-    fn needs_criterion_for_listing_requires_list_a_native_only_engine_and_absence_of_criterion() {
-        // Not listing: never inject Criterion, regardless of the other modes.
-        assert!(!needs_criterion_for_listing(false, &[Mode::Vtune], &[]));
-        // Listing, but only native (non-Perf/Allocations/Vtune) modes selected: nothing to inject for.
-        assert!(!needs_criterion_for_listing(true, &[Mode::Criterion], &[Mode::Criterion]));
-        // Listing with Criterion already present among the native modes: no duplicate injection.
-        assert!(!needs_criterion_for_listing(true, &[Mode::Vtune], &[Mode::Criterion]));
-        // Listing with each non-native engine selected and no Criterion present yet: inject it.
-        assert!(needs_criterion_for_listing(true, &[Mode::Allocations], &[]));
-        assert!(needs_criterion_for_listing(true, &[Mode::Perf], &[]));
-        assert!(needs_criterion_for_listing(true, &[Mode::Vtune], &[]));
+    fn collector_environment_is_removed_without_removing_worker_or_native_settings() {
+        let collectors = [
+            allocation::ARTIFACT_ENV,
+            allocation::IDENTITY_ENV,
+            perf::CONTROL_ENV,
+            perf::ACK_ENV,
+            vtune::RESULT_DIR_ENV,
+            crate::probe::DISCOVERY_ENV,
+        ];
+        let mut command = Command::new("unused");
+        for name in collectors {
+            command.env(name, "stale collector configuration");
+        }
+        command.env(WORKER_MODE_ENV, "criterion").env("CRITERION_HOME", "native");
+        clear_collector_environment(&mut command);
+        let settings = command.get_envs().collect::<Vec<_>>();
+        for name in collectors {
+            assert!(settings.contains(&(OsStr::new(name), None)));
+        }
+        assert!(settings.contains(&(OsStr::new(WORKER_MODE_ENV), Some(OsStr::new("criterion")))));
+        assert!(settings.contains(&(OsStr::new("CRITERION_HOME"), Some(OsStr::new("native")))));
+    }
+
+    #[test]
+    fn native_discovery_receiver_enforces_case_budget_and_listing_encoding() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("discovery.json");
+        let case = serde_json::json!({
+            "identity": "group/escape\u{1b}[31m\r\nforged",
+            "native_identity": "native",
+            "group": 0, "benchmark": 0, "case": 0, "iteration": null
+        });
+        for (count, accepted) in [(10_000, true), (10_001, false)] {
+            artifact::write_json(&path, &vec![case.clone(); count]).unwrap();
+            let result = read_probe_targets(&path);
+            assert_eq!(result.is_ok(), accepted);
+            if let Ok(targets) = result {
+                let mut output = Vec::new();
+                write_probe_targets(&mut output, &targets[..1]).unwrap();
+                assert_eq!(
+                    String::from_utf8(output).unwrap(),
+                    "group/escape\\u{1b}[31m\\r\\nforged: benchmark\n"
+                );
+                assert_eq!(targets[0].identity, "group/escape\u{1b}[31m\r\nforged");
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap()[0],
+                    case
+                );
+            } else {
+                assert!(result.unwrap_err().to_string().contains("10000-case limit"));
+            }
+        }
+    }
+
+    #[test]
+    fn captured_logs_are_exclusive_and_excerpt_encoding_preserves_raw_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("worker.log");
+        let mut command = Command::new("unused");
+        let mut log = capture_worker_output(&mut command, &path, false).unwrap().unwrap();
+        let raw = b"failure\x1b[31m\r\nforged";
+        log.file.write_all(raw).unwrap();
+        assert!(matches!(
+            capture_worker_output(&mut Command::new("unused"), &path, false),
+            Err(Error::ArtifactIo { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists
+        ));
+        let mut output = Vec::new();
+        write_worker_log(&mut output, Mode::Allocations, &path, &log.file, false).unwrap();
+        assert!(String::from_utf8(output).unwrap().ends_with("failure\\u{1b}[31m\\r\\nforged\n"));
+        assert_eq!(fs::read(&path).unwrap(), raw);
+        #[cfg(unix)]
+        {
+            fs::rename(&path, directory.path().join("retained.log")).unwrap();
+            fs::write(&path, b"substituted log").unwrap();
+            let mut output = Vec::new();
+            write_worker_log(&mut output, Mode::Allocations, &path, &log.file, false).unwrap();
+            assert!(!String::from_utf8(output).unwrap().contains("substituted"));
+        }
+    }
+
+    #[test]
+    fn captured_logs_never_truncate_preexisting_link_targets() {
+        let directory = tempfile::tempdir().unwrap();
+        let sentinel = directory.path().join("sentinel");
+        let path = directory.path().join("worker.log");
+        fs::write(&sentinel, b"preserve me").unwrap();
+        fs::hard_link(&sentinel, &path).unwrap();
+        assert!(matches!(
+            capture_worker_output(&mut Command::new("unused"), &path, false),
+            Err(Error::ArtifactIo { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(fs::read(&sentinel).unwrap(), b"preserve me");
+        #[cfg(unix)]
+        {
+            fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(&sentinel, &path).unwrap();
+            assert!(matches!(
+                capture_worker_output(&mut Command::new("unused"), &path, false),
+                Err(Error::ArtifactIo { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists
+            ));
+            assert_eq!(fs::read(&sentinel).unwrap(), b"preserve me");
+        }
+    }
+
+    #[test]
+    fn captured_output_fixture() {
+        let Some(scenario) = env::var_os("METABENCH_LOG_TEST_SCENARIO") else {
+            return;
+        };
+        let mut stdout = io::stdout().lock();
+        let mut stderr = io::stderr().lock();
+        let noisy = scenario != "success" && scenario != "failure";
+        let chunks = if noisy { 512 } else { 1 };
+        let bytes = [b'x'; 8_192];
+        let started = Instant::now();
+        loop {
+            for _ in 0..chunks {
+                stdout.write_all(&bytes).unwrap();
+                stderr.write_all(&bytes).unwrap();
+            }
+            stdout.write_all(b"\ncritical stdout diagnostic\n").unwrap();
+            stdout.flush().unwrap();
+            stderr.write_all(b"critical stderr diagnostic\xff\x1b[31m\n").unwrap();
+            stderr.flush().unwrap();
+            // A disabled parent deadline must fail its assertion without leaving this fixture running forever.
+            if scenario != "timeout" || started.elapsed() >= Duration::from_secs(2) {
+                std::process::exit(i32::from(scenario != "success"));
+            }
+        }
+    }
+
+    fn captured_fixture_command(scenario: &str) -> Command {
+        let mut command = Command::new(env::current_exe().unwrap());
+        command
+            .args(["--exact", "runner::tests::captured_output_fixture", "--nocapture"])
+            .env("METABENCH_LOG_TEST_SCENARIO", scenario);
+        command
+    }
+
+    #[test]
+    fn captured_logs_keep_bounded_raw_tail_for_noisy_failures_and_normal_workers() {
+        for scenario in ["success", "failure", "noisy-failure"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("worker.log");
+            let mut command = captured_fixture_command(scenario);
+            let mut log = capture_worker_output(&mut command, &path, false).unwrap().unwrap();
+            let result = wait_for_captured_worker(Mode::Criterion, &mut command, Some(Duration::from_secs(10)), &path, &mut log);
+            assert_eq!(result.unwrap().success(), scenario == "success");
+            assert!(log.file.metadata().unwrap().len() <= crate::worker_log::LOG_LIMIT as u64);
+            log.persist().unwrap();
+            let bytes = fs::read(&path).unwrap();
+            assert!(bytes.len() <= crate::worker_log::LOG_LIMIT);
+            assert_eq!(log.truncated(), scenario == "noisy-failure");
+            assert!(
+                bytes
+                    .windows(b"critical stdout diagnostic".len())
+                    .any(|bytes| bytes == b"critical stdout diagnostic")
+            );
+            assert!(bytes.ends_with(b"critical stderr diagnostic\xff\x1b[31m\n"));
+            if log.truncated() {
+                assert_eq!(bytes.len(), crate::worker_log::LOG_LIMIT);
+                assert!(bytes.starts_with(b"[metabench: output truncated;"));
+            }
+            let mut output = Vec::new();
+            write_worker_excerpt(&mut output, Mode::Criterion, &path, &log.excerpt(), log.truncated()).unwrap();
+            let excerpt = String::from_utf8(output).unwrap();
+            assert!(excerpt.contains("critical stdout diagnostic"));
+            assert!(excerpt.contains("critical stderr diagnostic"));
+            assert!(excerpt.contains("\\u{1b}[31m\\n"));
+            assert_eq!(excerpt.contains("output truncated"), scenario == "noisy-failure");
+        }
+    }
+
+    #[test]
+    fn captured_logs_bound_sustained_output_and_timeout_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("worker.log");
+        let mut command = captured_fixture_command("timeout");
+        let log = capture_worker_output(&mut command, &path, false).unwrap();
+        let started = Instant::now();
+        let error = wait_for_logged_worker_with_output(
+            Mode::Criterion,
+            &mut command,
+            Some(Duration::from_millis(150)),
+            &path,
+            log,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("timeout"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(fs::metadata(&path).unwrap().len() <= crate::worker_log::LOG_LIMIT as u64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_logs_bound_inherited_writer_lifetime_after_worker_exit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("worker.log");
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30 & printf 'parent diagnostic\\n'; exit 0"]);
+        let log = capture_worker_output(&mut command, &path, false).unwrap();
+        let started = Instant::now();
+        let error = wait_for_logged_worker_with_output(Mode::Criterion, &mut command, None, &path, log, &mut Vec::new()).unwrap_err();
+        assert!(error.to_string().contains("pipe remained open"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(fs::read(&path).unwrap(), b"parent diagnostic\n");
+    }
+
+    #[test]
+    fn captured_logs_publish_failures_through_the_original_open_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("worker.log");
+        let mut command = captured_fixture_command("failure");
+        let log = capture_worker_output(&mut command, &path, false).unwrap();
+        #[cfg(unix)]
+        {
+            fs::rename(&path, directory.path().join("retained.log")).unwrap();
+            fs::write(&path, b"substituted log").unwrap();
+        }
+        let mut output = Vec::new();
+        let status = wait_for_logged_worker_with_output(
+            Mode::Criterion,
+            &mut command,
+            Some(Duration::from_secs(10)),
+            &path,
+            log,
+            &mut output,
+        )
+        .unwrap();
+        assert!(!status.success());
+        assert!(String::from_utf8(output).unwrap().contains("critical stderr diagnostic"));
+        let retained = if cfg!(unix) {
+            directory.path().join("retained.log")
+        } else {
+            path.clone()
+        };
+        assert!(fs::read(retained).unwrap().ends_with(b"critical stderr diagnostic\xff\x1b[31m\n"));
+        #[cfg(unix)]
+        assert_eq!(fs::read(&path).unwrap(), b"substituted log");
+    }
+
+    #[test]
+    fn captured_logs_keep_diagnostics_when_file_publication_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("readonly.log");
+        fs::write(&path, b"preserve me").unwrap();
+        let mut command = captured_fixture_command("failure");
+        let log = WorkerLog::new(fs::File::open(&path).unwrap(), &mut command).unwrap();
+        let mut output = Vec::new();
+        let error = wait_for_logged_worker_with_output(
+            Mode::Criterion,
+            &mut command,
+            Some(Duration::from_secs(10)),
+            &path,
+            Some(log),
+            &mut output,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("failed to access artifact"));
+        assert!(error.to_string().contains("exited with status 1"));
+        assert_eq!(fs::read(&path).unwrap(), b"preserve me");
+        let diagnostics = String::from_utf8(output).unwrap();
+        assert!(diagnostics.contains("critical stdout diagnostic"));
+        assert!(diagnostics.contains("critical stderr diagnostic"));
+    }
+
+    #[test]
+    fn captured_logs_show_output_does_not_create_a_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("worker.log");
+        let mut command = Command::new("unused");
+        assert!(capture_worker_output(&mut command, &path, true).unwrap().is_none());
+        assert!(!path.exists());
+    }
+    #[test]
+    fn empty_native_backend_cannot_promote_nonempty_probe_results() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().join("report");
+        let json = base.with_extension("json");
+        let markdown = base.with_extension("md");
+        fs::write(&json, b"json sentinel").unwrap();
+        fs::write(&markdown, b"markdown sentinel").unwrap();
+        let arguments = Arguments::parse_from(
+            [
+                "--criterion".into(),
+                "--allocations".into(),
+                "--output".into(),
+                base.into_os_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        for mode in [Mode::Criterion, Mode::Gungraun] {
+            let artifacts = ArtifactDirectory::create(&directory.path().join("artifacts")).unwrap();
+            fs::create_dir_all(artifacts.criterion_path()).unwrap();
+            fs::create_dir_all(artifacts.gungraun_path()).unwrap();
+            let probe = crate::report::NativeResult {
+                identity: "native/work".to_owned(),
+                native_identity: "native/work".to_owned(),
+                source: "alloc_tracker".to_owned(),
+                metrics: [(
+                    "Allocations".to_owned(),
+                    crate::report::Metric::integer("alloc_tracker", "Allocations", 1, crate::report::MetricDirection::LowerIsBetter),
+                )]
+                .into(),
+                raw_artifacts: Vec::new(),
+            };
+            let error = build_report(
+                &artifacts,
+                &[mode, Mode::Allocations],
+                &[],
+                &arguments,
+                "target",
+                None,
+                vec![probe],
+                true,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains(mode.as_str()));
+            assert!(error.contains("no benchmark measurements"));
+            assert_eq!(fs::read(&json).unwrap(), b"json sentinel");
+            assert_eq!(fs::read(&markdown).unwrap(), b"markdown sentinel");
+        }
+    }
+
+    #[test]
+    fn native_probe_selection_validates_and_applies_filters() {
+        let targets = || {
+            serde_json::from_value(serde_json::json!([
+                {"identity":"group/work/small","native_identity":"native/small","group":0,"benchmark":0,"case":0,"iteration":null},
+                {"identity":"group/work/large","native_identity":"native/large","group":0,"benchmark":0,"case":1,"iteration":null}
+            ]))
+            .unwrap()
+        };
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
+        let selected = select_native_probe_targets(targets(), &args(&["small$", "--sample-size", "10"])).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].identity, "group/work/small");
+        assert!(
+            select_native_probe_targets(targets(), &args(&["small", "--exact"]))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            select_native_probe_targets(targets(), &args(&["group/work/large", "--exact"]))
+                .unwrap()
+                .len(),
+            1
+        );
+        for invalid in [
+            &["["][..],
+            &["small", "large"],
+            &["--unknown"],
+            &["--sample-size"],
+            &["--profile-time"],
+        ] {
+            assert!(select_native_probe_targets(targets(), &args(invalid)).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn probe_selection_preserves_option_values_but_discards_benchmark_mode() {
+        let configured = [OsString::from("--sample-size"), OsString::from("20"), OsString::from("--bench")];
+
+        assert_eq!(probe_selection_arguments(&configured).unwrap(), ["--sample-size", "20"]);
     }
 
     #[cfg(unix)]
     fn exit_status(code: i32) -> ExitStatus {
-        use std::os::unix::process::ExitStatusExt as _;
-
         ExitStatus::from_raw(code << 8)
     }
 
     #[cfg(windows)]
     fn exit_status(code: i32) -> ExitStatus {
-        use std::os::windows::process::ExitStatusExt as _;
-
         ExitStatus::from_raw(u32::try_from(code).unwrap())
     }
 
@@ -1372,6 +2047,199 @@ mod tests {
         }
     }
 
+    #[test]
+    fn captured_process_waits_for_both_exit_and_output_eof() {
+        for (statuses, drains) in [
+            (vec![Ok(None), Ok(Some(exit_status(3)))], vec![(true, false), (true, false)]),
+            (vec![Ok(Some(exit_status(3)))], vec![(false, true), (true, false)]),
+        ] {
+            let mut process = FakeProcess::new(statuses);
+            let clock = FakeClock::new();
+            let mut drains = VecDeque::from(drains);
+            let status = wait_for_captured_process(
+                Mode::Criterion,
+                &mut process,
+                None,
+                Path::new("worker.log"),
+                || Ok(drains.pop_front().unwrap()),
+                &clock,
+            )
+            .unwrap();
+            assert_eq!(status.code(), Some(3));
+            assert!(drains.is_empty());
+            assert_eq!(process.kill_calls, 0);
+        }
+    }
+
+    #[test]
+    fn captured_process_drains_until_the_exact_post_exit_deadline() {
+        let mut process = FakeProcess::new([Ok(Some(exit_status(0))), Ok(Some(exit_status(0)))]);
+        let clock = FakeClock::new();
+        let mut polls = 0;
+        let error = wait_for_captured_process(
+            Mode::Criterion,
+            &mut process,
+            None,
+            Path::new("worker.log"),
+            || {
+                polls += 1;
+                clock.elapsed.set(match polls {
+                    1 => Duration::ZERO,
+                    2 => TERMINATION_REAP_GRACE.checked_sub(Duration::from_nanos(1)).unwrap(),
+                    3 => TERMINATION_REAP_GRACE,
+                    _ => panic!("draining must stop at the deadline"),
+                });
+                Ok((false, false))
+            },
+            &clock,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("pipe remained open"));
+        assert_eq!(polls, 3);
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(clock.elapsed.get(), TERMINATION_REAP_GRACE);
+    }
+
+    #[test]
+    fn captured_process_read_errors_kill_and_reap_and_preserve_cleanup_errors() {
+        let mut process = FakeProcess::new([Err(io::Error::other("reap failed"))]);
+        let error = wait_for_captured_process(
+            Mode::Criterion,
+            &mut process,
+            None,
+            Path::new("worker.log"),
+            || Err(io::Error::other("read failed")),
+            &FakeClock::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("read failed"));
+        assert!(error.contains("reap failed"));
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(process.wait_calls, 0);
+    }
+
+    #[test]
+    fn captured_process_timeout_drain_deadline_includes_the_reap_grace() {
+        let polls = TERMINATION_REAP_GRACE.as_nanos() / WORKER_POLL_INTERVAL.as_nanos();
+        let mut process = FakeProcess::new((0..=polls + 1).map(|_| Ok(None)));
+        let clock = FakeClock::new();
+        let mut drains = 0;
+        let error = wait_for_captured_process(
+            Mode::Criterion,
+            &mut process,
+            Some(Duration::ZERO),
+            Path::new("worker.log"),
+            || {
+                drains += 1;
+                assert_eq!(drains, 1, "reaping has already exhausted the output drain deadline");
+                Ok((false, false))
+            },
+            &clock,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("worker exceeded"));
+        assert!(error.contains("pipe remained open"));
+        assert_eq!(clock.elapsed.get(), TERMINATION_REAP_GRACE);
+        assert_eq!(process.kill_calls, 2);
+        assert_eq!(process.wait_calls, 0);
+    }
+
+    #[test]
+    fn captured_process_deadline_preempts_a_finite_successful_exit() {
+        let deadline = WORKER_POLL_INTERVAL * 2;
+        for timeout in [Some(deadline), None] {
+            let mut process = FakeProcess::new([Ok(None), Ok(None), Ok(None), Ok(Some(exit_status(0)))]);
+            let clock = FakeClock::new();
+            let mut polls = 0;
+            let result = wait_for_captured_process(
+                Mode::Criterion,
+                &mut process,
+                timeout,
+                Path::new("worker.log"),
+                || {
+                    polls += 1;
+                    assert!(polls <= 4, "the scripted worker exits successfully within four polls");
+                    Ok((polls >= 3, false))
+                },
+                &clock,
+            );
+            if timeout.is_some() {
+                assert!(matches!(
+                    result,
+                    Err(Error::WorkerTimedOut { mode: "criterion", timeout }) if timeout == deadline
+                ));
+                assert_eq!(polls, 3);
+                assert_eq!(clock.elapsed.get(), deadline);
+                assert_eq!(process.kill_calls, 1);
+            } else {
+                assert!(result.unwrap().success());
+                assert_eq!(polls, 4);
+                assert_eq!(clock.elapsed.get(), WORKER_POLL_INTERVAL * 3);
+                assert_eq!(process.kill_calls, 0);
+            }
+            assert!(process.try_wait.is_empty());
+            assert_eq!(process.wait_calls, 0);
+        }
+    }
+
+    #[test]
+    fn captured_process_timeout_is_enforced_while_the_pipe_is_pending() {
+        let mut process = FakeProcess::new([Ok(None), Ok(None), Ok(Some(exit_status(9)))]);
+        let clock = FakeClock::new();
+        let mut drains = VecDeque::from([(false, false), (false, false), (true, false)]);
+        let error = wait_for_captured_process(
+            Mode::Criterion,
+            &mut process,
+            Some(WORKER_POLL_INTERVAL),
+            Path::new("worker.log"),
+            || Ok(drains.pop_front().unwrap()),
+            &clock,
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::WorkerTimedOut { .. }));
+        assert!(drains.is_empty());
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(clock.elapsed.get(), WORKER_POLL_INTERVAL * 2);
+    }
+
+    #[test]
+    fn kill_and_reap_polls_pending_exit_but_stops_at_the_exact_grace_deadline() {
+        let mut process = FakeProcess::new([Ok(None), Ok(Some(exit_status(9)))]);
+        let clock = FakeClock::new();
+        kill_and_reap_worker(Mode::Criterion, &mut process, &clock).unwrap();
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(process.wait_calls, 0);
+        assert_eq!(clock.elapsed.get(), WORKER_POLL_INTERVAL);
+        assert!(process.try_wait.is_empty());
+
+        let polls = TERMINATION_REAP_GRACE.as_nanos() / WORKER_POLL_INTERVAL.as_nanos();
+        let mut statuses = (0..=polls).map(|_| Ok(None)).collect::<Vec<_>>();
+        // A late exit also makes an accidentally unbounded grace finish deterministically.
+        statuses.push(Ok(Some(exit_status(9))));
+        let mut process = FakeProcess::new(statuses);
+        let clock = FakeClock::new();
+        let error = kill_and_reap_worker(Mode::Criterion, &mut process, &clock).unwrap_err();
+        assert!(matches!(error, Error::WorkerTermination { source, .. } if source.kind() == io::ErrorKind::TimedOut));
+        assert_eq!(clock.elapsed.get(), TERMINATION_REAP_GRACE);
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(process.wait_calls, 0);
+        assert_eq!(process.try_wait.len(), 1);
+    }
+
+    #[test]
+    fn kill_and_reap_propagates_failed_kill_without_polling() {
+        let mut process = FakeProcess::new([Ok(Some(exit_status(0)))]);
+        process.kill = Some(Err(io::Error::other("kill denied")));
+        let clock = FakeClock::new();
+        let error = kill_and_reap_worker(Mode::Criterion, &mut process, &clock).unwrap_err();
+        assert!(error.to_string().contains("kill denied"));
+        assert_eq!(process.kill_calls, 1);
+        assert_eq!(process.try_wait.len(), 1);
+        assert_eq!(clock.elapsed.get(), Duration::ZERO);
+    }
+
     struct FailingOutput;
 
     impl io::Write for FailingOutput {
@@ -1410,8 +2278,44 @@ mod tests {
         assert!(read_baseline(&path, true).unwrap().is_none());
         assert!(matches!(
             read_baseline(&path, false),
-            Err(Error::UnsupportedReportSchema { found: 7, expected: 8, .. })
+            Err(Error::UnsupportedReportSchema { found: 7, expected: 9, .. })
         ));
+    }
+
+    #[test]
+    fn baseline_warnings_encode_hostile_paths_and_schema_errors() {
+        let mut output = Vec::new();
+        let hostile = Path::new("baseline\x1b[31m\r\nforged\u{202e}.json");
+        write_baseline_warning(
+            &mut output,
+            &format!(
+                "skipping incompatible baseline {} (target, compiler, CPU, profile, or flags differ)",
+                hostile.display()
+            ),
+        )
+        .unwrap();
+        let warning = String::from_utf8(output).unwrap();
+        assert!(warning.contains("baseline\\u{1b}[31m\\r\\nforged\\u{202e}.json"));
+        assert_eq!(warning.lines().count(), 1);
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("baseline\u{202e}.json");
+        let report = serde_json::json!({
+            "schema_version": 7,
+            "metadata": {
+                "timestamp_utc": "", "target_triple": "", "rustc_version": "",
+                "host_cpu": "", "profile": "", "compiler_flags": null,
+                "measured_backends": [], "artifact_root": ""
+            },
+            "entries": []
+        });
+        fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+        let mut output = Vec::new();
+        assert!(read_baseline_with_output(&path, true, &mut output).unwrap().is_none());
+        let warning = String::from_utf8(output).unwrap();
+        assert!(warning.contains("baseline\\u{202e}.json"));
+        assert!(warning.contains("unsupported report schema"));
+        assert!(!warning.contains('\u{202e}'));
     }
 
     #[test]
@@ -1691,12 +2595,99 @@ mod tests {
     }
 
     #[test]
+    fn probe_filters_are_replaced_without_losing_option_values() {
+        let arguments = ["--sample-size", "20", "--color", "never", "group", "--exact", "--bench"].map(OsString::from);
+        assert_eq!(
+            probe_selection_arguments(&arguments).unwrap(),
+            ["--sample-size", "20", "--color", "never", "group", "--exact"]
+        );
+        assert_eq!(
+            probe_selection_arguments(&[
+                "--profile-time".into(),
+                "60".into(),
+                "--load-baseline=old".into(),
+                "--baseline".into(),
+                "old".into(),
+                "--noplot".into(),
+                "group".into(),
+            ],)
+            .unwrap(),
+            ["group"]
+        );
+    }
+
+    #[test]
+    fn native_probe_selection_accepts_criterion_aliases_and_output_options() {
+        for arguments in [
+            vec![
+                "-s", "old", "-b", "old", "-n", "-c", "never", "--format", "terse", "group", "--exact",
+            ],
+            vec!["-s=old", "-b=old", "-n", "-c=never", "--format=terse", "group", "--exact"],
+        ] {
+            let arguments = arguments.into_iter().map(OsString::from).collect::<Vec<_>>();
+            let targets = serde_json::from_str(
+                r#"[{"identity":"group","native_identity":"native/group","group":0,"benchmark":0,"case":0,"iteration":null}]"#,
+            )
+            .unwrap();
+            let selected = select_native_probe_targets(targets, &arguments).unwrap();
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0].identity, "group");
+        }
+        for arguments in [vec!["-s"], vec!["-b"], vec!["-c"], vec!["--format"]] {
+            assert!(matches!(
+                probe_selection_arguments(&arguments.into_iter().map(OsString::from).collect::<Vec<_>>()),
+                Err(Error::Probe(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn configured_target_root_disambiguates_a_triple_named_directory() {
+        let configured = PathBuf::from("custom").join(env!("METABENCH_TARGET"));
+        for executable in [
+            configured.join("release/deps/benchmark"),
+            configured.join(env!("METABENCH_TARGET")).join("release/deps/benchmark"),
+        ] {
+            assert_eq!(
+                effective_target_directory(&executable, |name| (name == "CARGO_TARGET_DIR").then(|| configured.clone().into())).unwrap(),
+                configured
+            );
+        }
+        assert_eq!(
+            effective_target_directory(&configured.join("release/deps/benchmark"), |_| Some(configured.join(".").into())).unwrap(),
+            configured
+        );
+    }
+
+    #[test]
+    fn target_directory_follows_executable_layout_over_environment() {
+        for (executable, expected) in [
+            ("custom/release/deps/benchmark", "custom"),
+            ("custom/debug/examples/benchmark", "custom"),
+            ("custom/release/benchmark", "custom"),
+        ] {
+            assert_eq!(
+                effective_target_directory(Path::new(executable), |_| Some("ignored".into())).unwrap(),
+                PathBuf::from(expected)
+            );
+        }
+        let executable = PathBuf::from("custom")
+            .join(env!("METABENCH_TARGET"))
+            .join("release/deps/benchmark");
+        assert_eq!(effective_target_directory(&executable, |_| None).unwrap(), PathBuf::from("custom"));
+        let custom = tempfile::tempdir().unwrap();
+        fs::create_dir_all(custom.path().join("special/.fingerprint")).unwrap();
+        assert_eq!(
+            effective_target_directory(&custom.path().join("special/deps/benchmark"), |_| None).unwrap(),
+            custom.path()
+        );
+    }
+
+    #[test]
     fn environment_and_output_boundaries_map_exact_errors() {
         assert_eq!(
-            default_target_directory_with(
-                |name| (name == "CARGO_TARGET_DIR").then(|| OsString::from("custom-target")),
-                || Err(io::Error::other("must not be called")),
-            )
+            effective_target_directory(Path::new("relocated/benchmark"), |name| (name == "CARGO_TARGET_DIR")
+                .then(|| OsString::from("custom-target")),)
             .unwrap(),
             PathBuf::from("custom-target")
         );
@@ -1705,8 +2696,8 @@ mod tests {
             Err(Error::CurrentExecutable(_))
         ));
         assert!(matches!(
-            default_target_directory_with(|_| None, || Err(io::Error::other("no directory"))),
-            Err(Error::CurrentDirectory(_))
+            effective_target_directory(Path::new("relocated/benchmark"), |_| None),
+            Err(Error::ArtifactFormat { .. })
         ));
 
         let mut progress = Vec::new();

@@ -24,12 +24,7 @@ exclude = true
 min-lines-percent = 1
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "alloc_tracker::allocator::Allocator",
-    "criterion",
-    "gungraun",
-    "metabench_macros::*",
-]
+allowed_external_types = ["criterion", "gungraun", "metabench_macros::*"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -41,10 +36,14 @@ bench = false
 alloc_tracker = { workspace = true }
 command-group = { workspace = true }
 criterion = { workspace = true }
+either-or-both = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
-gungraun-summary = { workspace = true }
+# Parse summaries with the matching runner, avoiding a separately resolved wrapper.
+gungraun-runner = { workspace = true, features = ["summary"] }
 jiff = { workspace = true, features = ["std"] }
 metabench_macros = { workspace = true }
+ohno = { workspace = true }
+regex = { workspace = true, features = ["std", "perf", "unicode"] }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 tempfile = { workspace = true, features = ["getrandom"] }
@@ -54,8 +53,16 @@ unicode-width = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { workspace = true, features = ["fs", "poll"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Pipes"] }
+
 [dev-dependencies]
 bolero = { workspace = true, features = ["std"] }
+
+[target.'cfg(not(target_os = "linux"))'.dev-dependencies]
 mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints

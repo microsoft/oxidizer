@@ -34,6 +34,7 @@ profile = "mutants"
 # Only run unit tests and integration tests, not doctests, benchmarks or examples.
 # Retain fatal-path tests needed to detect mutations in termination guards;
 # skip the remaining intentional-abort tests only during mutation runs.
+# Exact metabench deadlines use FakeClock/FakeProcess; keep real-time stress outside mutation runs.
 additional_cargo_test_args = [
     "--locked", "--tests", "--",
     "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
@@ -44,9 +45,12 @@ additional_cargo_test_args = [
     "--skip", "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
     "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
     "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
+    "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
 ]
 
 exclude_re = [
+    # O_NOFOLLOW and O_NONBLOCK have disjoint bits, so XOR is equivalent to OR.
+    'crates/metabench/src/artifact.rs:\d+:\d+: replace \| with \^ in open_regular_file$',
     # There are no API contracts for what these must return because they
     # are for human-readable stringification. No purpose mutating them.
     "impl Debug",

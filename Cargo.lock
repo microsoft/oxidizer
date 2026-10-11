@@ -2460,20 +2460,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gungraun-summary"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89f967da1beab0153f3f1e52408a71d3bd0fbea3c9e0bf0431f9a3a3c9e96130"
-dependencies = [
- "either-or-both",
- "gungraun-runner",
- "indexmap",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3517,17 +3503,22 @@ dependencies = [
  "bolero",
  "command-group",
  "criterion",
+ "either-or-both",
  "gungraun",
- "gungraun-summary",
+ "gungraun-runner",
  "jiff",
+ "libc",
  "metabench_macros",
  "mutants",
  "nix 0.31.3",
+ "ohno",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
  "terminal_size",
  "unicode-width 0.2.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

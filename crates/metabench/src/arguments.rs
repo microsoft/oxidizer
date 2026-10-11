@@ -69,6 +69,12 @@ pub(crate) enum FailureMode {
 }
 
 impl Arguments {
+    pub(crate) fn smoke(&self) -> bool {
+        self.cargo_test
+            || self.native_args.criterion.iter().any(|argument| argument == "--test")
+            || self.native_args.gungraun.iter().any(|argument| argument == "--test")
+    }
+
     pub(crate) fn parse() -> Result<Self, Error> {
         Self::parse_from(env::args_os().skip(1), env::var_os("BENCH_ENGINE"))
     }
@@ -110,10 +116,10 @@ impl Arguments {
             || modes.contains(&Mode::Perf)
             || modes.contains(&Mode::Vtune)
         {
-            if self.cargo_bench || !self.cargo_test {
+            if !self.smoke() {
                 push_argument_unique(&mut self.native_args.criterion, "--bench");
             }
-            if self.cargo_test {
+            if self.smoke() {
                 push_argument_unique(&mut self.native_args.criterion, "--test");
             }
             if self.list {
@@ -121,10 +127,10 @@ impl Arguments {
             }
         }
         if modes.contains(&Mode::Gungraun) {
-            if self.cargo_bench {
+            if self.cargo_bench && !self.smoke() {
                 push_argument_unique(&mut self.native_args.gungraun, "--bench");
             }
-            if self.cargo_test {
+            if self.smoke() {
                 push_argument_unique(&mut self.native_args.gungraun, "--test");
             }
             if self.list {
@@ -154,7 +160,11 @@ impl Arguments {
         let mut trailing = Vec::new();
         let mut cargo_bench = false;
         let mut cargo_test = false;
-        let mut arguments = arguments.into_iter();
+        let mut arguments = arguments.into_iter().peekable();
+        if arguments.peek().is_none() {
+            // Cargo invokes harness-free `cargo test --bench` binaries without --bench.
+            cargo_test = true;
+        }
 
         while let Some(argument) = arguments.next() {
             if argument == OsStr::new("--") {
@@ -461,6 +471,20 @@ mod tests {
     }
 
     #[test]
+    fn gungraun_bench_flag_requires_cargo_bench_and_non_smoke_mode() {
+        for (options, expected) in [
+            (&["--gungraun"][..], &[][..]),
+            (&["--gungraun", "--bench"][..], &["--bench"][..]),
+            (&["--gungraun", "--test"][..], &["--test"][..]),
+            (&["--gungraun", "--bench", "--test"][..], &["--test"][..]),
+        ] {
+            let mut arguments = parse(options, None).unwrap();
+            arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
+            assert_eq!(arguments.args_for(Mode::Gungraun), expected);
+        }
+    }
+
+    #[test]
     fn parses_perf_selection_and_arguments() {
         let mut arguments = Arguments::parse_from(["--perf".into(), "--perf-arg".into(), "--event=cpu-clock".into()], None).unwrap();
         arguments.finalize_native_args(&[Mode::Perf]).unwrap();
@@ -503,6 +527,28 @@ mod tests {
             Arguments::parse_from(["--valgrind".into()], None),
             Err(Error::UnknownOption(_))
         ));
+    }
+
+    #[test]
+    fn smoke_intent_covers_cargo_and_forwarded_native_arguments() {
+        for options in [
+            &[][..],
+            &["--test"][..],
+            &["--criterion", "--criterion-arg=--test"][..],
+            &["--allocations", "--", "--test"][..],
+        ] {
+            let mut arguments = Arguments::parse_from(options.iter().map(OsString::from), None).unwrap();
+            arguments.finalize_native_args(&arguments.modes.clone()).unwrap();
+            assert!(arguments.smoke());
+            assert!(arguments.criterion_args().contains(&"--test".into()));
+            assert!(!arguments.criterion_args().contains(&"--bench".into()));
+        }
+        for options in [&["--bench"][..], &["--criterion"][..], &["--allocations"][..]] {
+            let mut arguments = Arguments::parse_from(options.iter().map(OsString::from), None).unwrap();
+            arguments.finalize_native_args(&arguments.modes.clone()).unwrap();
+            assert!(!arguments.smoke());
+            assert!(arguments.criterion_args().contains(&"--bench".into()));
+        }
     }
 
     #[test]
