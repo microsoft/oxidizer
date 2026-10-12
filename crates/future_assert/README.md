@@ -1,11 +1,11 @@
 <div align="center">
- <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Future-Assert Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Future Assert Logo" width="96">
 
-# Future-Assert
+# Future Assert
 
-[![crate.io](https://img.shields.io/crates/v/future-assert.svg)](https://crates.io/crates/future-assert)
-[![docs.rs](https://docs.rs/future-assert/badge.svg)](https://docs.rs/future-assert)
-[![MSRV](https://img.shields.io/crates/msrv/future-assert)](https://crates.io/crates/future-assert)
+[![crate.io](https://img.shields.io/crates/v/future_assert.svg)](https://crates.io/crates/future_assert)
+[![docs.rs](https://docs.rs/future_assert/badge.svg)](https://docs.rs/future_assert)
+[![MSRV](https://img.shields.io/crates/msrv/future_assert)](https://crates.io/crates/future_assert)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
@@ -24,7 +24,7 @@ future.
 
 ## Usage
 
-Add `future-assert` to your dev-dependencies, then import [`FutureTestExt`][__link2]:
+Add `future_assert` to your dev-dependencies, then import [`FutureTestExt`][__link2]:
 
 ```rust
 use future_assert::FutureTestExt;
@@ -67,10 +67,10 @@ assert_eq!(future.as_mut().unwrap_ready(), 7);
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/future-assert">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/future_assert">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQberAKr9hIs-4bDA_CvcJiIgobI9A21j4XFcUbzFW8mziIAJ1hZIGDbWZ1dHVyZS1hc3NlcnRlMC4xLjBtZnV0dXJlX2Fzc2VydA
- [__link0]: https://docs.rs/future-assert/0.1.0/future_assert/trait.FutureTestExt.html
- [__link1]: https://docs.rs/future-assert/0.1.0/future_assert/fn.poll_once.html
- [__link2]: https://docs.rs/future-assert/0.1.0/future_assert/trait.FutureTestExt.html
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbXCfThO0eQtobW-gS-4GpQlYbqF46ZsRLdNYbNFjyr3R6OgphZIGCbWZ1dHVyZV9hc3NlcnRlMC4xLjA
+ [__link0]: https://docs.rs/future_assert/0.1.0/future_assert/trait.FutureTestExt.html
+ [__link1]: https://docs.rs/future_assert/0.1.0/future_assert/fn.poll_once.html
+ [__link2]: https://docs.rs/future_assert/0.1.0/future_assert/trait.FutureTestExt.html

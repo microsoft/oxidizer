@@ -983,7 +983,7 @@ name = "bytesbuf_io"
 version = "0.11.0"
 dependencies = [
  "bytesbuf",
- "future-assert",
+ "future_assert",
  "futures",
  "futures-core",
  "mutants",
@@ -1007,7 +1007,7 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
- "future-assert",
+ "future_assert",
  "futures",
  "layered",
  "parking_lot",
@@ -2083,7 +2083,7 @@ dependencies = [
  "bytesbuf_io",
  "events_once",
  "fetch",
- "future-assert",
+ "future_assert",
  "futures",
  "h3",
  "h3-quinn",
@@ -2246,7 +2246,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "future-assert"
+name = "future_assert"
 version = "0.1.0"
 
 [[package]]
@@ -3946,7 +3946,7 @@ name = "observed_testing"
 version = "0.0.0"
 dependencies = [
  "data_privacy",
- "future-assert",
+ "future_assert",
  "observed",
  "observed_utils",
  "tick",

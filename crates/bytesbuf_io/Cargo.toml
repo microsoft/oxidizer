@@ -36,7 +36,7 @@ trait-variant = { workspace = true }
 
 [dev-dependencies]
 bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
-future-assert.workspace = true
+future_assert.workspace = true
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 mutants = { workspace = true }

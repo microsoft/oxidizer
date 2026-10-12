@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! Add `future-assert` to your dev-dependencies, then import [`FutureTestExt`]:
+//! Add `future_assert` to your dev-dependencies, then import [`FutureTestExt`]:
 //!
 //! ```
 //! use future_assert::FutureTestExt;

@@ -105,7 +105,7 @@ windows = { workspace = true, features = [
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
-future-assert.workspace = true
+future_assert.workspace = true
 futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
 mutants = { workspace = true }
