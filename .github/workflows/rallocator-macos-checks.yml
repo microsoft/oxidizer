@@ -45,13 +45,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Bootstrap repository tooling
+        uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+
+      # Restore scoped binaries and their matching Cargo registry after the
+      # shared bootstrap, which restores a different tool-cache generation.
       - name: Restore scoped check cache
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: macos-validation-v1-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-${{ github.sha }}
+          key: macos-validation-v2-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-${{ github.sha }}
           restore-keys: |
-            macos-validation-v1-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-
+            macos-validation-v2-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-
           path: |
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
@@ -62,11 +69,6 @@ jobs:
             ~/.rustup/toolchains/nightly-2026-05-30-*/
             ~/.rustup/toolchains/nightly-2026-03-20-*/
             target/
-
-      - name: Bootstrap repository tooling
-        uses: ./.github/actions/anvil-setup
-        with:
-          group: none
 
       - name: Select explicit three-package validation scope
         run: |
