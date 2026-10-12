@@ -142,6 +142,7 @@ foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.4.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "=0.4.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "=0.4.0" }
+future-assert = { path = "crates/future-assert", default-features = false, version = "0.1.0" }
 futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }

@@ -2244,6 +2244,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "future-assert"
+version = "0.1.0"
+
+[[package]]
 name = "futures"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5884,6 +5888,7 @@ name = "testing_aids"
 version = "0.0.0"
 dependencies = [
  "ctor",
+ "future-assert",
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
