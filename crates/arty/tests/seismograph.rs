@@ -13,12 +13,14 @@ use std::collections::HashSet;
 use std::pin::{Pin, pin};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
-use std::time::Instant;
 
 use arty::runtime::{Runtime, RuntimeId as ArtyRuntimeId, RuntimeOperations, WorkersPolicy};
 use arty::task::Scheduler;
 use events_once::Event;
 use many_cpus::SystemHardware;
+use observed::metadata::EventDescription;
+use observed::processing::{EventProcessor, EventView};
+use observed::{FlushError, Sink};
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::runtime::RuntimeId as SeismographRuntimeId;
 use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
@@ -26,6 +28,7 @@ use seismograph::snapshot::{DecodedSnapshot, SnapshotOptions};
 use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot as RuntimeSourceSnapshot, WorkerState, source};
 use support::JoinHandleExt as _;
 use thread_aware::Unaware;
+use tick::SimpleClock;
 
 struct RecorderReset;
 
@@ -46,6 +49,38 @@ fn wait_for_notification(notification: &(Mutex<bool>, Condvar)) {
     while !*started {
         started = ready.wait(started).expect("the wake notification mutex is not poisoned");
     }
+}
+
+#[derive(Debug)]
+struct RuntimeStoppedProcessor {
+    notification: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl EventProcessor for RuntimeStoppedProcessor {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() == "arty.rt.stopped"
+    }
+
+    fn process(&self, _: &EventView<'_>) {
+        let (stopped, ready) = self.notification.as_ref();
+        *stopped.lock().expect("the runtime-stopped notification mutex is not poisoned") = true;
+        ready.notify_one();
+    }
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+fn runtime_stopped_sink() -> (Sink, Arc<(Mutex<bool>, Condvar)>) {
+    let notification = Arc::new((Mutex::new(false), Condvar::new()));
+    let processor = Arc::new(RuntimeStoppedProcessor {
+        notification: Arc::clone(&notification),
+    });
+    (
+        Sink::new("arty-seismograph-test", vec![processor], SimpleClock::new_frozen()),
+        notification,
+    )
 }
 
 struct BlockingWake {
@@ -348,8 +383,10 @@ fn exercise_stopped_runtime() {
 
 fn exercise_owner_drop_runtime() -> Scheduler {
     let previous = runtime_ids();
+    let (sink, stopped) = runtime_stopped_sink();
     let owner_dropped = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
+        .sink(sink)
         .build()
         .expect("the owner-drop runtime requires one available worker");
     let owner_drop_scheduler = owner_dropped
@@ -360,20 +397,13 @@ fn exercise_owner_drop_runtime() -> Scheduler {
         .spawn(async move |_| drop(owner_dropped))
         .join()
         .expect("dropping the owner on its worker does not unwind");
-    let deadline = Instant::now() + testing_aids::TEST_TIMEOUT;
-    loop {
-        let (decoded, snapshot) = capture();
-        let runtime = new_runtime(&snapshot, &previous);
-        if runtime.state == RuntimeState::Stopped
-            && decoded.events.events.iter().any(|event| {
-                event.kind == EventKind::RuntimeStopped && event.runtime().is_some_and(|payload| payload.runtime_id == runtime.id)
-            })
-        {
-            break;
-        }
-        assert!(Instant::now() < deadline, "owner-drop shutdown must report stopped");
-        std::thread::yield_now();
-    }
+    wait_for_notification(&stopped);
+    let (decoded, snapshot) = capture();
+    let runtime = new_runtime(&snapshot, &previous);
+    assert_eq!(runtime.state, RuntimeState::Stopped);
+    assert!(decoded.events.events.iter().any(|event| {
+        event.kind == EventKind::RuntimeStopped && event.runtime().is_some_and(|payload| payload.runtime_id == runtime.id)
+    }));
     owner_drop_scheduler
 }
 
@@ -552,25 +582,15 @@ fn exercise_runtime_identity_and_idle_worker() {
     assert_ne!(first.id(), second.id());
     assert_eq!(first.id().to_string(), first.id().get().to_string());
 
-    for id in [first.id(), second.id()] {
-        let deadline = Instant::now() + testing_aids::TEST_TIMEOUT;
-        loop {
-            let (_, snapshot) = capture();
-            if runtime_by_id(&snapshot, id).workers[0].state == WorkerState::Parked {
-                break;
-            }
-            assert!(Instant::now() < deadline, "idle Arty workers report the parked state");
-            std::thread::yield_now();
-        }
-    }
-
     let first_id = first.id();
     let second_id = second.id();
     first.stop().expect("the first identity runtime stops cleanly");
     second.stop().expect("the second identity runtime stops cleanly");
     let (decoded, snapshot) = capture();
     for id in [first_id, second_id] {
-        assert_eq!(runtime_by_id(&snapshot, id).state, RuntimeState::Stopped);
+        let runtime = runtime_by_id(&snapshot, id);
+        assert_eq!(runtime.state, RuntimeState::Stopped);
+        assert!(runtime.workers.iter().all(|worker| worker.state == WorkerState::Stopped));
         let events: Vec<_> = decoded
             .events
             .events
@@ -580,6 +600,9 @@ fn exercise_runtime_identity_and_idle_worker() {
                 (payload.runtime_id.get() == id.get()).then_some(event.kind)
             })
             .collect();
+        // Parked is a transient live state because the worker uses a bounded
+        // wait. The durable transitions prove the public Arty wiring; the
+        // seismograph_runtime worker tests own live-state snapshot coverage.
         assert!(events.contains(&EventKind::WorkerParked));
         assert!(events.contains(&EventKind::WorkerUnparked));
     }
