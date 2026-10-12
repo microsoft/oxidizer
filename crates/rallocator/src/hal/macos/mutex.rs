@@ -40,6 +40,7 @@ impl<T> Mutex<T> {
         unsafe { os_unfair_lock_lock(self.lock.get()) };
         let guard = MutexGuard {
             mutex: self,
+            panicking: std::thread::panicking(),
             _not_send: PhantomData,
         };
         if self.poisoned.load(Ordering::Relaxed) {
@@ -52,6 +53,7 @@ impl<T> Mutex<T> {
 
 pub(crate) struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
+    panicking: bool,
     // The native lock must be unlocked by the same thread that acquired it.
     _not_send: PhantomData<*mut ()>,
 }
@@ -74,7 +76,7 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        if std::thread::panicking() {
+        if !self.panicking && std::thread::panicking() {
             self.mutex.poisoned.store(true, Ordering::Relaxed);
         }
         // SAFETY: The non-Send guard releases its own live lock, on the same
@@ -117,5 +119,24 @@ mod tests {
         };
         let guard = error.into_inner();
         assert_eq!(*guard, 42);
+    }
+
+    #[test]
+    fn acquisition_during_unwinding_does_not_poison_the_lock() {
+        struct LockOnDrop<'a>(&'a Mutex<usize>);
+
+        impl Drop for LockOnDrop<'_> {
+            fn drop(&mut self) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+
+        let value = Mutex::new(0);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _on_drop = LockOnDrop(&value);
+            panic!("exercise an already-unwinding lock acquisition");
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(*value.lock().unwrap(), 1);
     }
 }
