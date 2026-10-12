@@ -1,0 +1,163 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Branch-local, three-package PR validation. Add [mac-checks] to a commit
+# message to run these checks without opening a PR or invoking unrelated CI.
+name: Rallocator macOS validation
+
+on:
+  push:
+    branches: [ralfbiedert-rallocator-macos-support]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rallocator-macos-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "14.4"
+  ANVIL_IMPACT: consume
+  ANVIL_IMPACT_INPUT_DIR: ${{ github.workspace }}/target/macos-validation-scope
+  BASE_REF: origin/main
+  CARGO_TERM_COLOR: never
+
+jobs:
+  check:
+    if: contains(github.event.head_commit.message, '[mac-checks]')
+    name: "${{ matrix.check }} (${{ matrix.runner }})"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+        check: [compatibility, coverage, careful, miri, mutation]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore scoped check cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: macos-validation-v1-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-${{ github.sha }}
+          restore-keys: |
+            macos-validation-v1-${{ matrix.runner }}-${{ matrix.check }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'justfiles/anvil/versions.just') }}-
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.rustup/toolchains/1.95-*/
+            ~/.rustup/toolchains/nightly-2026-05-30-*/
+            ~/.rustup/toolchains/nightly-2026-03-20-*/
+            target/
+
+      - name: Bootstrap repository tooling
+        uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+
+      - name: Select explicit three-package validation scope
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $IsMacOS) { throw 'This workflow requires a native macOS runner.' }
+          # This is an explicit validation selection, not inferred impact.
+          $scope = '--package rallocator --package seismograph --package seismograph_rallocator'
+          New-Item -ItemType Directory -Force -Path $env:ANVIL_IMPACT_INPUT_DIR | Out-Null
+          foreach ($tier in @('modified', 'affected', 'required')) {
+            Set-Content -LiteralPath (Join-Path $env:ANVIL_IMPACT_INPUT_DIR "include_$tier.txt") -Value $scope -Encoding UTF8
+          }
+          Write-Host "Mac-only validation scope: $scope"
+          @(
+            '### Declared validation boundaries'
+            '- rallocator: native VM backend is excluded from Miri by package metadata.'
+            '- rallocator and seismograph_rallocator: excluded from mutation testing by .cargo/mutants.toml.'
+            '- Bolero/libfuzzer campaign: Linux-only; ordinary tests still run on both Mac architectures.'
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+
+      - name: Run scoped Anvil checks
+        env:
+          MACOS_CHECK_GROUP: ${{ matrix.check }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $recipes = switch ($env:MACOS_CHECK_GROUP) {
+            compatibility {
+              @(
+                'anvil-msrv-test'
+                'anvil-cargo-hack'
+                'anvil-doc-build'
+                'anvil-doc-test'
+                'anvil-examples'
+                'anvil-bench'
+                'anvil-udeps'
+                'anvil-external-types'
+                'anvil-loom'
+              )
+            }
+            coverage { @('anvil-llvm-cov') }
+            careful { @('anvil-careful') }
+            miri { @('anvil-miri') }
+            mutation { @('anvil-mutants-diff') }
+            default { throw "Unknown Mac check group: $env:MACOS_CHECK_GROUP" }
+          }
+          & just anvil-toolchain-stable-install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $failed = @()
+          foreach ($recipe in $recipes) {
+            Write-Host "::group::$recipe"
+            & just "$recipe-validate-prereqs"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "$recipe prerequisites missing; installing the repository-pinned tools."
+              & just "$recipe-setup" binstall
+              if ($LASTEXITCODE -ne 0) {
+                $failed += $recipe
+                Write-Host '::endgroup::'
+                continue
+              }
+            }
+            $arguments = @($recipe)
+            if ($recipe -eq 'anvil-examples') { $arguments += '--run' }
+            & just @arguments
+            if ($LASTEXITCODE -ne 0) { $failed += $recipe }
+            Write-Host '::endgroup::'
+          }
+          if ($failed.Count -gt 0) {
+            Write-Error "Failed Mac checks: $($failed -join ', ')"
+            exit 1
+          }
+
+      - name: Upload check reports
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: macos-${{ matrix.runner }}-${{ matrix.check }}-reports
+          path: |
+            target/coverage/
+            target/mutants.out/
+            mutants.out/
+
+      - name: Save scoped check cache
+        if: always() && !cancelled() && steps.cache.outputs.cache-primary-key != '' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.rustup/toolchains/1.95-*/
+            ~/.rustup/toolchains/nightly-2026-05-30-*/
+            ~/.rustup/toolchains/nightly-2026-03-20-*/
+            target/
