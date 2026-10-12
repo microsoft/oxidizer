@@ -13,6 +13,7 @@ fn entrypoint_macros_resolve_a_renamed_arty_dependency() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = crate_root.parent().and_then(Path::parent).unwrap();
     let arty = workspace_root.join("crates").join("arty");
+    let ohno = workspace_root.join("crates").join("ohno");
     let plurality = workspace_root.join("crates").join("plurality");
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("src");
@@ -31,9 +32,11 @@ edition = "2024"
 renamed_arty = {{ package = "arty", path = "{}" }}
 
 [patch.crates-io]
+ohno = {{ path = "{}" }}
 plurality = {{ path = "{}" }}
 "#,
             arty.to_string_lossy().replace('\\', "\\\\"),
+            ohno.to_string_lossy().replace('\\', "\\\\"),
             plurality.to_string_lossy().replace('\\', "\\\\")
         ),
     )
