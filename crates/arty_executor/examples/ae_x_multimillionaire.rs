@@ -23,9 +23,7 @@ fn main() {
         (FIRST_LAYER_TASK_COUNT, SECOND_LAYER_TASK_COUNT)
     };
 
-    // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
-    // an execution cycle indicates the `Shutdown` outcome. We do.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     // When our root task is done, it will set this signal to indicate that the app can exit.
@@ -55,7 +53,7 @@ fn main() {
                         .collect::<Vec<_>>();
 
                         for join_handle in join_handles {
-                            join_handle.await;
+                            join_handle.await.expect("the executor remains active until all work completes");
                         }
                     }
                 })
@@ -64,7 +62,7 @@ fn main() {
             .collect::<Vec<_>>();
 
             for join_handle in join_handles {
-                join_handle.await;
+                join_handle.await.expect("the executor remains active until all work completes");
             }
 
             shutdown_signal.set(true);

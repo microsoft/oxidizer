@@ -13,9 +13,8 @@ use std::task::{Poll, Wake, Waker};
 use arty_executor::{CycleOutcome, Executor};
 
 #[test]
-fn retained_waker_is_inert_after_shutdown() {
-    // SAFETY: The test drives the executor through a terminal shutdown cycle before dropping it.
-    let executor = unsafe { Executor::builder().build() };
+fn retained_waker_is_noop_after_shutdown() {
+    let executor = Executor::builder().build();
     let retained = Rc::new(RefCell::new(None));
     let task = executor.tasks().add(poll_fn({
         let retained = Rc::clone(&retained);
@@ -54,8 +53,7 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
         }
     }
 
-    // SAFETY: The test drives the executor through a terminal shutdown cycle before dropping it.
-    let executor = unsafe { Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build() };
+    let executor = Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build();
     let retained = Rc::new(RefCell::new(None));
     let task = executor.tasks().add(poll_fn({
         let retained = Rc::clone(&retained);

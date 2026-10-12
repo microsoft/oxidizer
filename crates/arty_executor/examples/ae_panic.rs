@@ -37,9 +37,7 @@ fn assert_failure_in_child() {
 
 #[expect(clippy::panic, reason = "the example demonstrates executor behavior when a task panics")]
 fn run_example() {
-    // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
-    // an execution cycle indicates the `Shutdown` outcome. We do.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     tasks.add(async move {

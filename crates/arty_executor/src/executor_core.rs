@@ -1,23 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(debug_assertions)]
-use std::backtrace::Backtrace;
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::{mem, task, thread};
+use std::time::Instant;
+use std::{mem, task};
 
-use events_once::RawLocalEventLake;
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use plurality::MultiPool;
 use tick::SimpleClock;
 
 use crate::wake::WakeShared;
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal};
+use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, JoinHandleStorage, Task, TaskRef, WakeSignal};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -25,7 +22,7 @@ use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, Shu
 ///   controls its operation and is responsible for its shutdown orchestration.
 /// * `TaskSet` is the public API used by anyone on the same thread to add tasks to the executor.
 ///   It can be freely cloned and shared, with its useful lifetime bounded by the lifetime of
-///   `Executor` (after `Executor` is dropped, a `TaskSet` will simply panic when accessed).
+///   `Executor` (after `Executor` is dropped, new submissions return a shutdown join error).
 #[derive(Debug)]
 pub(crate) struct ExecutorCore {
     reentrancy_safe: RefCell<ReentrancySafeState>,
@@ -50,26 +47,18 @@ struct ReentrancySafeState {
     /// This is a `VecDeque` because we do not require set characteristics and a deque is faster.
     new_tasks: VecDeque<TaskRef>,
 
-    /// Storage for the channels used to deliver results from tasks to join handles. We use pooled
-    /// event storage, which requires us to only drop this object when we identify that it is safe
-    /// to do so (via `.is_empty()`). This means that all join handles must be dropped first.
-    ///
-    /// Optimization?: we could potentially benefit from embedding the result channels directly into
-    /// the tasks to further reduce object sprawl (to have one object that contains all data related
-    /// to one task) and co-locate the data. A downside might be that tasks could remain non-inert
-    /// for longer with this model, causing executor cycle execution to become less efficient.
-    result_events: RawLocalEventLake,
-
     /// Storage for all the tasks registered with the executor. Once a task has been registered,
     /// the executor only sees it as a [`TypeErasedTask`][crate::TypeErasedTask], with only the
     /// task itself knowing the specific type of the future and the type of the result it produces.
     task_storage: MultiPool,
 
-    /// In shutdown mode (`Some`), all tasks are cancelled and retired. New tasks can no longer be
-    /// scheduled in this mode (a panic will occur). If the
-    /// deadline is reached without a successful shutdown, we terminate the process and try to report
-    /// the underlying reasons.
-    shutdown_deadline: Option<Instant>,
+    /// Storage for result channels. Managed endpoints retain detached pool slots independently,
+    /// allowing join handles to outlive the executor safely.
+    join_handles: JoinHandleStorage,
+
+    /// In shutdown mode, all tasks are cancelled and retired. New submissions produce a
+    /// shutdown join error without registering a task.
+    shutting_down: bool,
 }
 
 /// This portion of the executor state is exclusive to its internal use - even if something calls
@@ -117,11 +106,6 @@ struct SharedState {
     /// Queue, probe flag, owner notification, and independent wake-state pool shared by every
     /// task in this executor.
     wake: Arc<WakeShared>,
-
-    /// If the executor fails to shut down after this much time has passed from the start of the
-    /// shutdown process, we panic and report whatever debug information we have available.
-    shutdown_timeout: Duration,
-    shutdown_timeout_behavior: ShutdownTimeoutBehavior,
 }
 
 // We prefer to get wake notifications via the "awakened" queue. This may not always be possible
@@ -143,23 +127,14 @@ impl ExecutorCore {
     ///
     /// The `owner_waker` is used by the executor to wake up its owner when more work has
     /// arrived for the executor and calling `execute_cycle()` is desirable.
-    ///
-    /// # Safety
-    ///
-    /// The returned object must not be dropped until a call to
-    /// [`execute_cycle()`][Self::execute_cycle] returns [`CycleOutcome::Shutdown`].
     #[must_use]
-    pub(crate) unsafe fn new(
-        owner_waker: task::Waker,
-        shutdown_timeout: Duration,
-        shutdown_timeout_behavior: ShutdownTimeoutBehavior,
-    ) -> Self {
+    pub(crate) fn new(owner_waker: task::Waker) -> Self {
         Self {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
-                result_events: RawLocalEventLake::new(),
                 task_storage: MultiPool::new(),
-                shutdown_deadline: None,
+                join_handles: JoinHandleStorage::new(),
+                shutting_down: false,
             }),
             exclusive: RefCell::new(ExclusiveState {
                 active: VecDeque::new(),
@@ -174,8 +149,6 @@ impl ExecutorCore {
                     Arc::new(AtomicBool::new(false)),
                     owner_waker,
                 )),
-                shutdown_timeout,
-                shutdown_timeout_behavior,
             },
             _single_threaded: PhantomData,
         }
@@ -186,20 +159,14 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        let future = future.into_future();
-
         let mut state = self.reentrancy_safe.borrow_mut();
 
-        assert!(
-            state.shutdown_deadline.is_none(),
-            "Cannot add tasks when the executor is already shutting down"
-        );
+        if state.shutting_down {
+            return state.join_handles.disconnected();
+        }
 
-        // SAFETY: We guarantee that the senders/receivers are dropped before the result channels
-        // via a simple technique: we only allow the executor to be dropped when there are no more
-        // registered channels because the shutdown process will not complete until all channels
-        // have been dropped.
-        let (result_tx, result_rx) = unsafe { state.result_events.rent::<R>() };
+        let future = future.into_future();
+        let (result_tx, join_handle) = state.join_handles.rent::<R>();
 
         let task = state.task_storage.alloc_box(Task::new(future, result_tx));
         let task_ref = TaskRef::new(task);
@@ -214,14 +181,21 @@ impl ExecutorCore {
         // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
         let task = unsafe { task_ref.as_task() };
 
-        // SAFETY: We are required not to drop the task until it is inert. That is enforced by the
-        // shutdown logic - the executor will refuse to shut down as long as any task remains that
-        // is not yet in an inert state. We are also required to call this at most once - we do.
-        unsafe { task.initialize(wake_signal) };
+        task.initialize(wake_signal);
 
         state.new_tasks.push_back(task_ref);
 
-        JoinHandle::new(result_rx)
+        join_handle
+    }
+
+    #[must_use]
+    pub(crate) fn join_handle_storage(&self) -> JoinHandleStorage {
+        self.reentrancy_safe.borrow().join_handles.clone()
+    }
+
+    #[must_use]
+    pub(crate) fn has_tasks(&self) -> bool {
+        !self.reentrancy_safe.borrow().task_storage.is_empty()
     }
 
     #[must_use]
@@ -247,7 +221,7 @@ impl ExecutorCore {
         {
             let state_reentrant = self.reentrancy_safe.borrow();
 
-            self.drop_inert_tasks(&mut state_exclusive);
+            Self::drop_completed_tasks(&mut state_exclusive);
 
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
@@ -420,7 +394,7 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState) {
+    fn drop_completed_tasks(state_exclusive: &mut ExclusiveState) {
         let completed_before = state_exclusive.completed.len();
 
         // We drop all completed tasks after their completion/cancellation path has retired any
@@ -438,7 +412,7 @@ impl ExecutorCore {
 
     /// Whether an immediately performed `execute_cycle()` would do any useful work.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // It timeouts
+    #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
     fn has_work_to_do(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
         // Work for us means there is a task that we can poll (either because it is new
         // or because it has been awakened).
@@ -463,23 +437,17 @@ impl ExecutorCore {
         let mut state_reentrant = self.reentrancy_safe.borrow_mut();
 
         assert!(
-            state_reentrant.shutdown_deadline.is_none(),
+            !state_reentrant.shutting_down,
             "Cannot start shutdown process when it has already been started"
         );
+        state_reentrant.shutting_down = true;
 
-        let shutdown_start_time = state_exclusive.clock.instant();
-        state_reentrant.shutdown_deadline = Some(
-            shutdown_start_time
-                .checked_add(self.shared.shutdown_timeout)
-                .expect("shutdown timeout must be representable as an Instant after shutdown starts"),
-        );
+        Self::abort_tasks(&mut state_exclusive, &mut state_reentrant);
+    }
 
-        // We call `abort()` on every task being cancelled. This drops captured state and retires
-        // its pooled wake metadata, making retained external wakers inert without delaying task
-        // storage retirement.
-
+    fn abort_tasks(state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
         // Needed for split borrowing.
-        let state_exclusive_real: &mut ExclusiveState = &mut state_exclusive;
+        let state_exclusive_real: &mut ExclusiveState = state_exclusive;
 
         let new = &mut state_reentrant.new_tasks;
         let active = &mut state_exclusive_real.active;
@@ -492,6 +460,9 @@ impl ExecutorCore {
         });
 
         for task_ref in active.drain(..).chain(inactive.drain()).chain(new.drain(..)) {
+            // Record ownership before calling user drop code so unwinding cannot lose the task.
+            completed.push_back(task_ref);
+
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -501,8 +472,6 @@ impl ExecutorCore {
             let task = unsafe { task_ref.as_task() };
 
             task.abort();
-
-            completed.push_back(task_ref);
         }
     }
 
@@ -510,145 +479,33 @@ impl ExecutorCore {
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
     fn evaluate_shutdown_completion(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
-        let Some(shutdown_deadline) = state_reentrant.shutdown_deadline else {
+        if !state_reentrant.shutting_down {
             // We are not in a shutdown process.
             return false;
-        };
+        }
 
         // During shutdown, tasks can only exist in the "completed" state.
         debug_assert!(state_exclusive.active.is_empty());
         debug_assert!(state_reentrant.new_tasks.is_empty());
         debug_assert!(state_exclusive.inactive.is_empty());
 
-        // Shutdown is finished if all of the following are true:
-        // 1. All completed tasks (== all tasks because there can be
-        //   no tasks in other states during shutdown) have been removed from the
-        //   completed list after they became inert.
-        // 2. All registered result channels have been dropped.
-        if state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() {
-            return true;
-        }
-
-        if state_exclusive.clock.instant() >= shutdown_deadline {
-            self.shutdown_failed(state_exclusive, state_reentrant);
-        }
-
-        // Shutdown process is ongoing.
-        false
-    }
-
-    #[cfg_attr(coverage_nightly, coverage(off))] // The default behavior terminates the test process.
-    fn shutdown_failed(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
-        #[cfg(debug_assertions)]
-        self.report_shutdown_diagnostics(state_exclusive, state_reentrant);
-
-        // We write to standard error stream because the logging system is going to stop
-        // functioning shortly, so any data written to logs might not survive.
-        eprintln!(
-            "Executor shutdown timed out with {} tasks and {} JoinHandles having not completed cleanup. Use a debug build with RUST_BACKTRACE=1 to emit maximum diagnostic information.",
-            state_exclusive.completed.len(),
-            state_reentrant.result_events.len()
-        );
-
-        match self.shared.shutdown_timeout_behavior {
-            ShutdownTimeoutBehavior::TerminateProcess => std::process::abort(),
-            #[cfg(test)]
-            ShutdownTimeoutBehavior::Panic => panic!("executor shutdown timed out"),
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[cfg_attr(test, mutants::skip)] // Purely telemetry, nothing worth testing.
-    fn report_shutdown_diagnostics(&self, _state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
-        // There are different shutdown-blocking states possible with join handles:
-        // 1. The join handle's owner is not awaiting it, they just put it in their pocket and
-        //    never used it.
-        // 2. The join handle's owner started awaiting it and has been woken up but has not
-        //    picked up the result for some reason.
-        //
-        // In all cases, every result channel used by a join handle will have its result set
-        // at shutdown time because we disconnect every result channel when shutdown starts. That
-        // is a type of result and can be received by whoever owns the join handle, if they are
-        // actively awaiting the result, leading to successful cleanup.
-        //
-        // Join handles owned by other tasks in the same executor will never show up here because
-        // we drop all state of all tasks at shutdown time. Unless the task smuggled the join handle
-        // out into some non-local state, all such join handles will be dropped by now.
-        //
-        // In other words, it is OK to not await the join handles, and it is OK to stash it in some
-        // independent storage but not both at the same time - that will lead to shutdown timeout.
-
-        use std::num::NonZero;
-        state_reentrant.result_events.inspect_awaiters(report_blocking_join_handle);
-
-        // The above covers join handles that are awaited. We can use the total count to identify
-        // whether there are also some that are not being awaited at all. We do not generally expect
-        // a giant data set from here, so it should be obvious enough.
-        if let Some(blocking_join_handle_count) = NonZero::new(state_reentrant.result_events.len()) {
-            eprintln!("{blocking_join_handle_count} total JoinHandles blocking shutdown (awaited or not)");
-        }
+        state_exclusive.completed.is_empty() && state_reentrant.task_storage.is_empty()
     }
 }
 
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
-        let was_panicking = thread::panicking();
-        if was_panicking {
-            // Retain raw task owners while unwinding: releasing one may run an arbitrary task or
-            // future destructor that panics and would abort the process with a double panic.
-            return;
-        }
-
-        let shutdown_started = self.reentrancy_safe.get_mut().shutdown_deadline.is_some();
-
         let state_exclusive = self.exclusive.get_mut();
         let state_reentrant = self.reentrancy_safe.get_mut();
-        let shutdown_complete =
-            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty() && state_reentrant.task_storage.is_empty();
 
-        if !shutdown_complete {
-            for task_ref in state_reentrant.new_tasks.drain(..) {
-                // SAFETY: New tasks have been initialized but never polled, so their embedded
-                // waker has not escaped and no external reference can point into them. Each
-                // appears exactly once in `new_tasks`.
-                unsafe { task_ref.release() };
-            }
-
-            for task_ref in state_exclusive
-                .active
-                .drain(..)
-                .chain(state_exclusive.inactive.drain())
-                .chain(state_exclusive.completed.drain(..))
-            {
-                // SAFETY: Tasks in these collections have been initialized and remain alive.
-                let task = unsafe { task_ref.as_task() };
-                if task.is_inert() {
-                    // SAFETY: `is_inert` proves no external reference still needs the embedded
-                    // wake signal. Each task appears exactly once across these collections.
-                    unsafe { task_ref.release() };
-                }
-            }
+        if !state_reentrant.shutting_down {
+            state_reentrant.shutting_down = true;
+            Self::abort_tasks(state_exclusive, state_reentrant);
         }
 
-        assert!(
-            shutdown_started,
-            "Executor is being dropped without a shutdown process having been started. This is a programming error."
-        );
-
-        assert!(
-            shutdown_complete,
-            "Executor is being dropped before execute_cycle() returned CycleOutcome::Shutdown. This violates ExecutorBuilder::build() safety requirements."
-        );
+        Self::drop_completed_tasks(state_exclusive);
+        debug_assert!(state_reentrant.task_storage.is_empty());
     }
-}
-
-#[cfg(debug_assertions)]
-#[cfg_attr(test, mutants::skip)] // Purely telemetry, nothing worth testing.
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn report_blocking_join_handle(bt: &Backtrace) {
-    // We write to standard error stream because the logging system is going to stop
-    // functioning shortly, so any data written to logs might not survive.
-    eprintln!("JoinHandle blocking shutdown. Backtrace of where it was most recently awaited from: {bt}");
 }
 
 const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];

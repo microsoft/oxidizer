@@ -41,11 +41,16 @@ Cloned task wakers retain independently pooled wake metadata. Completing or canc
 retires that metadata before releasing task storage, so an escaped waker remains callable but
 becomes an inert no-op and cannot delay executor shutdown.
 
+Join handles similarly retain their pooled result storage independently. They may outlive the
+executor and return [`JoinError`][__link1] with [`JoinError::is_shutdown()`][__link2] after cancellation.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbgDrZK4cg32obonbv_V8cWDUb4c6WkcNN8nAbqlbxKZ6n4Y1hZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbsJrjzOzYTkYbcvldrTXpyqIbJc5HhrLw8Ugbi2eEKhIA0pJhZIKCaUpvaW5FcnJvcvaCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle
+ [__link1]: https://crates.io/crates/JoinError
+ [__link2]: `JoinError::is_shutdown()`

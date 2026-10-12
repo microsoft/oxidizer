@@ -15,10 +15,9 @@ mock! {
     #[derive(Debug)]
     pub TypeErasedTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()>;
-        fn is_inert(&self) -> bool;
         fn consume_awakened(&self) -> bool;
         fn abort(self: Pin<&Self>);
-        unsafe fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
+        fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
         // Intentionally missing: inspect_waker_backtraces
     }
 }
@@ -26,10 +25,6 @@ mock! {
 impl TypeErasedTask for MockTypeErasedTask {
     fn poll(self: Pin<&Self>) -> task::Poll<()> {
         self.poll()
-    }
-
-    fn is_inert(&self) -> bool {
-        self.is_inert()
     }
 
     fn consume_awakened(&self) -> bool {
@@ -42,11 +37,8 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.abort();
     }
 
-    unsafe fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
-        // SAFETY: Forwarding safety guarantees from trait.
-        unsafe {
-            self.initialize(wake_signal);
-        }
+    fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
+        self.initialize(wake_signal);
     }
 
     #[cfg(all(debug_assertions, test))]

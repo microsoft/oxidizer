@@ -3,7 +3,7 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinHandle};
+use crate::{ExecutorCore, JoinHandle, JoinHandleStorage};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -16,33 +16,36 @@ pub struct TaskSet {
     // We only keep a weak reference, so even if the owner of this type does something odd, we do
     // not extend the lifetime of the `Executor`, which is governed by the `Executor` owner.
     core: Weak<ExecutorCore>,
+
+    // Retained independently so submissions after executor drop can still produce a valid
+    // disconnected join handle.
+    join_handles: JoinHandleStorage,
 }
 
 impl TaskSet {
     pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
-        Self { core: Rc::downgrade(core) }
+        Self {
+            core: Rc::downgrade(core),
+            join_handles: core.join_handle_storage(),
+        }
     }
 
     /// Registers a future to be processed by the executor as a new task.
     ///
     /// The future will be polled until it completes, after which it will be dropped, unless the
     /// executor is commanded to shut down, in which case the future may be dropped before it
-    /// completes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the executor is already shutting down. This method will never panic when
-    /// called from inside an existing task on the same executor (the task is running,
-    /// therefore the executor is not shutting down).
+    /// completes. A submission after shutdown returns a join handle that resolves to
+    /// [`JoinError`](crate::JoinError).
     pub fn add<F, R>(&self, future: F) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        self.core
-            .upgrade()
-            .expect("task set is disconnected - executor has been dropped")
-            .add_task(future)
+        let Some(core) = self.core.upgrade() else {
+            return self.join_handles.disconnected();
+        };
+
+        core.add_task(future)
     }
 }
 

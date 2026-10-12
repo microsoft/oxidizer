@@ -38,41 +38,20 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// the [`CycleOutcome`] returned from each call.
 ///
 /// The owner may, at any point (regardless of what any registered tasks are doing), initiate the
-/// shutdown process and drop the executor after the shutdown process has completed. Any active
-/// tasks are aborted and their futures dropped when shutdown starts. Any remaining [`TaskSet`]s
-/// become disconnected and will panic if an attempt is made to use them after shutdown starts.
+/// shutdown process. Any active tasks are aborted and their futures dropped when shutdown starts.
+/// Submissions through remaining [`TaskSet`]s resolve to [`JoinError`](crate::JoinError).
 ///
 /// # Shutdown process
 ///
-/// The executor must be gracefully shut down by the caller before it can be dropped:
+/// Graceful shutdown lets the owner observe when cancellation is complete:
 ///
 /// 1. Call [`begin_shutdown()`][Self::begin_shutdown] to start the shutdown process.
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
-/// 3. Drop the executor.
+/// 3. Drop the executor when convenient.
 ///
-/// The executor returns [`CycleOutcome::Shutdown`] after task storage is retired and all pooled
-/// result channels are no longer borrowed (for example, all join handles have been dropped).
-/// Retained task wakers do not delay shutdown: they keep only independently pooled metadata and
-/// become inert when their task completes or is cancelled.
-///
-/// ## Troubleshooting shutdown failure
-///
-/// The executor will terminate the process if the shutdown process times out. This is typically
-/// a sign of a resource leak that prevented resource manager finalization.
-///
-/// Potential causes include:
-///
-/// * Some future awaited by a task failed to cancel an ongoing `await` operation when the future
-///   was dropped. This suggests a resource management defect in the future.
-/// * A [`JoinHandle`][1] remains alive somewhere with an independent lifetime (e.g. in
-///   a `thread_local!` variable). This suggests a resource management defect in whatever logic
-///   placed the [`JoinHandle`][1] there.
-///
-/// If the app is a debug build (`debug_assertions` is set) and `RUST_BACKTRACE=1` is defined,
-/// additional diagnostic information will be emitted to standard error stream when the
-/// timeout occurs, to help pinpoint what executor resources have not been cleaned up.
-///
-/// [1]: crate::JoinHandle
+/// Dropping the executor without this sequence is also safe and synchronously cancels remaining
+/// tasks. Retained join handles and task wakers own independent pooled metadata, so they may
+/// outlive the executor and report shutdown or become inert respectively.
 #[derive(Debug)]
 pub struct Executor {
     core: Rc<ExecutorCore>,
@@ -97,6 +76,15 @@ impl Executor {
         TaskSet::new(&self.core)
     }
 
+    /// Returns whether the executor still owns any registered tasks.
+    ///
+    /// Completed tasks stop counting during the cycle that observes their completion. Join handles
+    /// and retained wakers do not count as tasks and may remain alive after this returns `false`.
+    #[must_use]
+    pub fn has_tasks(&self) -> bool {
+        self.core.has_tasks()
+    }
+
     /// Executes one processing cycle to progress registered tasks.
     ///
     /// More work may remain after a cycle completes. The return value will indicate whether the
@@ -117,23 +105,8 @@ impl Executor {
 
     /// Starts the executor shutdown process.
     ///
-    /// An executor shutdown may complete instantaneously or occur over many seconds, as it depends
-    /// on the release of shared resources that are not under the control of the executor. For
-    /// speedy shutdown, ensure that nothing is awaiting on the join handles of tasks registered
-    /// with the executor.
-    ///
-    /// The caller must keep regularly commanding executor cycle execution via
-    /// [`execute_cycle()`][1] until they receive [`CycleOutcome::Shutdown`], at which point
-    /// the executor is ready to be dropped. Dropping the executor before that point
-    /// is a programming error. This is a safety requirement enforced by
-    /// [`ExecutorBuilder::build()`][2].
-    ///
-    /// If the shutdown process takes too long, the executor will declare a timeout and terminate
-    /// the process on a call to [`execute_cycle()`][1]. This is a sign of a resource leak.
-    ///
-    /// If this happens in a debug build and `RUST_BACKTRACE=1` is defined in environment variables,
-    /// additional debug information is emitted to the standard error stream to help
-    /// you track down the leak.
+    /// The next [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`] after releasing cancelled
+    /// task storage. Retained join handles resolve independently and do not delay shutdown.
     ///
     /// This function is not safe to call in a reentrant manner - only the owner may
     /// call it in an exclusive context.
@@ -144,7 +117,6 @@ impl Executor {
     /// from within [`execute_cycle()`][1]).
     ///
     /// [1]: Self::execute_cycle
-    /// [2]: ExecutorBuilder::build
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     pub fn begin_shutdown(&self) {
         self.core.begin_shutdown();
@@ -159,14 +131,13 @@ mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
-    use std::time::Duration;
 
     use static_assertions::assert_not_impl_any;
-    use testing_aids::{YieldFuture, assert_panic};
+    use testing_aids::YieldFuture;
 
     use super::*;
+    use crate::AWAKENED_CAPACITY;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
-    use crate::{AWAKENED_CAPACITY, ShutdownTimeoutBehavior};
 
     #[test]
     fn smoke_test() {
@@ -206,7 +177,7 @@ mod tests {
         let mut cx = Context::from_waker(Waker::noop());
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
-        assert!(matches!(result, Poll::Ready(42)));
+        assert!(matches!(result, Poll::Ready(Ok(42))));
     }
 
     #[test]
@@ -248,8 +219,8 @@ mod tests {
         let result1 = Pin::new(&mut join_handle1).poll(&mut cx);
         let result2 = Pin::new(&mut join_handle2).poll(&mut cx);
 
-        assert!(matches!(result1, Poll::Ready(42)));
-        assert!(matches!(result2, Poll::Ready(43)));
+        assert!(matches!(result1, Poll::Ready(Ok(42))));
+        assert!(matches!(result2, Poll::Ready(Ok(43))));
     }
 
     #[test]
@@ -337,7 +308,7 @@ mod tests {
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
         // The task must be completed.
-        assert!(matches!(result, Poll::Ready(())));
+        assert!(matches!(result, Poll::Ready(Ok(()))));
     }
 
     #[test]
@@ -383,7 +354,7 @@ mod tests {
         // Every task should now have completed.
         for mut join_handle in join_handles {
             let result = Pin::new(&mut join_handle).poll(&mut cx);
-            assert!(matches!(result, Poll::Ready(())));
+            assert!(matches!(result, Poll::Ready(Ok(()))));
         }
 
         assert!(matches!(Pin::new(&mut inactive_join_handle).poll(&mut cx), Poll::Pending));
@@ -445,9 +416,7 @@ mod tests {
 
         let drop_signal = Rc::new(Cell::new(false));
 
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
@@ -465,9 +434,7 @@ mod tests {
 
     #[test]
     fn shutdown_without_tasks_is_immediate() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
 
         executor.begin_shutdown();
 
@@ -475,19 +442,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "shutdown timeout must be representable")]
-    fn unrepresentable_shutdown_timeout_panics_when_shutdown_begins() {
-        // SAFETY: The configured timeout intentionally prevents shutdown from beginning.
-        let executor = unsafe { Executor::builder().shutdown_timeout(Duration::MAX).build() };
-
-        executor.begin_shutdown();
-    }
-
-    #[test]
     fn shutdown_with_unreferenced_tasks_is_immediate() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         // We add the task but do not keep any references to its join handle.
@@ -500,68 +456,43 @@ mod tests {
     }
 
     #[test]
-    fn join_handle_delays_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+    fn join_handle_reports_shutdown_without_delaying_shutdown() {
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
-        // We add the task and keep a reference to its join handle. This will keep the executor
-        // alive until we drop the join handle.
-        let join_handle = tasks.add(TestSubjectFuture::new());
-
-        executor.begin_shutdown();
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        drop(join_handle);
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    fn join_handle_poll_panics_during_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
-        let tasks = executor.tasks();
-
-        // We add the task and keep a reference to its join handle. This will keep the executor
-        // alive until we drop the join handle. The join handle itself will now start to panic,
-        // however, as it is impossible for the task to progress to completion.
         let mut join_handle = tasks.add(TestSubjectFuture::new());
 
         executor.begin_shutdown();
 
-        let mut cx = Context::from_waker(Waker::noop());
-
-        assert_panic!(Pin::new(&mut join_handle).poll(&mut cx));
-
-        // This returns Shutdown because a poll that panics still consumes the join handle and
-        // releases resources (it is just a different form of completion, think of this panic as
-        // just being a poll().unwrap()).
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        let mut cx = Context::from_waker(Waker::noop());
+        let result = Pin::new(&mut join_handle).poll(&mut cx);
+
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
-    fn panic_if_enqueue_after_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+    fn enqueue_after_shutdown_reports_shutdown() {
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         executor.begin_shutdown();
 
-        let future = async { 42 };
-        assert_panic!(tasks.add(future));
+        let mut handle = tasks.add(async { 42 });
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
-    fn panic_if_dirty_drop() {
-        // SAFETY: We intentionally fail to uphold the safety promises and skip graceful shutdown.
-        let executor = unsafe { Executor::builder().build() };
+    fn direct_drop_cancels_tasks_safely() {
+        let executor = Executor::builder().build();
+        let mut handle = executor.tasks().add(std::future::pending::<()>());
 
-        assert_panic!(drop(executor));
+        drop(executor);
+
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
@@ -713,9 +644,8 @@ mod tests {
     }
 
     #[test]
-    fn completed_task_waker_is_inert_after_executor_shutdown() {
-        // SAFETY: Shutdown reaches its terminal cycle before the executor is dropped.
-        let executor = unsafe { Executor::builder().build() };
+    fn completed_task_waker_is_noop_after_executor_shutdown() {
+        let executor = Executor::builder().build();
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
         executor.tasks().add(poll_fn({
@@ -787,44 +717,12 @@ mod tests {
 
         let outcome = executor.execute_cycle();
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(())));
-    }
-
-    #[test]
-    // The difficulty here is that while we could easily assert_panic!() the timeout, this test
-    // may also panic for other reasons after the timeout because the timeout is essentially a
-    // declaration of failure to clean up - the dirty state is invalid and may result in further
-    // panics or even memory safety violations in the test runner. This may break in the future,
-    // so be ready to adjust or remove as needed when additional complexity makes it impractical.
-    #[should_panic]
-    fn shutdown_times_out_with_leaked_join_handle() {
-        // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
-        let executor = unsafe {
-            Executor::builder()
-                // No delay allowed - shutdown must either succeed or fail immediately.
-                .shutdown_timeout(Duration::ZERO)
-                // Override the default behavior for testing purposes.
-                .shutdown_timeout_behavior(ShutdownTimeoutBehavior::Panic)
-                .build()
-        };
-        let tasks = executor.tasks();
-
-        let leaked_join_handle = tasks.add(async {});
-
-        executor.begin_shutdown();
-
-        // We expect this to panic.
-        _ = executor.execute_cycle();
-
-        // We only drop it after shutdown completes, which is a leak because shutdown
-        // will never complete like this.
-        drop(leaked_join_handle);
+        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(Ok(()))));
     }
 
     #[test]
     fn retained_waiter_does_not_delay_shutdown() {
-        // SAFETY: The test drives the executor through a terminal shutdown cycle.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let retained_waiter = Rc::new(RefCell::new(None));

@@ -224,9 +224,9 @@ impl WakeSignal {
     ///
     /// Before retirement this requires no owned wakers. Retirement releases the task's owner,
     /// after which independent wakers retain only pooled state and this returns `true`.
-    #[cfg_attr(test, mutants::skip)] // Mutation causes infinite loops as executor will never shut down.
+    #[cfg_attr(test, mutants::skip)] // White-box diagnostic used only by focused ownership tests.
     #[cfg(test)]
-    pub(crate) fn is_inert(&self) -> bool {
+    pub(crate) fn can_drop_task_storage(&self) -> bool {
         // We use Acquire ordering to ensure we see all writes to the waker before we declare it
         // inert. Generally, we expect wakers to already be inert by the time their inertness is
         // queried, because this query will happen when a task has completed and its future has
@@ -627,7 +627,7 @@ mod tests {
             fake_task_ref
         ));
 
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
         }
 
         assert_eq!(signal.external_waker_count(), 0);
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
     }
 
     #[test]
@@ -844,7 +844,7 @@ mod tests {
         // WakeSignal is only meant to be consumed via shared references.
         let signal = signal.as_ref();
 
-        // SAFETY: Must not be dropped until `is_inert()` returns true.
+        // SAFETY: The signal remains alive through the end of the test.
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
@@ -881,7 +881,7 @@ mod tests {
         // WakeSignal is only meant to be consumed via shared references.
         let signal = signal.as_ref();
 
-        // SAFETY: Must not be dropped until `is_inert()` returns true.
+        // SAFETY: The signal remains alive through the end of the test.
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
@@ -919,7 +919,7 @@ mod tests {
         // WakeSignal is only meant to be consumed via shared references.
         let signal = signal.as_ref();
 
-        // SAFETY: Must not be dropped until `is_inert()` returns true.
+        // SAFETY: The signal remains alive through the end of the test.
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
@@ -934,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn is_inert_when_expected() {
+    fn task_storage_drop_readiness_tracks_waker_ownership() {
         // SAFETY: We can use it as a placeholder value but not actually dereference it.
         // This is fine because `WakeSignal` only uses the `TaskRef`, not the task behind it.
         let fake_task_ref = unsafe { TaskRef::fake() };
@@ -952,17 +952,17 @@ mod tests {
         // WakeSignal is only meant to be consumed via shared references.
         let signal = signal.as_ref();
 
-        // SAFETY: Must not be dropped until `is_inert()` returns true.
+        // SAFETY: The signal remains alive through the end of the test.
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
         // A waker now exists, so it cannot be inert.
-        assert!(!signal.is_inert());
+        assert!(!signal.can_drop_task_storage());
 
         let waker_clone = waker.clone();
 
         // A second one, just for extra measure.
-        assert!(!signal.is_inert());
+        assert!(!signal.can_drop_task_storage());
         assert_eq!(signal.external_waker_count(), 2);
 
         // Drop the wakers and we are inert again.
@@ -970,21 +970,21 @@ mod tests {
         drop(waker_clone);
 
         assert_eq!(signal.external_waker_count(), 0);
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
 
         // And back to having wakers!
 
-        // SAFETY: Must not be dropped until `is_inert()` returns true.
+        // SAFETY: The signal remains alive through the end of the test.
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
         // A waker now exists, so it cannot be inert.
-        assert!(!signal.is_inert());
+        assert!(!signal.can_drop_task_storage());
 
         let waker_clone = waker.clone();
 
         // A second one, just for extra measure.
-        assert!(!signal.is_inert());
+        assert!(!signal.can_drop_task_storage());
         assert_eq!(signal.external_waker_count(), 2);
 
         // Drop the wakers and we are inert again.
@@ -992,7 +992,7 @@ mod tests {
         drop(waker_clone);
 
         assert_eq!(signal.external_waker_count(), 0);
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
     }
 
     #[test]
@@ -1017,7 +1017,7 @@ mod tests {
 
         assert_eq!(signal.external_waker_count(), 0);
         assert!(!awakened_queue.lock().unwrap().is_empty());
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
     }
 
     #[test]
@@ -1046,6 +1046,6 @@ mod tests {
         testing_aids::assert_panic!(waker.wake());
 
         assert_eq!(signal.external_waker_count(), 0);
-        assert!(signal.is_inert());
+        assert!(signal.can_drop_task_storage());
     }
 }

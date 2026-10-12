@@ -45,15 +45,15 @@ No duplicate work item is required.
 | P11 | **Keep telemetry non-panicking contract.** Catch-and-continue could report incomplete startup or shutdown as successful. Existing public observability tests cover supported processors; a panicking processor remains contract violation. |
 | P12 | **Confirmed separate Tick integrity work.** Custom timer wakers still run through Tick's timer path; lock-bound callback redesign is not hidden as an Arty task failure in this change. The final-timer integration test preserves worker-terminal reporting. |
 | P13 | **Test-util only; deferred transactional Tick change.** Saturating virtual time would silently change the requested value. |
-| P14 | **Keep raw executor admission invariant.** Post-shutdown `TaskSet::add` is raw API misuse, not an admitted task failure. |
+| P14 | **Implemented typed rejection.** Post-shutdown and disconnected `TaskSet::add` return a `JoinHandle` that resolves to shutdown-only `arty_executor::JoinError`. |
 | P15 | **Keep raw executor non-reentrancy invariants.** Recovering from interrupted `RefCell` state without rollback proof would be unsafe. |
-| P16 | **Keep raw join disconnect invariant.** The bare raw join cannot synthesize its promised `R`; a fallible redesign would be breaking. |
-| P17 | **Deferred pre-shutdown timeout validation.** Returning after entering unsafe teardown state is not safe; validation must precede the transition. |
-| P18 | **Keep terminal abort.** Shutdown timeout with live referenced executor storage must not free that storage. Retained task wakers no longer create this condition. |
+| P16 | **Implemented fallible raw joins.** `arty_executor::JoinHandle<R>` now returns `Result<R, JoinError>` and reports shutdown without adding panic recovery to the raw executor. |
+| P17 | **Removed obsolete timeout configuration.** Executor construction and drop are safe; shutdown no longer enters a state that waits on externally retained result storage. |
+| P18 | **Removed the unsafe teardown condition.** Join handles retain independently owned pooled result slots, so they may outlive the executor and cannot force a shutdown timeout. Direct executor drop synchronously cancels and releases remaining tasks. |
 | P19 | **Keep terminal abort.** Repeated panics while disposing user payloads cannot become a success-shaped fallback. |
 | P20 | **Keep overflow abort.** Pooled independent waker counts retain the conservative no-wrap rule. |
 | P21 | **Keep worker-terminal error.** Final timer callback panic after task retirement is reported by `Runtime::stop`; the retained-waker variant is now enabled. |
-| P22 | **Keep caller panic for raw `IntoFuture` conversion.** Conversion occurs before task admission; catching it cannot honestly produce an admitted task result. |
+| P22 | **Keep caller panic for admitted raw `IntoFuture` conversion.** Rejected submissions do not invoke conversion; accepted submissions still treat a panicking conversion as caller code outside the task panic boundary. |
 
 The saturated blocking-pool dependency described by #800 remains a **deadlock**
 risk, not a panic. This change does not resurrect an unbounded strong-parent

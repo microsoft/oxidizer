@@ -32,6 +32,9 @@
 //! Cloned task wakers retain independently pooled wake metadata. Completing or canceling a task
 //! retires that metadata before releasing task storage, so an escaped waker remains callable but
 //! becomes an inert no-op and cannot delay executor shutdown.
+//!
+//! Join handles similarly retain their pooled result storage independently. They may outlive the
+//! executor and return [`JoinError`] with [`JoinError::is_shutdown()`] after cancellation.
 
 mod builder;
 mod constants;
@@ -40,7 +43,6 @@ mod executor;
 mod executor_core;
 mod join_handle;
 mod ptr_hash;
-mod shutdown_timeout;
 mod task;
 mod task_ref;
 mod task_set;
@@ -53,7 +55,6 @@ pub use executor::*;
 pub(crate) use executor_core::*;
 pub use join_handle::*;
 pub(crate) use ptr_hash::*;
-pub(crate) use shutdown_timeout::*;
 pub(crate) use task::*;
 pub(crate) use task_ref::*;
 pub use task_set::*;

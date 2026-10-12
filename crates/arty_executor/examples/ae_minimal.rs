@@ -10,9 +10,7 @@ use std::thread;
 use arty_executor::{CycleOutcome, Executor};
 
 fn main() {
-    // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
-    // an execution cycle indicates the `Shutdown` outcome. We do.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     // When our single task is done, it will set this signal to indicate that the app can exit.

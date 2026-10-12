@@ -35,7 +35,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::testing::{AWAKENED_CAPACITY, WakerStateAllocationProbe, new_guarded_executor};
-use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskSet};
+use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskSet};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use scopeguard::{Always, ScopeGuard};
@@ -110,14 +110,14 @@ fn executor_state() -> State {
     }
 }
 
-fn spawn_complete_once(state: &State) -> Poll<()> {
+fn spawn_complete_once(state: &State) -> Poll<Result<(), JoinError>> {
     // Stack-pin to avoid allocator noise on the measured path.
     let mut handle = pin!(state.tasks.add(async {}));
     black_box(state.executor.execute_cycle());
     handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
 }
 
-fn yield_once(state: &State) -> Poll<()> {
+fn yield_once(state: &State) -> Poll<Result<(), JoinError>> {
     // Stack-pin to avoid allocator noise on the measured path.
     let mut handle = pin!(state.tasks.add(YieldFuture::default()));
     black_box(state.executor.execute_cycle());
@@ -128,7 +128,7 @@ fn yield_once(state: &State) -> Poll<()> {
 fn warmed_state() -> State {
     let state = executor_state();
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_complete_once(&state), Poll::Ready(()));
+        assert_eq!(spawn_complete_once(&state), Poll::Ready(Ok(())));
     }
     assert_eq!(state.executor.execute_cycle(), CycleOutcome::Suspend);
     state
@@ -137,7 +137,7 @@ fn warmed_state() -> State {
 fn warmed_yield_state() -> State {
     let state = executor_state();
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(yield_once(&state), Poll::Ready(()));
+        assert_eq!(yield_once(&state), Poll::Ready(Ok(())));
     }
     assert_eq!(state.executor.execute_cycle(), CycleOutcome::Suspend);
     state
@@ -268,8 +268,7 @@ fn retired_waker_state() -> State {
 }
 
 fn shutdown_pending_state() -> ShutdownState {
-    // SAFETY: `ShutdownState::drop` finishes shutdown unless the measured operation already did.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let handle = executor.tasks().add(pending::<()>());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     ShutdownState {
@@ -302,7 +301,7 @@ fn decomposed_cycle_ready(state: &State) -> CycleOutcome {
 
 #[metabench::benchmark(DECOMPOSED_POLL_COMPLETED, DECOMPOSED, "poll_completed")]
 #[bench::ready(&mut completed_state())]
-fn decomposed_poll_completed(state: &mut State) -> Poll<()> {
+fn decomposed_poll_completed(state: &mut State) -> Poll<Result<(), JoinError>> {
     Pin::new(&mut state.handles[0]).poll(&mut Context::from_waker(Waker::noop()))
 }
 
@@ -408,13 +407,13 @@ fn criterion_slow_benchmarks(criterion: &mut Criterion) {
 
 #[metabench::benchmark(BASIC_SPAWN_AND_COMPLETE_ONE, BASIC, "spawn_and_complete_one")]
 #[bench::warm(&warmed_state())]
-fn basic_spawn_and_complete_one(state: &State) -> Poll<()> {
+fn basic_spawn_and_complete_one(state: &State) -> Poll<Result<(), JoinError>> {
     spawn_complete_once(state)
 }
 
 #[metabench::benchmark(BASIC_YIELD_ONE, BASIC, "yield_one")]
 #[bench::warm(&warmed_yield_state())]
-fn basic_yield_one(state: &State) -> Poll<()> {
+fn basic_yield_one(state: &State) -> Poll<Result<(), JoinError>> {
     yield_once(state)
 }
 
