@@ -237,18 +237,15 @@ impl AsyncWorkerStartInfo {
             }
         };
 
-        // SAFETY: We are required to call `.run()` before dropping it, which we do.
-        let worker: AsyncWorker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                thread_state_constructor,
-                Arc::clone(&blocking_worker),
-                clock,
-                signal,
-                shutdown_signal,
-                success_tx,
-            )
-        };
+        let worker: AsyncWorker = AsyncWorker::new(
+            command_rx,
+            thread_state_constructor,
+            Arc::clone(&blocking_worker),
+            clock,
+            signal,
+            shutdown_signal,
+            success_tx,
+        );
 
         emit!(
             worker_sink,

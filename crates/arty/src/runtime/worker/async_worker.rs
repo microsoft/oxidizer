@@ -103,13 +103,7 @@ impl<TS> AsyncWorker<TS>
 where
     TS: Clone + 'static,
 {
-    /// # Safety
-    ///
-    /// You must call `run()` before dropping the instance to ensure that the proper shutdown
-    /// process is executed. Dropping the worker without first going through `run()` and the proper
-    /// shutdown process aborts the process rather than releasing executor storage that may still
-    /// be referenced by an escaped task waker.
-    pub(in crate::runtime) unsafe fn new<TSFF, TSF>(
+    pub(in crate::runtime) fn new<TSFF, TSF>(
         command_rx: channel::Receiver<AsyncWorkerCommand<TS>>,
         thread_state_constructor: TSFF,
         blocking_worker: Arc<BlockingWorker>,
@@ -172,11 +166,13 @@ where
     fn execute_step(&mut self) -> ControlFlow<()> {
         let batch_exhausted = self.process_commands();
 
-        let cycle_outcome = self
-            .executor
-            .as_ref()
-            .expect("executor is not dropped until execute phase is finished")
-            .execute_cycle();
+        let Some(executor) = self.executor.as_ref() else {
+            // Executor drop cancels tasks before final timer callbacks can observe their state.
+            _ = self.clock_driver.advance_timers(Instant::now());
+            return ControlFlow::Break(());
+        };
+
+        let cycle_outcome = executor.execute_cycle();
 
         if matches!(cycle_outcome, CycleOutcome::Shutdown) {
             // No task wakers remain; retire their storage before the final timer callbacks.
@@ -191,8 +187,8 @@ where
             // A notification arriving before this wait is retained by WorkerSignal.
             CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
             CycleOutcome::Continue | CycleOutcome::Suspend => {}
-            // This is the only way to exit the loop, guaranteeing safe shutdown of the
-            // executor. The storage has already been retired before timer callbacks run.
+            // Explicit low-level executor shutdown is not used by Arty, but preserve the terminal
+            // outcome if an alternate owner initiates it.
             CycleOutcome::Shutdown => return ControlFlow::Break(()),
         }
 
@@ -263,13 +259,8 @@ where
 
         self.blocking_worker.shutdown();
 
-        // The executor can now start its own shutdown process. For us this does not change
-        // anything - we are still required to keep executing executor cycles until it decides to
-        // stop. This merely starts the executor shutdown.
-        self.executor
-            .as_mut()
-            .expect("executor is not dropped until execute phase is finished")
-            .begin_shutdown();
+        // Safe executor drop synchronously cancels and releases all remaining task storage.
+        self.executor = None;
     }
 }
 
@@ -277,13 +268,9 @@ impl<TS> Drop for AsyncWorker<TS>
 where
     TS: Clone + 'static,
 {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Only enforces the executor shutdown invariant.
-    #[cfg_attr(test, mutants::skip)] // Safety on drop is validated on multiple levels, so might panic even if this is mutated away.
     fn drop(&mut self) {
         if self.executor.is_some() {
-            // Unwinding cannot release storage still referenced by escaped task wakers.
-            // Timer callbacks can poison clock state, so restarting shutdown is not safe here.
-            std::process::abort();
+            self.begin_shutdown();
         }
     }
 }
@@ -368,28 +355,25 @@ mod tests {
             let task_observer = Arc::clone(&task_done);
             let timer_observer = Arc::clone(&timer_done);
 
-            // SAFETY: finish() uses bounded steps to drive the worker through executor shutdown.
-            let worker = unsafe {
-                AsyncWorker::new(
-                    command_rx,
-                    async move |tasks, clock| {
-                        drop(tasks.add(async move {
-                            task_ready.await.unwrap();
-                            task_observer.store(true, Ordering::Relaxed);
-                        }));
-                        drop(tasks.add(async move {
-                            clock.delay(Duration::from_secs(1)).await;
-                            timer_observer.store(true, Ordering::Relaxed);
-                        }));
-                        initialized.await.unwrap();
-                    },
-                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                    control.clone().into(),
-                    Arc::clone(&signal),
-                    Arc::clone(&shutdown_signal),
-                    ready_tx,
-                )
-            };
+            let worker = AsyncWorker::new(
+                command_rx,
+                async move |tasks, clock| {
+                    drop(tasks.add(async move {
+                        task_ready.await.unwrap();
+                        task_observer.store(true, Ordering::Relaxed);
+                    }));
+                    drop(tasks.add(async move {
+                        clock.delay(Duration::from_secs(1)).await;
+                        timer_observer.store(true, Ordering::Relaxed);
+                    }));
+                    initialized.await.unwrap();
+                },
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                control.clone().into(),
+                Arc::clone(&signal),
+                Arc::clone(&shutdown_signal),
+                ready_tx,
+            );
             let mut scenario = Self {
                 command_tx,
                 initialize: Some(initialize),
@@ -571,28 +555,25 @@ mod tests {
         let timer_observer = Arc::clone(&timer_done);
         let shutdown = command_tx.clone();
 
-        // SAFETY: run drives this worker to complete shutdown before it is dropped.
-        let worker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                async move |tasks, clock| {
-                    drop(tasks.add(async move {
-                        progress.await.unwrap();
-                        task_observer.store(true, Ordering::Relaxed);
-                    }));
-                    drop(tasks.add(async move {
-                        clock.delay(Duration::from_secs(1)).await;
-                        timer_observer.store(true, Ordering::Relaxed);
-                        shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
-                    }));
-                },
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                control.clone().into(),
-                Arc::new(WorkerSignal::default()),
-                Arc::new(AtomicBool::new(false)),
-                ready_tx,
-            )
-        };
+        let worker = AsyncWorker::new(
+            command_rx,
+            async move |tasks, clock| {
+                drop(tasks.add(async move {
+                    progress.await.unwrap();
+                    task_observer.store(true, Ordering::Relaxed);
+                }));
+                drop(tasks.add(async move {
+                    clock.delay(Duration::from_secs(1)).await;
+                    timer_observer.store(true, Ordering::Relaxed);
+                    shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
+                }));
+            },
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            control.clone().into(),
+            Arc::new(WorkerSignal::default()),
+            Arc::new(AtomicBool::new(false)),
+            ready_tx,
+        );
         let executor = worker.executor.as_ref().unwrap();
         let _ = executor.execute_cycle();
         ready_rx.recv().unwrap();
@@ -618,18 +599,15 @@ mod tests {
         let (ready_tx, ready_rx) = channel::unbounded();
         let signal = Arc::new(WorkerSignal::default());
 
-        // SAFETY: the shutdown command below drives this worker to completion before it is dropped.
-        let mut worker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                async |_, _| (),
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                InactiveClock::default(),
-                Arc::clone(&signal),
-                Arc::new(AtomicBool::new(false)),
-                ready_tx,
-            )
-        };
+        let mut worker = AsyncWorker::new(
+            command_rx,
+            async |_, _| (),
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::clone(&signal),
+            Arc::new(AtomicBool::new(false)),
+            ready_tx,
+        );
         assert!(worker.execute_step().is_continue());
         ready_rx.recv().unwrap();
 
@@ -656,7 +634,7 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
-    fn final_timer_panic_after_completed_shutdown_does_not_trigger_the_lifecycle_guard() {
+    fn final_timer_panic_occurs_after_executor_drop() {
         struct PanicWake;
 
         impl Wake for PanicWake {
@@ -668,18 +646,15 @@ mod tests {
         let (command_tx, command_rx) = channel::unbounded();
         let (ready_tx, ready_rx) = channel::unbounded();
         let (clock_tx, clock_rx) = channel::unbounded();
-        // SAFETY: run reaches Shutdown and retires the executor before the final timer callback.
-        let worker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                async move |_, clock| clock_tx.send(clock).unwrap(),
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                InactiveClock::default(),
-                Arc::new(WorkerSignal::default()),
-                Arc::new(AtomicBool::new(false)),
-                ready_tx,
-            )
-        };
+        let worker = AsyncWorker::new(
+            command_rx,
+            async move |_, clock| clock_tx.send(clock).unwrap(),
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+            Arc::new(AtomicBool::new(false)),
+            ready_tx,
+        );
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
         ready_rx.recv().unwrap();
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
@@ -707,19 +682,15 @@ mod tests {
 
                 let signal = Arc::new(WorkerSignal::default());
 
-                // SAFETY: We are required to call `run()` and must not drop the worker before that.
-                // Okay. We are calling `run()` right now, so we are all good on that front.
-                let worker = unsafe {
-                    AsyncWorker::new(
-                        command_rx,
-                        async move |tasks, _| TestTaskContext::new(tasks),
-                        Arc::clone(&blocking_worker),
-                        InactiveClock::default(),
-                        signal,
-                        Arc::new(AtomicBool::new(false)),
-                        channel::unbounded().0,
-                    )
-                };
+                let worker = AsyncWorker::new(
+                    command_rx,
+                    async move |tasks, _| TestTaskContext::new(tasks),
+                    Arc::clone(&blocking_worker),
+                    InactiveClock::default(),
+                    signal,
+                    Arc::new(AtomicBool::new(false)),
+                    channel::unbounded().0,
+                );
                 worker.run();
 
                 // The async worker owns the blocking worker in our current implementation,
@@ -776,22 +747,18 @@ mod tests {
             let worker_thread = thread::spawn(move || {
                 let signal = Arc::new(WorkerSignal::default());
 
-                // SAFETY: We are required to call `run()` and must not drop the worker before that.
-                // Okay. We are calling `run()` right now, so we are all good on that front.
-                let worker = unsafe {
-                    AsyncWorker::new(
-                        command_rx,
-                        async move |tasks, _| {
-                            drop(tasks.add(async move { initial_completed_tx.send(()) }));
-                            TestTaskContext::new(tasks)
-                        },
-                        BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                        InactiveClock::default(),
-                        signal,
-                        Arc::new(AtomicBool::new(false)),
-                        constructed_tx,
-                    )
-                };
+                let worker = AsyncWorker::new(
+                    command_rx,
+                    async move |tasks, _| {
+                        drop(tasks.add(async move { initial_completed_tx.send(()) }));
+                        TestTaskContext::new(tasks)
+                    },
+                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                    InactiveClock::default(),
+                    signal,
+                    Arc::new(AtomicBool::new(false)),
+                    constructed_tx,
+                );
 
                 worker.run();
             });
@@ -836,19 +803,15 @@ mod tests {
         let async_worker_thread = thread::spawn(move || {
             let signal = Arc::new(WorkerSignal::default());
 
-            // SAFETY: We are required to call `run()` and must not drop the worker before that.
-            // Okay. We are calling `run()` right now, so we are all good on that front.
-            let worker = unsafe {
-                AsyncWorker::new(
-                    command_rx,
-                    async move |tasks, _| TestTaskContext::new(tasks),
-                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                    InactiveClock::default(),
-                    signal,
-                    Arc::new(AtomicBool::new(false)),
-                    channel::unbounded().0,
-                )
-            };
+            let worker = AsyncWorker::new(
+                command_rx,
+                async move |tasks, _| TestTaskContext::new(tasks),
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                signal,
+                Arc::new(AtomicBool::new(false)),
+                channel::unbounded().0,
+            );
             worker.run();
         });
 
@@ -882,18 +845,15 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_factory = Arc::clone(&invoked);
 
-        // SAFETY: run completes the executor's shutdown before the worker is dropped.
-        let worker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                async |_, _| (),
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                InactiveClock::default(),
-                Arc::new(WorkerSignal::default()),
-                Arc::clone(&shutdown_signal),
-                ready_tx,
-            )
-        };
+        let worker = AsyncWorker::new(
+            command_rx,
+            async |_, _| (),
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+            Arc::clone(&shutdown_signal),
+            ready_tx,
+        );
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
         ready_rx.recv().unwrap();
 
@@ -917,26 +877,48 @@ mod tests {
         let observed = Arc::clone(&initialized);
         let (_commands, receiver) = channel::unbounded();
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        // SAFETY: run completes the executor's shutdown before the worker is dropped.
-        let mut worker = unsafe {
-            AsyncWorker::new(
-                receiver,
-                async move |tasks, _| {
-                    observed.store(true, Ordering::Relaxed);
-                    TestTaskContext::new(tasks)
-                },
-                Arc::clone(&blocking_worker),
-                InactiveClock::default(),
-                Arc::new(WorkerSignal::default()),
-                Arc::new(AtomicBool::new(false)),
-                channel::unbounded().0,
-            )
-        };
+        let mut worker = AsyncWorker::new(
+            receiver,
+            async move |tasks, _| {
+                observed.store(true, Ordering::Relaxed);
+                TestTaskContext::new(tasks)
+            },
+            Arc::clone(&blocking_worker),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+            Arc::new(AtomicBool::new(false)),
+            channel::unbounded().0,
+        );
 
         worker.process_commands();
         worker.begin_shutdown();
         worker.process_commands();
         worker.run();
+
+        assert!(!initialized.load(Ordering::Relaxed));
+        assert!(is_blocking_worker_shutting_down(&blocking_worker));
+    }
+
+    #[test]
+    fn dropping_worker_without_run_cleans_up_safely() {
+        let initialized = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&initialized);
+        let (_commands, receiver) = channel::unbounded();
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let worker = AsyncWorker::new(
+            receiver,
+            async move |tasks, _| {
+                observed.store(true, Ordering::Relaxed);
+                TestTaskContext::new(tasks)
+            },
+            Arc::clone(&blocking_worker),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+            Arc::new(AtomicBool::new(false)),
+            channel::unbounded().0,
+        );
+
+        drop(worker);
 
         assert!(!initialized.load(Ordering::Relaxed));
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
