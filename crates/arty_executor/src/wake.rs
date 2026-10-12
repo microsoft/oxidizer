@@ -191,7 +191,9 @@ impl WakeSignal {
         if let Some(state) = unsafe { state.as_ref() } {
             state.retire();
         }
-        remove_queued_notification(&self.shared.awakened, &self.queued, self.task_ref);
+        if self.queued.load(atomic::Ordering::Relaxed) {
+            remove_queued_notification(&self.shared.awakened, &self.queued, self.task_ref);
+        }
     }
 
     pub(crate) fn clear_queued_notification(&self) {
