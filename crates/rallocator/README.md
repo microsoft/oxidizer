@@ -16,12 +16,19 @@
 An owner-return allocator implemented in Rust.
 
 Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
-**x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**.
+**x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**, and
+**x86-64 and native ARM64 macOS 14.4 or later**.
 Linux hosts with larger kernel pages reject allocation requests rather than
-discarding neighboring live objects. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
+discarding neighboring live objects. Windows and Linux use 4-KiB base pages;
+macOS uses 4-KiB x86-64 pages and 16-KiB native ARM64 pages.
+Windows uses `VirtualAlloc2`
 reservations and commit/decommit; Linux uses aligned anonymous `mmap`
 reservations, `mprotect` for access and `madvise(MADV_DONTNEED)` to discard
-unused backing pages without revoking access. Neither uses another allocator.
+unused backing pages without revoking access. macOS uses aligned `mach_vm_map`
+reservations, `mprotect` for access and `MADV_FREE_REUSABLE` / `MADV_FREE_REUSE`
+for lazy reclamation. Recommitted macOS object ranges may retain retired
+contents; `alloc_zeroed` explicitly clears its allocations on every platform.
+None of the native backends allocates through another allocator.
 OS operations and CPU instructions are isolated under the internal HAL.
 It is intended for a single statically
 linked allocator instance; allocations must not cross independently linked
@@ -179,7 +186,7 @@ untouched and are not build targets. Miri is not a v4 backend.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbATsDLrRE8vwb9dqymEyAH6EbJO-GYuVpg2wb9UEF8qSVFPVhZIKCanJhbGxvY2F0b3JlMC4yLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblW44u_Utc2kbP7uwjGMCQB8b3w8NSthn5pIbBQNxifsd7TJhZIKCanJhbGxvY2F0b3JlMC4yLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
  [__link0]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::set_publication_enabled
  [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::request_observation
  [__link2]: https://docs.rs/rallocator/0.2.0/rallocator/struct.Rallocator.html

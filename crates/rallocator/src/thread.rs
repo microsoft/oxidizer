@@ -8,12 +8,15 @@
 
 use std::alloc::Layout;
 use std::cell::Cell;
-use std::sync::Mutex;
 use std::sync::atomic::{Ordering, fence};
+#[cfg(not(target_os = "macos"))]
+use std::sync::{Mutex, MutexGuard};
 
 use crate::backend;
 use crate::classes::Request;
 use crate::core::Owner;
+#[cfg(target_os = "macos")]
+use crate::hal::{Mutex, MutexGuard};
 
 std::thread_local! {
     static CURRENT: Cell<usize> = const { Cell::new(0) };
@@ -91,7 +94,7 @@ static POOL: Mutex<Pool> = Mutex::new(Pool {
     count: 0,
 });
 
-fn lock_pool() -> std::sync::MutexGuard<'static, Pool> {
+fn lock_pool() -> MutexGuard<'static, Pool> {
     match POOL.lock() {
         Ok(guard) => guard,
         Err(_) => crate::abort::abort(),

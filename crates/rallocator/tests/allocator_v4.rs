@@ -99,6 +99,31 @@ fn zero_realloc_and_oom_preserve_input() {
 }
 
 #[test]
+fn zeroed_large_allocations_clear_dirty_backend_ranges() {
+    let layout = Layout::from_size_align(4 << 20, 16384).unwrap();
+    for _ in 0..8 {
+        // SAFETY: The valid layout requests an exclusively owned large range.
+        let dirty = unsafe { Rallocator.alloc(layout) };
+        assert!(!dirty.is_null());
+        // SAFETY: All layout bytes are exclusively writable.
+        unsafe { dirty.write_bytes(0x5a, layout.size()) };
+        // SAFETY: Retire this complete large range, allowing OS reclamation.
+        unsafe { Rallocator.dealloc(dirty, layout) };
+        // SAFETY: The zeroed request uses the same valid large layout.
+        let zeroed = unsafe { Rallocator.alloc_zeroed(layout) };
+        assert!(!zeroed.is_null());
+        // SAFETY: alloc_zeroed initializes the complete requested range,
+        // regardless of whether the OS actually reclaimed its retired pages.
+        let cleared = unsafe { std::slice::from_raw_parts(zeroed, layout.size()) }
+            .iter()
+            .all(|&byte| byte == 0);
+        assert!(cleared);
+        // SAFETY: No access remains into the exclusively owned zeroed range.
+        unsafe { Rallocator.dealloc(zeroed, layout) };
+    }
+}
+
+#[test]
 fn many_live_objects_survive_shuffled_returns() {
     let mut pointers = Vec::new();
     for n in 0..24000usize {

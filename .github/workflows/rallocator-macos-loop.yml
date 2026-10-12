@@ -20,6 +20,7 @@ env:
   RUSTUP_TOOLCHAIN: "1.95"
   CARGO_INCREMENTAL: "1"
   CARGO_TERM_COLOR: never
+  MACOSX_DEPLOYMENT_TARGET: "14.4"
 
 jobs:
   build:
@@ -54,16 +55,17 @@ jobs:
             target/
 
       - name: Install Rust
-        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy --no-self-update
 
-      - name: Build and link rallocator tests
+      - name: Run native allocator and telemetry suites
         run: |
           {
             sw_vers
             uname -m
             getconf PAGESIZE
             rustc --version
-            cargo test --package rallocator --no-run --locked
+            cargo test --package rallocator --package seismograph --package seismograph_rallocator --all-features --locked -- --nocapture
+            cargo clippy --package rallocator --package seismograph --package seismograph_rallocator --all-targets --all-features --locked -- -D warnings
           } 2>&1 | tee "$RUNNER_TEMP/rallocator-macos.log"
 
       - name: Upload compiler output
