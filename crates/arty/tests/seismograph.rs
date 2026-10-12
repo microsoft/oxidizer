@@ -45,27 +45,22 @@ impl Drop for RecorderReset {
 
 fn wait_for_notification(notification: &(Mutex<bool>, Condvar), failure: &'static str) {
     let (started, ready) = notification;
-    let mut started = started.lock().expect("the wake notification mutex is not poisoned");
-    if testing_aids::is_mutation_testing() {
-        let (started, _) = ready
-            .wait_timeout_while(started, testing_aids::TEST_TIMEOUT, |started| !*started)
-            .expect("the wake notification mutex is not poisoned");
-        assert!(*started, "{failure}");
-        return;
-    }
-    while !*started {
-        started = ready.wait(started).expect("the wake notification mutex is not poisoned");
-    }
+    let started = started.lock().expect("the wake notification mutex is not poisoned");
+    let (started, _) = ready
+        .wait_timeout_while(started, testing_aids::TEST_TIMEOUT, |started| !*started)
+        .expect("the wake notification mutex is not poisoned");
+    assert!(*started, "{failure}");
 }
 
 #[derive(Debug)]
-struct RuntimeStoppedProcessor {
+struct EventNotificationProcessor {
+    event_name: &'static str,
     notification: Arc<(Mutex<bool>, Condvar)>,
 }
 
-impl EventProcessor for RuntimeStoppedProcessor {
+impl EventProcessor for EventNotificationProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
-        description.name() == "arty.rt.stopped"
+        description.name() == self.event_name
     }
 
     fn process(&self, _: &EventView<'_>) {
@@ -79,9 +74,10 @@ impl EventProcessor for RuntimeStoppedProcessor {
     }
 }
 
-fn runtime_stopped_sink() -> (Sink, Arc<(Mutex<bool>, Condvar)>) {
+fn event_notification_sink(event_name: &'static str) -> (Sink, Arc<(Mutex<bool>, Condvar)>) {
     let notification = Arc::new((Mutex::new(false), Condvar::new()));
-    let processor = Arc::new(RuntimeStoppedProcessor {
+    let processor = Arc::new(EventNotificationProcessor {
+        event_name,
         notification: Arc::clone(&notification),
     });
     (
@@ -390,7 +386,7 @@ fn exercise_stopped_runtime() {
 
 fn exercise_owner_drop_runtime() -> Scheduler {
     let previous = runtime_ids();
-    let (sink, stopped) = runtime_stopped_sink();
+    let (sink, thread_exited) = event_notification_sink("arty.rt.thread.exiting");
     let owner_dropped = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .sink(sink)
@@ -404,7 +400,7 @@ fn exercise_owner_drop_runtime() -> Scheduler {
         .spawn(async move |_| drop(owner_dropped))
         .join()
         .expect("dropping the owner on its worker does not unwind");
-    wait_for_notification(&stopped, "owner-drop shutdown reports stopped");
+    wait_for_notification(&thread_exited, "owner-drop worker thread exits");
     let (decoded, snapshot) = capture();
     let runtime = new_runtime(&snapshot, &previous);
     assert_eq!(runtime.state, RuntimeState::Stopped);
@@ -610,8 +606,8 @@ fn exercise_runtime_identity_and_idle_worker() {
         // Parked is a transient live state because the worker uses a bounded
         // wait. The durable transitions prove the public Arty wiring; the
         // seismograph_runtime worker tests own live-state snapshot coverage.
-        assert!(events.contains(&EventKind::WorkerParked));
-        assert!(events.contains(&EventKind::WorkerUnparked));
+        assert_eq!(events.iter().filter(|kind| **kind == EventKind::WorkerParked).count(), 1);
+        assert_eq!(events.iter().filter(|kind| **kind == EventKind::WorkerUnparked).count(), 1);
     }
 }
 

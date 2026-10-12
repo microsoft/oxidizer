@@ -255,13 +255,14 @@ impl<WFS> DispatcherCore<WFS> {
             .register_task_with_descriptor(usize::from(worker_index), descriptor);
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(
+        let prepared = prepare_remote(
             future_factory,
             parent_task_enrichment,
             self.sink.clone(),
             Arc::clone(&self.shutdown_started),
             task_telemetry,
         );
+        let (future_factory, join_handle) = prepared.into_enqueued_parts();
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
@@ -304,6 +305,7 @@ mod tests {
     use std::task;
     use std::task::Poll;
 
+    use observed_testing::{TEST_ID, test_emitter};
     use seismograph::recorder::event::EventKind;
     use seismograph::recorder::{Configuration, RecordingPolicy};
     use seismograph::snapshot::SnapshotOptions;
@@ -467,6 +469,34 @@ mod tests {
     }
 
     #[test]
+    fn observed_runtime_stopped_follows_worker_join() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let before_join = processor.clone();
+        let mut wait_for_shutdown = MockWaitForShutdown::new();
+        wait_for_shutdown.expect_wait().returning(move || {
+            assert_eq!(
+                before_join
+                    .events()
+                    .iter()
+                    .filter(|event| event.name() == "arty.rt.stopped")
+                    .count(),
+                0
+            );
+            Ok(())
+        });
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(wait_for_shutdown, NonEmpty::new(endpoint(worker_tx, &threads[0])), sink);
+
+        dispatcher.join().unwrap();
+
+        assert_eq!(
+            processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
+            1
+        );
+    }
+
+    #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // Once the worker has closed the command channel (e.g. because it is shutting down)
         // we ignore any further spawn requests (they simply return disconnected join handles).
@@ -500,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_dispatch_cancels_without_reporting_enqueue_or_readiness() {
+    fn failed_dispatch_reports_enqueue_readiness_and_cancellation() {
         struct RecorderReset;
 
         impl Drop for RecorderReset {
@@ -546,7 +576,15 @@ mod tests {
                 .then_some(event.kind)
             })
             .collect();
-        assert_eq!(task_kinds, [EventKind::TaskSpawned, EventKind::TaskCanceled]);
+        assert_eq!(
+            task_kinds,
+            [
+                EventKind::TaskSpawned,
+                EventKind::TaskEnqueued,
+                EventKind::TaskReady,
+                EventKind::TaskCanceled,
+            ]
+        );
     }
 
     #[cfg_attr(test, mutants::skip)]

@@ -120,6 +120,10 @@ impl<F> TaskFactory<F> {
             self.telemetry.take(),
         )
     }
+
+    pub(super) fn enqueued(&self) {
+        self.telemetry.as_ref().expect("remote factories retain task telemetry").enqueued();
+    }
 }
 
 impl<F> Drop for TaskFactory<F> {

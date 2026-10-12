@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicBool;
 
@@ -31,13 +32,62 @@ use crate::task::join::JoinHandle;
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
 pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet) + Send + 'static>;
 
+pub(crate) struct PreparedRemote<C, FF, F, R>
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    future_factory: TaskFactory<FF>,
+    result_tx: BoxedSender<TaskResult<R>>,
+    join_handle: JoinHandle<R>,
+    shutdown_signal: Arc<AtomicBool>,
+    _marker: PhantomData<fn(C) -> F>,
+}
+
+impl<C, FF, F, R> PreparedRemote<C, FF, F, R>
+where
+    C: 'static,
+    FF: FnOnce(C) -> F + Send + 'static,
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    pub(crate) fn into_enqueued_parts(self) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>) {
+        self.future_factory.enqueued();
+        let Self {
+            future_factory,
+            result_tx,
+            join_handle,
+            shutdown_signal,
+            ..
+        } = self;
+        let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
+            // Factory invocation belongs inside the same panic boundary as polling.
+            let (future_factory, parent_task_enrichment, sink, task_telemetry) = future_factory.into_parts();
+            let task_telemetry = task_telemetry.expect("remote factories retain task telemetry").materialized();
+            let inner = async move { future_factory(cx).await };
+
+            // The executor join handle is not used - the task delivers its result through the
+            // channel above, which unlike the executor's join handle can cross thread boundaries.
+            drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
+                inner,
+                result_tx,
+                parent_task_enrichment,
+                sink,
+                Some(shutdown_signal),
+                task_telemetry,
+            )));
+        });
+        (future_factory, join_handle)
+    }
+}
+
 pub(crate) fn prepare_remote<C, FF, F, R>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
     sink: Sink,
     shutdown_signal: Arc<AtomicBool>,
     task_telemetry: TaskTelemetryPlacement,
-) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
+) -> PreparedRemote<C, FF, F, R>
 where
     C: 'static,
     FF: FnOnce(C) -> F + Send + 'static,
@@ -46,26 +96,13 @@ where
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink, Some(task_telemetry));
-    let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
-        // Factory invocation belongs inside the same panic boundary as polling.
-        let (future_factory, parent_task_enrichment, sink, task_telemetry) = future_factory.into_parts();
-        let task_telemetry = task_telemetry.expect("remote factories retain task telemetry");
-        task_telemetry.enqueued();
-        let task_telemetry = task_telemetry.materialized();
-        let inner = async move { future_factory(cx).await };
-
-        // The executor join handle is not used - the task delivers its result through the
-        // channel above, which unlike the executor's join handle can cross thread boundaries.
-        drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
-            inner,
-            result_tx,
-            parent_task_enrichment,
-            sink,
-            Some(shutdown_signal),
-            task_telemetry,
-        )));
-    });
-    (future_factory, JoinHandle::new(result_rx))
+    PreparedRemote {
+        future_factory,
+        result_tx,
+        join_handle: JoinHandle::new(result_rx),
+        shutdown_signal,
+        _marker: PhantomData,
+    }
 }
 
 pub(crate) fn prepare_remote_on_worker<FF, F, R>(
@@ -205,7 +242,8 @@ mod tests {
             sink,
             shutdown_signal,
             task_telemetry,
-        );
+        )
+        .into_enqueued_parts();
 
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
@@ -234,7 +272,8 @@ mod tests {
             sink,
             PArc::clone(&shutdown_signal),
             task_telemetry,
-        );
+        )
+        .into_enqueued_parts();
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
 
@@ -288,7 +327,8 @@ mod tests {
             sink,
             shutdown_signal,
             task_telemetry,
-        );
+        )
+        .into_enqueued_parts();
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
         run_to_completion(&executor);

@@ -20,9 +20,15 @@ use crate::runtime::telemetry::events::RuntimeStopped;
 
 static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
 
+const TYPE_DESCRIPTOR_CACHE_SIZE: usize = 4;
+
 thread_local! {
     static LAST_TYPE_DESCRIPTOR: Cell<Option<(TypeId, TypeDescriptorId)>> = const { Cell::new(None) };
+    static RECENT_TYPE_DESCRIPTORS: Cell<[Option<(TypeId, TypeDescriptorId)>; TYPE_DESCRIPTOR_CACHE_SIZE]> =
+        const { Cell::new([None; TYPE_DESCRIPTOR_CACHE_SIZE]) };
     static ACTIVE_TASK: Cell<Option<ActiveTask>> = const { Cell::new(None) };
+    #[cfg(test)]
+    static TYPE_DESCRIPTOR_CACHE_MISSES: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Clone, Copy)]
@@ -62,7 +68,7 @@ impl Drop for WorkerTelemetry {
 struct RuntimeLifecycle {
     registration: RuntimeRegistration,
     workers_remaining: AtomicUsize,
-    stopped_reported: AtomicBool,
+    observed_stopped_reported: AtomicBool,
     sink: Sink,
 }
 
@@ -71,13 +77,13 @@ impl RuntimeLifecycle {
         let previous = self.workers_remaining.fetch_sub(1, Ordering::AcqRel);
         assert!(previous > 0, "each runtime worker retires exactly once");
         if previous == 1 {
-            self.stopped();
+            self.registration.stopped();
         }
     }
 
     fn stopped(&self) {
         self.registration.stopped();
-        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
+        if !self.observed_stopped_reported.swap(true, Ordering::Relaxed) {
             emit!(&self.sink, RuntimeStopped);
         }
     }
@@ -99,7 +105,7 @@ impl RuntimeTelemetry {
         let lifecycle = Arc::new(RuntimeLifecycle {
             registration,
             workers_remaining: AtomicUsize::new(worker_count),
-            stopped_reported: AtomicBool::new(false),
+            observed_stopped_reported: AtomicBool::new(false),
             sink,
         });
         let workers: Vec<_> = processor_indices
@@ -305,8 +311,13 @@ impl Drop for TaskPollGuard<'_> {
 
 fn type_descriptor_id<T: 'static>() -> TypeDescriptorId {
     let type_id = TypeId::of::<T>();
-    if let Some(descriptor) = LAST_TYPE_DESCRIPTOR.with(Cell::get).filter(|(cached, _)| *cached == type_id) {
-        return descriptor.1;
+    if let Some((_, descriptor)) = LAST_TYPE_DESCRIPTOR.get().filter(|(cached, _)| *cached == type_id) {
+        return descriptor;
+    }
+    let cache = RECENT_TYPE_DESCRIPTORS.get();
+    if let Some((_, descriptor)) = cache.into_iter().flatten().find(|(cached, _)| *cached == type_id) {
+        LAST_TYPE_DESCRIPTOR.set(Some((type_id, descriptor)));
+        return descriptor;
     }
     let _suppression = SuppressionGuard::enter();
     let descriptor = *TYPE_DESCRIPTORS
@@ -314,7 +325,10 @@ fn type_descriptor_id<T: 'static>() -> TypeDescriptorId {
         .expect("the type descriptor cache is never held across user code")
         .entry(type_id)
         .or_insert_with(allocate_type_descriptor_id);
-    LAST_TYPE_DESCRIPTOR.with(|cached| cached.set(Some((type_id, descriptor))));
+    RECENT_TYPE_DESCRIPTORS.set([Some((type_id, descriptor)), cache[0], cache[1], cache[2]]);
+    LAST_TYPE_DESCRIPTOR.set(Some((type_id, descriptor)));
+    #[cfg(test)]
+    TYPE_DESCRIPTOR_CACHE_MISSES.set(TYPE_DESCRIPTOR_CACHE_MISSES.get().saturating_add(1));
     descriptor
 }
 
@@ -324,7 +338,7 @@ mod tests {
     use seismograph_runtime::allocate_type_descriptor_id;
     use seismograph_runtime::snapshot::{RuntimeState, source};
 
-    use super::{TaskDescriptor, type_descriptor_id};
+    use super::{TYPE_DESCRIPTOR_CACHE_MISSES, TaskDescriptor, type_descriptor_id};
 
     #[test]
     fn type_descriptor_cache_is_stable_and_type_specific() {
@@ -337,6 +351,24 @@ mod tests {
         assert_ne!(type_descriptor_id::<u8>(), type_descriptor_id::<u16>());
         assert!(before.get() < arty.get());
         assert!(arty.get() < after.get());
+    }
+
+    #[test]
+    fn heterogeneous_type_descriptor_cache_stays_thread_local_after_warmup() {
+        let _ = type_descriptor_id::<u32>();
+        let _ = type_descriptor_id::<u64>();
+        let _ = type_descriptor_id::<i32>();
+        let _ = type_descriptor_id::<i64>();
+        let misses = TYPE_DESCRIPTOR_CACHE_MISSES.get();
+
+        for _ in 0..100 {
+            let _ = type_descriptor_id::<u32>();
+            let _ = type_descriptor_id::<u64>();
+            let _ = type_descriptor_id::<i32>();
+            let _ = type_descriptor_id::<i64>();
+        }
+
+        assert_eq!(TYPE_DESCRIPTOR_CACHE_MISSES.get(), misses);
     }
 
     #[test]
@@ -407,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
-            1
+            0
         );
     }
 }

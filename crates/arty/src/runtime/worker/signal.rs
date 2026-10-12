@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Wake, Waker};
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ pub(in crate::runtime) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
     telemetry: Option<WorkerHandle>,
+    parked: AtomicBool,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -47,6 +49,7 @@ impl WorkerSignal {
             notified: Mutex::new(false),
             ready: Condvar::new(),
             telemetry: Some(telemetry),
+            parked: AtomicBool::new(false),
         }
     }
 
@@ -58,9 +61,7 @@ impl WorkerSignal {
             **notification = false;
             return;
         }
-        if let Some(telemetry) = &self.telemetry {
-            telemetry.parked();
-        }
+        self.mark_parked();
         wait_until_deadline(
             &mut notified,
             timeout,
@@ -83,9 +84,6 @@ impl WorkerSignal {
         );
         let mut notified = notified.expect("the final timed wait always replaced its notification guard");
         *notified = false;
-        if let Some(telemetry) = &self.telemetry {
-            telemetry.unparked();
-        }
     }
 
     pub(in crate::runtime) fn waker(signal: &Arc<Self>) -> Waker {
@@ -102,7 +100,24 @@ impl WorkerSignal {
 
     fn notify(&self) {
         *self.notified.lock() = true;
+        self.mark_unparked();
         self.wake_waiter();
+    }
+
+    fn mark_parked(&self) {
+        if !self.parked.swap(true, Ordering::AcqRel)
+            && let Some(telemetry) = &self.telemetry
+        {
+            telemetry.parked();
+        }
+    }
+
+    fn mark_unparked(&self) {
+        if self.parked.swap(false, Ordering::AcqRel)
+            && let Some(telemetry) = &self.telemetry
+        {
+            telemetry.unparked();
+        }
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing the native notification strands the smoke test; flag handling is tested separately.
@@ -177,6 +192,19 @@ mod tests {
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
         assert!(!*signal.notified.lock());
+        assert!(signal.parked.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn repeated_idle_timeouts_remain_one_parked_interval() {
+        let signal = Arc::new(WorkerSignal::default());
+
+        signal.wait(Duration::ZERO);
+        signal.wait(Duration::ZERO);
+        assert!(signal.parked.load(Ordering::Acquire));
+
+        WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(!signal.parked.load(Ordering::Acquire));
     }
 
     #[test]
