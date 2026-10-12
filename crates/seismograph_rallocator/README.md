@@ -13,30 +13,51 @@
 
 </div>
 
-Rallocator snapshot source for seismograph.
+Native v4 allocator observations for Seismograph.
 
-Rallocator contributes this payload to the process-wide [`seismograph`][__link0]
-snapshot. Snapshot data is organized into [`snapshot`][__link1], [`topology`][__link2], and
-[`callers`][__link3].
+[`native::Snapshot`][__link0] inventories persistent owners, including never-observed
+active endpoints, and an independently collected global backend. Owner state
+is bounded and may be stale: compare session, lease generation and round.
+Idle inspection is fresh under the pool lock; busy, unobserved and slot
+allocation failure (`Unavailable`) are explicitly unknown. Native capacity is not application-live
+memory, remote batching budget is not pending bytes, and globally cached
+ranges are not guaranteed physically decommitted.
+Matching rounds mean contributed this round, not an exact current census:
+the first round can predate polling. Consumers show observation age at capture.
+Outstanding allocator ranges include pending/retained frees, not app-live
+object counts. Incoming front/back inequality means potential work only,
+not guaranteed ready links or queue depth; equality does not prove emptiness.
 
-## Compatibility contract
+[`encoded_len`][__link1], [`encode`][__link2] and [`decode`][__link3] implement schema 3 exclusively.
+The decoder bounds allocation by both the payload length and [`MAX_OWNERS`][__link4],
+rejects invalid flags, duplicates, inconsistent inventory and trailing bytes.
+Application allocation events remain in the unchanged Seismograph container.
+[`encoded_len_with_owners`][__link5] and [`encode_with_owners`][__link6] accept borrowed owner
+rows, ignoring the metadata snapshot’s vector. Both use fixed stack scratch
+and never allocate, so a producer can keep inventory and output System-backed
+without native allocator activity perturbing the observations it collects.
+[`events::callers`][__link7] projects these into view-local correlation identities,
+preserving stacks, actor names, orphan frees and repeated addresses.
 
-A snapshot has three layers with independent versions:
+Self-publication defaults on, but recording defaults off. Polling requests
+another observation round without a background thread or per-operation clock
+check. Controls belong to this plugin, not the allocator’s public API.
+Only contributing accepted recorded allocation/free operations publish, after
+the native operation ends; sampled-out events and merely enabled attempts do
+not contribute. Collectors request the next round after collection, and apps
+may use [`native::request_observation`][__link8] to schedule requests explicitly.
 
-* The private wire layer owns the little-endian container header and
-  length-prefixed section framing. A framing change increments the wire
-  version, and readers reject unknown wire versions.
-* This crate owns the telemetry schema named by the header. A change that
-  reinterprets the snapshot as a whole increments that schema; readers
-  reject unsupported schema versions.
-* Each section owns its payload version. Compatible extensions increment
-  only that section version. Unknown sections and unsupported optional
-  section versions are skipped and reported through
-  [`snapshot::Snapshot::skipped_sections`][__link4].
+## Explore a sample capture
 
-Metadata and statistics sections are required. Statistics must use the current
-section version; legacy statistics payloads are not supported. Producers must
-not change the meaning or byte order of an existing version.
+```text
+cargo +1.95.0 run -p seismograph_rallocator --example native_snapshot
+cargo +1.95.0 run -p seismograph_cli -- view native-demo.seismograph
+cargo +1.95.0 run -p seismograph_cli -- snapshot html native-demo.seismograph
+```
+
+The example uses synthetic native state and real recorder events, including
+address reuse and an orphan free. It does not install the native allocator.
+Its capture callback encodes borrowed stack rows into System-backed `SourceData`.
 
 
 <hr/>
@@ -44,9 +65,13 @@ not change the meaning or byte order of an existing version.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEcLzBLld0bkb1MkXB7BgGAUb_SG7uw5pXb4bEk90SYhdPJVhZIKCa3NlaXNtb2dyYXBoZTAuMi4wgnZzZWlzbW9ncmFwaF9yYWxsb2NhdG9yZTAuMi4w
- [__link0]: https://crates.io/crates/seismograph/0.2.0
- [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/snapshot/index.html
- [__link2]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/topology/index.html
- [__link3]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/callers/index.html
- [__link4]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=snapshot::Snapshot::skipped_sections
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAXJgUeSXjZMbZaYTfsaEXvQbE_CfSnnGi2AbpPgIGakgPdthZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
+ [__link0]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::Snapshot
+ [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encoded_len
+ [__link2]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encode
+ [__link3]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=decode
+ [__link4]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=MAX_OWNERS
+ [__link5]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encoded_len_with_owners
+ [__link6]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=encode_with_owners
+ [__link7]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=events::callers
+ [__link8]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::request_observation

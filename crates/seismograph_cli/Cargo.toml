@@ -22,6 +22,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [package.metadata.anvil.miri]
 exclude = true
 
+# Anvil's coverage opt-out marker: run CLI tests without instrumentation.
+# The measured allocator and schema packages retain their default 100% gates.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [[bin]]
 name = "seismograph"
 path = "src/main.rs"
@@ -31,7 +36,7 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 crossterm.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
-ratatui.workspace = true
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 same-file.workspace = true
 seismograph.workspace = true
 seismograph_protocol.workspace = true

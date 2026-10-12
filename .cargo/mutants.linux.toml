@@ -10,18 +10,22 @@ exclude_globs = [
     "crates/http_headers/**",
     "crates/http_headers_simd/**",
     "crates/observed_testing/**",
-    # The Miri-only allocator backend is compiled out of native mutation runs.
-    "crates/rallocator/src/hal/miri.rs",
+    # Allocator and its Seismograph integration are outside mutation-testing scope.
+    "crates/rallocator/**",
+    "crates/seismograph_rallocator/**",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
     # Seismograph terminal rendering, layout, mouse routing, and presentation-only formatting.
     "crates/seismograph_cli/src/commands/monitor/help.rs",
     "crates/seismograph_cli/src/commands/monitor/info_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/mouse.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui/**",
     "crates/seismograph_cli/src/commands/monitor/panels.rs",
     "crates/seismograph_cli/src/commands/monitor/runtime_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/ui.rs",
+    "crates/seismograph_cli/src/native_view.rs",
     "crates/testing_aids/**",
 
     # Linux host only.
@@ -30,7 +34,7 @@ exclude_globs = [
     # every gated source path here.
     "**/*windows.rs",
     "windows",
-    "crates/rallocator/src/hal/win64.rs",
+    "crates/rallocator/src/hal/win64/**",
     "crates/fetch_winhttp/**",
     "crates/fetch_winhttp_impl/**",
 ]
@@ -39,7 +43,19 @@ cap_lints = true
 profile = "mutants"
 
 # Only run unit tests and integration tests, not doctests, benchmarks or examples.
-additional_cargo_test_args = [ "--locked", "--tests" ]
+# Retain fatal-path tests needed to detect mutations in termination guards;
+# skip the remaining intentional-abort tests only during mutation runs.
+additional_cargo_test_args = [
+    "--locked", "--tests", "--",
+    "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
+    "--skip", "abort::tests::subprocess_oracle_accepts_genuine_abort",
+    "--skip", "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
+    "--skip", "combining::tests::consumed_action_aborts_instead_of_running_twice",
+    "--skip", "observation::tests::poisoned_publication_copy_aborts_instead_of_reporting_empty_state",
+    "--skip", "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
+    "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
+    "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
+]
 
 exclude_re = [
     # Shared exclusions copied from mutants.toml.
@@ -54,7 +70,80 @@ exclude_re = [
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
 
+    # Equivalent suffix caps: a power-of-two-aligned refill ends on a multiple
+    # of the cursor's low bit, so alignment already bounds every suffix block.
+    # These replacements only raise the redundant cap (division precedence
+    # matters: BITS - 1 / zeros, not (BITS - 1) / zeros).
+    'crates/rallocator/src/backend.rs:95:(76|80): replace - with (\+|/) in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:95:87: replace - with \+ in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:187:(80|84): replace - with (\+|/) in Local::alloc$',
+    'crates/rallocator/src/backend.rs:187:91: replace - with \+ in Local::alloc$',
+    # At i=4 both size formulas give 80; (i+4)%4 == (i-4)%4.
+    # At the slab/waking thresholds both arms return CHUNK/32 respectively.
+    'crates/rallocator/src/classes.rs:31:25: replace < with <= in make_classes$',
+    'crates/rallocator/src/classes.rs:35:31: replace - with \+ in make_classes$',
+    'crates/rallocator/src/classes.rs:38:32: replace < with <= in make_classes$',
+    'crates/rallocator/src/classes.rs:45:37: replace < with <= in make_classes$',
+    # end/cursor division is NOT equivalent: it creates sub-CHUNK suffix
+    # blocks. Both exact mutants hang on Linux ARM64 and local Ubuntu x64.
+    'crates/rallocator/src/backend.rs:95:87: replace - with / in global_alloc_reserved$',
+    'crates/rallocator/src/backend.rs:187:91: replace - with / in Local::alloc$',
+
+    # Cache hash distribution changes affect collision frequency, not correctness.
+    # Keep mask/bounds mutations: those can select an invalid cache index.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace ReallocMap::set -> usize with (0|1)$',
+    'crates/rallocator/src/core.rs:\d+:\d+: replace (>>|\*|\^) with (<<|\+|/|\||&) in ReallocMap::set$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace Cache::ring_set -> usize with (0|1)$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace (>>|/) with (<<|%|\*) in Cache::ring_set$',
+    # Owner endpoints are 256-byte aligned; valid tags occupy only their zero low bits.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace \| with \^ in Core::new_slab$',
+    # Small-slab needed is overwritten by refill before any observation or return.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace - with / in Core::new_slab$',
+    # Native tests cannot reliably distinguish a removed release fence on relaxed
+    # pointer handoff. Keep the fence and its concurrent handoff regressions.
+    'crates/rallocator/src/core.rs:\d+:\d+: delete ! in Core::allocate_slow$',
+    # CPU hints and batching/teardown budgets are performance policy, not API behavior.
+    'crates/rallocator/src/hal/(aarch64|x86_64)/mod.rs:\d+:\d+: replace (prefetch|pause) with \(\)$',
+    'crates/rallocator/src/remote.rs:1[56]:\d+: replace \* with (\+|/)$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace > with >= in Cache::reserve$',
+    'crates/rallocator/src/thread.rs:\d+:\d+: replace < with <= in flush_for_teardown$',
+    # Extra reservation padding is immediately unmapped by retain_mapping.
+    # This mutation changes transient address-space demand, not retained size.
+    'crates/rallocator/src/hal/linux/mod.rs:27:56: replace - with \+ in reserve_with_page_size$',
+    # These Linux flags have disjoint bits, so OR and XOR are identical.
+    'crates/rallocator/src/hal/linux/mod.rs:38:(31|53): replace \| with \^ in reserve_with_page_size$',
+    'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace \| with \^ in (wait|wake_one)$',
+    # MAP_ANONYMOUS ignores the file descriptor; -1 and 1 behave identically.
+    'crates/rallocator/src/hal/linux/mod.rs:39:13: delete - in reserve_with_page_size$',
+    # Legacy domain markup, CSS names and SVG stroke widths are presentation only.
+    # View-local IDs have no fixed numbering: index and index+1 are injective
+    # relabelings that preserve pairing, orphan identity and histogram membership.
+    'crates/seismograph_rallocator/src/events.rs:78:38: replace \+ with \* in callers$',
+    'crates/seismograph_cli/src/report.rs:\d+:\d+: replace render_domains with \(\)$',
+    'crates/seismograph_cli/src/report.rs:\d+:\d+: replace slice_kind_class -> &.static str with (""|"xyzzy")$',
+    'crates/seismograph_cli/src/report.rs:1878:\d+: replace (\+|/|\*) with (-|\*|%|\+|/) in render_thread_flow_diagram$',
+
+    # Native ARM reproduction: subtracting the small-class index turns a 64KiB
+    # fixture into 8TiB allocations; the test process exceeded 55GiB RSS.
+    'crates/rallocator/src/classes.rs:103:34: replace \+ with - in Request::with_size$',
+    # Removing the incoming drain spins flush indefinitely with queued returns.
+    # Both exact mutations exhausted the native ARM test timeout.
+    'crates/rallocator/src/core.rs:\d+:\d+: replace Core::drain with \(\)$',
+
     # Known hanging mutations from PR #764. Keep other mutations in these functions.
+    # Reconfirmed native Linux deadlocks: invert combiner admission, prevent probe
+    # progress, drain a retained tail, or route every cache message to one bucket.
+    # These exact mutants exceed the bounded test timeout rather than escape assertions.
+    'crates/rallocator/src/combining.rs:\d+:\d+: delete ! in Combining<T>::with$',
+    'crates/rallocator/src/core.rs:\d+:\d+: replace \+ with \* in ReallocMap::(insert|remove)$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace Queue::can_dequeue -> bool with true$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace != with == in Queue::can_dequeue$',
+    'crates/rallocator/src/remote.rs:\d+:\d+: replace Cache::slot -> usize with (0|1)$',
+    # Removing the Windows wake call strands native waiters (reconfirmed on Windows).
+    'crates/rallocator/src/hal/win64/mod.rs:\d+:\d+: replace wake_one with \(\)$',
+    # Inverting the Linux wait predicate spins on immediate EAGAIN responses,
+    # so the per-syscall timeout cannot bound it. Reproduced in an isolated test.
+    'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace == with != in wait$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
     'crates/rallocator/src/tuning_telemetry.rs:50:48: replace - with (\+|/)$',

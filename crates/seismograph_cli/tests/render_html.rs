@@ -1,292 +1,217 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! End-to-end tests for HTML report rendering.
+//! End-to-end native structure explorer rendering.
 #![cfg(not(miri))]
-#![expect(clippy::too_many_lines, reason = "Large fixtures are intentionally assembled inline")]
 
-use seismograph_rallocator::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
-use seismograph_rallocator::snapshot::{Domain, Estimate, Histograms, Region, SizeClass, Snapshot, Stats, Version};
-use seismograph_rallocator::topology::{Segment, Slice, SliceKind, TopologyRegion};
-
+#[path = "../src/native_view/fixture.rs"]
+mod fixture;
 mod support;
 
-macro_rules! schema {
-    ($base:expr, $($field:ident: $value:expr),+ $(,)?) => {{
-        let mut value = $base;
-        $(value.$field = $value;)+
-        value
-    }};
-}
+#[test]
+fn retained_allocation_events_render_actors_stacks_locations_and_escaped_symbols() {
+    use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+    use seismograph::recorder::event::{Address, EventClass, Record};
+    use seismograph::snapshot::{SnapshotOptions, Source};
 
-fn stable_digest(value: &str) -> (usize, u64) {
-    let hash = value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        hash.wrapping_mul(0x0000_0100_0000_01b3) ^ u64::from(byte)
+    static NATIVE: Source = Source::new(
+        seismograph_rallocator::source::ID,
+        "allocation-html-native",
+        seismograph_rallocator::source::SCHEMA_VERSION,
+        capture_native,
+    );
+    static SYMBOLS: Source = Source::new(
+        seismograph_runtime::snapshot::source::ID,
+        "allocation-html-symbols",
+        6,
+        capture_allocation_symbol,
+    );
+    seismograph::recorder(seismograph::recorder::Configuration {
+        allocations: seismograph::recorder::RecordingPolicy::all(true),
+        ..Default::default()
     });
-    (value.len(), hash)
-}
-
-#[test]
-fn html_report_contains_required_sections() {
-    let mut snapshot = Snapshot::new(Version::new(1, 2, 3));
-    snapshot.stats = schema!(
-        Stats::default(),
-        live_bytes: 1024,
-        mapped_bytes: 4096,
-        allocations: 12,
-        remote_frees: 2
-    );
-    snapshot.size_classes.push(schema!(
-        SizeClass::default(),
-        class_index: 1,
-        block_bytes: 64,
-        live_allocations: schema!(Estimate::default(), value: 2, lower_bound: 2, upper_bound: 2),
-        requested_bytes: schema!(Estimate::default(), value: 100, lower_bound: 100, upper_bound: 100),
-        usable_bytes: schema!(Estimate::default(), value: 128, lower_bound: 128, upper_bound: 128)
-    ));
-    snapshot.regions.push(schema!(
-        Region::default(),
-        region_index: 0,
-        reserved_bytes: 1 << 30,
-        used_slices: 10,
-        free_slices: 90
-    ));
-    snapshot.domains.push(schema!(
-        Domain::default(),
-        domain_id: 7,
-        is_default: true,
-        region_count: 1,
-        reserved_bytes: 1 << 30,
-        used_slices: 2,
-        free_slices: 16_382,
-        small_slices: 1,
-        medium_slices: 0,
-        bump_slices: 1,
-        unknown_slices: 0,
-        region_indices: vec![0]
-    ));
-    snapshot.topology.push(schema!(
-        TopologyRegion::default(),
-        region_index: 0,
-        base_address: 0x1000_0000,
-        region_bytes: 64 * (64 << 10),
-        slice_bytes: 64 << 10,
-        used_bitmap: vec![0b11],
-        slices: vec![
-            schema!(
-                Slice::default(),
-                slice_index: 0,
-                kind: SliceKind::Small,
-                span_slices: 0,
-                owner: 0x1234,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: vec![schema!(
-                    Segment::default(),
-                    segment_index: 0,
-                    class_index: 1,
-                    context: false,
-                    live_blocks: 7,
-                    usable_blocks: 511,
-                    utilization_tracked: true
-                )]
-            ),
-            schema!(
-                Slice::default(),
-                slice_index: 1,
-                kind: SliceKind::Bump,
-                span_slices: 1,
-                owner: 0x5678,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: Vec::new()
-            ),
-        ],
-    ));
-    snapshot.histograms = schema!(
-        Histograms::default(),
-        allocated: vec![0, 0, 4],
-        live: vec![0, 0, 1]
-    );
-    snapshot.callers = Some(schema!(
-        Callers::default(),
-        session_id: 1,
-        total_events: 4,
-        lost_events: 0,
-        threads: vec![schema!(
-            ThreadLog::default(),
-            thread_log_id: 10,
-            total_events: 4,
-            lost_events: 0,
-            allocated_histogram: vec![0, 0, 1],
-            live_histogram: vec![0, 0, 0]
-        )],
-        events: vec![
-            schema!(
-                Event::default(),
-                thread_log_id: 10,
-                event_thread_id: 10,
-                sequence: 1,
-                allocation_id: 20,
-                kind: EventKind::Allocated,
-                heap_id: 30,
-                heap_kind: HeapKind::Bump,
-                freed_after_heap_release: false,
-                address: 0x2000,
-                size: 4,
-                align: 4,
-                call_stack: vec![0x3000]
-            ),
-            schema!(
-                Event::default(),
-                thread_log_id: 10,
-                event_thread_id: 11,
-                sequence: 2,
-                allocation_id: 20,
-                kind: EventKind::Deallocated,
-                heap_id: 30,
-                heap_kind: HeapKind::Bump,
-                freed_after_heap_release: true,
-                address: 0x2000,
-                size: 4,
-                align: 4,
-                call_stack: vec![0x4000]
-            ),
-            schema!(
-                Event::default(),
-                thread_log_id: 10,
-                event_thread_id: 10,
-                sequence: 3,
-                allocation_id: 21,
-                kind: EventKind::Allocated,
-                heap_id: 31,
-                heap_kind: HeapKind::General,
-                freed_after_heap_release: false,
-                address: 0x2100,
-                size: 8,
-                align: 8,
-                call_stack: vec![0x3000]
-            ),
-            schema!(
-                Event::default(),
-                thread_log_id: 10,
-                event_thread_id: 10,
-                sequence: 4,
-                allocation_id: 21,
-                kind: EventKind::Deallocated,
-                heap_id: 31,
-                heap_kind: HeapKind::General,
-                freed_after_heap_release: false,
-                address: 0x2100,
-                size: 8,
-                align: 8,
-                call_stack: vec![0x4000]
-            ),
-        ],
-        thread_names: vec![
-            schema!(
-                ThreadName::default(),
-                thread_id: 10,
-                name: "producer".to_owned()
-            ),
-            schema!(
-                ThreadName::default(),
-                thread_id: 11,
-                name: "consumer".to_owned()
-            ),
-        ],
-    ));
-
-    let html = support::render_html(&snapshot, "required-sections");
-    for heading in [
-        "Virtual regions",
-        "Allocation domains",
-        "Allocation size histograms",
-        "Segments, spans, bumps, and owners",
-        "General slabs and size classes",
-        "Process totals",
-        "Remote frees and reclamation",
-        "Retained caller stacks",
-    ] {
-        assert!(html.contains(heading));
+    let allocation = Allocation {
+        allocation_id: AllocationId::new(7),
+        event_thread_id: EventThreadId::new(70),
+        heap_id: HeapId::new(1),
+        heap_kind: HeapKind::General,
+        freed_after_heap_release: false,
+        address: Address::new(0x1234),
+        size: 17,
+        alignment: 8,
+    };
+    seismograph::record(EventClass::Allocation, || Some(Record::allocation(allocation)));
+    seismograph::record(EventClass::Allocation, || {
+        Some(Record::deallocation(Allocation {
+            event_thread_id: EventThreadId::new(90),
+            ..allocation
+        }))
+    });
+    seismograph::snapshot::register_source(&NATIVE);
+    seismograph::snapshot::register_source(&SYMBOLS);
+    let recording = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    let html = support::render_capture(recording.as_bytes(), "retained-allocation-stacks");
+    for (operation, actor) in [("alloc", 70), ("free", 90)] {
+        let row = html
+            .split("<tr>")
+            .find(|row| row.starts_with(&format!("<td>{operation}</td>")) && row.contains("0x1234 / 17 B"))
+            .unwrap()
+            .split("</tr>")
+            .next()
+            .unwrap();
+        assert!(row.contains(&format!("#{actor}</td>")), "{row}");
+        assert!(row.contains("<td>matched retained pair</td>"), "{row}");
+        assert!(row.contains("Operation stack"), "{row}");
     }
-    assert!(html.contains("producer 1.2.3"));
-    assert!(html.contains("domain #7 default"));
-    assert!(html.contains("name=\"topology-mode\" value=\"kind\" checked"));
-    assert!(html.contains("name=\"topology-mode\" value=\"owner\""));
-    assert!(html.contains("<section id=\"physical-topology\" class=\"topology-kind\""));
-    assert!(html.contains("document.querySelector('#physical-topology')"));
-    assert!(html.contains("Allocation sizes by thread"));
-    assert!(html.contains("value=\"live\" checked"));
-    assert!(html.contains("class=\"histogram histogram-live\""));
-    assert!(html.contains("producer · #10"));
-    assert!(html.contains("Cross-thread and escaped-lifetime hotspots"));
-    assert!(html.contains("Allocation → free thread flow"));
-    assert!(html.contains("producer · #10 → consumer · #11"));
-    assert!(html.contains("producer · #10 → producer · #10"));
-    assert!(html.contains("thread-flow-link local"));
-    assert!(html.contains("class=\"thread-flow-endpoint source\""));
-    assert!(html.contains("class=\"thread-flow-endpoint destination\""));
-    assert!(html.contains("data-source=\"10\" data-destination=\"11\""));
-    assert!(html.contains("flow.classList.toggle('has-selection'"));
-    assert!(html.contains("item.dataset[selection.side] === selection.thread"));
-    assert!(html.contains("M330 68 C500 68,700 68,870 68"));
-    assert!(html.contains("viewBox=\"0 0 1200"));
-    assert!(!html.contains("width:1600px"));
-    assert!(html.contains("Allocated and freed on different threads"));
-    assert!(html.contains("Freed after a bump heap handle was released"));
-    assert!(html.contains("<details><summary>Retained unmatched allocation candidates (showing"));
-    assert!(html.contains("<details class=\"stack-details\"><summary>Stack trace"));
-    let cross_thread = html.find("Cross-thread and escaped-lifetime hotspots").unwrap();
-    let thread_sizes = html.find("<details><summary>Allocation sizes by thread</summary>").unwrap();
-    assert!(cross_thread < thread_sizes);
-    assert!(html.contains("<section><details><summary>Segments, spans, bumps, and owners"));
-    assert!(html.contains("<section><details><summary>General slabs and size classes"));
-    assert!(html.contains("class=\"domain-bar\""));
-    assert!(html.contains("Payload efficiency"));
-    assert!(html.contains("7 / 511 live (1.4%)"));
-    assert!(html.contains("7 / 511 live blocks (1.4%)"));
-    assert!(html.contains("fill-opacity:"));
-    assert!(html.contains("Block size"));
-    assert!(html.contains("<td>64 B</td>"));
-    assert!(html.matches("class=\"info\"").count() > 20);
-    assert!(html.contains("tabindex=\"0\""));
-    assert!(html.contains("role=\"tooltip\""));
-    assert!(html.contains("getBoundingClientRect"));
-    assert!(html.contains("innerWidth - width - margin"));
-    assert!(html.contains("position:fixed"));
-    assert!(!html.contains("Size-class occupancy"));
-    assert!(!html.contains("http://"));
-    assert!(!html.contains("https://"));
-    assert_eq!(stable_digest(&html), (54_085, 2_038_034_598_192_960_993));
+    let allocation_row = html
+        .split("<tr>")
+        .find(|row| row.starts_with("<td>alloc</td>") && row.contains("0x1234 / 17 B"))
+        .unwrap()
+        .split("</tr>")
+        .next()
+        .unwrap();
+    assert!(allocation_row.contains("alloc&lt;T&gt;&amp;"), "{allocation_row}");
+    assert!(allocation_row.contains("allocation.rs:42:7"), "{allocation_row}");
+    assert!(!allocation_row.contains("alloc<T>&"), "{allocation_row}");
+}
+
+#[expect(clippy::unwrap_used, reason = "the source callback encodes a known valid test fixture")]
+fn capture_native(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+    let snapshot = fixture::snapshot();
+    let mut data = seismograph::snapshot::SourceData::zeroed(seismograph_rallocator::encoded_len(&snapshot).unwrap())?;
+    seismograph_rallocator::encode(&snapshot, data.as_mut_bytes()).unwrap();
+    Ok(data)
+}
+
+#[expect(clippy::unwrap_used, reason = "the test records an allocation with a required captured stack")]
+fn capture_allocation_symbol(
+    context: seismograph::snapshot::SnapshotContext<'_>,
+) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+    let address = context
+        .events()
+        .events
+        .iter()
+        .find(|event| event.kind == seismograph::recorder::event::EventKind::Allocation)
+        .unwrap()
+        .call_stack
+        .first()
+        .unwrap()
+        .get();
+    // Runtime schema 6: no runtimes and one lookup for the captured allocation stack.
+    let mut bytes = b"SEISRUNT".to_vec();
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&6_u16.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    bytes.extend_from_slice(&address.to_le_bytes());
+    bytes.extend_from_slice(&9_u32.to_le_bytes());
+    bytes.extend_from_slice(&13_u32.to_le_bytes());
+    bytes.extend_from_slice(&42_u32.to_le_bytes());
+    bytes.extend_from_slice(&7_u32.to_le_bytes());
+    bytes.extend_from_slice(b"alloc<T>&allocation.rs");
+    let mut data = seismograph::snapshot::SourceData::zeroed(bytes.len())?;
+    data.as_mut_bytes().copy_from_slice(&bytes);
+    Ok(data)
 }
 
 #[test]
-fn html_report_handles_empty_and_boundary_data() {
-    let mut snapshot = Snapshot::new(Version::new(1, 2, 3));
-    snapshot.histograms = schema!(
-        Histograms::default(),
-        allocated: vec![1],
-        live: vec![0]
-    );
-    snapshot.topology = vec![schema!(
-        TopologyRegion::default(),
-        region_index: 1,
-        region_bytes: (64 << 10) * 16_384,
-        slice_bytes: 64 << 10,
-        used_bitmap: vec![0; 256],
-    )];
-    snapshot.callers = Some(schema!(
-        Callers::default(),
-        threads: vec![schema!(
-            ThreadLog::default(),
-            thread_log_id: 77,
-        )],
-    ));
+fn native_inventory_is_wired_into_snapshot_html() {
+    let html = support::render_html(&fixture::snapshot(), "native-explorer");
+    for expected in [
+        "Native v4 structure explorer",
+        "contributed this round",
+        "age 10 ns at capture",
+        "not an exact current census",
+        "pending/retained frees",
+        "potential work only",
+        "ready links NOT guaranteed",
+        "stale lease",
+        "stale session",
+        "fresh idle inspection",
+        "older round",
+        "BUSY",
+        "unknown / unobserved",
+        "Owners: 7 / 9",
+        "PARTIAL bounded walk",
+        "object",
+        "slab",
+        "capacity",
+        "Large outstanding native ranges",
+        "Local metadata",
+        "Outgoing returns",
+        "Incoming atomic queue",
+        "Last contributor recorder thread 42",
+        "NOT application-live memory",
+        "NOT pending bytes",
+        "NOT guaranteed physically decommitted",
+        "<details class=",
+        "[####################]",
+    ] {
+        assert!(html.contains(expected), "missing {expected}");
+    }
+    assert!(!html.contains("Live requested"));
+    assert!(!html.contains("Physical allocator topology"));
+}
 
-    let html = support::render_html(&snapshot, "empty-boundary-data");
+#[test]
+fn zero_source_reports_incomplete_coverage_instead_of_fabricating_owners() {
+    let html = support::render_html(&seismograph_rallocator::native::Snapshot::default(), "zero-source");
+    assert!(html.contains("Owners: 0 / 0"));
+    assert!(html.contains("PARTIAL bounded walk"));
+    assert!(!html.contains("Last contributor recorder thread"));
+}
 
-    assert!(html.contains("viewBox=\"0 0 128 128\""));
-    assert!(html.contains("<span class=\"histogram-label\">0 B</span>"));
-    assert!(html.contains("Thread log #77"));
+#[test]
+fn system_slot_allocation_failure_is_not_presented_as_never_observed() {
+    use seismograph_rallocator::native::{ObservationSource, Owner, Snapshot};
+    let snapshot = Snapshot {
+        owner_count: 1,
+        owners_complete: true,
+        owners: vec![Owner {
+            id: 42,
+            generation: 1,
+            leased: true,
+            source: ObservationSource::Unavailable,
+            observation: None,
+        }],
+        ..Snapshot::default()
+    };
+    let html = support::render_html(&snapshot, "slot-allocation-failure");
+    for evidence in [
+        "<details class=\"unavailable\">",
+        "UNAVAILABLE",
+        "System slot allocation failed",
+        "unavailable 1",
+        "not zero or merely never-observed",
+        "accepted recorded allocation/free operations only",
+        "sampled-out events",
+    ] {
+        assert!(html.contains(evidence), "missing {evidence}");
+    }
+
+    assert!(!html.contains("unknown / unobserved"));
+}
+
+#[test]
+fn matching_round_retains_age_and_does_not_claim_a_current_census() {
+    let mut snapshot = fixture::snapshot();
+    snapshot.captured_nanos = 1_000_090;
+    let html = support::render_html(&snapshot, "old-first-round");
+    assert!(html.contains("age 1000000 ns at capture"));
+    assert!(html.contains("contributed this round"));
+    assert!(html.contains("first round may predate polling"));
+    assert!(!html.contains("current published"));
+}
+
+#[test]
+fn equal_incoming_endpoints_do_not_claim_an_empty_queue() {
+    let mut snapshot = fixture::snapshot();
+    let observation = snapshot.owners[0].observation.as_mut().unwrap();
+    observation.remote.incoming_front = 0xabc;
+    observation.remote.incoming_back = 0xabc;
+    let html = support::render_html(&snapshot, "equal-incoming-endpoints");
+    assert!(html.contains("Sampled front != back: false"));
+    assert!(html.contains("equality does NOT prove emptiness"));
+    assert!(html.contains("depth/emptiness UNKNOWN"));
 }
