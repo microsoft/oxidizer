@@ -383,4 +383,31 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn final_worker_retirement_stops_the_runtime() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, sink);
+        let runtime_id = runtime.id();
+
+        drop(workers);
+
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let source = decoded.sources.iter().find(|entry| entry.id == source::ID).unwrap();
+        let runtime_snapshot = seismograph_runtime::snapshot::decode(&source.data).unwrap();
+        assert_eq!(
+            runtime_snapshot
+                .runtimes
+                .iter()
+                .find(|runtime| runtime.id == runtime_id)
+                .unwrap()
+                .state,
+            RuntimeState::Stopped
+        );
+        assert_eq!(
+            processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
+            1
+        );
+    }
 }

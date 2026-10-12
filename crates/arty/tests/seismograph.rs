@@ -43,9 +43,16 @@ impl Drop for RecorderReset {
     }
 }
 
-fn wait_for_notification(notification: &(Mutex<bool>, Condvar)) {
+fn wait_for_notification(notification: &(Mutex<bool>, Condvar), failure: &'static str) {
     let (started, ready) = notification;
     let mut started = started.lock().expect("the wake notification mutex is not poisoned");
+    if testing_aids::is_mutation_testing() {
+        let (started, _) = ready
+            .wait_timeout_while(started, testing_aids::TEST_TIMEOUT, |started| !*started)
+            .expect("the wake notification mutex is not poisoned");
+        assert!(*started, "{failure}");
+        return;
+    }
     while !*started {
         started = ready.wait(started).expect("the wake notification mutex is not poisoned");
     }
@@ -211,7 +218,7 @@ fn exercise_join_notification_ordering() {
     }));
     assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     release_task.send(());
-    wait_for_notification(&wake_started);
+    wait_for_notification(&wake_started, "task completion wakes the blocked join");
 
     let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("the task result is ready before its wake callback returns");
@@ -248,7 +255,7 @@ fn exercise_cancellation_notification_ordering() {
     }));
     assert!(task.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     RuntimeOperations::from(&runtime).request_stop();
-    wait_for_notification(&wake_started);
+    wait_for_notification(&wake_started, "task cancellation wakes the blocked join");
 
     let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("the canceled join is ready before its wake callback returns");
@@ -397,7 +404,7 @@ fn exercise_owner_drop_runtime() -> Scheduler {
         .spawn(async move |_| drop(owner_dropped))
         .join()
         .expect("dropping the owner on its worker does not unwind");
-    wait_for_notification(&stopped);
+    wait_for_notification(&stopped, "owner-drop shutdown reports stopped");
     let (decoded, snapshot) = capture();
     let runtime = new_runtime(&snapshot, &previous);
     assert_eq!(runtime.state, RuntimeState::Stopped);
