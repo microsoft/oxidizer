@@ -27,7 +27,7 @@ use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, Joi
 pub(crate) struct ExecutorCore {
     reentrancy_safe: RefCell<ReentrancySafeState>,
     exclusive: RefCell<ExclusiveState>,
-    shared: SharedState,
+    wake: Arc<WakeShared>,
 
     _single_threaded: PhantomData<*const ()>,
 }
@@ -97,17 +97,6 @@ struct ExclusiveState {
     last_cycle_ended: Option<Instant>,
 }
 
-/// This portion of the executor state is of a form that allows it to be naturally shared between
-/// different users (e.g. mutex-protected or immutable), so it needs no special handling.
-///
-/// We could just put all this stuff into `Executor` itself but let's follow the pattern above.
-#[derive(Debug)]
-struct SharedState {
-    /// Queue, probe flag, owner notification, and independent wake-state pool shared by every
-    /// task in this executor.
-    wake: Arc<WakeShared>,
-}
-
 // We prefer to get wake notifications via the "awakened" queue. This may not always be possible
 // because the queue may be full or it may be locked (if the wake-up is coming from another thread).
 //
@@ -143,13 +132,11 @@ impl ExecutorCore {
                 clock: SimpleClock::new_system().with_fast_instant(true),
                 last_cycle_ended: None,
             }),
-            shared: SharedState {
-                wake: Arc::new(WakeShared::new(
-                    Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
-                    Arc::new(AtomicBool::new(false)),
-                    owner_waker,
-                )),
-            },
+            wake: Arc::new(WakeShared::new(
+                Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
+                Arc::new(AtomicBool::new(false)),
+                owner_waker,
+            )),
             _single_threaded: PhantomData,
         }
     }
@@ -159,19 +146,24 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        let mut state = self.reentrancy_safe.borrow_mut();
-
-        if state.shutting_down {
-            return state.join_handles.disconnected();
+        {
+            let state = self.reentrancy_safe.borrow();
+            if state.shutting_down {
+                return state.join_handles.disconnected();
+            }
         }
 
         let future = future.into_future();
+        let mut state = self.reentrancy_safe.borrow_mut();
+        if state.shutting_down {
+            return state.join_handles.disconnected();
+        }
         let (result_tx, join_handle) = state.join_handles.rent::<R>();
 
         let task = state.task_storage.alloc_box(Task::new(future, result_tx));
         let task_ref = TaskRef::new(task);
 
-        let wake_signal = WakeSignal::new_pooled(Arc::clone(&self.shared.wake), task_ref);
+        let wake_signal = WakeSignal::new_pooled(Arc::clone(&self.wake), task_ref);
 
         // SAFETY: The task is alive (we own it and just created it) and we are on the thread
         // where it was created (because we just created it). The executor is the only thing that
@@ -221,7 +213,7 @@ impl ExecutorCore {
         {
             let state_reentrant = self.reentrancy_safe.borrow();
 
-            Self::drop_completed_tasks(&mut state_exclusive);
+            Self::drop_completed_tasks(&mut state_exclusive, true);
 
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
@@ -282,7 +274,7 @@ impl ExecutorCore {
             // First, we simply drain the "awakened" queue, which is the preferred
             // way to wake up tasks. This is a fast TaskRef move, so the lock here is
             // hopefully short and mostly uncontended.
-            let mut awakened = self.shared.wake.awakened.lock().expect(ERR_POISONED_LOCK);
+            let mut awakened = self.wake.awakened.lock().expect(ERR_POISONED_LOCK);
 
             if !awakened.is_empty() {
                 // Process each contiguous slice in FIFO order, avoiding per-task ring-buffer
@@ -315,7 +307,7 @@ impl ExecutorCore {
         //
         // We use Acquire ordering as we are acquiring the synchronization block for the
         // wake-up flags inside the task wake signals.
-        if !self.shared.wake.probe_embedded_wake_signals.swap(false, atomic::Ordering::Acquire) {
+        if !self.wake.probe_embedded_wake_signals.swap(false, atomic::Ordering::Acquire) {
             return;
         }
 
@@ -394,7 +386,7 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_completed_tasks(state_exclusive: &mut ExclusiveState) {
+    fn drop_completed_tasks(state_exclusive: &mut ExclusiveState, record_cycle_metric: bool) {
         let completed_before = state_exclusive.completed.len();
 
         // We drop all completed tasks after their completion/cancellation path has retired any
@@ -405,7 +397,7 @@ impl ExecutorCore {
             unsafe { task_ref.release() };
         }
 
-        if completed_before > 0 {
+        if record_cycle_metric && completed_before > 0 {
             TASKS_DROPPED.with(|x| x.observe(completed_before));
         }
     }
@@ -427,8 +419,8 @@ impl ExecutorCore {
         );
 
         !state_reentrant.new_tasks.is_empty()
-            || !self.shared.wake.awakened.lock().expect(ERR_POISONED_LOCK).is_empty()
-            || self.shared.wake.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed)
+            || !self.wake.awakened.lock().expect(ERR_POISONED_LOCK).is_empty()
+            || self.wake.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed)
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
@@ -442,10 +434,18 @@ impl ExecutorCore {
         );
         state_reentrant.shutting_down = true;
 
-        Self::abort_tasks(&mut state_exclusive, &mut state_reentrant);
+        Self::abort_tasks(&self.wake, &mut state_exclusive, &mut state_reentrant);
     }
 
-    fn abort_tasks(state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
+    fn abort_tasks(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
+        let mut awakened = wake.awakened.lock().expect(ERR_POISONED_LOCK);
+        for &task_ref in awakened.iter() {
+            // SAFETY: Shutdown has not released task storage yet; every queued reference remains live.
+            unsafe { task_ref.as_task() }.clear_queued_notification();
+        }
+        awakened.clear();
+        drop(awakened);
+
         // Needed for split borrowing.
         let state_exclusive_real: &mut ExclusiveState = state_exclusive;
 
@@ -500,10 +500,11 @@ impl Drop for ExecutorCore {
 
         if !state_reentrant.shutting_down {
             state_reentrant.shutting_down = true;
-            Self::abort_tasks(state_exclusive, state_reentrant);
+            Self::abort_tasks(&self.wake, state_exclusive, state_reentrant);
         }
 
-        Self::drop_completed_tasks(state_exclusive);
+        Self::drop_completed_tasks(state_exclusive, false);
+        EXECUTOR_PUSHER.with(MetricsPusher::push);
         debug_assert!(state_reentrant.task_storage.is_empty());
     }
 }

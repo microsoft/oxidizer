@@ -338,7 +338,7 @@ fn decomposed_cycle_awakened(state: &State) -> CycleOutcome {
 
 #[metabench::benchmark(DECOMPOSED_RETIRED_WAKE, DECOMPOSED, "retired_wake_by_ref")]
 #[bench::after_completion(&retired_waker_state())]
-fn decomposed_retired_wake(state: &State) {
+fn decomposed_retired_wake_by_ref(state: &State) {
     black_box(&state.wakers[0]).wake_by_ref();
 }
 
@@ -355,13 +355,13 @@ fn decomposed_shutdown_pending_one(state: &mut ShutdownState) -> CycleOutcome {
 
 #[metabench::benchmark(WAKER_STATE_POOLED, ALLOCATION, "waker_state_pooled")]
 #[bench::warm(&mut WakerStateAllocationProbe::new())]
-fn waker_state_pooled(state: &mut WakerStateAllocationProbe) {
+fn allocation_waker_state_pooled(state: &mut WakerStateAllocationProbe) {
     state.replace_pooled();
 }
 
 #[metabench::benchmark(WAKER_STATE_FRESH_ARC, ALLOCATION, "waker_state_fresh_arc")]
 #[bench::fresh(&mut WakerStateAllocationProbe::new())]
-fn waker_state_fresh_arc(state: &mut WakerStateAllocationProbe) {
+fn allocation_waker_state_fresh_arc(state: &mut WakerStateAllocationProbe) {
     state.replace_fresh_arc();
 }
 
@@ -374,8 +374,8 @@ fn criterion_allocation_benchmarks(criterion: &mut Criterion) {
             });
         };
     }
-    allocation!(WAKER_STATE_POOLED, "warm", waker_state_pooled);
-    allocation!(WAKER_STATE_FRESH_ARC, "fresh", waker_state_fresh_arc);
+    allocation!(WAKER_STATE_POOLED, "warm", allocation_waker_state_pooled);
+    allocation!(WAKER_STATE_FRESH_ARC, "fresh", allocation_waker_state_fresh_arc);
     allocation.finish();
 }
 
@@ -559,7 +559,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         DECOMPOSED_RETIRED_WAKE,
         "after_completion",
         retired_waker_state(),
-        decomposed_retired_wake
+        decomposed_retired_wake_by_ref
     );
     prepared!(
         DECOMPOSED_SHUTDOWN_PENDING_ONE,

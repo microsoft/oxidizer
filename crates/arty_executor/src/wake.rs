@@ -178,7 +178,6 @@ impl WakeSignal {
         self.state.load(atomic::Ordering::Acquire)
     }
 
-    #[inline]
     pub(crate) fn retire(&self) {
         let state = self.state.load(atomic::Ordering::Acquire);
         self.retirement.set(if state.is_null() {

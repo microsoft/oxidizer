@@ -29,7 +29,7 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-renamed_arty = {{ package = "arty", path = "{}" }}
+renamed_arty = {{ package = "arty", path = "{}", features = ["test-util"] }}
 
 [patch.crates-io]
 ohno = {{ path = "{}" }}
@@ -52,9 +52,25 @@ async fn main(cx: Builtins) {
 ",
     )
     .unwrap();
+    let tests = directory.path().join("tests");
+    fs::create_dir(&tests).unwrap();
+    fs::write(
+        tests.join("controlled_clock.rs"),
+        r"use renamed_arty::task::Builtins;
+use renamed_arty::time::ClockControl;
+
+#[renamed_arty::test(workers = 1)]
+async fn controlled_clock_alias_resolves(cx: Builtins, control: ClockControl) {
+    let watch = cx.clock().stopwatch();
+    control.advance(std::time::Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), std::time::Duration::from_secs(1));
+}
+",
+    )
+    .unwrap();
 
     let output = Command::new(env!("CARGO"))
-        .args(["check", "--offline", "--quiet", "--manifest-path"])
+        .args(["check", "--tests", "--offline", "--quiet", "--manifest-path"])
         .arg(directory.path().join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", directory.path().join("target"))
         .output()
