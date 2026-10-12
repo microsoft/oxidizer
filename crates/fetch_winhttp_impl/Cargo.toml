@@ -17,16 +17,6 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp_impl"
 
-[target.'cfg(windows)'.dev-dependencies]
-future_assert = { path = "../future_assert" }
-futures = { workspace = true, features = ["std"] }
-mockall = { workspace = true }
-mutants = { workspace = true }
-observed_testing = { path = "../observed_testing" }
-static_assertions = { workspace = true }
-thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-tick = { path = "../tick", features = ["test-util"] }
-
 [package.metadata.cargo_check_external_types]
 # Implementation crate. Its public surface exists only so that the `fetch_winhttp`
 # facade can re-export the supported parts of it, and is not itself an API anyone
@@ -113,6 +103,16 @@ windows = { workspace = true, features = [
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
 ] }
+
+[target.'cfg(windows)'.dev-dependencies]
+future_assert = { path = "../future_assert" }
+futures = { workspace = true, features = ["std"] }
+mockall = { workspace = true }
+mutants = { workspace = true }
+observed_testing = { path = "../observed_testing" }
+static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
+tick = { path = "../tick", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]
