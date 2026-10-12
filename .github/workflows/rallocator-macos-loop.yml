@@ -65,6 +65,7 @@ jobs:
             getconf PAGESIZE
             rustc --version
             cargo test --package rallocator --package seismograph --package seismograph_rallocator --all-features --locked -- --nocapture
+            cargo test --package rallocator --release --all-features --locked -- --nocapture
             cargo clippy --package rallocator --package seismograph --package seismograph_rallocator --all-targets --all-features --locked -- -D warnings
           } 2>&1 | tee "$RUNNER_TEMP/rallocator-macos.log"
 
