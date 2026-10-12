@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
+
 //! Utilities for driving futures by hand in unit tests.
 //!
 //! [`FutureTestExt`] adds consuming manual-polling assertions (`unwrap_ready`,
@@ -191,6 +193,7 @@ pub trait FutureTestExt: Future + Sized {
 impl<F: Future> FutureTestExt for F {}
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
     use std::collections::VecDeque;

@@ -18,7 +18,7 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp_impl"
 
 [target.'cfg(windows)'.dev-dependencies]
-future_assert.workspace = true
+future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
 mutants = { workspace = true }

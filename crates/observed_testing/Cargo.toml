@@ -27,7 +27,7 @@ observed_utils = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
 
 [dev-dependencies]
-future_assert.workspace = true
+future_assert = { path = "../future_assert" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 # >>> anvil-managed: anvil-lints
