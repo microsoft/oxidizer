@@ -94,6 +94,18 @@ impl Default for WakerStateAllocationProbe {
     }
 }
 
+impl Drop for WakerStateAllocationProbe {
+    #[cfg_attr(test, mutants::skip)] // Benchmark-fixture cleanup has no observable result to assert.
+    fn drop(&mut self) {
+        self.pooled = None;
+        self.fresh = None;
+
+        // SAFETY: The probe created this task reference, never dereferences it, and releases it
+        // exactly once after every benchmark state carrying a copy has been dropped.
+        unsafe { self.task_ref.release() };
+    }
+}
+
 struct AllocationProbeTask {
     _nonzero: u8,
 }
