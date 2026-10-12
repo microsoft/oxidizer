@@ -108,6 +108,31 @@ fn into_future_conversion_may_submit_a_nested_task() {
     assert!(nested_completed.get());
 }
 
+struct ShutdownDuringIntoFuture {
+    executor: Rc<Executor>,
+}
+
+impl IntoFuture for ShutdownDuringIntoFuture {
+    type Output = usize;
+    type IntoFuture = std::future::Ready<usize>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        self.executor.begin_shutdown();
+        std::future::ready(42)
+    }
+}
+
+#[test]
+fn shutdown_during_into_future_conversion_rejects_the_outer_task() {
+    let executor = Rc::new(Executor::builder().build());
+    let mut handle = executor.tasks().add(ShutdownDuringIntoFuture {
+        executor: Rc::clone(&executor),
+    });
+
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+}
+
 #[test]
 fn shutdown_retires_a_batch_of_queued_tasks() {
     const TASK_COUNT: usize = 32;
