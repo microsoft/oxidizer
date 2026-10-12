@@ -24,7 +24,6 @@ mod metrics;
 pub mod tracing_logs;
 mod yielding;
 
-pub use future_assert::{FutureTestExt, poll_once};
 pub use io::*;
 pub use macro_expansion::*;
 pub use metrics::*;

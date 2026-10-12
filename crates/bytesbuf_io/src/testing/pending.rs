@@ -195,7 +195,7 @@ impl PendingBuilder {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytesbuf::mem::CallbackMemory;
-    use testing_aids::FutureTestExt;
+    use future_assert::FutureTestExt;
 
     use super::*;
 

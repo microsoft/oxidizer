@@ -37,8 +37,8 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use future_assert::FutureTestExt;
 use plurality::Pool;
-use testing_aids::FutureTestExt;
 use windows::Win32::Networking::WinHttp::{
     ERROR_WINHTTP_INCORRECT_HANDLE_STATE, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
     WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,

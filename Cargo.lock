@@ -983,6 +983,7 @@ name = "bytesbuf_io"
 version = "0.11.0"
 dependencies = [
  "bytesbuf",
+ "future-assert",
  "futures",
  "futures-core",
  "mutants",
@@ -1006,6 +1007,7 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
+ "future-assert",
  "futures",
  "layered",
  "parking_lot",
@@ -2081,6 +2083,7 @@ dependencies = [
  "bytesbuf_io",
  "events_once",
  "fetch",
+ "future-assert",
  "futures",
  "h3",
  "h3-quinn",
@@ -2103,7 +2106,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "static_assertions",
- "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
@@ -3944,9 +3946,9 @@ name = "observed_testing"
 version = "0.0.0"
 dependencies = [
  "data_privacy",
+ "future-assert",
  "observed",
  "observed_utils",
- "testing_aids",
  "tick",
  "tokio",
 ]
@@ -5888,7 +5890,6 @@ name = "testing_aids"
 version = "0.0.0"
 dependencies = [
  "ctor",
- "future-assert",
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
