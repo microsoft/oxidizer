@@ -129,7 +129,15 @@ impl Barrier<Async> {
 
     /// Blocks the current thread until all participants reach the barrier.
     pub fn wait(&self) -> BarrierWaitResult {
-        block_on(self.wait_async())
+        match self.arrive() {
+            Arrival::Leader => BarrierWaitResult { leader: true },
+            Arrival::Waiting(generation) => block_on(BarrierWait {
+                barrier: self,
+                generation: Some(generation),
+                waiter: None,
+                completed: false,
+            }),
+        }
     }
 
     fn generation(&self) -> u32 {
@@ -272,7 +280,9 @@ impl BarrierWaitResult {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::pin;
     use std::task::Waker;
+    use std::time::Duration;
 
     use super::*;
 
@@ -309,6 +319,37 @@ mod tests {
 
         assert!(matches!(barrier.arrive(), Arrival::Leader));
         assert_eq!(barrier.raw.state.load(Ordering::Relaxed), 8_u64 << 32);
+    }
+
+    #[test]
+    fn blocking_leader_releases_async_waiters_once_per_generation() {
+        let barrier = Barrier::<Async>::new(2);
+        let mut context = Context::from_waker(Waker::noop());
+        for generation in 1..=3 {
+            let mut wait = pin!(barrier.wait_async());
+            assert!(wait.as_mut().poll(&mut context).is_pending());
+            assert!(barrier.wait().is_leader());
+            assert_eq!(wait.as_mut().poll(&mut context), Poll::Ready(BarrierWaitResult { leader: false }));
+            assert_eq!(barrier.raw.state.load(Ordering::Relaxed), generation << 32);
+        }
+    }
+
+    #[test]
+    fn blocking_waiter_retains_its_first_arrival() {
+        let barrier = Arc::new(Barrier::<Async>::new(2));
+        let other = Arc::clone(&barrier);
+        let worker = std::thread::spawn(move || other.wait());
+        let deadline = std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
+        while Barrier::<Async>::count(barrier.raw.state.load(Ordering::Acquire)) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "blocking participant must arrive before the deadline"
+            );
+            std::thread::yield_now();
+        }
+        assert!(block_on(barrier.wait_async()).is_leader());
+        assert!(!worker.join().unwrap().is_leader());
+        assert_eq!(barrier.raw.state.load(Ordering::Relaxed), 1_u64 << 32);
     }
 
     #[test]

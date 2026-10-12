@@ -11,11 +11,11 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, PoisonError};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // Channel state is already heap-shared; another lazy sidecar would not shrink
 // the endpoint handles and would add work to their notification path.
-use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_timeout};
+use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_until};
 use crate::telemetry::{self, EventKind};
 
 const ERROR_FULL: u8 = 1;
@@ -260,8 +260,11 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub async fn send_async(&self, value: T) -> Result<(), Error<T>> {
+        self.send_with_recording(value, ContentionRecording::Pending).await
+    }
+
+    async fn send_with_recording(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
         let mut value = value;
-        let mut contention_recording = ContentionRecording::Pending;
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -292,7 +295,15 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub fn send(&self, value: T) -> Result<(), Error<T>> {
-        block_on(self.send_async(value))
+        match self.shared.try_send(value) {
+            Ok(()) => Ok(()),
+            Err((ERROR_CLOSED, value)) => Err(Error::with_value(ERROR_CLOSED, value)),
+            Err((code, value)) => {
+                debug_assert_eq!(code, ERROR_FULL, "queue send reports only full or closed");
+                self.shared.record(EventKind::ChannelSendContention);
+                block_on(self.send_with_recording(value, ContentionRecording::Recorded))
+            }
+        }
     }
 
     /// Attempts to send `value` without waiting.
@@ -393,7 +404,10 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub async fn recv_async(&self) -> Result<T, Error> {
-        let mut contention_recording = ContentionRecording::Pending;
+        self.recv_with_recording(ContentionRecording::Pending).await
+    }
+
+    async fn recv_with_recording(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -426,7 +440,10 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub fn recv(&self) -> Result<T, Error> {
-        block_on(self.recv_async())
+        match self.try_recv() {
+            Err(error) if error.is_empty() => block_on(self.recv_with_recording(ContentionRecording::Recorded)),
+            result => result,
+        }
     }
 
     /// Receives the next value, blocking for at most `timeout`.
@@ -436,7 +453,12 @@ impl<T> Receiver<T> {
     /// Returns an error if the deadline expires or the channel closes while
     /// drained.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, Error> {
-        match block_on_timeout(self.recv_async(), timeout) {
+        let deadline = Instant::now().checked_add(timeout);
+        match self.try_recv() {
+            Err(error) if error.is_empty() => {}
+            result => return result,
+        }
+        match block_on_until(self.recv_with_recording(ContentionRecording::Recorded), deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -727,6 +749,9 @@ impl<T> OneshotReceiver<T> {
     ///
     /// Returns [`Error`] if the sender is dropped without sending.
     pub fn recv(mut self) -> Result<T, Error> {
+        if let Some(result) = self.take_result() {
+            return result;
+        }
         block_on(&mut self)
     }
 
@@ -737,7 +762,11 @@ impl<T> OneshotReceiver<T> {
     /// Returns an error if the deadline expires or the sender drops without
     /// sending.
     pub fn recv_timeout(mut self, timeout: Duration) -> Result<T, Error> {
-        match block_on_timeout(&mut self, timeout) {
+        let deadline = Instant::now().checked_add(timeout);
+        if let Some(result) = self.take_result() {
+            return result;
+        }
+        match block_on_until(&mut self, deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -1071,19 +1100,17 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub async fn changed_async(&self) -> Result<(), Error> {
-        let mut contention_recording = ContentionRecording::Pending;
+        self.changed_with_recording(ContentionRecording::Pending).await
+    }
+
+    async fn changed_with_recording(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "watch receive must make progress");
-            match self.observe_change() {
-                WatchChange::Version(_) => {
-                    telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
-                    return Ok(());
-                }
-                WatchChange::Closed => return Err(Error::without_value(ERROR_CLOSED)),
-                WatchChange::Pending => {}
+            if let Some(result) = self.try_changed() {
+                return result;
             }
             if matches!(contention_recording, ContentionRecording::Pending) {
                 telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
@@ -1131,7 +1158,22 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub fn changed(&self) -> Result<(), Error> {
-        block_on(self.changed_async())
+        if let Some(result) = self.try_changed() {
+            return result;
+        }
+        telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+        block_on(self.changed_with_recording(ContentionRecording::Recorded))
+    }
+
+    fn try_changed(&self) -> Option<Result<(), Error>> {
+        match self.observe_change() {
+            WatchChange::Version(_) => {
+                telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
+                Some(Ok(()))
+            }
+            WatchChange::Closed => Some(Err(Error::without_value(ERROR_CLOSED))),
+            WatchChange::Pending => None,
+        }
     }
 
     /// Returns whether all senders have been dropped.
@@ -1272,11 +1314,13 @@ impl<T: fmt::Display> fmt::Display for WatchRef<'_, T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
+    use std::time::{Duration, Instant};
 
     use super::{
         ERROR_CLOSED, ERROR_EMPTY, ERROR_FULL, ERROR_TIMEOUT, Error, OneshotShared, OneshotState, QueueState, QueueWait, WaitQueue,
@@ -1289,6 +1333,99 @@ mod tests {
     impl Wake for WakeCounter {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn wait_for_waiter<T>(queue: &WaitQueue, worker: &std::thread::JoinHandle<T>) {
+        let deadline = Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
+        while !queue.has_waiters() {
+            assert!(!worker.is_finished(), "a blocking receive must wait for its producer");
+            assert!(Instant::now() < deadline, "the blocking receive must register before the deadline");
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn blocking_queue_receive_waits_for_a_value() {
+        let (sender, receiver) = bounded(1);
+        let worker = std::thread::spawn(move || receiver.recv());
+        wait_for_waiter(&sender.shared.receive_waiters, &worker);
+        sender.try_send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn timed_queue_receive_waits_for_value_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = bounded(1);
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::from_mins(2)));
+            wait_for_waiter(&shared.receive_waiters, &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.try_send(17).unwrap();
+            }
+
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(17) });
+        }
+    }
+
+    #[test]
+    fn overflowing_queue_deadline_waits_for_a_value() {
+        let (sender, receiver) = bounded(1);
+        let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::MAX));
+        wait_for_waiter(&sender.shared.receive_waiters, &worker);
+        sender.try_send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn blocking_oneshot_receive_waits_for_a_value() {
+        let (sender, receiver) = oneshot();
+        let worker = std::thread::spawn(move || receiver.recv());
+        wait_for_waiter(&sender.shared.receiver_waiters, &worker);
+        sender.send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn timed_oneshot_receive_waits_for_value_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = oneshot();
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::from_mins(2)));
+            wait_for_waiter(&shared.receiver_waiters, &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.send(17).unwrap();
+            }
+
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(17) });
+        }
+    }
+
+    #[test]
+    fn blocking_watch_change_waits_for_update_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = watch(0);
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.changed());
+            wait_for_waiter(&shared.receiver_waiters, &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.send(17).unwrap();
+            }
+
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(()) });
         }
     }
 

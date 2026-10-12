@@ -42,7 +42,11 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
+    block_on_until(future, Instant::now().checked_add(timeout))
+}
+
+pub(super) fn block_on_until<F: Future>(future: F, deadline: Option<Instant>) -> Option<F::Output> {
+    let Some(deadline) = deadline else {
         return Some(block_on(future));
     };
     let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
@@ -212,6 +216,11 @@ impl EagerWaitQueue {
             has_waiters: AtomicBool::new(false),
             waiters: Mutex::new(VecDeque::new()),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_waiters(&self) -> bool {
+        self.has_waiters.load(Ordering::Acquire)
     }
 
     pub(super) fn enqueue_if_needed(&self, waiter: &Arc<Waiter>, retry: impl FnOnce() -> bool) -> bool {

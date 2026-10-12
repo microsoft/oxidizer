@@ -197,6 +197,30 @@ fn queue_receive_timeout_returns_buffered_values() {
 }
 
 #[test]
+fn queue_zero_timeout_drains_closed_channels_before_reporting_close() {
+    for bounded_queue in [false, true] {
+        let (sender, receiver) = if bounded_queue { bounded(2) } else { unbounded() };
+        sender.send(17).unwrap();
+        sender.send(23).unwrap();
+        assert!(sender.close());
+
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(23));
+        assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+        assert_eq!(sender.send(29).unwrap_err().into_value(), Some(29));
+    }
+}
+
+#[test]
+fn queue_zero_timeout_cancels_wait_without_consuming_the_next_value() {
+    let (sender, receiver) = bounded(1);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    sender.try_send(17).unwrap();
+
+    assert_eq!(receiver.recv(), Ok(17));
+}
+
+#[test]
 fn unbounded_channel_supports_multiple_producers_and_consumers() {
     let (sender, receiver) = unbounded();
     let producer_a = sender.clone();
@@ -439,6 +463,21 @@ fn oneshot_supports_blocking_timeout_and_nonblocking_receives() {
 }
 
 #[test]
+fn oneshot_zero_timeout_preserves_ready_closed_and_cancelled_states() {
+    let (sender, receiver) = oneshot();
+    sender.send(17).unwrap();
+    assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+
+    let (sender, receiver) = oneshot::<usize>();
+    drop(sender);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+
+    let (sender, receiver) = oneshot::<usize>();
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    assert_eq!(sender.send(23).unwrap_err().into_value(), Some(23));
+}
+
+#[test]
 fn oneshot_reports_endpoint_state_and_cancels_registered_waiters() {
     let (sender, mut receiver) = oneshot();
     assert_eq!(
@@ -604,6 +643,17 @@ fn watch_blocking_change_wakes_for_updates() {
 }
 
 #[test]
+fn watch_blocking_change_observes_the_final_version_before_close() {
+    let (sender, receiver) = watch(1);
+    sender.send(2).unwrap();
+    drop(sender);
+
+    assert_eq!(receiver.changed(), Ok(()));
+    assert_eq!(*receiver.borrow(), 2);
+    assert!(receiver.changed().unwrap_err().is_closed());
+}
+
+#[test]
 fn channel_futures_are_send_for_send_values() {
     fn assert_send<T: Send>(_: T) {}
 
@@ -623,6 +673,10 @@ fn channel_futures_are_send_for_send_values() {
 
 #[test]
 #[cfg(feature = "seismograph")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one recorder session checks identity and blocking events without global-state races"
+)]
 fn channel_operations_share_runtime_telemetry_identity() {
     let thread_id = seismograph::recorder::current_thread_id();
     seismograph::recorder(Configuration {
@@ -719,6 +773,43 @@ fn channel_operations_share_runtime_telemetry_identity() {
         vec![1, 2, 3],
     );
 
-    seismograph::recorder(Configuration::default());
     drop(watch_sender);
+    seismograph::snapshot(seismograph::snapshot::SnapshotOptions {
+        event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
+    })
+    .unwrap();
+
+    let (sender, receiver) = bounded(1);
+    sender.send(1).unwrap();
+    assert_eq!(receiver.len(), 1);
+    assert_eq!(receiver.recv(), Ok(1));
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    let (oneshot_sender, oneshot_receiver) = oneshot();
+    oneshot_sender.send(2).unwrap();
+    assert_eq!(oneshot_receiver.recv(), Ok(2));
+    let (_pending_sender, pending_receiver) = oneshot::<usize>();
+    assert!(pending_receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    let (watch_sender, watch_receiver) = watch(0);
+    watch_sender.send(3).unwrap();
+    assert_eq!(watch_receiver.changed(), Ok(()));
+
+    let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap().events;
+    let mut contention_counts = std::collections::HashMap::new();
+    let mut sent_events = 0;
+    let mut received_events = 0;
+    for event in snapshot.events.iter().filter(|event| event.thread_id == thread_id) {
+        match event.kind {
+            EventKind::ChannelReceiveContention => {
+                *contention_counts.entry(event.object_id().unwrap()).or_insert(0) += 1;
+            }
+            EventKind::ChannelSendContention => panic!("ready sends must not record contention"),
+            EventKind::ChannelSend => sent_events += 1,
+            EventKind::ChannelReceive => received_events += 1,
+            _ => {}
+        }
+    }
+    assert_eq!((sent_events, received_events), (3, 3));
+    assert_eq!(contention_counts.into_values().collect::<Vec<_>>(), [1, 1]);
+    seismograph::recorder(Configuration::default());
 }

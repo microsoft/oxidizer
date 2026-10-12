@@ -43,6 +43,7 @@ thread_aware_core = { workspace = true, features = ["std"] }
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 criterion.workspace = true
 metabench.workspace = true
 mutants.workspace = true
