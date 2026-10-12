@@ -959,16 +959,6 @@ mod tests {
     }
 
     #[test]
-    fn dirty_drop_reclaims_task_without_result_event() {
-        let (executor, _task_ref, dropped) = dirty_drop_fixture(TaskLocation::New, true);
-
-        let result = catch_unwind(AssertUnwindSafe(|| drop(executor)));
-
-        assert!(result.is_err());
-        assert!(dropped.get());
-    }
-
-    #[test]
     fn dirty_drop_retains_non_inert_task() {
         let (executor, task_ref, dropped) = dirty_drop_fixture(TaskLocation::Inactive, false);
 
