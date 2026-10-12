@@ -112,6 +112,7 @@ impl TypeErasedTask for AllocationProbeTask {
 
     fn abort(self: Pin<&Self>) {}
 
+    #[cfg_attr(test, mutants::skip)] // Opaque benchmark task is never initialized as an executor task.
     fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {
         unreachable!("the allocation probe never initializes its opaque task reference")
     }

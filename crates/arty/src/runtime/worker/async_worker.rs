@@ -175,8 +175,9 @@ where
         let cycle_outcome = executor.execute_cycle();
 
         if matches!(cycle_outcome, CycleOutcome::Shutdown) {
-            // No task wakers remain; retire their storage before the final timer callbacks.
-            self.executor = None;
+            // An alternate low-level owner initiated executor shutdown. Complete the surrounding
+            // worker shutdown before final timer callbacks run.
+            self.begin_shutdown();
         }
 
         // Advances the timers registered with the clock.
@@ -922,6 +923,32 @@ mod tests {
 
         assert!(!initialized.load(Ordering::Relaxed));
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
+    }
+
+    #[test]
+    fn explicit_executor_shutdown_completes_worker_shutdown() {
+        let (commands, receiver) = channel::unbounded();
+        let (ready_tx, ready_rx) = channel::unbounded();
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let mut worker = AsyncWorker::new(
+            receiver,
+            async |_, _| (),
+            Arc::clone(&blocking_worker),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+            Arc::new(AtomicBool::new(false)),
+            ready_tx,
+        );
+        assert!(worker.execute_step().is_continue());
+        ready_rx.recv().unwrap();
+        worker.executor.as_ref().unwrap().begin_shutdown();
+
+        let outcome = worker.execute_step();
+
+        assert!(outcome.is_break());
+        assert!(worker.executor.is_none());
+        assert!(is_blocking_worker_shutting_down(&blocking_worker));
+        drop(commands);
     }
 
     #[test]
