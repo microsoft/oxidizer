@@ -3,6 +3,7 @@
 
 # Branch-local, three-package PR validation. Add [mac-checks] to a commit
 # message to run these checks without opening a PR or invoking unrelated CI.
+# Use [mac-coverage] to iterate on coverage without restarting interpreter jobs.
 name: Rallocator macOS validation
 
 on:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rallocator-macos-checks-${{ github.ref }}
+  group: rallocator-macos-checks-${{ github.ref }}-${{ contains(github.event.head_commit.message, '[mac-coverage]') && 'coverage' || 'full' }}
   cancel-in-progress: true
 
 env:
@@ -25,7 +26,7 @@ env:
 
 jobs:
   check:
-    if: contains(github.event.head_commit.message, '[mac-checks]')
+    if: contains(github.event.head_commit.message, '[mac-checks]') || contains(github.event.head_commit.message, '[mac-coverage]')
     name: "${{ matrix.check }} (${{ matrix.runner }})"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -33,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [macos-15, macos-15-intel]
-        check: [compatibility, coverage, careful, miri, mutation]
+        check: ${{ fromJSON(contains(github.event.head_commit.message, '[mac-coverage]') && '["coverage"]' || '["compatibility", "coverage", "careful", "miri", "mutation"]') }}
     defaults:
       run:
         shell: pwsh

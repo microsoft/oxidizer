@@ -38,6 +38,8 @@ unsafe extern "C" {
         maximum_protection: libc::c_int,
         inheritance: u32,
     ) -> libc::c_int;
+    #[cfg(test)]
+    fn mach_vm_protect(task: u32, address: u64, size: u64, set_maximum: libc::c_int, protection: libc::c_int) -> libc::c_int;
     fn os_sync_wait_on_address(address: *mut libc::c_void, value: u64, size: usize, flags: u32) -> libc::c_int;
     #[cfg(test)]
     fn os_sync_wait_on_address_with_timeout(
@@ -146,9 +148,13 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32) {
         #[cfg(not(test))]
         // SAFETY: The live, aligned atomic provides the four-byte wait word.
         let result = unsafe { os_sync_wait_on_address(word.as_ptr().cast(), u64::from(expected), std::mem::size_of::<u32>(), 0) };
-        if result == -1 {
-            check_wait_error(std::io::Error::last_os_error().raw_os_error());
-        }
+        check_wait_result(result);
+    }
+}
+
+fn check_wait_result(result: libc::c_int) {
+    if result == -1 {
+        check_wait_error(std::io::Error::last_os_error().raw_os_error());
     }
 }
 
@@ -207,6 +213,56 @@ mod tests {
             // SAFETY: No access remains into the owned reservation.
             unsafe { release(pointer, RESERVE_MIN) };
         }
+    }
+
+    #[test]
+    fn rejected_commit_preserves_the_owned_reservation() {
+        let pointer = reserve(RESERVE_MIN, RESERVE_MIN);
+        assert!(!pointer.is_null());
+        // SAFETY: libSystem maintains this process's task port.
+        let task = unsafe { mach_task_self_ };
+        // SAFETY: The test owns the complete, inaccessible reservation. Lowering
+        // its maximum protection to NONE deliberately prevents a later commit.
+        let result = unsafe { mach_vm_protect(task, pointer.addr() as u64, RESERVE_MIN as u64, 1, libc::PROT_NONE) };
+        assert_eq!(result, 0);
+        // SAFETY: The page-granular range still belongs to this live reservation.
+        assert!(!unsafe { commit(pointer, PAGE) });
+        // SAFETY: The rejected commit leaves the complete reservation owned.
+        unsafe { release(pointer, RESERVE_MIN) };
+    }
+
+    #[test]
+    fn rejected_advice_leaves_owned_pages_accessible() {
+        let pointer = reserve(RESERVE_MIN, RESERVE_MIN);
+        assert!(!pointer.is_null());
+        // SAFETY: The test owns this complete, page-aligned reservation.
+        assert!(unsafe { commit(pointer, PAGE) });
+        // SAFETY: The committed page is exclusively writable.
+        unsafe { pointer.write_bytes(0x5a, PAGE) };
+        // SAFETY: The owned page is writable, contains no live objects, and the
+        // invalid advice is rejected by the kernel without changing its mapping.
+        assert!(!unsafe { advise(pointer, PAGE, -1) });
+        // SAFETY: The rejected advice preserves this initialized page.
+        assert_eq!(unsafe { *pointer }, 0x5a);
+        // SAFETY: No access remains into the complete owned reservation.
+        unsafe { release(pointer, RESERVE_MIN) };
+    }
+
+    #[test]
+    fn timed_out_test_wait_aborts_through_the_kernel_result_dispatch() {
+        crate::abort::assert_aborts(
+            "hal::macos::tests::timed_out_test_wait_aborts_through_the_kernel_result_dispatch",
+            || {
+                let word = AtomicU32::new(0);
+                // SAFETY: The live, aligned word matches the expected value.
+                // A one-nanosecond timeout bounds this intentional failed wait.
+                let result =
+                    unsafe { os_sync_wait_on_address_with_timeout(word.as_ptr().cast(), 0, std::mem::size_of::<u32>(), 0, WAIT_CLOCK, 1) };
+                assert_eq!(result, -1);
+                assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ETIMEDOUT));
+                check_wait_result(result);
+            },
+        );
     }
 
     #[test]
