@@ -153,6 +153,7 @@ impl Executor {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::poll_fn;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
@@ -821,13 +822,7 @@ mod tests {
     }
 
     #[test]
-    // The difficulty here is that while we could easily assert_panic!() the timeout, this test
-    // may also panic for other reasons after the timeout because the timeout is essentially a
-    // declaration of failure to clean up - the dirty state is invalid and may result in further
-    // panics or even memory safety violations in the test runner. This may break in the future,
-    // so be ready to adjust or remove as needed when additional complexity makes it impractical.
-    #[should_panic]
-    fn shutdown_times_out_with_leaked_waiter() {
+    fn shutdown_timeout_then_completes_after_waiter_release() {
         // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
         let executor = unsafe {
             Executor::builder()
@@ -839,13 +834,13 @@ mod tests {
         };
         let tasks = executor.tasks();
 
-        let leaked_waiter = Rc::new(RefCell::new(None));
+        let retained_waiter = Rc::new(RefCell::new(None));
 
         tasks.add({
-            let leaked_waiter = Rc::clone(&leaked_waiter);
+            let retained_waiter = Rc::clone(&retained_waiter);
 
             poll_fn(move |cx| {
-                *leaked_waiter.borrow_mut() = Some(cx.waker().clone());
+                *retained_waiter.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending::<usize>
             })
         });
@@ -854,12 +849,13 @@ mod tests {
 
         executor.begin_shutdown();
 
-        // We expect this to panic.
-        _ = executor.execute_cycle();
+        let panic = catch_unwind(AssertUnwindSafe(|| executor.execute_cycle())).unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"executor shutdown timed out"));
 
-        // We only drop it after shutdown completes, which is a leak because shutdown
-        // will never complete like this.
-        drop(leaked_waiter);
+        // Releasing the retained waiter lets shutdown complete and keeps this test from leaking
+        // the task when the expected panic unwinds.
+        drop(retained_waiter);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     }
 
     #[test]

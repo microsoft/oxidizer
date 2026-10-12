@@ -169,7 +169,6 @@ hyper-rustls = { version = "0.27.9", default-features = false }
 hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
 idna = { version = "1.1.0", default-features = false }
-infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 internity = { path = "crates/internity", default-features = false, version = "0.2.1" }
 internity_macros = { path = "crates/internity_macros", default-features = false, version = "=0.2.1" }
