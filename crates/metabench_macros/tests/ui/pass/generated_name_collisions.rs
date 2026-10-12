@@ -31,3 +31,43 @@ mod contract {
 }
 
 fn main() {}
+
+mod collector_names {
+    use renamed_metabench::benchmark;
+
+    #[benchmark(ALLOCATIONS, "collisions", "allocations")]
+    #[bench::one(1)]
+    fn allocations(value: u64) -> u64 {
+        value + 1
+    }
+
+    #[benchmark(PERF, "collisions", "perf")]
+    #[bench::one(1)]
+    fn perf(value: u64) -> u64 {
+        value + 2
+    }
+
+    #[benchmark(VTUNE, "collisions", "vtune")]
+    #[bench::one(1)]
+    fn vtune(value: u64) -> u64 {
+        value + 3
+    }
+
+    #[benchmark(OUTPUT, "collisions", "output")]
+    #[bench::one(1)]
+    fn output(value: u64) -> u64 {
+        value + 4
+    }
+
+    #[benchmark(ARGUMENT, "collisions", "argument")]
+    #[bench::one(1)]
+    fn __metabench_argument_0(value: u64) -> u64 {
+        value + 5
+    }
+
+    #[benchmark(DROP, "collisions", "drop")]
+    #[bench::one(1)]
+    fn drop(value: u64) -> u64 {
+        value + 6
+    }
+}

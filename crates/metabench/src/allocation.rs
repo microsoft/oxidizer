@@ -15,7 +15,7 @@ use crate::report::{Metric, MetricDirection, NativeResult};
 pub(crate) const ARTIFACT_ENV: &str = "METABENCH_INTERNAL_ALLOCATION_ARTIFACT";
 pub(crate) const IDENTITY_ENV: &str = "METABENCH_INTERNAL_ALLOCATION_IDENTITY";
 
-static ACTIVE: LazyLock<bool> = LazyLock::new(|| env::var_os(ARTIFACT_ENV).is_some());
+static ACTIVE: AtomicBool = AtomicBool::new(false);
 static MEASURED: AtomicBool = AtomicBool::new(false);
 static SESSION: LazyLock<Session> = LazyLock::new(|| Session::new().no_stdout().no_file());
 
@@ -27,25 +27,25 @@ struct AllocationArtifact {
 }
 
 #[inline]
-/// Begins measuring the first workload invocation in an allocation worker.
+/// Begins measuring the first explicit workload boundary in an allocation worker.
 #[doc(hidden)]
 pub fn begin() -> Option<ProcessSpan> {
-    (*ACTIVE && !MEASURED.swap(true, Ordering::Relaxed)).then(|| {
+    (ACTIVE.load(Ordering::Relaxed) && !MEASURED.swap(true, Ordering::Relaxed)).then(|| {
         let operation = SESSION.operation("workload");
         operation.measure_process().iterations(1)
     })
 }
 
-/// Resolves the lazy state behind [`begin`] ahead of any measurement.
+/// Enables collection after validating an allocation worker's token and mode.
 ///
-/// [`begin`] runs inside the region a profiler collects, so leaving these
-/// `LazyLock`s cold would charge the first workload for a `getenv` call, the
-/// surrounding one-time synchronization, and the tracking session setup.
-#[cfg_attr(coverage_nightly, coverage(off))] // not exercised by the instrumented test binary; see prime()'s doc comment
-#[cfg_attr(test, mutants::skip)] // warm-up only affects timing, not any observable behavior
+/// Enable tracking and initialize the session before the workload boundary so
+/// session setup cannot contribute allocations to the selected workload.
+#[cfg_attr(coverage_nightly, coverage(off))] // exercised in generated allocation-worker executables
 pub(crate) fn prime() {
-    if *ACTIVE {
+    if env::var_os(ARTIFACT_ENV).is_some() {
+        crate::allocator::enable_tracking();
         LazyLock::force(&SESSION);
+        ACTIVE.store(true, Ordering::Relaxed);
     }
 }
 
@@ -63,7 +63,7 @@ pub(crate) fn write_worker_artifact() -> Result<(), Error> {
         .find_map(|(name, operation)| (name == "workload").then_some(operation))
         .ok_or_else(|| Error::ArtifactFormat {
             path: path.clone(),
-            message: format!("benchmark '{identity}' did not execute its instrumented workload"),
+            message: format!("benchmark '{identity}' did not execute its generated allocation probe"),
         })?;
     if operation.total_iterations() != 1 {
         return Err(Error::ArtifactFormat {
@@ -85,7 +85,7 @@ pub(crate) fn write_worker_artifact() -> Result<(), Error> {
 }
 
 pub(crate) fn read_artifact(path: &Path, native_identity: String, relative_path: String) -> Result<NativeResult, Error> {
-    let artifact: AllocationArtifact = read_json(path)?;
+    let artifact: AllocationArtifact = crate::artifact::read_json(path)?;
     Ok(NativeResult {
         identity: artifact.identity,
         native_identity,
@@ -132,16 +132,15 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     })
 }
 
-fn read_json<T>(path: &Path) -> Result<T, Error>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let file = fs::File::open(path).map_err(|source| Error::ArtifactIo {
-        path: path.to_owned(),
-        source,
-    })?;
-    serde_json::from_reader(file).map_err(|source| Error::ArtifactJson {
-        path: path.to_owned(),
-        source,
-    })
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inactive_collection_does_not_consume_the_first_workload() {
+        assert!(begin().is_none());
+        assert!(begin().is_none());
+        assert!(!MEASURED.load(Ordering::Relaxed));
+    }
 }

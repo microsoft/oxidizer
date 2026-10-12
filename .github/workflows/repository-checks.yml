@@ -103,10 +103,41 @@ jobs:
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
+  metabench-native-contracts:
+    name: Metabench native contracts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "2"
+      METABENCH_REQUIRE_NATIVE_CONTRACTS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+          free-disk-space: "true"
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Install native prerequisites
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/target/metabench-contract-scratch"
+          export TMPDIR="$GITHUB_WORKSPACE/target/metabench-contract-scratch"
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --quiet valgrind
+          cargo +1.95 install --locked --version 0.19.4 gungraun-runner
+          gungraun-runner --version
+          valgrind --version
+      - name: Run native listing and smoke contracts
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/target/metabench-contract-scratch"
+          export TMPDIR="$GITHUB_WORKSPACE/target/metabench-contract-scratch"
+          cargo +1.95 test --package metabench --test spawned_benchmark --locked gungraun_listing_is_forwarded -- --exact --nocapture
+          cargo +1.95 test --package metabench --test spawned_benchmark --locked default_engine_smoke_checks_do_not_publish_measurements -- --exact --nocapture
+
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde]
+    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, metabench-native-contracts]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
@@ -116,6 +147,7 @@ jobs:
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
           INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
           INTERNITY_NO_STD_SERDE: ${{ needs.internity-no-std-serde.result }}
+          METABENCH_NATIVE_CONTRACTS: ${{ needs.metabench-native-contracts.result }}
         run: |
           if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
             echo "::error::release-script-tests concluded $RELEASE_SCRIPT_TESTS"
@@ -135,5 +167,9 @@ jobs:
           fi
           if [[ "$INTERNITY_NO_STD_SERDE" != "success" ]]; then
             echo "::error::internity-no-std-serde concluded $INTERNITY_NO_STD_SERDE"
+            exit 1
+          fi
+          if [[ "$METABENCH_NATIVE_CONTRACTS" != "success" ]]; then
+            echo "::error::metabench-native-contracts concluded $METABENCH_NATIVE_CONTRACTS"
             exit 1
           fi

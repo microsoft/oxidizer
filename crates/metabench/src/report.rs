@@ -3,8 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Write as _};
-use std::io::{BufReader, BufWriter, Write as _};
+use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 use std::process::Command;
 use std::{env, fs, io};
 
@@ -12,11 +13,13 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use unicode_width::UnicodeWidthStr;
 
+use crate::artifact::read_regular_file;
 use crate::error::Error;
 use crate::metric_display::TableMetric;
+use crate::runner::terminal_text;
 
 pub(crate) const DEFAULT_REGRESSION_THRESHOLD: f64 = 5.0;
-const REPORT_SCHEMA_VERSION: u32 = 8;
+const REPORT_SCHEMA_VERSION: u32 = 9;
 const MAX_REPORT_JSON_BYTES: u64 = 64 * 1024 * 1024;
 const DEFAULT_CONSOLE_WIDTH: usize = 120;
 const MARKDOWN_TABLE_WIDTH: usize = 180;
@@ -69,6 +72,10 @@ pub(crate) struct Metric {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) upper_bound: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confidence_level: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) statistic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) change_percentage: Option<f64>,
 }
 
@@ -81,6 +88,8 @@ impl Metric {
             direction,
             lower_bound: None,
             upper_bound: None,
+            confidence_level: None,
+            statistic: None,
             change_percentage: None,
         }
     }
@@ -93,6 +102,8 @@ impl Metric {
             direction,
             lower_bound: None,
             upper_bound: None,
+            confidence_level: None,
+            statistic: None,
             change_percentage: None,
         }
     }
@@ -185,7 +196,7 @@ impl BenchmarkReport {
         }
         let report = Self {
             schema_version: REPORT_SCHEMA_VERSION,
-            metadata: EnvironmentMetadata::collect(backends, artifact_root)?,
+            metadata: EnvironmentMetadata::collect(backends, artifact_root),
             entries: entries.into_values().collect(),
         };
         validate_report(&report)?;
@@ -201,23 +212,8 @@ impl BenchmarkReport {
                 message: format!("publication is incomplete; marker {} is present", incomplete.display()),
             });
         }
-        let length = fs::metadata(path)
-            .map_err(|source| Error::ReportIo {
-                path: path.to_owned(),
-                source,
-            })?
-            .len();
-        if length > MAX_REPORT_JSON_BYTES {
-            return Err(Error::ReportFormat {
-                path: path.to_owned(),
-                message: format!("JSON file is {length} bytes; limit is {MAX_REPORT_JSON_BYTES} bytes"),
-            });
-        }
-        let file = fs::File::open(path).map_err(|source| Error::ReportIo {
-            path: path.to_owned(),
-            source,
-        })?;
-        let mut report: Self = serde_json::from_reader(BufReader::new(file)).map_err(|source| Error::ReportJson {
+        let bytes = read_regular_file(path, MAX_REPORT_JSON_BYTES, "JSON").map_err(Self::report_read_error)?;
+        let mut report: Self = serde_json::from_slice(&bytes).map_err(|source| Error::ReportJson {
             path: path.to_owned(),
             source,
         })?;
@@ -231,6 +227,14 @@ impl BenchmarkReport {
         report.refresh_display_names();
         validate_report(&report)?;
         Ok(report)
+    }
+
+    fn report_read_error(error: Error) -> Error {
+        match error {
+            Error::ArtifactIo { path, source } => Error::ReportIo { path, source },
+            Error::ArtifactFormat { path, message } => Error::ReportFormat { path, message },
+            error => error,
+        }
     }
 
     pub(crate) fn apply_baseline(&mut self, baseline: &Self, threshold: f64) -> Result<(), Error> {
@@ -269,7 +273,11 @@ impl BenchmarkReport {
                     let Some(old) = previous_result.metrics.get(name) else {
                         continue;
                     };
-                    if current.unit != old.unit || current.direction != old.direction || current.direction == MetricDirection::Unknown {
+                    if current.unit != old.unit
+                        || current.statistic != old.statistic
+                        || current.direction != old.direction
+                        || current.direction == MetricDirection::Unknown
+                    {
                         continue;
                     }
                     let change = percentage_shift(old.value.as_f64(), current.value.as_f64());
@@ -411,23 +419,20 @@ pub(crate) struct EnvironmentMetadata {
 }
 
 impl EnvironmentMetadata {
-    fn collect(measured_backends: Vec<String>, artifact_root: String) -> Result<Self, Error> {
+    pub(crate) fn comparable_to(&self, other: &Self) -> bool {
+        self.target_triple == other.target_triple
+            && self.rustc_version == other.rustc_version
+            && self.host_cpu == other.host_cpu
+            && self.profile == other.profile
+            && self.compiler_flags == other.compiler_flags
+    }
+
+    fn collect(measured_backends: Vec<String>, artifact_root: String) -> Self {
         let timestamp_utc = Timestamp::now().to_string();
-        let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-        let output = Command::new(rustc)
-            .arg("-Vv")
-            .output()
-            .map_err(|error| Error::Metadata(error.to_string()))?;
-        if !output.status.success() {
-            return Err(Error::Metadata(format!("rustc -Vv exited with {}", output.status)));
-        }
-        Ok(Self {
+        Self {
             timestamp_utc,
             target_triple: env!("METABENCH_TARGET").to_owned(),
-            rustc_version: String::from_utf8(output.stdout)
-                .map_err(|error| Error::Metadata(error.to_string()))?
-                .trim()
-                .to_owned(),
+            rustc_version: env!("METABENCH_RUSTC_VERSION").to_owned(),
             host_cpu: host_cpu(),
             profile: env!("METABENCH_PROFILE").to_owned(),
             compiler_flags: option_env!("METABENCH_RUSTFLAGS")
@@ -435,7 +440,7 @@ impl EnvironmentMetadata {
                 .filter(|flags| !flags.is_empty()),
             measured_backends,
             artifact_root,
-        })
+        }
     }
 }
 
@@ -511,10 +516,16 @@ fn render_metric_markdown(name: &str, metric: &Metric) -> String {
         let _ = write!(value, " {unit}");
     }
     if let (Some(lower), Some(upper)) = (metric.lower_bound, metric.upper_bound) {
-        if name == "median" {
+        if matches!(name, "time" | "median") {
             let _ = write!(value, " ({lower:.2}..{upper:.2})");
         } else {
             let _ = write!(value, " ({lower:.4}..{upper:.4})");
+        }
+        if let Some(level) = metric.confidence_level {
+            let _ = write!(value, " {:.1}% CI", level * 100.0);
+        }
+        if let Some(statistic) = &metric.statistic {
+            let _ = write!(value, " [{statistic}]");
         }
     }
     value
@@ -522,7 +533,7 @@ fn render_metric_markdown(name: &str, metric: &Metric) -> String {
 
 fn render_metric_value(name: &str, metric: &Metric) -> String {
     match (name, metric.value) {
-        ("median", MetricValue::Float(value)) => format!("{value:.2}"),
+        ("time" | "median", MetricValue::Float(value)) => format!("{value:.2}"),
         _ => metric.value.to_string(),
     }
 }
@@ -562,7 +573,44 @@ fn classify(changes: &[f64], threshold: f64) -> BenchmarkStatus {
 }
 
 fn escape_table(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', "<br>")
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}') {
+            let _ = write!(escaped, "&#92;u&#123;{:x}&#125;", u32::from(character));
+            continue;
+        }
+        if character.is_control()
+            || matches!(
+                character,
+                '&' | '<'
+                    | '>'
+                    | '"'
+                    | '\''
+                    | '\\'
+                    | '`'
+                    | '*'
+                    | '_'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | '('
+                    | ')'
+                    | '#'
+                    | '+'
+                    | '-'
+                    | '.'
+                    | '!'
+                    | '|'
+            )
+            || matches!(character, '\u{2028}' | '\u{2029}')
+        {
+            let _ = write!(escaped, "&#{};", u32::from(character));
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
 }
 
 fn table_headers(metrics: &[TableMetric]) -> Vec<String> {
@@ -648,11 +696,11 @@ fn render_console_grid(headers: &[String], rows: &[Vec<String>]) -> String {
 fn console_column_widths(headers: &[String], rows: &[Vec<String>]) -> Vec<usize> {
     let mut widths = headers
         .iter()
-        .map(|header| UnicodeWidthStr::width(header.as_str()))
+        .map(|header| UnicodeWidthStr::width(terminal_text(header).as_str()))
         .collect::<Vec<_>>();
     for row in rows {
         for (index, value) in row.iter().enumerate() {
-            widths[index] = widths[index].max(UnicodeWidthStr::width(value.as_str()));
+            widths[index] = widths[index].max(UnicodeWidthStr::width(terminal_text(value).as_str()));
         }
     }
     widths
@@ -660,10 +708,11 @@ fn console_column_widths(headers: &[String], rows: &[Vec<String>]) -> Vec<usize>
 
 fn render_console_row(output: &mut String, cells: &[String], widths: &[usize]) {
     for (index, cell) in cells.iter().enumerate() {
+        let cell = terminal_text(cell);
         if index != 0 {
             output.push_str("  ");
         }
-        output.push_str(cell);
+        output.push_str(&cell);
         output.push_str(&" ".repeat(widths[index] - UnicodeWidthStr::width(cell.as_str())));
     }
     output.push('\n');
@@ -674,6 +723,41 @@ fn validate_report(report: &BenchmarkReport) -> Result<(), Error> {
     for entry in &report.entries {
         if !identities.insert(entry.identity.as_str()) {
             return Err(Error::DuplicateReportBenchmark(entry.identity.clone()));
+        }
+        for (engine, result) in entry.results.iter().chain(entry.prior.iter().flat_map(|prior| prior.iter())) {
+            for (name, metric) in &result.metrics {
+                let invalid = match (metric.lower_bound, metric.upper_bound) {
+                    (Some(lower), Some(upper)) => {
+                        metric.confidence_level.is_none()
+                            || !lower.is_finite()
+                            || !upper.is_finite()
+                            || lower > upper
+                            || (engine == "criterion" && matches!(name.as_str(), "time" | "median") && (lower < 0.0 || upper < 0.0))
+                    }
+                    (None, None) => metric.confidence_level.is_some() || (engine == "criterion" && name == "time"),
+                    _ => true,
+                };
+                let invalid_confidence = metric
+                    .confidence_level
+                    .is_some_and(|level| !level.is_finite() || level <= 0.0 || level >= 1.0);
+                let invalid_timing = engine == "criterion"
+                    && matches!(name.as_str(), "time" | "median")
+                    && (!metric.value.as_f64().is_finite() || metric.value.as_f64() < 0.0);
+                let invalid_statistic = engine == "criterion"
+                    && name == "time"
+                    && metric.statistic.as_deref().is_none_or(|statistic| statistic.trim().is_empty());
+                if invalid || invalid_confidence || invalid_timing || invalid_statistic {
+                    return Err(Error::ReportFormat {
+                        path: "<report>".into(),
+                        message: format!(
+                            "invalid estimate or confidence metadata for {} ({}/{})",
+                            terminal_text(&entry.identity),
+                            terminal_text(engine),
+                            terminal_text(name)
+                        ),
+                    });
+                }
+            }
         }
     }
     Ok(())
@@ -852,7 +936,51 @@ fn cpu_identity_fallback(architecture: &str) -> String {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
     use super::*;
+
+    #[test]
+    fn report_admission_errors_retain_report_context_and_existing_causes() {
+        let path = PathBuf::from("baseline.json");
+        assert!(matches!(
+            BenchmarkReport::report_read_error(Error::ArtifactIo {
+                path: path.clone(),
+                source: io::Error::new(io::ErrorKind::PermissionDenied, "read denied"),
+            }),
+            Error::ReportIo { path: failed, source }
+                if failed == path && source.kind() == io::ErrorKind::PermissionDenied
+        ));
+        assert!(matches!(
+            BenchmarkReport::report_read_error(Error::ArtifactFormat { path: path.clone(), message: "not regular".into() }),
+            Error::ReportFormat { path: failed, message } if failed == path && message == "not regular"
+        ));
+        assert!(matches!(
+            BenchmarkReport::report_read_error(Error::Metadata("original error".into())),
+            Error::Metadata(message) if message == "original error"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn baseline_admission_rejects_links_and_fifos_without_waiting_for_a_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("baseline.json");
+        let link = directory.path().join("link.json");
+        fs::write(&path, b"{}").unwrap();
+        symlink(&path, &link).unwrap();
+        assert!(matches!(BenchmarkReport::read_json(&link), Err(Error::ReportIo { .. })));
+        #[cfg(target_os = "linux")]
+        {
+            let fifo = directory.path().join("fifo.json");
+            nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).unwrap();
+            assert!(matches!(
+                BenchmarkReport::read_json(&fifo),
+                Err(Error::ReportFormat { message, .. }) if message.contains("regular file")
+            ));
+        }
+    }
 
     fn metadata() -> EnvironmentMetadata {
         EnvironmentMetadata {
@@ -907,8 +1035,13 @@ mod tests {
     }
 
     fn engine(value: f64, direction: MetricDirection) -> EngineResult {
+        let mut time = Metric::float("criterion", "time", value, direction);
+        time.statistic = Some("mean".to_owned());
+        time.lower_bound = Some(value);
+        time.upper_bound = Some(value);
+        time.confidence_level = Some(0.95);
         EngineResult {
-            metrics: BTreeMap::from([("median".to_owned(), Metric::float("criterion", "median", value, direction))]),
+            metrics: BTreeMap::from([("time".to_owned(), time)]),
             raw_artifacts: vec!["raw.json".to_owned()],
         }
     }
@@ -930,16 +1063,22 @@ mod tests {
     fn merges_sources_by_canonical_identity() {
         let results = ["criterion", "gungraun.callgrind"]
             .into_iter()
-            .zip(["median", "Ir"])
-            .map(|(source, metric)| NativeResult {
-                identity: "group/bench".to_owned(),
-                native_identity: source.to_owned(),
-                source: source.to_owned(),
-                metrics: BTreeMap::from([(
-                    metric.to_owned(),
-                    Metric::integer(source, metric, 1, MetricDirection::LowerIsBetter),
-                )]),
-                raw_artifacts: Vec::new(),
+            .zip(["time", "Ir"])
+            .map(|(source, name)| {
+                let mut metric = Metric::integer(source, name, 1, MetricDirection::LowerIsBetter);
+                if source == "criterion" {
+                    metric.statistic = Some("mean".to_owned());
+                    metric.lower_bound = Some(1.0);
+                    metric.upper_bound = Some(1.0);
+                    metric.confidence_level = Some(0.95);
+                }
+                NativeResult {
+                    identity: "group/bench".to_owned(),
+                    native_identity: source.to_owned(),
+                    source: source.to_owned(),
+                    metrics: BTreeMap::from([(name.to_owned(), metric)]),
+                    raw_artifacts: Vec::new(),
+                }
             });
         let report = BenchmarkReport::from_results(results, Vec::new(), String::new()).unwrap();
         assert_eq!(report.entries.len(), 1);
@@ -1032,6 +1171,7 @@ mod tests {
         for (identity, direction, unit, expected) in [
             ("other", MetricDirection::LowerIsBetter, None, BenchmarkStatus::Uncompared),
             ("bench", MetricDirection::Unknown, None, BenchmarkStatus::Uncompared),
+            ("bench", MetricDirection::HigherIsBetter, None, BenchmarkStatus::Uncompared),
             ("bench", MetricDirection::LowerIsBetter, Some("ns"), BenchmarkStatus::Uncompared),
             ("bench", MetricDirection::LowerIsBetter, None, BenchmarkStatus::Stable),
         ] {
@@ -1041,7 +1181,7 @@ mod tests {
                 .get_mut("criterion")
                 .unwrap()
                 .metrics
-                .get_mut("median")
+                .get_mut("time")
                 .unwrap()
                 .unit = unit.map(str::to_owned);
             current.apply_baseline(&baseline, 5.0).unwrap();
@@ -1074,18 +1214,18 @@ mod tests {
         assert!(!console.contains("criterion"));
         assert!(!console.contains("alloc_tracker"));
         assert!(console.contains("測試"));
-        assert!(console.contains("b|ench\n測試 (PRIOR)"));
+        assert!(console.contains("b|ench\\n測試 (PRIOR)"));
 
         let mut markdown = Vec::new();
         current.write_markdown(&mut markdown).unwrap();
         let markdown = String::from_utf8(markdown).unwrap();
-        assert!(markdown.contains("b\\|ench<br>測試"));
+        assert!(markdown.contains("b&#124;ench&#10;測試"));
         assert!(markdown.contains("Benchmark"));
         assert!(markdown.contains("Time"));
         assert!(markdown.contains("Allocs"));
-        assert!(markdown.contains("10.00"));
-        assert!(markdown.contains("b\\|ench<br>測試 (PRIOR)"));
-        assert!(markdown.contains("8.00"));
+        assert!(markdown.contains("10&#46;00"));
+        assert!(markdown.contains("b&#124;ench&#10;測試 &#40;PRIOR&#41;"));
+        assert!(markdown.contains("8&#46;00"));
         assert!(markdown.ends_with("\n\n"));
     }
 
@@ -1144,7 +1284,7 @@ mod tests {
         assert!(lines[1].split('|').nth(2).unwrap().trim_end().ends_with(':'));
         let time_cell = lines[2].split('|').nth(2).unwrap();
         assert!(time_cell.len() - time_cell.trim_start().len() > 1);
-        assert!(time_cell.trim().starts_with("10.00"));
+        assert!(time_cell.trim().starts_with("10&#46;00"));
     }
 
     #[test]
@@ -1171,13 +1311,13 @@ mod tests {
 
     #[test]
     fn time_values_use_two_decimal_places_only_for_display() {
-        let mut time = Metric::float("criterion", "median", 12.3456, MetricDirection::LowerIsBetter);
+        let mut time = Metric::float("criterion", "time", 12.3456, MetricDirection::LowerIsBetter);
         time.unit = Some("ns".to_owned());
         time.lower_bound = Some(11.2345);
         time.upper_bound = Some(13.4567);
 
-        assert_eq!(render_metric_console("median", &time), "12.35 ns");
-        assert_eq!(render_metric_markdown("median", &time), "12.35 ns (11.23..13.46)");
+        assert_eq!(render_metric_console("time", &time), "12.35 ns");
+        assert_eq!(render_metric_markdown("time", &time), "12.35 ns (11.23..13.46)");
         assert_eq!(time.value, MetricValue::Float(12.3456));
 
         let counter = Metric::float("perf", "cycles", 12.3456, MetricDirection::LowerIsBetter);
@@ -1283,19 +1423,388 @@ mod tests {
     }
 
     #[test]
+    fn different_timing_statistics_are_not_compared() {
+        let mut baseline = report("bench", 10.0, MetricDirection::LowerIsBetter);
+        let mut current = report("bench", 100.0, MetricDirection::LowerIsBetter);
+        baseline.entries[0]
+            .results
+            .get_mut("criterion")
+            .unwrap()
+            .metrics
+            .get_mut("time")
+            .unwrap()
+            .statistic = Some("mean".to_owned());
+        current.entries[0]
+            .results
+            .get_mut("criterion")
+            .unwrap()
+            .metrics
+            .get_mut("time")
+            .unwrap()
+            .statistic = Some("slope".to_owned());
+        current.apply_baseline(&baseline, 5.0).unwrap();
+        assert_eq!(current.entries[0].status, BenchmarkStatus::Uncompared);
+        assert_eq!(current.entries[0].results["criterion"].metrics["time"].change_percentage, None);
+    }
+
+    #[test]
+    fn environment_compatibility_ignores_run_location_but_not_measurement_conditions() {
+        let base = report("bench", 10.0, MetricDirection::LowerIsBetter).metadata;
+        let mut other = base.clone();
+        other.timestamp_utc = "different time".to_owned();
+        other.artifact_root = "different output directory".to_owned();
+        other.measured_backends = vec!["different subset".to_owned()];
+        assert!(base.comparable_to(&other));
+        for field in 0..5 {
+            let mut other = base.clone();
+            match field {
+                0 => other.target_triple.push_str("-different"),
+                1 => other.rustc_version.push_str("-different"),
+                2 => other.host_cpu.push_str("-different"),
+                3 => other.profile.push_str("-different"),
+                _ => other.compiler_flags = Some("-different".to_owned()),
+            }
+            assert!(!base.comparable_to(&other));
+        }
+    }
+
+    #[test]
+    fn compiler_metadata_uses_the_build_identity() {
+        if env::var_os("METABENCH_TEST_AMBIENT_COMPILER").is_some() {
+            let current = EnvironmentMetadata::collect(vec![], "artifacts".to_owned());
+            assert_eq!(current.rustc_version, env!("METABENCH_RUSTC_VERSION"));
+            assert!(current.rustc_version.starts_with("rustc "));
+            let mut other = current.clone();
+            other.rustc_version = "rustc other build".to_owned();
+            assert!(!current.comparable_to(&other));
+            return;
+        }
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        for version in ["one", "two"] {
+            let ambient = directory.path().join(format!("ambient-rustc-{version}"));
+            #[cfg(unix)]
+            {
+                fs::write(&ambient, format!("#!/bin/sh\nprintf 'rustc ambient {version}\\n'\n")).unwrap();
+                fs::set_permissions(&ambient, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let status = Command::new(env::current_exe().unwrap())
+                .args(["--exact", "report::tests::compiler_metadata_uses_the_build_identity"])
+                .env("METABENCH_TEST_AMBIENT_COMPILER", "1")
+                .env("RUSTC", &ambient)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
+    fn primary_estimate_report() -> BenchmarkReport {
+        serde_json::from_str(
+            r#"{
+                "schema_version": 9,
+                "metadata": {
+                    "timestamp_utc": "2026-01-02T03:04:05Z", "target_triple": "test-target",
+                    "rustc_version": "rustc test", "host_cpu": "test cpu", "profile": "release",
+                    "compiler_flags": null, "measured_backends": ["criterion"], "artifact_root": "artifacts"
+                },
+                "entries": [{
+                    "identity": "bench", "status": "uncompared",
+                    "results": {"criterion": {"metrics": {"time": {
+                        "value": 12.35, "unit": "ns", "direction": "lower_is_better",
+                        "lower_bound": 11.23, "upper_bound": 13.46,
+                        "confidence_level": 0.95, "statistic": "slope"
+                    }}}},
+                    "prior": {"criterion": {"metrics": {"time": {
+                        "value": 20.0, "unit": "cycles", "direction": "lower_is_better",
+                        "lower_bound": 10.0, "upper_bound": 30.0,
+                        "confidence_level": 0.99, "statistic": "mean"
+                    }}}}
+                }]
+            }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn primary_estimate_wire_fields_and_markdown_cells_are_preserved() {
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let path = directory.path().join("report.json");
+        let source = primary_estimate_report();
+        fs::write(&path, serde_json::to_vec(&source).unwrap()).unwrap();
+        let actual = BenchmarkReport::read_json(&path).unwrap();
+        let wire = serde_json::to_value(&actual).unwrap();
+        for (row, statistic, value, unit, lower, upper, confidence) in [
+            ("results", "slope", 12.35, "ns", 11.23, 13.46, 0.95),
+            ("prior", "mean", 20.0, "cycles", 10.0, 30.0, 0.99),
+        ] {
+            let metric = &wire["entries"][0][row]["criterion"]["metrics"]["time"];
+            assert_eq!(metric["statistic"], statistic);
+            assert_eq!(metric["confidence_level"], confidence);
+            assert_eq!(metric["value"], value);
+            assert_eq!(metric["unit"], unit);
+            assert_eq!(metric["lower_bound"], lower);
+            assert_eq!(metric["upper_bound"], upper);
+        }
+        let mut output = Vec::new();
+        actual.write_markdown(&mut output).unwrap();
+        let markdown = String::from_utf8(output).unwrap();
+        let rows = markdown.split_once("## Results\n\n").unwrap().1.lines().collect::<Vec<_>>();
+        assert_eq!(
+            rows[2].split('|').nth(2).unwrap().trim(),
+            "12&#46;35 ns &#40;11&#46;23&#46;&#46;13&#46;46&#41; 95&#46;0% CI &#91;slope&#93;"
+        );
+        assert_eq!(
+            rows[3].split('|').nth(2).unwrap().trim(),
+            "20&#46;00 cycles &#40;10&#46;00&#46;&#46;30&#46;00&#41; 99&#46;0% CI &#91;mean&#93;"
+        );
+    }
+
+    #[test]
+    fn schema_nine_rejects_incoherent_confidence_in_current_and_prior_metrics() {
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let path = directory.path().join("report.json");
+        for row in ["results", "prior"] {
+            for invalid in [
+                serde_json::json!({"statistic": null}),
+                serde_json::json!({"statistic": ""}),
+                serde_json::json!({"statistic": " "}),
+                serde_json::json!({"confidence_level": null}),
+                serde_json::json!({"confidence_level": 0.0}),
+                serde_json::json!({"confidence_level": 1.0}),
+                serde_json::json!({"confidence_level": 2.0}),
+                serde_json::json!({"confidence_level": -0.1}),
+                serde_json::json!({"confidence_level": 0.95, "lower_bound": null, "upper_bound": null}),
+                serde_json::json!({"lower_bound": null}),
+                serde_json::json!({"upper_bound": null}),
+                serde_json::json!({"lower_bound": 40.0}),
+                serde_json::json!({"lower_bound": -1.0}),
+                serde_json::json!({"value": -1.0}),
+                serde_json::json!({"lower_bound": null, "upper_bound": null, "confidence_level": null}),
+            ] {
+                let mut wire = serde_json::to_value(primary_estimate_report()).unwrap();
+                let metric = wire["entries"][0][row]["criterion"]["metrics"]["time"].as_object_mut().unwrap();
+                metric.extend(invalid.as_object().unwrap().clone());
+                fs::write(&path, serde_json::to_vec(&wire).unwrap()).unwrap();
+                assert!(matches!(BenchmarkReport::read_json(&path), Err(Error::ReportFormat { .. })));
+                let mut wire = serde_json::to_value(primary_estimate_report()).unwrap();
+                let metric = wire["entries"][0][row]["criterion"]["metrics"]["time"].as_object_mut().unwrap();
+                for field in ["lower_bound", "upper_bound", "confidence_level"] {
+                    metric.remove(field);
+                }
+                fs::write(&path, serde_json::to_vec(&wire).unwrap()).unwrap();
+                assert!(matches!(BenchmarkReport::read_json(&path), Err(Error::ReportFormat { .. })));
+            }
+            let mut wire = serde_json::to_value(primary_estimate_report()).unwrap();
+            wire["entries"][0][row]["criterion"]["metrics"]["time"]
+                .as_object_mut()
+                .unwrap()
+                .remove("statistic");
+            fs::write(&path, serde_json::to_vec(&wire).unwrap()).unwrap();
+            assert!(matches!(BenchmarkReport::read_json(&path), Err(Error::ReportFormat { .. })));
+        }
+        let mut valid = primary_estimate_report();
+        valid.entries[0]
+            .results
+            .get_mut("criterion")
+            .unwrap()
+            .metrics
+            .get_mut("time")
+            .unwrap()
+            .value = MetricValue::Float(100.0);
+        valid.entries[0]
+            .prior
+            .as_mut()
+            .unwrap()
+            .get_mut("criterion")
+            .unwrap()
+            .metrics
+            .get_mut("time")
+            .unwrap()
+            .value = MetricValue::Float(1.0);
+        fs::write(&path, serde_json::to_vec(&valid).unwrap()).unwrap();
+        let actual = BenchmarkReport::read_json(&path).unwrap();
+        assert_eq!(
+            actual.entries[0].results["criterion"].metrics["time"].value,
+            MetricValue::Float(100.0)
+        );
+        assert_eq!(
+            actual.entries[0].prior.as_ref().unwrap()["criterion"].metrics["time"].value,
+            MetricValue::Float(1.0)
+        );
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for component in 0..4 {
+                let mut baseline = valid.clone();
+                let metric = baseline.entries[0]
+                    .results
+                    .get_mut("criterion")
+                    .unwrap()
+                    .metrics
+                    .get_mut("time")
+                    .unwrap();
+                match component {
+                    0 => metric.value = MetricValue::Float(invalid),
+                    1 => metric.lower_bound = Some(invalid),
+                    2 => metric.upper_bound = Some(invalid),
+                    _ => metric.confidence_level = Some(invalid),
+                }
+                let mut current = report("bench", 5.0, MetricDirection::LowerIsBetter);
+                assert!(matches!(current.apply_baseline(&baseline, 5.0), Err(Error::ReportFormat { .. })));
+            }
+        }
+    }
+
+    #[test]
+    fn timing_estimates_accept_zero_and_equal_interval_bounds() {
+        for (value, lower, upper) in [(0.0, 0.0, 0.0), (1.0, 0.0, 2.0), (1.0, 1.0, 1.0)] {
+            let mut current = report("bench", value, MetricDirection::LowerIsBetter);
+            let time = current.entries[0]
+                .results
+                .get_mut("criterion")
+                .unwrap()
+                .metrics
+                .get_mut("time")
+                .unwrap();
+            time.lower_bound = Some(lower);
+            time.upper_bound = Some(upper);
+            super::validate_report(&current).unwrap();
+            current.entries[0].prior = Some(current.entries[0].results.clone());
+            super::validate_report(&current).unwrap();
+        }
+    }
+
+    #[test]
+    fn invalid_metric_diagnostics_escape_untrusted_identity_engine_and_name() {
+        let mut report = report("identity\n\u{1b}", 1.0, MetricDirection::LowerIsBetter);
+        let mut result = report.entries[0].results.remove("criterion").unwrap();
+        let mut metric = result.metrics.remove("time").unwrap();
+        metric.lower_bound = Some(2.0);
+        metric.upper_bound = Some(1.0);
+        result.metrics.insert("metric\r\u{202e}".into(), metric);
+        report.entries[0].results.insert("engine\t\u{200f}".into(), result);
+        let message = validate_report(&report).unwrap_err().to_string();
+        assert!(message.contains(r"identity\n\u{1b}"));
+        assert!(message.contains(r"engine\t\u{200f}"));
+        assert!(message.contains(r"metric\r\u{202e}"));
+        for character in ['\n', '\r', '\t', '\u{1b}', '\u{200f}', '\u{202e}'] {
+            assert!(!message.contains(character));
+        }
+    }
+
+    #[test]
+    fn markdown_encodes_untrusted_text_without_changing_json() {
+        let text = "<img src=x onerror='alert(1)'> [link](javascript:bad) `code` *bold* _em_ \\ | &lt;\r\n\u{1b}\u{85}\u{202e}";
+        let mut report = primary_estimate_report();
+        report.entries[0].identity = text.to_owned();
+        report.metadata.artifact_root = text.to_owned();
+        report.metadata.compiler_flags = Some(text.to_owned());
+        for result in report.entries[0].results.values_mut() {
+            for metric in result.metrics.values_mut() {
+                metric.unit = Some(text.to_owned());
+                metric.statistic = Some(text.to_owned());
+            }
+        }
+        report.entries[0]
+            .prior
+            .as_mut()
+            .unwrap()
+            .get_mut("criterion")
+            .unwrap()
+            .metrics
+            .get_mut("time")
+            .unwrap()
+            .statistic = Some(text.to_owned());
+        let mut output = Vec::new();
+        report.write_markdown(&mut output).unwrap();
+        let markdown = String::from_utf8(output).unwrap();
+        assert!(markdown.contains("&#60;img src=x onerror=&#39;alert&#40;1&#41;&#39;&#62;"));
+        assert!(markdown.contains("&#91;link&#93;&#40;javascript:bad&#41;"));
+        assert!(
+            markdown
+                .contains("&#96;code&#96; &#42;bold&#42; &#95;em&#95; &#92; &#124; &#38;lt;&#13;&#10;&#27;&#133;&#92;u&#123;202e&#125;")
+        );
+        assert!(!markdown.contains("<img"));
+        assert!(!markdown.contains('\r'));
+        assert!(!markdown.contains('\u{1b}'));
+        let prior = markdown.split_once("## Results\n\n").unwrap().1.lines().nth(3).unwrap();
+        assert!(prior.contains("99&#46;0% CI &#91;&#60;img src=x onerror=&#39;alert&#40;1&#41;&#39;&#62;"));
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["entries"][0]["identity"], text);
+        assert_eq!(wire["metadata"]["artifact_root"], text);
+        assert_eq!(wire["entries"][0]["results"]["criterion"]["metrics"]["time"]["unit"], text);
+        assert_eq!(wire["entries"][0]["results"]["criterion"]["metrics"]["time"]["statistic"], text);
+        assert_eq!(wire["entries"][0]["prior"]["criterion"]["metrics"]["time"]["statistic"], text);
+    }
+
+    #[test]
+    fn markdown_encodes_all_terminal_directional_marks() {
+        for character in [
+            '\u{061c}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}', '\u{202e}', '\u{2066}', '\u{2067}',
+            '\u{2068}', '\u{2069}',
+        ] {
+            let encoded = escape_table(&format!("before{character}after"));
+            assert_eq!(encoded, format!("before&#92;u&#123;{:x}&#125;after", u32::from(character)));
+            assert!(!encoded.contains(character));
+            assert!(!encoded.contains(&format!("&#{};", u32::from(character))));
+        }
+    }
+
+    #[test]
+    fn console_encodes_baseline_cells_without_changing_raw_strings() {
+        let text = "bench\u{1b}[31m\r\nforged\t\u{85}\u{2028}\u{202e}";
+        let mut baseline = primary_estimate_report();
+        baseline.entries[0].identity = text.to_owned();
+        for result in baseline.entries[0].results.values_mut() {
+            for metric in result.metrics.values_mut() {
+                metric.unit = Some(text.to_owned());
+                metric.statistic = Some(text.to_owned());
+            }
+        }
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let path = directory.path().join("baseline.json");
+        fs::write(&path, serde_json::to_vec(&baseline).unwrap()).unwrap();
+        let baseline = BenchmarkReport::read_json(&path).unwrap();
+        let mut current = baseline.clone();
+        current.apply_baseline(&baseline, 5.0).unwrap();
+        let console = current.render_console_table_with_width(usize::MAX);
+        assert!(console.contains(r"bench\u{1b}[31m\r\nforged\t\u{85}\u{2028}\u{202e} (PRIOR)"));
+        assert!(console.contains(r"12.35 bench\u{1b}[31m\r\nforged\t\u{85}\u{2028}\u{202e}"));
+        assert_eq!(console.lines().count(), 4);
+        assert!(!console.chars().any(|character| character.is_control() && character != '\n'));
+        assert!(!console.contains('\u{2028}'));
+        assert!(!console.contains('\u{202e}'));
+        assert!(
+            console
+                .lines()
+                .all(|line| UnicodeWidthStr::width(line) == UnicodeWidthStr::width(console.lines().next().unwrap()))
+        );
+        let wire = serde_json::to_value(&current).unwrap();
+        assert_eq!(wire["entries"][0]["identity"], text);
+        for row in ["results", "prior"] {
+            assert_eq!(wire["entries"][0][row]["criterion"]["metrics"]["time"]["unit"], text);
+            assert_eq!(wire["entries"][0][row]["criterion"]["metrics"]["time"]["statistic"], text);
+        }
+
+        let console = render_console_grid(&["counter\u{1b}\r\n\u{202e}".to_owned()], &[vec!["safe".to_owned()]]);
+        assert!(console.lines().next().unwrap().contains(r"counter\u{1b}\r\n\u{202e}"));
+        assert_eq!(console.lines().count(), 3);
+        assert!(!console.contains('\u{1b}'));
+        assert!(!console.contains('\r'));
+        assert!(!console.contains('\u{202e}'));
+    }
+
+    #[test]
     fn report_schema_round_trip_and_parser_boundaries_are_deterministic() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("report.json");
         let expected = report("bench", 1.25, MetricDirection::LowerIsBetter);
         fs::write(&path, serde_json::to_vec_pretty(&expected).unwrap()).unwrap();
         let actual = BenchmarkReport::read_json(&path).unwrap();
-        assert_eq!(actual.schema_version, 8);
+        assert_eq!(actual.schema_version, 9);
         assert_eq!(actual.entries[0].identity, "bench");
         assert_eq!(
-            actual.entries[0].results["criterion"].metrics["median"].value,
+            actual.entries[0].results["criterion"].metrics["time"].value,
             MetricValue::Float(1.25)
         );
-        assert_eq!(actual.entries[0].results["criterion"].metrics["median"].display_name, "Time");
+        assert_eq!(actual.entries[0].results["criterion"].metrics["time"].display_name, "Time");
 
         let mut stale_name = expected.clone();
         stale_name.entries[0]
@@ -1303,17 +1812,17 @@ mod tests {
             .get_mut("criterion")
             .unwrap()
             .metrics
-            .get_mut("median")
+            .get_mut("time")
             .unwrap()
             .display_name = "Old Time Label".to_owned();
         fs::write(&path, serde_json::to_vec(&stale_name).unwrap()).unwrap();
         let refreshed = BenchmarkReport::read_json(&path).unwrap();
-        assert_eq!(refreshed.entries[0].results["criterion"].metrics["median"].display_name, "Time");
+        assert_eq!(refreshed.entries[0].results["criterion"].metrics["time"].display_name, "Time");
 
         let valid = String::from_utf8(serde_json::to_vec(&expected).unwrap()).unwrap();
         for invalid in [
-            valid.replacen(r#""schema_version":8"#, r#""schema_version":7"#, 1),
-            valid.replacen(r#""schema_version":8"#, r#""schema_version":8,"schema_version":8"#, 1),
+            valid.replacen(r#""schema_version":9"#, r#""schema_version":8"#, 1),
+            valid.replacen(r#""schema_version":9"#, r#""schema_version":9,"schema_version":9"#, 1),
             valid.replacen("1.25", "1e9999", 1),
             format!("{valid} trailing"),
         ] {
