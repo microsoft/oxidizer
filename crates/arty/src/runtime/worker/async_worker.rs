@@ -228,6 +228,9 @@ where
         for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
                 Ok(mut command) => {
+                    // The command can become visible before the dispatcher calls the worker
+                    // waker, so dequeue itself must end the parked interval before user work.
+                    self.signal.command_received();
                     match &mut command {
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {
                             if self.shutdown_signal.load(Ordering::Acquire) {

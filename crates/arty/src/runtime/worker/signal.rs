@@ -104,6 +104,10 @@ impl WorkerSignal {
         self.wake_waiter();
     }
 
+    pub(in crate::runtime) fn command_received(&self) {
+        self.mark_unparked();
+    }
+
     fn mark_parked(&self) {
         if !self.parked.swap(true, Ordering::AcqRel)
             && let Some(telemetry) = &self.telemetry
@@ -204,6 +208,17 @@ mod tests {
         assert!(signal.parked.load(Ordering::Acquire));
 
         WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(!signal.parked.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn command_receipt_ends_a_parked_interval_before_dispatcher_wake() {
+        let signal = WorkerSignal::default();
+        signal.wait(Duration::ZERO);
+        assert!(signal.parked.load(Ordering::Acquire));
+
+        signal.command_received();
+
         assert!(!signal.parked.load(Ordering::Acquire));
     }
 
