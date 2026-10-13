@@ -106,11 +106,12 @@ fn zeroed_large_allocations_clear_dirty_backend_ranges() {
         let dirty = unsafe { Rallocator.alloc(layout) };
         if dirty.is_null() {
             std::alloc::handle_alloc_error(layout);
+        } else {
+            // SAFETY: All layout bytes are exclusively writable.
+            unsafe { dirty.write_bytes(0x5a, layout.size()) };
+            // SAFETY: Retire this complete large range, allowing OS reclamation.
+            unsafe { Rallocator.dealloc(dirty, layout) };
         }
-        // SAFETY: All layout bytes are exclusively writable.
-        unsafe { dirty.write_bytes(0x5a, layout.size()) };
-        // SAFETY: Retire this complete large range, allowing OS reclamation.
-        unsafe { Rallocator.dealloc(dirty, layout) };
         // SAFETY: The zeroed request uses the same valid large layout.
         let zeroed = unsafe { Rallocator.alloc_zeroed(layout) };
         assert!(!zeroed.is_null());

@@ -216,20 +216,21 @@ mod tests {
             let pointer = reserve(RESERVE_MIN, alignment);
             if pointer.is_null() {
                 std::alloc::handle_alloc_error(std::alloc::Layout::from_size_align(RESERVE_MIN, alignment).unwrap());
+            } else {
+                assert_eq!(pointer.addr() % alignment, 0);
+                // SAFETY: The test owns the entire fresh reservation.
+                assert!(unsafe { commit(pointer, RESERVE_MIN) });
+                // SAFETY: The complete range is exclusively writable.
+                unsafe { pointer.write_bytes(0x5a, RESERVE_MIN) };
+                // SAFETY: The first endpoint belongs to the initialized range.
+                let first = unsafe { *pointer };
+                // SAFETY: The final endpoint lies within the same owned reservation.
+                let last = unsafe { pointer.add(RESERVE_MIN - 1) };
+                // SAFETY: The final endpoint was initialized by write_bytes above.
+                assert_eq!((first, unsafe { *last }), (0x5a, 0x5a));
+                // SAFETY: No access remains into the owned reservation.
+                unsafe { release(pointer, RESERVE_MIN) };
             }
-            assert_eq!(pointer.addr() % alignment, 0);
-            // SAFETY: The test owns the entire fresh reservation.
-            assert!(unsafe { commit(pointer, RESERVE_MIN) });
-            // SAFETY: The complete range is exclusively writable.
-            unsafe { pointer.write_bytes(0x5a, RESERVE_MIN) };
-            // SAFETY: The first endpoint belongs to the initialized range.
-            let first = unsafe { *pointer };
-            // SAFETY: The final endpoint lies within the same owned reservation.
-            let last = unsafe { pointer.add(RESERVE_MIN - 1) };
-            // SAFETY: The final endpoint was initialized by write_bytes above.
-            assert_eq!((first, unsafe { *last }), (0x5a, 0x5a));
-            // SAFETY: No access remains into the owned reservation.
-            unsafe { release(pointer, RESERVE_MIN) };
         }
     }
 
@@ -254,18 +255,19 @@ mod tests {
         let pointer = reserve(RESERVE_MIN, RESERVE_MIN);
         if pointer.is_null() {
             std::alloc::handle_alloc_error(std::alloc::Layout::from_size_align(RESERVE_MIN, RESERVE_MIN).unwrap());
+        } else {
+            // SAFETY: The test owns this complete, page-aligned reservation.
+            assert!(unsafe { commit(pointer, PAGE) });
+            // SAFETY: The committed page is exclusively writable.
+            unsafe { pointer.write_bytes(0x5a, PAGE) };
+            // SAFETY: The owned page is writable, contains no live objects, and the
+            // invalid advice is rejected by the kernel without changing its mapping.
+            assert!(!unsafe { advise(pointer, PAGE, -1) });
+            // SAFETY: The rejected advice preserves this initialized page.
+            assert_eq!(unsafe { *pointer }, 0x5a);
+            // SAFETY: No access remains into the complete owned reservation.
+            unsafe { release(pointer, RESERVE_MIN) };
         }
-        // SAFETY: The test owns this complete, page-aligned reservation.
-        assert!(unsafe { commit(pointer, PAGE) });
-        // SAFETY: The committed page is exclusively writable.
-        unsafe { pointer.write_bytes(0x5a, PAGE) };
-        // SAFETY: The owned page is writable, contains no live objects, and the
-        // invalid advice is rejected by the kernel without changing its mapping.
-        assert!(!unsafe { advise(pointer, PAGE, -1) });
-        // SAFETY: The rejected advice preserves this initialized page.
-        assert_eq!(unsafe { *pointer }, 0x5a);
-        // SAFETY: No access remains into the complete owned reservation.
-        unsafe { release(pointer, RESERVE_MIN) };
     }
 
     #[test]
