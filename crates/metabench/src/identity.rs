@@ -72,10 +72,6 @@ impl BenchmarkIdentity {
     pub(crate) fn gungraun_identity(self) -> String {
         join_identity(self.gungraun_group, self.gungraun_benchmark)
     }
-
-    pub(crate) const fn allocation_tracking(self) -> bool {
-        self.allocation_tracking
-    }
 }
 
 fn join_identity(group: &str, benchmark: &str) -> String {

@@ -9,6 +9,7 @@ macro_rules! __metabench_main {
         criterion = $criterion_benchmarks:path,
         gungraun = { $($gungraun:tt)* },
         identities = $identities:expr
+        , probes = $probes:expr
         $(, allocator = $allocator:path)?
         $(,)?
     ) => {
@@ -21,6 +22,7 @@ macro_rules! __metabench_main {
             criterion_unit = ::core::option::Option::Some("ns");
             gungraun = { $($gungraun)* };
             identities = $identities;
+            probes = $probes;
             allocator = [$($allocator)?];
         );
     };
@@ -32,6 +34,7 @@ macro_rules! __metabench_main {
         },
         gungraun = { $($gungraun:tt)* },
         identities = $identities:expr
+        , probes = $probes:expr
         $(, allocator = $allocator:path)?
         $(,)?
     ) => {
@@ -44,6 +47,7 @@ macro_rules! __metabench_main {
             criterion_unit = $crate::__metabench_main!(@unit $( $unit)?);
             gungraun = { $($gungraun)* };
             identities = $identities;
+            probes = $probes;
             allocator = [$($allocator)?];
         );
     };
@@ -59,6 +63,7 @@ macro_rules! __metabench_main {
         criterion_unit = $criterion_unit:expr;
         gungraun = { $($gungraun:tt)* };
         identities = $identities:expr;
+        probes = $probes:expr;
         allocator = [$($allocator:path)?];
     ) => {
         $crate::__metabench_main!(@allocator $($allocator)?);
@@ -82,6 +87,10 @@ macro_rules! __metabench_main {
             pub(super) fn run() {
                 main();
             }
+
+            pub(super) fn run_probe() -> Result<(), String> {
+                $crate::__private::run_probe_groups($probes, __run_setup, __run_teardown)
+            }
         }
 
         fn main() {
@@ -90,6 +99,7 @@ macro_rules! __metabench_main {
                     __metabench_criterion::run,
                     __metabench_gungraun::run,
                     $criterion_unit,
+                    __metabench_gungraun::run_probe,
                 ),
                 $identities,
                 env!("CARGO_CRATE_NAME"),

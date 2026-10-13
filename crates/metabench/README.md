@@ -83,6 +83,11 @@ markdown reports in your `target` directory.
 
 ## Measurement engines
 
+A **native case** is a case supplied by a benchmark’s Gungraun declarations,
+including its implicit single case when no case attribute is present.
+**Probes** are the separate allocation, perf, and `VTune` workers that execute
+these cases; they do not use Criterion registrations.
+
 As mentioned, metabench supports five distinct benchmark tools: Criterion, Gungraun, allocation
 tracking, Linux `perf`, and Intel `VTune`:
 
@@ -94,15 +99,19 @@ tracking, Linux `perf`, and Intel `VTune`:
   enabled, system calls, and heap activity.
 
 * **Allocation tracking** reports allocation count and allocated bytes for
-  one invocation of every discovered Criterion case.
+  one invocation of every declared native case. Counts
+  are process-wide, so concurrent threads can contribute allocations.
 
 * **Linux `perf`** reports supported hardware and software counters for one
-  invocation of every discovered Criterion case. Counters cover only the
-  annotated workload. Use repeated `--perf-arg` options for additional
+  invocation of every declared native case. Collection starts and stops in
+  a private caller around the workload, excluding input preparation and
+  returned-value teardown. The collection window can include caller and
+  control overhead; it is not a claim of exact function-only counters.
+  Use repeated `--perf-arg` options for additional
   `perf stat` arguments.
 
 * **Intel `VTune`** reports hardware event counts for one invocation of every
-  discovered Criterion case, using the same annotated-workload
+  declared native case, using the same private caller
   measurement as Linux `perf`. Because `VTune`’s hardware-event collection
   is a statistical sampler rather than an exact counter, reported counts
   are sampling estimates that can read zero for a short workload, and the
@@ -123,15 +132,40 @@ cargo bench --bench parser -- --criterion
 
 Some limitations around engines:
 
-* Benchmark functions declared with `const fn` can be measured by Criterion and Gungraun, but not
-  by allocation tracking, `perf`, or `VTune`.
-
 * Gungraun and Linux `perf` are only available on Linux platforms. `VTune` is
   available on Linux and Windows, provided a `vtune` installation is
   reachable on `PATH`. `VTune`’s integration test exercises the control
   protocol and CSV-report parsing on every platform against a fake
   `vtune` fixture (see `tests/spawned_benchmark.rs`), rather than a real
   `VTune` install.
+
+## Workload boundaries
+
+The attribute preserves a non-inlined workload symbol without injecting
+runtime collector checks into the function. Criterion callbacks call it
+directly, and Gungraun uses its normal adapter. Neither executes the private
+allocation, perf, or `VTune` collection controls.
+
+Allocation and hardware workers reuse the existing `#[bench::...]` and
+`#[benches::...]` declarations through separate generated adapters. Native
+suite and group hooks run outside collection. Case argument evaluation and
+setup precede collection; teardown and returned-value destruction follow it.
+Calls to annotated functions during setup cannot consume the measurement.
+Collection guards stop on unwinding.
+
+No new registration language or public measurement helper is required. Probes
+do not run Criterion registration or infer its arbitrary callbacks. A
+Criterion-only case without a corresponding native declaration has no probe
+result. Matching case names do not prove matching Criterion inputs or cleanup;
+those remain author responsibilities.
+
+Probe execution reuses native case arguments and lifecycle hooks, not
+Valgrind configuration such as sandboxes or environment overrides. Configure
+hardware tools with their own forwarded arguments.
+
+Input destruction inside the benchmark function is included; return owned
+inputs with the output if their destruction should happen outside collection.
+Functions declared with `const fn` can also have runtime probes.
 
 ## Configure Criterion
 
@@ -151,6 +185,9 @@ metabench::main!(
 ```
 
 ## Configure Gungraun
+
+The installed `gungraun-runner` must match the Gungraun library version
+(currently 0.19.4).
 
 Benchmark-level `gungraun_config`, `gungraun_setup`, and
 `gungraun_teardown` options work with native `#[bench::...]` and
@@ -214,12 +251,51 @@ under `target/metabench/<benchmark-target>/`. Reports include benchmark
 metadata, environment information, measured engines, and their metrics.
 JSON retains every available metric and includes human-readable display
 names.
+Criterion’s `Time` is its slope estimate when available, otherwise its mean,
+with the statistic and matching confidence level and bounds retained in JSON
+and Markdown. Custom measurement units remain unchanged. `Input bytes` denotes
+the declared work size, not allocated memory or a throughput rate.
+Confidence levels must be strictly between zero and one, with finite, ordered
+bounds. Bootstrap intervals need not contain the point estimate. Markdown
+encodes report text as literal content, and terminal cells visibly escape
+controls and untrusted line breaks; JSON preserves the original strings.
 
 When the JSON output path already exists, it is used as the baseline before
 being replaced. `--baseline` selects another report, while `--no-baseline`
-disables comparison. Metrics with compatible names, units, and directions
+disables comparison. Report schema 9 distinguishes these estimates from old
+median-only reports. Old automatic baselines are warned about and skipped;
+an explicitly selected unsupported schema is an error. Different target,
+compiler, CPU, profile, or compiler flags also warn and skip comparison.
+Compiler identity is captured when the executable is built, not from the
+runtime `RUSTC` override or the compiler currently on `PATH`.
+These checks do not prove identical hardware, features, inputs, or boundaries.
+Metrics with compatible names, units, directions, and timing statistics
 are classified as improved, stable, or regressed. The default regression
 threshold is five percent; change it with `--regression-threshold`.
+These percentage labels are not statistical significance or equivalence tests.
+
+Smoke runs (`--test`, including a forwarded native `--test`) run Criterion or
+Gungraun cases briefly without collecting probe metrics or publishing reports.
+Allocation, perf, and `VTune` smoke selections fall back to Criterion registration,
+which must be provided even when the target declares native probe cases.
+An invocation
+without arguments is also smoke mode, matching Cargo’s harness-free test
+invocation; pass an engine selector to request measurements directly.
+A measurement selection matching no cases fails and preserves existing reports.
+Failed multi-engine runs can write separate `.partial` reports but never
+replace the complete rolling baseline.
+
+Default native artifacts and combined reports follow the Cargo output root
+of the running executable, including `--target-dir`, target triples, and recognized
+custom profiles. `CARGO_TARGET_DIR` identifies a target root whose name matches
+the target triple without overriding a different executable root selected by Cargo.
+A relocated executable in an unknown layout needs an explicit
+`CARGO_TARGET_DIR`; metabench does not guess a workspace root.
+Hidden worker stdout and stderr share a pipe. Each run log retains at most
+1 MiB of raw output, keeping the tail with an explicit truncation marker.
+Failures and timeouts show the final 8 KiB and the log path. Capture is bounded
+while workers run, and inherited pipe writers cannot delay cleanup indefinitely.
+`--show-engine-output` instead inherits the terminal without capturing a log.
 
 ## Command-line options
 
@@ -258,12 +334,33 @@ selected. The `BENCH_ENGINE` environment variable may select `criterion`,
 `gungraun`, `perf`, `vtune`, or `allocations` when no engine selector is present.
 `CRITERION_HOME` and `GUNGRAUN_HOME` select the corresponding engine data
 directories.
+Filters remain engine-specific: use Criterion arguments for Criterion and
+probes, and Gungraun arguments for Gungraun. Probes apply the Criterion name
+filter (and `--exact`) to declared native case identities, then run a private
+indexed worker. Criterion timing, profiling, and baseline options do not
+affect probe execution. A common cross-engine filter is not supported.
+Native Gungraun symbols include readable registration-identity suffixes and
+collision-safe hashes; run manifests retain native-to-canonical mappings.
+Renamed native symbols do not automatically reconnect older native histories.
 
 ## Custom memory allocator
 
 The system allocator
 is used by default; `main!(..., allocator = MyAllocator)` selects another
 underlying allocator.
+Put `allocator` after `benchmarks` or `groups` in [`main!`][__link3]. The executable
+may define only one global allocator. Any existing `alloc_tracker`
+instrumentation must resolve to the same Cargo package source as the metabench
+tracker; a registry dependency and a separate path dependency have independent
+tracking state even if their names and versions match.
+The generated allocator checks one process-wide atomic flag on allocation,
+reallocation, and deallocation. Tracking is enabled only in allocation workers; Criterion,
+Gungraun, perf, and `VTune` bypass the tracking counters and thread-local state.
+The flag check still adds overhead to allocating workloads; it is not a
+zero-overhead claim.
+Both paths use the same underlying allocator instance, including custom
+allocators. Allocation workers track process-wide totals, with snapshots
+excluding setup and teardown from reported counts.
 
 
 <hr/>
@@ -274,3 +371,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link0]: https://crates.io/crates/criterion
  [__link1]: https://crates.io/crates/gungraun
  [__link2]: `main!`
+ [__link3]: `main!`

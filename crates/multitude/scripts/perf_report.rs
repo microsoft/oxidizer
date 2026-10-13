@@ -362,7 +362,7 @@ fn index_report(report: JsonReport) -> Result<ReportIndex, AppError> {
 }
 
 fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
-    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("time")?;
     let value = metric.value.as_f64();
     match metric.unit.as_deref()? {
         "ps" => Some(value * 1e-3),
@@ -383,7 +383,7 @@ fn parse_report(path: &Path, expected: &[(&str, &str)]) -> Result<Vec<(String, f
     let mut out = Vec::with_capacity(expected_keys.len());
     for key in &expected_keys {
         let Some(value) = criterion_time_ns(&report, key) else {
-            bail!("report {} is missing criterion median for {key}", path.display());
+            bail!("report {} is missing criterion primary estimate (`time`) for {key}", path.display());
         };
         out.push((key.clone(), value));
     }
@@ -395,7 +395,7 @@ fn parse_report(path: &Path, expected: &[(&str, &str)]) -> Result<Vec<(String, f
     Ok(out)
 }
 
-/// Median of every measurement recorded for `key`.
+/// Median of the primary estimates recorded across runs for `key`.
 fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
     let mut values: Vec<f64> = crit
         .iter()
@@ -411,6 +411,54 @@ fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
     } else {
         values[middle]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonReport, criterion_time_ns, index_report, lookup_time};
+
+    #[test]
+    fn schema_nine_primary_estimate_and_units() {
+        for (value, unit, expected) in [
+            (serde_json::json!(1250), "ps", 1.25),
+            (serde_json::json!(1.25), "ns", 1.25),
+            (serde_json::json!(1.25), "µs", 1250.0),
+            (serde_json::json!(1.25), "us", 1250.0),
+            (serde_json::json!(1.25), "ms", 1_250_000.0),
+            (serde_json::json!(1.25), "s", 1_250_000_000.0),
+        ] {
+            let fixture = serde_json::json!({
+                "schema_version": 9,
+                "entries": [{
+                    "identity": "example",
+                    "results": {"criterion": {"metrics": {
+                        "time": {"value": value, "unit": unit}
+                    }}}
+                }]
+            });
+            let report: JsonReport = serde_json::from_value(fixture).unwrap();
+            let mut report = index_report(report).unwrap();
+            assert_eq!(criterion_time_ns(&report, "example"), Some(expected));
+            let metrics = &mut report.get_mut("example").unwrap().results.get_mut("criterion").unwrap().metrics;
+            let time = metrics.remove("time").unwrap();
+            metrics.insert("median".to_string(), time);
+            assert_eq!(criterion_time_ns(&report, "example"), None);
+        }
+    }
+
+    #[test]
+    fn paired_runs_still_use_median_of_primary_estimates() {
+        let mut values = vec![
+            ("example".to_string(), 9.0),
+            ("example".to_string(), 1.0),
+            ("example".to_string(), 3.0),
+            ("other".to_string(), 100.0),
+        ];
+        assert_eq!(lookup_time(&values, "example"), Some(3.0));
+        values.push(("example".to_string(), 5.0));
+        assert_eq!(lookup_time(&values, "example"), Some(4.0));
+        assert_eq!(lookup_time(&values, "missing"), None);
+    }
 }
 
 fn fmt_ns(ns: Option<f64>) -> String {
@@ -457,7 +505,7 @@ fn build_report(
          Re-run it to refresh these numbers.\n\n",
     );
     out.push_str(
-        "All figures are wall-clock medians measured by Criterion. They are \
+        "All figures use primary wall-clock estimates measured by Criterion. They are \
          machine-dependent:\nthe ratios between rows are the durable signal, not \
          the absolute values.\n\n",
     );
@@ -471,7 +519,7 @@ fn build_report(
     out.push_str("## How these numbers were produced\n\n");
     let _ = writeln!(
         out,
-        "Criterion medians use {criterion_samples} samples, a {criterion_warmup_secs} s \
+        "Criterion primary estimates use {criterion_samples} samples, a {criterion_warmup_secs} s \
          warm-up, and a {criterion_measurement_secs} s measurement."
     );
     if let Some(cpu) = cpu {
@@ -486,7 +534,7 @@ fn build_report(
     } else {
         let _ = writeln!(
             out,
-            "Differential allocation, Serde, and teardown timings are the median of \
+            "Differential allocation, Serde, and teardown timings are the median of the primary estimates from \
              {comparison_repetitions} independently warmed paired runs. Compared \
              variants run in the same process, with group order alternated between rounds.\n"
         );

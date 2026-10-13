@@ -6,15 +6,21 @@ use std::ffi::OsString;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::hash::Hash;
-use std::io::{self, BufReader, BufWriter, Write as _};
+use std::io::{self, BufWriter, Read as _, Write as _};
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{self, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
-use gungraun_summary::either_or_both::EitherOrBoth;
-use gungraun_summary::v6::{BenchmarkSummary, Metric as GungraunMetric, MetricsSummary, ToolMetricSummary, ValgrindTool};
+use either_or_both::EitherOrBoth;
+use gungraun_runner::api::ValgrindTool;
+use gungraun_runner::metrics::model::{Metric as GungraunMetric, MetricsSummary};
+use gungraun_runner::summary::model::{BenchmarkSummary, ToolMetricSummary};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -48,6 +54,8 @@ struct EngineRunManifest {
     success: bool,
     exit_code: Option<i32>,
     discovered_native_identities: Vec<String>,
+    #[serde(default)]
+    native_to_canonical: BTreeMap<String, String>,
 }
 
 impl ArtifactDirectory {
@@ -72,7 +80,7 @@ impl ArtifactDirectory {
         let gungraun = gungraun_runs
             .as_ref()
             .map_or_else(|| run.join("gungraun"), |runs| runs.join(&run_name));
-        fs::create_dir_all(&run).map_err(|source| Error::ArtifactIo { path: run.clone(), source })?;
+        Self::create_private_run(&run)?;
         let mut marked_runs = BTreeSet::from([run.clone()]);
         let mut active_locks = vec![mark_run_active(&run)?];
         Self::prune_owned_runs(&runs, &run)?;
@@ -84,6 +92,7 @@ impl ArtifactDirectory {
         .flatten()
         {
             if marked_runs.insert(current.to_owned()) {
+                Self::create_private_run(current)?;
                 active_locks.push(mark_run_active(current)?);
             }
             Self::prune_owned_runs(owned_runs, current)?;
@@ -94,6 +103,26 @@ impl ArtifactDirectory {
             criterion,
             gungraun,
             _active_locks: active_locks,
+        })
+    }
+
+    fn create_private_run(path: &Path) -> Result<(), Error> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
+                path: parent.to_owned(),
+                source,
+            })?;
+        }
+        let directory = fs::DirBuilder::new();
+        #[cfg(unix)]
+        let directory = {
+            let mut directory = directory;
+            directory.mode(0o700);
+            directory
+        };
+        directory.create(path).map_err(|source| Error::ArtifactIo {
+            path: path.to_owned(),
+            source,
         })
     }
 
@@ -175,6 +204,7 @@ pub(crate) fn write_run_manifest(
         success: status.is_some_and(|status| status.success()),
         exit_code: status.and_then(|status| status.code()),
         discovered_native_identities: Vec::new(),
+        native_to_canonical: BTreeMap::new(),
     };
     write_json(&manifest_root.join("manifests").join(format!("{engine}.json")), &manifest)
 }
@@ -187,6 +217,10 @@ pub(crate) fn record_discovered_identities(manifest_root: &Path, engine: &str, r
         .map(|result| result.native_identity.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .collect();
+    manifest.native_to_canonical = results
+        .iter()
+        .map(|result| (result.native_identity.clone(), result.identity.clone()))
         .collect();
     write_json(&path, &manifest)
 }
@@ -201,7 +235,8 @@ struct CriterionMetadata {
 
 #[derive(Debug, Deserialize)]
 struct CriterionEstimates {
-    median: CriterionEstimate,
+    slope: Option<CriterionEstimate>,
+    mean: CriterionEstimate,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,6 +247,7 @@ struct CriterionEstimate {
 
 #[derive(Debug, Deserialize)]
 struct CriterionConfidenceInterval {
+    confidence_level: f64,
     lower_bound: f64,
     upper_bound: f64,
 }
@@ -234,13 +270,18 @@ pub(crate) fn parse_criterion(
         let identity = identities.resolve_criterion(&native_identity);
         let estimates_path = path.with_file_name("estimates.json");
         let estimates = read_json::<CriterionEstimates>(&estimates_path)?;
-        let median = estimates.median;
-        validate_criterion_estimate(&estimates_path, &median)?;
-        let mut metric = Metric::float("criterion", "median", median.point_estimate, MetricDirection::LowerIsBetter);
+        let (statistic, estimate) = match estimates.slope {
+            Some(slope) => ("slope", slope),
+            None => ("mean", estimates.mean),
+        };
+        validate_criterion_estimate(&estimates_path, &estimate)?;
+        let mut metric = Metric::float("criterion", "time", estimate.point_estimate, MetricDirection::LowerIsBetter);
         metric.unit = unit.map(str::to_owned);
-        metric.lower_bound = Some(median.confidence_interval.lower_bound);
-        metric.upper_bound = Some(median.confidence_interval.upper_bound);
-        let mut metrics = BTreeMap::from([("median".to_owned(), metric)]);
+        metric.statistic = Some(statistic.to_owned());
+        metric.confidence_level = Some(estimate.confidence_interval.confidence_level);
+        metric.lower_bound = Some(estimate.confidence_interval.lower_bound);
+        metric.upper_bound = Some(estimate.confidence_interval.upper_bound);
+        let mut metrics = BTreeMap::from([("time".to_owned(), metric)]);
         if let Some((name, value)) = metadata.throughput.as_ref().and_then(parse_criterion_throughput) {
             metrics.insert(name.clone(), Metric::integer("criterion", &name, value, MetricDirection::Unknown));
         }
@@ -263,10 +304,12 @@ pub(crate) fn parse_gungraun(root: &Path, artifact_root: &Path, identities: &[Be
     let identities = CanonicalIdentityIndex::new(identities);
     let mut results = Vec::new();
     for path in paths {
-        validate_json_size(&path, MAX_ARTIFACT_JSON_BYTES)?;
-        let summary = gungraun_summary::v6::parse(&path).map_err(|error| Error::ArtifactFormat {
-            path: path.clone(),
-            message: error.to_string(),
+        let summary = read_json::<BenchmarkSummary>(&path).map_err(|error| match error {
+            Error::ArtifactJson { path, source } => Error::ArtifactFormat {
+                path,
+                message: source.to_string(),
+            },
+            error => error,
         })?;
         if summary.version != "6" {
             return Err(Error::ArtifactFormat {
@@ -311,11 +354,7 @@ struct PerfStatRecord {
 }
 
 pub(crate) fn parse_perf(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
-    validate_json_size(path, MAX_ARTIFACT_JSON_BYTES)?;
-    let contents = fs::read_to_string(path).map_err(|source| Error::ArtifactIo {
-        path: path.to_owned(),
-        source,
-    })?;
+    let contents = read_artifact_text(path, "JSON")?;
     let mut metrics = BTreeMap::new();
     for (index, line) in contents.lines().enumerate() {
         if line.trim().is_empty() {
@@ -431,11 +470,7 @@ const VTUNE_EVENT_COUNT_COLUMN: &str = "Hardware Event Count:Self";
 /// against a live install) parses correctly as long as it is quoted per CSV
 /// convention, e.g. `INST_RETIRED.ANY,"1,234,567"`.
 pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
-    validate_artifact_size(path, MAX_ARTIFACT_JSON_BYTES, "CSV")?;
-    let contents = fs::read_to_string(path).map_err(|source| Error::ArtifactIo {
-        path: path.to_owned(),
-        source,
-    })?;
+    let contents = read_artifact_text(path, "CSV")?;
     let mut lines = contents.lines().enumerate();
     let (name_column, count_column, expected_field_count) = match lines.next() {
         Some((_, header)) => {
@@ -547,10 +582,6 @@ fn criterion_identity(metadata: &CriterionMetadata) -> String {
     .join("/")
 }
 
-pub(crate) fn allocation_criterion_identity(native_identity: &str, identities: &[BenchmarkIdentity]) -> Option<String> {
-    CanonicalIdentityIndex::new(identities).resolve_allocation_criterion(native_identity)
-}
-
 fn parse_criterion_throughput(value: &serde_json::Value) -> Option<(String, u64)> {
     let object = value.as_object()?;
     let (kind, value) = object.iter().next()?;
@@ -573,14 +604,13 @@ fn gungraun_canonical_identity(summary: &BenchmarkSummary) -> String {
     }
     let group = parts.last().copied().unwrap_or("gungraun");
     match &summary.id {
-        Some(id) if id != "default" => format!("{group}/{}/{id}", summary.function_name),
+        Some(id) => format!("{group}/{}/{id}", summary.function_name),
         _ => format!("{group}/{}", summary.function_name),
     }
 }
 
 struct CanonicalIdentityIndex {
     criterion: BTreeMap<String, String>,
-    allocation_criterion: BTreeMap<String, String>,
     gungraun: BTreeMap<String, String>,
 }
 
@@ -590,20 +620,11 @@ impl CanonicalIdentityIndex {
             .iter()
             .map(|identity| (identity.criterion_identity(), identity.canonical_identity()))
             .collect();
-        let allocation_criterion = identities
-            .iter()
-            .filter(|identity| identity.allocation_tracking())
-            .map(|identity| (identity.criterion_identity(), identity.canonical_identity()))
-            .collect();
         let gungraun = identities
             .iter()
             .map(|identity| (identity.gungraun_identity(), identity.canonical_identity()))
             .collect();
-        Self {
-            criterion,
-            allocation_criterion,
-            gungraun,
-        }
+        Self { criterion, gungraun }
     }
 
     fn resolve_criterion(&self, native: &str) -> String {
@@ -612,10 +633,6 @@ impl CanonicalIdentityIndex {
 
     fn resolve_registered_criterion(&self, native: &str) -> Option<String> {
         Self::resolve(&self.criterion, native)
-    }
-
-    fn resolve_allocation_criterion(&self, native: &str) -> Option<String> {
-        Self::resolve(&self.allocation_criterion, native)
     }
 
     fn resolve_gungraun(&self, native: &str, default_identity: String) -> String {
@@ -700,7 +717,13 @@ fn validate_criterion_estimate(path: &Path, estimate: &CriterionEstimate) -> Res
     let point = estimate.point_estimate;
     let lower = estimate.confidence_interval.lower_bound;
     let upper = estimate.confidence_interval.upper_bound;
-    if !point.is_finite() || !lower.is_finite() || !upper.is_finite() {
+    let confidence = estimate.confidence_interval.confidence_level;
+    if !confidence.is_finite() || confidence <= 0.0 || confidence >= 1.0 {
+        Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("Criterion confidence level must be between zero and one; found {confidence}"),
+        })
+    } else if !point.is_finite() || !lower.is_finite() || !upper.is_finite() {
         Err(Error::ArtifactFormat {
             path: path.to_owned(),
             message: "contains a non-finite Criterion estimate".to_owned(),
@@ -710,10 +733,10 @@ fn validate_criterion_estimate(path: &Path, estimate: &CriterionEstimate) -> Res
             path: path.to_owned(),
             message: format!("Criterion estimates must be non-negative; found {lower}..{point}..{upper}"),
         })
-    } else if lower > point || point > upper {
+    } else if lower > upper {
         Err(Error::ArtifactFormat {
             path: path.to_owned(),
-            message: format!("Criterion confidence interval must contain its point estimate; found {lower}..{point}..{upper}"),
+            message: format!("Criterion confidence interval bounds must be ordered; found {lower}..{upper}"),
         })
     } else {
         Ok(())
@@ -847,43 +870,112 @@ fn mark_run_active(path: &Path) -> Result<File, Error> {
     Ok(file)
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
-    validate_json_size(path, MAX_ARTIFACT_JSON_BYTES)?;
-    let file = fs::File::open(path).map_err(|source| Error::ArtifactIo {
-        path: path.to_owned(),
-        source,
-    })?;
-    serde_json::from_reader(BufReader::new(file)).map_err(|source| Error::ArtifactJson {
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
+    let bytes = read_regular_file(path, MAX_ARTIFACT_JSON_BYTES, "JSON")?;
+    serde_json::from_slice(&bytes).map_err(|source| Error::ArtifactJson {
         path: path.to_owned(),
         source,
     })
 }
 
-fn validate_json_size(path: &Path, limit: u64) -> Result<(), Error> {
-    validate_artifact_size(path, limit, "JSON")
+fn read_artifact_text(path: &Path, format: &str) -> Result<String, Error> {
+    let bytes = read_regular_file(path, MAX_ARTIFACT_JSON_BYTES, format)?;
+    String::from_utf8(bytes).map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source: io::Error::new(io::ErrorKind::InvalidData, source),
+    })
 }
 
-/// Rejects an artifact larger than `limit`, naming its `format` (e.g.
-/// `"JSON"` or `"CSV"`) in the error so the diagnostic matches the actual
-/// file being validated rather than always describing it as JSON.
-fn validate_artifact_size(path: &Path, limit: u64, format: &str) -> Result<(), Error> {
-    let length = fs::metadata(path)
+pub(crate) fn read_regular_file(path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
+    let file = open_regular_file(path)?;
+    read_bounded_file(file, path, limit, format)
+}
+
+/// Admits the same regular-file handle later consumed by the bounded reader.
+fn open_regular_file(path: &Path) -> Result<File, Error> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        // Reject final links and avoid waiting for a FIFO writer before checking the file type.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        // Inspect rather than follow reparse points, denying concurrent writes and path replacement.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_SHARE_READ: u32 = 1;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).share_mode(FILE_SHARE_READ);
+    }
+    let file = options.open(path).map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    })?;
+    let metadata = file.metadata().map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    })?;
+    #[cfg(windows)]
+    {
+        reject_windows_reparse_point(path, metadata.file_attributes())?;
+    }
+    if !metadata.is_file() {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: "artifact must be a regular file".to_owned(),
+        });
+    }
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn reject_windows_reparse_point(path: &Path, attributes: u32) -> Result<(), Error> {
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: "artifact must not be a reparse point".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn read_bounded_file(file: File, path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
+    let length = file
+        .metadata()
         .map_err(|source| Error::ArtifactIo {
             path: path.to_owned(),
             source,
         })?
         .len();
     if length > limit {
-        Err(Error::ArtifactFormat {
+        return Err(Error::ArtifactFormat {
             path: path.to_owned(),
             message: format!("{format} file is {length} bytes; limit is {limit} bytes"),
-        })
-    } else {
-        Ok(())
+        });
     }
+    read_bounded_stream(file, path, limit, format)
 }
 
-fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
+fn read_bounded_stream(reader: impl io::Read, path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| Error::ArtifactIo {
+            path: path.to_owned(),
+            source,
+        })?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("{format} stream exceeds the {limit}-byte limit"),
+        });
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -924,8 +1016,237 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
+    #[cfg(unix)]
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     use super::*;
+
+    #[test]
+    fn private_run_creation_creates_parents_and_rejects_existing_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runs").join("new-run");
+        ArtifactDirectory::create_private_run(&path).unwrap();
+        assert!(path.is_dir());
+        assert!(matches!(
+            ArtifactDirectory::create_private_run(&path),
+            Err(Error::ArtifactIo { path: failed, source })
+                if failed == path && source.kind() == io::ErrorKind::AlreadyExists
+        ));
+        let file = directory.path().join("file");
+        fs::write(&file, b"preserve me").unwrap();
+        assert!(matches!(
+            ArtifactDirectory::create_private_run(&file.join("run")),
+            Err(Error::ArtifactIo { path: failed, .. }) if failed == file
+        ));
+        assert_eq!(fs::read(file).unwrap(), b"preserve me");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn json_admission_rejects_reparse_attributes_without_symlink_privileges() {
+        let path = Path::new("artifact.json");
+        for attributes in [0, 0x80, 0x1000] {
+            reject_windows_reparse_point(path, attributes).unwrap();
+        }
+        for attributes in [0x400, 0x480, 0x1400] {
+            assert!(matches!(
+                reject_windows_reparse_point(path, attributes),
+                Err(Error::ArtifactFormat { path: failed, message })
+                    if failed == path && message == "artifact must not be a reparse point"
+            ));
+        }
+    }
+
+    #[test]
+    fn json_admission_limits_the_opened_stream_and_ignores_path_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("artifact.json");
+        fs::write(&path, b"null").unwrap();
+        let file = open_regular_file(&path).unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 4);
+        #[cfg(unix)]
+        {
+            fs::write(&path, b"null      ").unwrap();
+            assert!(
+                read_bounded_stream(file, &path, 4, "JSON")
+                    .unwrap_err()
+                    .to_string()
+                    .contains("stream exceeds")
+            );
+        }
+        #[cfg(windows)]
+        {
+            // Admission denies write sharing while the artifact handle is open.
+            fs::write(&path, b"null      ").unwrap_err();
+            assert_eq!(read_bounded_file(file, &path, 4, "JSON").unwrap(), b"null");
+            fs::write(&path, b"null      ").unwrap();
+        }
+        assert!(
+            read_bounded_stream(io::Cursor::new(b"null      "), &path, 4, "JSON")
+                .unwrap_err()
+                .to_string()
+                .contains("stream exceeds")
+        );
+        assert!(matches!(
+            read_bounded_file(open_regular_file(&path).unwrap(), &path, 4, "JSON"),
+            Err(Error::ArtifactFormat { .. })
+        ));
+        fs::write(&path, b"null").unwrap();
+        assert_eq!(
+            read_bounded_file(open_regular_file(&path).unwrap(), &path, 4, "JSON").unwrap(),
+            b"null"
+        );
+        #[cfg(unix)]
+        {
+            let file = open_regular_file(&path).unwrap();
+            fs::rename(&path, directory.path().join("original.json")).unwrap();
+            fs::write(&path, b"not the opened artifact").unwrap();
+            assert_eq!(read_bounded_file(file, &path, 4, "JSON").unwrap(), b"null");
+        }
+    }
+
+    #[test]
+    fn json_admission_rejects_oversized_allocation_identities() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("allocation.json");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(b"{\"identity\":\"").unwrap();
+        for _ in 0..(MAX_ARTIFACT_JSON_BYTES / 8_192) {
+            file.write_all(&[b'x'; 8_192]).unwrap();
+        }
+        file.write_all(b"\",\"allocated_bytes\":1,\"allocation_count\":1}").unwrap();
+        drop(file);
+        assert!(matches!(
+            crate::allocation::read_artifact(&path, "native".to_owned(), "allocation.json".to_owned()),
+            Err(Error::ArtifactFormat { .. })
+        ));
+        read_json::<serde_json::Value>(directory.path()).unwrap_err();
+    }
+
+    #[test]
+    fn hardware_artifact_admission_rejects_invalid_files_before_parsing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("artifact");
+        for csv in [false, true] {
+            let parse = if csv { parse_vtune } else { parse_perf };
+            let parse = |path: &Path| parse(path, directory.path(), "group/case".into(), "native/case".into());
+            parse(directory.path()).unwrap_err();
+            fs::write(&path, [0xff]).unwrap();
+            assert!(matches!(
+                parse(&path),
+                Err(Error::ArtifactIo { source, .. }) if source.kind() == io::ErrorKind::InvalidData
+            ));
+            File::create(&path).unwrap().set_len(MAX_ARTIFACT_JSON_BYTES + 1).unwrap();
+            assert!(matches!(
+                parse(&path),
+                Err(Error::ArtifactFormat { message, .. })
+                    if message.starts_with(if csv { "CSV file" } else { "JSON file" })
+            ));
+            #[cfg(unix)]
+            {
+                let link = directory.path().join(if csv { "csv-link" } else { "json-link" });
+                symlink(&path, &link).unwrap();
+                assert!(matches!(parse(&link), Err(Error::ArtifactIo { .. })));
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let fifo = directory.path().join(if csv { "csv-fifo" } else { "json-fifo" });
+                nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).unwrap();
+                assert!(matches!(
+                    parse(&fifo),
+                    Err(Error::ArtifactFormat { message, .. }) if message.contains("regular file")
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_hardware_streams_check_growth_and_retain_the_output_format() {
+        let path = Path::new("hardware-output");
+        for format in ["JSON", "CSV"] {
+            assert_eq!(read_bounded_stream(io::Cursor::new(b"data"), path, 4, format).unwrap(), b"data");
+            assert!(matches!(
+                read_bounded_stream(io::Cursor::new(b"data grows"), path, 4, format),
+                Err(Error::ArtifactFormat { message, .. })
+                    if message == format!("{format} stream exceeds the 4-byte limit")
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_admission_rejects_links_and_fifos_without_waiting_for_a_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("artifact.json");
+        let link = directory.path().join("link.json");
+        fs::write(&path, b"null").unwrap();
+        symlink(&path, &link).unwrap();
+        read_json::<serde_json::Value>(&link).unwrap_err();
+        #[cfg(target_os = "linux")]
+        {
+            let fifo = directory.path().join("fifo.json");
+            nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).unwrap();
+            assert!(
+                read_json::<serde_json::Value>(&fifo)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("regular file")
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_run_directories_are_private() {
+        let directory = tempfile::tempdir().unwrap();
+        let artifacts = ArtifactDirectory::create_with_homes(
+            &directory.path().join("target"),
+            Some(directory.path().join("criterion").into_os_string()),
+            Some(directory.path().join("gungraun").into_os_string()),
+        )
+        .unwrap();
+        for path in [artifacts.path().to_owned(), artifacts.criterion_path(), artifacts.gungraun_path()] {
+            assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+    }
+
+    #[test]
+    fn explicit_default_case_is_distinct_and_joins_matching_engine_results() {
+        let source: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut all = Vec::new();
+        for id in [None, Some("default")] {
+            let path = directory.path().join(if id.is_some() { "named" } else { "unnamed" });
+            let mut summary = source.clone();
+            summary["id"] = id.into();
+            write_json(&path.join("summary.json"), &summary).unwrap();
+            let results = parse_gungraun(&path, directory.path(), &[]).unwrap();
+            let expected = if id.is_some() {
+                "adapter/metabench_adapter/default"
+            } else {
+                "adapter/metabench_adapter"
+            };
+            assert_eq!(results[0].native_identity, expected);
+            assert_eq!(results[0].identity, expected);
+            all.extend(results);
+        }
+        let mut time = Metric::float("criterion", "ns", 1.0, MetricDirection::LowerIsBetter);
+        time.statistic = Some("mean".to_owned());
+        time.lower_bound = Some(1.0);
+        time.upper_bound = Some(1.0);
+        time.confidence_level = Some(0.95);
+        all.push(NativeResult {
+            identity: "adapter/metabench_adapter/default".to_owned(),
+            native_identity: "adapter/metabench_adapter/default".to_owned(),
+            source: "criterion".to_owned(),
+            metrics: BTreeMap::from([("time".to_owned(), time)]),
+            raw_artifacts: Vec::new(),
+        });
+        let report = crate::report::BenchmarkReport::from_results(all, vec![], String::new()).unwrap();
+        assert_eq!(report.entries.len(), 2);
+        let named = report.entries.iter().find(|entry| entry.identity.ends_with("/default")).unwrap();
+        assert_eq!(named.results.len(), 2);
+    }
 
     #[test]
     fn accepts_only_performance_measurement_tools() {
@@ -953,7 +1274,7 @@ mod tests {
         fs::write(new.join("benchmark.json"), r#"{"group_id":"group","function_id":"bench"}"#).unwrap();
         fs::write(
             new.join("estimates.json"),
-            format!(r#"{{"median":{{"confidence_interval":{{"lower_bound":{lower},"upper_bound":{upper}}},"point_estimate":{point}}}}}"#),
+            format!(r#"{{"mean":{{"confidence_interval":{{"confidence_level":0.95,"lower_bound":{lower},"upper_bound":{upper}}},"point_estimate":{point}}}}}"#),
         )
         .unwrap();
     }
@@ -970,12 +1291,14 @@ mod tests {
         assert_eq!(result.native_identity, "group/bench");
         assert_eq!(result.source, "criterion");
         assert_eq!(result.raw_artifacts, ["new/benchmark.json", "new/estimates.json"]);
-        let median = &result.metrics["median"];
+        let median = &result.metrics["time"];
         assert_eq!(median.value, crate::report::MetricValue::Float(20.0));
         assert_eq!(median.direction, MetricDirection::LowerIsBetter);
         assert_eq!(median.unit.as_deref(), Some("ns"));
         assert_eq!(median.lower_bound, Some(10.0));
         assert_eq!(median.upper_bound, Some(30.0));
+        assert_eq!(median.statistic.as_deref(), Some("mean"));
+        assert_eq!(median.confidence_level, Some(0.95));
         assert_eq!(
             result.metrics["declared_throughput.bytes"].value,
             crate::report::MetricValue::Integer(10)
@@ -983,6 +1306,63 @@ mod tests {
         let index = CanonicalIdentityIndex::new(&identities);
         assert_eq!(index.resolve_criterion("group/bench/case_0"), "group/bench/case_0");
         assert_eq!(index.resolve_criterion("other/bench/case_0"), "other/bench/case_0");
+    }
+
+    #[test]
+    fn criterion_preserves_primary_estimate_and_its_confidence_interval() {
+        let directory = tempfile::tempdir().unwrap();
+        write_criterion(directory.path(), 20.0, 10.0, 30.0);
+        let path = directory.path().join("new/estimates.json");
+        let mut estimates: serde_json::Value = read_json(&path).unwrap();
+        estimates["slope"] = serde_json::json!({
+            "point_estimate": 100.0,
+            "confidence_interval": {"lower_bound": 90.0, "upper_bound": 110.0, "confidence_level": 0.99}
+        });
+        estimates["median"] = serde_json::json!({
+            "point_estimate": 2.0,
+            "confidence_interval": {"lower_bound": 1.0, "upper_bound": 3.0, "confidence_level": 0.90}
+        });
+        write_json(&path, &estimates).unwrap();
+        let results = parse_criterion(directory.path(), directory.path(), &[], Some("cycles")).unwrap();
+        let time = &results[0].metrics["time"];
+        assert_eq!(time.value, crate::report::MetricValue::Float(100.0));
+        assert_eq!(time.lower_bound, Some(90.0));
+        assert_eq!(time.upper_bound, Some(110.0));
+        assert_eq!(time.confidence_level, Some(0.99));
+        assert_eq!(time.statistic.as_deref(), Some("slope"));
+        assert_eq!(time.unit.as_deref(), Some("cycles"));
+        estimates["slope"] = serde_json::Value::Null;
+        write_json(&path, &estimates).unwrap();
+        let results = parse_criterion(directory.path(), directory.path(), &[], None).unwrap();
+        assert_eq!(results[0].metrics["time"].value, crate::report::MetricValue::Float(20.0));
+        assert_eq!(results[0].metrics["time"].statistic.as_deref(), Some("mean"));
+        assert_eq!(results[0].metrics["time"].lower_bound, Some(10.0));
+        assert_eq!(results[0].metrics["time"].upper_bound, Some(30.0));
+        assert_eq!(results[0].metrics["time"].confidence_level, Some(0.95));
+        assert_eq!(results[0].metrics["time"].unit, None);
+        for confidence in [0.0, 1.0, -0.1] {
+            estimates["mean"]["confidence_interval"]["confidence_level"] = serde_json::json!(confidence);
+            write_json(&path, &estimates).unwrap();
+            assert!(matches!(
+                parse_criterion(directory.path(), directory.path(), &[], None),
+                Err(Error::ArtifactFormat { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn criterion_accepts_zero_and_equal_interval_bounds() {
+        for (point, lower, upper) in [(0.0, 0.0, 0.0), (1.0, 0.0, 2.0), (1.0, 1.0, 1.0)] {
+            let estimate = CriterionEstimate {
+                point_estimate: point,
+                confidence_interval: CriterionConfidenceInterval {
+                    lower_bound: lower,
+                    upper_bound: upper,
+                    confidence_level: 0.95,
+                },
+            };
+            validate_criterion_estimate(Path::new("estimates.json"), &estimate).unwrap();
+        }
     }
 
     #[test]
@@ -1038,13 +1418,62 @@ mod tests {
             Err(Error::ArtifactFormat { .. })
         ));
 
-        for (point, lower, upper) in [(-1.0, 0.0, 1.0), (1.0, -1.0, 2.0), (1.0, 2.0, 3.0), (3.0, 1.0, 2.0)] {
+        for (point, lower, upper) in [(-1.0, 0.0, 1.0), (1.0, -1.0, 2.0), (1.0, 3.0, 2.0), (1.0, 0.0, -1.0)] {
             let directory = tempfile::tempdir().unwrap();
             write_criterion(directory.path(), point, lower, upper);
             assert!(matches!(
                 parse_criterion(directory.path(), directory.path(), &[], None),
                 Err(Error::ArtifactFormat { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn criterion_accepts_bootstrap_intervals_excluding_the_point() {
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        for point in [1.0, 4.0] {
+            write_criterion(directory.path(), point, 2.0, 3.0);
+            let path = directory.path().join("new/estimates.json");
+            let mut estimates: serde_json::Value = read_json(&path).unwrap();
+            for statistic in ["mean", "slope"] {
+                if statistic == "slope" {
+                    estimates["slope"] = estimates["mean"].clone();
+                    write_json(&path, &estimates).unwrap();
+                }
+                let results = parse_criterion(directory.path(), directory.path(), &[], None).unwrap();
+                let time = &results[0].metrics["time"];
+                assert_eq!(time.value, crate::report::MetricValue::Float(point));
+                assert_eq!(time.lower_bound, Some(2.0));
+                assert_eq!(time.upper_bound, Some(3.0));
+                assert_eq!(time.statistic.as_deref(), Some(statistic));
+                assert_eq!(time.confidence_level, Some(0.95));
+            }
+        }
+    }
+
+    #[test]
+    fn criterion_rejects_non_finite_estimate_components() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for component in 0..4 {
+                let mut estimate = CriterionEstimate {
+                    point_estimate: 2.0,
+                    confidence_interval: CriterionConfidenceInterval {
+                        lower_bound: 1.0,
+                        upper_bound: 3.0,
+                        confidence_level: 0.95,
+                    },
+                };
+                match component {
+                    0 => estimate.point_estimate = invalid,
+                    1 => estimate.confidence_interval.lower_bound = invalid,
+                    2 => estimate.confidence_interval.upper_bound = invalid,
+                    _ => estimate.confidence_interval.confidence_level = invalid,
+                }
+                assert!(matches!(
+                    validate_criterion_estimate(Path::new("estimates.json"), &estimate),
+                    Err(Error::ArtifactFormat { .. })
+                ));
+            }
         }
     }
 
@@ -1390,7 +1819,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("large.json");
         fs::File::create(&path).unwrap().set_len(11).unwrap();
-        assert!(matches!(validate_json_size(&path, 10), Err(Error::ArtifactFormat { .. })));
+        assert!(matches!(read_regular_file(&path, 10, "JSON"), Err(Error::ArtifactFormat { .. })));
+    }
+
+    #[test]
+    fn run_manifest_retains_native_to_canonical_identity_mapping() {
+        let directory = tempfile::tempdir().unwrap();
+        write_run_manifest(directory.path(), directory.path(), "target", "criterion", &[], None).unwrap();
+        let results = parse_criterion(&fixture("criterion/minimal"), &fixture("criterion"), &[], None).unwrap();
+        record_discovered_identities(directory.path(), "criterion", &results).unwrap();
+        let manifest: EngineRunManifest = read_json(&directory.path().join("manifests/criterion.json")).unwrap();
+        assert_eq!(manifest.discovered_native_identities, [results[0].native_identity.clone()]);
+        assert_eq!(manifest.native_to_canonical[&results[0].native_identity], results[0].identity);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Control protocol for measuring exactly the annotated workload under a live
+//! Control protocol for measuring an explicit workload boundary under a live
 //! `vtune` collection, mirroring [`crate::perf`]'s Linux `perf` integration.
 //!
 //! Unlike `perf`, which is driven through a pair of FIFOs the worker polls
@@ -15,13 +15,13 @@
 //! <https://intel.github.io/ittapi/src/ittapi/collection-control-api.html>).
 //! `runner::launch_vtune_worker` starts the collection with `--start-paused`
 //! so nothing is measured until this module's [`begin`] resumes it, and this
-//! module's [`Guard::drop`] pauses it again the instant the annotated
+//! module's [`Guard::drop`] pauses it again the instant the selected
 //! workload returns.
 //!
 //! # Sampling limitations
 //!
 //! `VTune`'s hardware-event collection is a statistical sampler, not an exact
-//! event counter: only the single Criterion invocation that first calls
+//! event counter: only the single native probe invocation that first calls
 //! [`begin`] is measured (the `MEASURED` flag admits exactly one resume per
 //! process), and unlike the exact per-invocation counts `perf` produces,
 //! `VTune`'s reported counts are sampling estimates whose accuracy improves
@@ -35,14 +35,14 @@
 
 use std::env;
 use std::process::Command;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex};
 
 use crate::error::Error;
 
 pub(crate) const RESULT_DIR_ENV: &str = "METABENCH_INTERNAL_VTUNE_RESULT_DIR";
 
-static ACTIVE: LazyLock<bool> = LazyLock::new(|| env::var_os(RESULT_DIR_ENV).is_some());
+static ACTIVE: AtomicBool = AtomicBool::new(false);
 static ERROR: Mutex<Option<Error>> = Mutex::new(None);
 static MEASURED: AtomicBool = AtomicBool::new(false);
 
@@ -64,14 +64,10 @@ impl Drop for Guard {
 #[inline]
 #[doc(hidden)]
 pub fn begin() -> Option<Guard> {
-    if !*ACTIVE {
+    if !ACTIVE.load(Ordering::Relaxed) {
         return None;
     }
-    // Fetch and validate the result directory before claiming the single
-    // `MEASURED` slot: if `ACTIVE` was cached `true` while the env var was
-    // set but it is now gone (only possible within the same process), this
-    // records a control error instead of silently marking the workload
-    // "measured" with no collection actually resumed.
+    // Validate before claiming the one measurement slot.
     let Some(result_dir) = env::var_os(RESULT_DIR_ENV) else {
         record_error(Error::VtuneControl(std::io::Error::other(
             "METABENCH_INTERNAL_VTUNE_RESULT_DIR was unset after vtune::begin's environment was primed",
@@ -79,10 +75,6 @@ pub fn begin() -> Option<Guard> {
         return None;
     };
     if MEASURED.swap(true, Ordering::Relaxed) {
-        // Only the first Criterion invocation in this process is ever
-        // measured; see this module's "Sampling limitations" doc for why
-        // that single-invocation, sampling-based measurement is `VTune`'s
-        // documented trade-off rather than a bug to fix here.
         return None;
     }
     let result_dir = std::path::PathBuf::from(result_dir);
@@ -97,15 +89,13 @@ pub fn begin() -> Option<Guard> {
     }
 }
 
-/// Resolves the environment probe behind [`begin`] ahead of any measurement.
+/// Enables collection after validating a `VTune` worker's token and mode.
 ///
-/// See [`crate::perf::prime`] for why this must run before the measured
-/// workload: leaving the `LazyLock` cold would charge the first workload for
-/// the `getenv` call and its surrounding one-time synchronization.
+/// Initialize the collector before a private probe invokes its workload,
+/// as in [`crate::perf::prime`].
 #[cfg_attr(coverage_nightly, coverage(off))] // not exercised by the instrumented test binary; see prime()'s doc comment
-#[cfg_attr(test, mutants::skip)] // warm-up only affects timing, not any observable behavior
 pub(crate) fn prime() {
-    let _active = *ACTIVE;
+    ACTIVE.store(env::var_os(RESULT_DIR_ENV).is_some(), Ordering::Relaxed);
 }
 
 pub(crate) fn finish_worker() -> Result<(), Error> {
