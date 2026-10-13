@@ -36,6 +36,7 @@ all-features = true
 [features]
 default = ["rt", "macros"]
 macros = ["rt", "dep:arty_macros"]
+seismograph = ["rt", "dep:seismograph", "dep:seismograph_runtime", "performables/seismograph"]
 rt = [
     "time",
     "dep:arty_executor",
@@ -69,6 +70,8 @@ nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
+seismograph = { workspace = true, optional = true }
+seismograph_runtime = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 threadpool = { workspace = true, optional = true }
@@ -93,9 +96,13 @@ nonempty = { workspace = true }
 observed = { path = "../observed", features = ["test-util"] }
 observed_testing = { path = "../observed_testing" }
 ohno = { workspace = true, features = ["app-err"] }
-performables = { path = "../performables" }
+performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
 scopeguard = { workspace = true }
+seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph_protocol = { path = "../seismograph_protocol" }
+seismograph_runtime = { path = "../seismograph_runtime" }
+serde_json = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-utils"] }
@@ -104,6 +111,15 @@ tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
 
 gungraun = { workspace = true, features = ["default"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["client_requests"] }
+nix = { workspace = true, features = ["time"] }
+
+[[bench]]
+name = "arty_spawning"
+harness = false
+required-features = ["rt"]
 
 [[bench]]
 name = "arty_scheduling"
@@ -123,6 +139,10 @@ required-features = ["rt"]
 [[example]]
 name = "arty_advanced"
 required-features = ["rt"]
+
+[[example]]
+name = "arty_seismograph"
+required-features = ["seismograph"]
 
 [[example]]
 name = "arty_basic"

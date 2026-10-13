@@ -88,6 +88,10 @@ pub(crate) struct WakeSignal {
 }
 
 impl WakeSignal {
+    pub(crate) fn is_awakened(&self) -> bool {
+        self.awakened.load(atomic::Ordering::Acquire)
+    }
+
     pub(crate) fn new(
         awakened_queue: Arc<Mutex<VecDeque<TaskRef>>>,
         probe_embedded_wake_signals: Arc<AtomicBool>,

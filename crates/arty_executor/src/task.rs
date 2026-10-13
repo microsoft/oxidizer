@@ -12,9 +12,10 @@ use std::{backtrace::Backtrace, sync::Arc};
 
 use events_once::RawLocalPooledSender;
 
-use crate::WakeSignal;
+use crate::inspection::Inspector;
 #[cfg(debug_assertions)]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
+use crate::{TaskState, WakeSignal};
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -22,7 +23,7 @@ use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
 /// The executor itself typically handles the task in obscured form, as a [`TypeErasedTask`],
 /// as it does not care about the specific type information - only the task itself does.
 #[derive(Debug)]
-pub(crate) struct Task<F, R>
+pub(crate) struct Task<F, R, I = ()>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
@@ -46,6 +47,8 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     wake_signal: UnsafeCell<Option<WakeSignal>>,
 
+    inspector: I,
+
     /// In debug builds, we store backtraces of waker clones here, to help detect waker leaks.
     #[cfg(debug_assertions)]
     diagnostic_waker_registry: Arc<DiagnosticWakerRegistry>,
@@ -57,6 +60,7 @@ where
     _requires_pin: PhantomPinned,
 }
 
+#[cfg(test)]
 impl<F, R> Task<F, R>
 where
     F: Future<Output = R> + 'static,
@@ -64,12 +68,23 @@ where
 {
     #[must_use]
     pub(crate) fn new(future: F, result_tx: RawLocalPooledSender<R>) -> Self {
+        Self::new_with_inspector(future, result_tx, ())
+    }
+}
+
+impl<F, R, I> Task<F, R, I>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+{
+    pub(crate) fn new_with_inspector(future: F, result_tx: RawLocalPooledSender<R>, inspector: I) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
                 future,
                 result_tx: Some(result_tx),
             })),
             wake_signal: UnsafeCell::new(None),
+            inspector,
             #[cfg(debug_assertions)]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
             _single_threaded: PhantomData,
@@ -78,11 +93,26 @@ where
     }
 }
 
-impl<F, R> TypeErasedTask for Task<F, R>
+impl<F, R, I> TypeErasedTask for Task<F, R, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
+    I: Inspector<F>,
 {
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        // SAFETY: inspection only borrows tasks between execution cycles, on their owner thread.
+        let payload = unsafe { &*self.payload.get() };
+        if let Some(payload) = payload {
+            self.inspector.inspect(&payload.future, state, visitor);
+        }
+    }
+
+    fn is_awakened(&self) -> bool {
+        // SAFETY: the wake signal is initialized once and remains alive with its task.
+        let signal = unsafe { &*self.wake_signal.get() };
+        signal.as_ref().is_some_and(WakeSignal::is_awakened)
+    }
+
     fn poll(self: Pin<&Self>) -> task::Poll<()> {
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
@@ -265,6 +295,12 @@ where
 }
 
 pub(crate) trait TypeErasedTask {
+    fn inspect(&self, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+
+    fn is_awakened(&self) -> bool {
+        false
+    }
+
     /// Polls the task's future, enabling it to make progress.
     ///
     /// There is no result type here - the expectation is that the task itself will deliver any

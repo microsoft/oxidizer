@@ -10,7 +10,8 @@
 //! - [Shutdown](shutdown): stop the runtime, cancel pending tasks, and wait for workers.
 //! - [Thread awareness](thread_awareness): preserve or change a worker association.
 //! - [Time](time): use delays and timeouts, and control time in tests.
-//! - [Telemetry](telemetry): configure events, enrichment, and data classification.
+//! - [Telemetry](telemetry): configure `observed` application events and inspect
+//!   automatic Seismograph runtime diagnostics.
 //!
 //! This module is only included in docs.rs documentation builds, not in the
 //! public API available to applications.

@@ -23,6 +23,8 @@ use crate::runtime::context::RuntimeBuiltins;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::{RuntimeTelemetry, WorkerTelemetry};
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
@@ -77,6 +79,9 @@ pub(in crate::runtime) fn build(
             }
         );
     })?;
+    #[cfg(any(test, feature = "seismograph"))]
+    let (runtime_telemetry, mut worker_telemetries) =
+        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()), sink.clone());
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         let (command_tx, command_rx) = channel::unbounded();
@@ -100,6 +105,8 @@ pub(in crate::runtime) fn build(
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
+                #[cfg(any(test, feature = "seismograph"))]
+                worker_telemetry: worker_telemetries.next().expect("one registration per selected processor"),
             }
             .start(),
         );
@@ -123,6 +130,8 @@ pub(in crate::runtime) fn build(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
         shutdown_started,
+        #[cfg(any(test, feature = "seismograph"))]
+        runtime_telemetry,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -168,6 +177,8 @@ struct AsyncWorkerStartInfo {
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
     sink: Sink,
+    #[cfg(any(test, feature = "seismograph"))]
+    worker_telemetry: WorkerTelemetry,
 }
 
 impl AsyncWorkerStartInfo {
@@ -195,6 +206,8 @@ impl AsyncWorkerStartInfo {
             blocking_pools,
             shutdown_started,
             sink,
+            #[cfg(any(test, feature = "seismograph"))]
+            worker_telemetry,
         } = self;
 
         let worker_sink = sink.clone();
@@ -202,6 +215,8 @@ impl AsyncWorkerStartInfo {
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
+        #[cfg(any(test, feature = "seismograph"))]
+        worker_telemetry.attach_current_thread();
 
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
@@ -210,6 +225,9 @@ impl AsyncWorkerStartInfo {
         // Use shared blocking worker pool if shared, otherwise use a new one
         let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
 
+        #[cfg(any(test, feature = "seismograph"))]
+        let signal = Arc::new(WorkerSignal::with_telemetry(worker_telemetry.handle()));
+        #[cfg(not(any(test, feature = "seismograph")))]
         let signal = Arc::new(WorkerSignal::default());
 
         worker_endpoint_tx
@@ -249,6 +267,10 @@ impl AsyncWorkerStartInfo {
                 success_tx,
             )
         };
+        #[cfg(any(test, feature = "seismograph"))]
+        let mut worker = worker;
+        #[cfg(any(test, feature = "seismograph"))]
+        worker.enable_live_inspection(worker_telemetry.handle());
 
         emit!(
             worker_sink,
@@ -272,6 +294,8 @@ impl AsyncWorkerStartInfo {
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
         blocking_worker.join();
+        #[cfg(any(test, feature = "seismograph"))]
+        drop(worker_telemetry);
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }

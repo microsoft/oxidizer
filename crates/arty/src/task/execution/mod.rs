@@ -6,6 +6,7 @@
 //! Submission code owns admission decisions. These helpers construct executable
 //! payloads and their result channels without deciding whether work is accepted.
 
+pub(crate) mod instrumentation;
 mod preparation;
 mod remote;
 mod result;

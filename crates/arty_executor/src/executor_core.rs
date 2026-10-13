@@ -6,6 +6,9 @@ use std::backtrace::Backtrace;
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
+use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,7 +19,30 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use plurality::MultiPool;
 use tick::SimpleClock;
 
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal};
+use crate::inspection::Inspector;
+use crate::{
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, InspectionError, InspectionStatus, JoinHandle, PollObserver,
+    ShutdownTimeoutBehavior, Task, TaskRef, TaskState, TypeErasedTask, WakeSignal,
+};
+
+trait ObservePoll: Copy {
+    fn started(self, task: Pin<&dyn TypeErasedTask>);
+    fn finished(self, completed: bool);
+}
+
+impl ObservePoll for () {
+    fn started(self, _task: Pin<&dyn TypeErasedTask>) {}
+    fn finished(self, _completed: bool) {}
+}
+
+impl ObservePoll for &dyn PollObserver {
+    fn started(self, task: Pin<&dyn TypeErasedTask>) {
+        task.inspect(TaskState::Running, &mut |description| self.poll_started(description));
+    }
+    fn finished(self, completed: bool) {
+        self.poll_finished(completed);
+    }
+}
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -30,6 +56,7 @@ pub(crate) struct ExecutorCore {
     reentrancy_safe: RefCell<ReentrancySafeState>,
     exclusive: RefCell<ExclusiveState>,
     shared: SharedState,
+    poll_observer: RefCell<Option<Rc<dyn PollObserver>>>,
 
     _single_threaded: PhantomData<*const ()>,
 }
@@ -193,6 +220,7 @@ impl ExecutorCore {
                 shutdown_timeout,
                 shutdown_timeout_behavior,
             },
+            poll_observer: RefCell::new(None),
             _single_threaded: PhantomData,
         }
     }
@@ -202,8 +230,15 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        let future = future.into_future();
+        self.add_inspected_task(future.into_future(), ())
+    }
 
+    pub(crate) fn add_inspected_task<F, R, I>(&self, future: F, inspector: I) -> JoinHandle<R>
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        I: Inspector<F> + 'static,
+    {
         let mut state = self.reentrancy_safe.borrow_mut();
 
         assert!(
@@ -217,7 +252,7 @@ impl ExecutorCore {
         // have been dropped.
         let (result_tx, result_rx) = unsafe { state.result_events.rent::<R>() };
 
-        let task = state.task_storage.alloc_box(Task::new(future, result_tx));
+        let task = state.task_storage.alloc_box(Task::new_with_inspector(future, result_tx, inspector));
         let task_ref = TaskRef::new(task);
 
         let wake_signal = WakeSignal::new(
@@ -243,6 +278,44 @@ impl ExecutorCore {
         state.new_tasks.push_back(task_ref);
 
         JoinHandle::new(result_rx)
+    }
+
+    pub(crate) fn inspect(
+        &self,
+        limit: NonZeroUsize,
+        visitor: &mut dyn FnMut(&dyn std::any::Any),
+    ) -> Result<InspectionStatus, InspectionError> {
+        let exclusive = self.exclusive.try_borrow_mut().map_err(|_error| InspectionError::Busy)?;
+        let reentrant = self.reentrancy_safe.try_borrow().map_err(|_error| InspectionError::Busy)?;
+        let awakened = self.shared.awakened.try_lock().map_err(|_error| InspectionError::Busy)?;
+        let notified = awakened.iter().copied().collect::<HashSet<_, BuildPointerHasher>>();
+        drop(awakened);
+        let tasks = reentrant
+            .new_tasks
+            .iter()
+            .chain(&exclusive.active)
+            .map(|task| (task, TaskState::Ready))
+            .chain(exclusive.inactive.iter().map(|task| (task, TaskState::Waiting)));
+        for (count, (task_ref, state)) in tasks.enumerate() {
+            if count == limit.get() {
+                return Ok(InspectionStatus::Truncated);
+            }
+            // SAFETY: the queues own these live tasks; both state borrows prevent polling or retirement.
+            let task = unsafe { task_ref.as_task() };
+            let state = if notified.contains(task_ref) || task.is_awakened() {
+                TaskState::Ready
+            } else {
+                state
+            };
+            task.inspect(state, visitor);
+        }
+        Ok(InspectionStatus::Complete)
+    }
+
+    pub(crate) fn set_poll_observer(&self, observer: Rc<dyn PollObserver>) -> Result<(), InspectionError> {
+        let _exclusive = self.exclusive.try_borrow_mut().map_err(|_error| InspectionError::Busy)?;
+        *self.poll_observer.borrow_mut() = Some(observer);
+        Ok(())
     }
 
     #[must_use]
@@ -388,7 +461,34 @@ impl ExecutorCore {
     fn poll_active_tasks(&self, state_exclusive: &mut ExclusiveState) {
         let completed_before = state_exclusive.completed.len();
         let inactive_before = state_exclusive.inactive.len();
+        let observer = self
+            .poll_observer
+            .borrow()
+            .as_ref()
+            .filter(|observer| observer.enabled())
+            .map(Rc::clone);
 
+        // Select once per cycle. The () specialization has no per-poll
+        // observation branches or callbacks while the observer is disabled.
+        if let Some(observer) = observer {
+            self.poll_tasks(state_exclusive, observer.as_ref());
+        } else {
+            self.poll_tasks(state_exclusive, ());
+        }
+        let completed_diff = state_exclusive
+            .completed
+            .len()
+            .checked_sub(completed_before)
+            .expect("completed tasks set cannot decrease when completing more tasks");
+        let inactive_diff = state_exclusive
+            .inactive
+            .len()
+            .checked_sub(inactive_before)
+            .expect("inactive tasks set cannot decrease when moving more tasks to inactive state");
+        self.record_poll_metrics(inactive_diff, completed_diff);
+    }
+
+    fn poll_tasks(&self, state_exclusive: &mut ExclusiveState, observer: impl ObservePoll) {
         while let Some(task_ref) = state_exclusive.active.pop_front() {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
@@ -398,7 +498,10 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
-            match task.poll() {
+            observer.started(task);
+            let outcome = task.poll();
+            observer.finished(outcome.is_ready());
+            match outcome {
                 task::Poll::Ready(()) => {
                     // The task has completed, so we can move it to the completed list.
                     // It will sit there until it signals `is_inert()` at which point it is dropped.
@@ -414,19 +517,6 @@ impl ExecutorCore {
                 }
             }
         }
-
-        let completed_diff = state_exclusive
-            .completed
-            .len()
-            .checked_sub(completed_before)
-            .expect("completed tasks set cannot decrease when completing more tasks");
-        let inactive_diff = state_exclusive
-            .inactive
-            .len()
-            .checked_sub(inactive_before)
-            .expect("inactive tasks set cannot decrease when moving more tasks to inactive state");
-
-        self.record_poll_metrics(inactive_diff, completed_diff);
     }
 
     #[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.

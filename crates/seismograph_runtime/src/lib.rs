@@ -13,6 +13,32 @@
 //! first schema, preserving metadata for every event still present in any
 //! recording session.
 //!
+//! # Live runtime providers
+//!
+//! Runtimes can expose their own task storage through
+//! [`worker::WorkerHandle::register_task_provider`]. No per-task registration is
+//! required: providers can allocate identities with [`allocate_task_id`] lazily
+//! on first observation and construct type metadata only when requested.
+//! [`task::LiveTask`] is optional, explicitly requested event instrumentation,
+//! not a prerequisite for callback-based inspection. It does not mirror the task list.
+//! Snapshots request bounded descriptions
+//! from workers; [`live::subscribe`] delivers repeating batches through a callback
+//! on a separate diagnostic thread. Slow callbacks do not block runtime workers.
+//!
+//! Live providers publish [`live::TaskCollection`] so a timeout or truncated batch
+//! cannot masquerade as a complete empty task list. Worker current-task slots
+//! are independently readable for polls observed after activation. A worker
+//! blocked before observation starts cannot reconstruct an earlier task identity.
+//! Live descriptions do not retain creation times; requested spawn events carry
+//! their own timestamps. Poll timing
+//! starts only during runtime-event recording or a subscription requesting
+//! [`live::Measurements::PollTiming`]; [`snapshot::TaskMetricsScope`] identifies
+//! uncollected data and the observed window. [`snapshot::CountersScope`] identifies
+//! partial, explicitly observed counters rather than complete lifetime history.
+//! Live tasks do not measure per-wake
+//! queue ages, resume intervals, or past execution. Existing registry-based
+//! instrumentation remains available for runtimes using [`task::TaskHandle`].
+//!
 //! # Compatibility
 //!
 //! The registered source has stable ID [`snapshot::source::ID`] and the name
@@ -89,12 +115,13 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use seismograph::recorder::SuppressionGuard;
 use seismograph::recorder::event::{Address, BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TransferId, TypeDescriptorId, WorkerId};
 
+pub mod live;
 pub mod snapshot;
 pub mod task;
 pub mod worker;
@@ -103,10 +130,40 @@ use snapshot::{Counters, Runtime, RuntimeState, Snapshot, Task, Worker, WorkerSt
 
 mod activity;
 
+/// Allocates a process-monotonic task type descriptor identity.
+///
+/// Instrumented runtimes that contribute to this crate's shared process source
+/// must allocate descriptors here rather than maintaining runtime-local
+/// counters. Callers remain responsible for caching stable descriptors for
+/// reusable concrete types.
+///
+/// # Panics
+///
+/// Panics if the process exhausts all nonzero `u64` descriptor identities.
+#[must_use]
+pub fn allocate_type_descriptor_id() -> TypeDescriptorId {
+    TypeDescriptorId::from_raw(next_id(&NEXT_TYPE_DESCRIPTOR_ID).get())
+        .expect("next_id always returns a nonzero type descriptor identifier")
+}
+
+/// Allocates a task identity only when an instrumented runtime observes a task.
+///
+/// Live providers can retain the returned identity lazily in their native task
+/// storage; submission does not need to allocate diagnostic identities.
+///
+/// # Panics
+///
+/// Panics if process task identities are exhausted.
+#[must_use]
+pub fn allocate_task_id() -> TaskId {
+    next_task_id()
+}
+
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
 static ADDRESS_LOOKUPS: OnceLock<Mutex<HashMap<u64, snapshot::AddressLookup>>> = OnceLock::new();
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
@@ -204,6 +261,26 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
+    /// Creates inline task instrumentation for a native-storage live provider.
+    ///
+    /// No task control is allocated or inserted into the diagnostic registry.
+    /// The caller owns this value alongside the future and exposes its description
+    /// through its worker's live provider.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the future size cannot be encoded or process task identities are exhausted.
+    #[must_use]
+    #[inline]
+    pub fn register_live_task(
+        &self,
+        type_descriptor: TypeDescriptorId,
+        parent: Option<TaskId>,
+        future_size_bytes: usize,
+    ) -> task::LiveTask {
+        task::LiveTask::new(self.clone(), type_descriptor, parent, future_size_bytes)
+    }
+
     /// Returns the process-monotonic runtime identity.
     #[must_use]
     pub fn id(&self) -> RuntimeId {
@@ -228,6 +305,8 @@ impl RuntimeHandle {
             state: AtomicU8::new(WorkerState::Running.wire_value()),
             thread_id: AtomicU64::new(0),
             current_task: AtomicU64::new(0),
+            task_provider: Mutex::new(None),
+            request_pending: std::sync::atomic::AtomicBool::new(false),
         });
         lock(&self.control.workers).push(Arc::clone(&worker));
         drop(suppression);
@@ -367,6 +446,7 @@ impl RuntimeHandle {
         let spawned_at = EventTimestamp::now();
         let task = Arc::new(TaskControl {
             id: task_id,
+            runtime: Arc::downgrade(&self.control),
             runtime_id: self.id(),
             activity: activity::Activity::new(session, spawned_at),
             parent,
@@ -387,7 +467,7 @@ impl RuntimeHandle {
             ready_wait_duration_nanos: AtomicU64::new(0),
             max_ready_wait_duration_nanos: AtomicU64::new(0),
         });
-        lock(&self.control.tasks).push(Arc::clone(&task));
+        lock(&self.control.tasks).insert(task_id, Arc::clone(&task));
         drop(suppression);
         record_now(
             &self.control,
@@ -435,40 +515,37 @@ impl RuntimeHandle {
     /// Updates terminal counters and emits a successful completion.
     #[inline]
     pub fn task_completed(&self, task_id: TaskId, worker_id: Option<WorkerId>) {
-        complete_task(
-            &self.control,
-            worker_id,
-            task_id,
-            EventKind::TaskCompleted,
-            &self.control.counters.completed_tasks,
-            BacktraceCapture::Never,
-        );
+        self.complete_task_id(task_id, worker_id, TaskOutcome::Completed);
     }
 
     /// Updates terminal counters and emits a cancellation.
     #[inline]
     pub fn task_canceled(&self, task_id: TaskId, worker_id: Option<WorkerId>) {
-        complete_task(
-            &self.control,
-            worker_id,
-            task_id,
-            EventKind::TaskCanceled,
-            &self.control.counters.canceled_tasks,
-            BacktraceCapture::Never,
-        );
+        self.complete_task_id(task_id, worker_id, TaskOutcome::Canceled);
     }
 
     /// Updates terminal counters and emits a panic event.
     #[inline]
     pub fn task_panicked(&self, task_id: TaskId, worker_id: Option<WorkerId>) {
-        complete_task(
-            &self.control,
-            worker_id,
-            task_id,
-            EventKind::TaskPanicked,
-            &self.control.counters.panicked_tasks,
-            self.control.lifecycle_backtraces,
-        );
+        self.complete_task_id(task_id, worker_id, TaskOutcome::Panicked);
+    }
+
+    fn complete_task_id(&self, task_id: TaskId, worker_id: Option<WorkerId>, outcome: TaskOutcome) {
+        let task = remove_task(&self.control, task_id, None);
+        if let Some(task) = task {
+            complete_removed_task(&self.control, worker_id, task, outcome);
+        }
+    }
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "consuming the handle-owned Arc releases that reference after terminal reporting"
+    )]
+    pub(crate) fn complete_task_handle(&self, task: Arc<TaskControl>, worker_id: Option<WorkerId>, outcome: TaskOutcome) {
+        let removed = remove_task(&self.control, task.id, Some(&task));
+        if let Some(task) = removed {
+            complete_removed_task(&self.control, worker_id, task, outcome);
+        }
     }
 }
 
@@ -509,7 +586,11 @@ pub fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeRegistration {
         state: AtomicU8::new(RuntimeState::Running.wire_value()),
         counters: CounterBlock::default(),
         workers: Mutex::new(Vec::new()),
-        tasks: Mutex::new(Vec::new()),
+        tasks: Mutex::new(HashMap::new()),
+        live_inspection: std::sync::atomic::AtomicBool::new(false),
+        live_timing: Mutex::new(live::Timing::default()),
+        live_timing_generation: AtomicU64::new(0),
+        live_observers: std::sync::atomic::AtomicUsize::new(0),
     });
     lock(&registry().runtimes).push(Arc::clone(&control));
     drop(suppression);
@@ -545,7 +626,11 @@ pub(crate) struct RuntimeControl {
     state: AtomicU8,
     pub(crate) counters: CounterBlock,
     workers: Mutex<Vec<Arc<WorkerControl>>>,
-    tasks: Mutex<Vec<Arc<TaskControl>>>,
+    tasks: Mutex<HashMap<TaskId, Arc<TaskControl>>>,
+    live_inspection: std::sync::atomic::AtomicBool,
+    live_timing: Mutex<live::Timing>,
+    live_timing_generation: AtomicU64,
+    live_observers: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -556,11 +641,14 @@ pub(crate) struct WorkerControl {
     pub(crate) state: AtomicU8,
     pub(crate) thread_id: AtomicU64,
     pub(crate) current_task: AtomicU64,
+    pub(crate) task_provider: Mutex<Option<live::TaskProvider>>,
+    pub(crate) request_pending: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug)]
 pub(crate) struct TaskControl {
     pub(crate) id: TaskId,
+    pub(crate) runtime: Weak<RuntimeControl>,
     pub(crate) runtime_id: RuntimeId,
     pub(crate) activity: activity::Activity,
     parent: Option<TaskId>,
@@ -622,7 +710,7 @@ fn capture_source(context: seismograph::snapshot::SnapshotContext<'_>) -> Result
 }
 
 fn capture_registry(observation: Option<seismograph::recorder::RecordingObservation>) -> Snapshot {
-    let runtimes = lock(&registry().runtimes);
+    let runtimes = lock(&registry().runtimes).clone();
     let runtimes = runtimes.iter().map(|runtime| runtime.snapshot(observation)).collect::<Vec<_>>();
     let addresses = resolve_runtime_addresses(&runtimes);
     Snapshot { runtimes, addresses }
@@ -671,14 +759,36 @@ fn resolve_runtime_addresses(runtimes: &[Runtime]) -> Vec<snapshot::AddressLooku
 }
 
 impl RuntimeControl {
-    fn snapshot(&self, observation: Option<seismograph::recorder::RecordingObservation>) -> Runtime {
+    fn snapshot(self: &Arc<Self>, observation: Option<seismograph::recorder::RecordingObservation>) -> Runtime {
         let state = runtime_state(self.state.load(Ordering::Acquire));
         let retired_at = match state {
             RuntimeState::Stopped => Some(EventTimestamp::from_ticks(self.retired_at.load(Ordering::Acquire))),
             RuntimeState::Running | RuntimeState::Stopping => None,
         };
         let workers = lock(&self.workers).iter().map(|worker| worker.snapshot()).collect();
-        let tasks = lock(&self.tasks).iter().map(|task| task.snapshot(observation)).collect();
+        let mut tasks = lock(&self.tasks)
+            .values()
+            .map(|task| task.snapshot(observation))
+            .collect::<Vec<_>>();
+        tasks.sort_unstable_by_key(|task| task.id);
+        let mut workers: Vec<Worker> = workers;
+        let task_source = if self.live_inspection.load(Ordering::Acquire) {
+            let batches = live::collect(
+                &RuntimeHandle { control: Arc::clone(self) },
+                live::QueryOptions::default(),
+                &std::sync::atomic::AtomicBool::new(false),
+            );
+            for batch in batches {
+                if let Some(worker) = workers.iter_mut().find(|worker| worker.id == batch.worker_id) {
+                    worker.task_collection = batch.collection;
+                }
+                tasks.extend(batch.tasks);
+            }
+            tasks.sort_unstable_by_key(|task| task.id);
+            snapshot::TaskSource::Live
+        } else {
+            snapshot::TaskSource::Retained
+        };
         Runtime {
             id: self.id,
             name: self.name.clone(),
@@ -688,8 +798,13 @@ impl RuntimeControl {
             created_at: self.created_at,
             retired_at,
             counters: self.counters.snapshot(),
+            counters_scope: match task_source {
+                snapshot::TaskSource::Live => snapshot::CountersScope::Observed,
+                snapshot::TaskSource::Retained => snapshot::CountersScope::Lifetime,
+            },
             workers,
             tasks,
+            task_source,
         }
     }
 }
@@ -714,6 +829,7 @@ impl TaskControl {
                 ready_wait_duration_nanos: self.ready_wait_duration_nanos.load(Ordering::Relaxed),
                 max_ready_wait_duration_nanos: self.max_ready_wait_duration_nanos.load(Ordering::Relaxed),
             },
+            metrics_scope: snapshot::TaskMetricsScope::Lifetime,
             activity: Some(self.activity.snapshot(observation)),
             spawn_backtrace: self.spawn_backtrace.clone(),
         }
@@ -735,41 +851,55 @@ impl WorkerControl {
                 0 => None,
                 value => TaskId::from_raw(value),
             },
+            task_collection: live::TaskCollection::Retained,
         }
     }
 }
 
-fn complete_task(
-    control: &RuntimeControl,
-    worker_id: Option<WorkerId>,
-    task_id: TaskId,
-    kind: EventKind,
-    terminal_counter: &AtomicU64,
-    backtrace: BacktraceCapture,
-) {
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TaskOutcome {
+    Completed,
+    Canceled,
+    Panicked,
+}
+
+fn remove_task(control: &RuntimeControl, task_id: TaskId, expected: Option<&Arc<TaskControl>>) -> Option<Arc<TaskControl>> {
     let suppression = SuppressionGuard::enter();
-    let removed = {
+    let task = {
         let mut tasks = lock(&control.tasks);
-        let previous_len = tasks.len();
-        tasks.retain(|task| {
-            if task.id == task_id {
-                // Lifetime state, not a recording observation: a retained waker
-                // must not revive this task when recording is later re-enabled.
-                task.activity.terminal.store(true, Ordering::Release);
-                false
-            } else {
-                true
-            }
-        });
-        tasks.len() != previous_len
+        let registered = tasks.get(&task_id)?;
+        if let Some(expected) = expected {
+            assert!(
+                Arc::ptr_eq(registered, expected),
+                "a task ID must always identify its original task control"
+            );
+        }
+        // Lifetime state, not a recording observation: a retained waker must
+        // not revive this task when recording is later re-enabled.
+        registered.activity.terminal.store(true, Ordering::Release);
+        tasks.remove(&task_id)
     };
     drop(suppression);
-    if !removed {
-        return;
-    }
+    task
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "consuming the removed registry Arc retires it after terminal accounting"
+)]
+fn complete_removed_task(control: &RuntimeControl, worker_id: Option<WorkerId>, task: Arc<TaskControl>, outcome: TaskOutcome) {
+    let (kind, terminal_counter, backtrace) = match outcome {
+        TaskOutcome::Completed => (EventKind::TaskCompleted, &control.counters.completed_tasks, BacktraceCapture::Never),
+        TaskOutcome::Canceled => (EventKind::TaskCanceled, &control.counters.canceled_tasks, BacktraceCapture::Never),
+        TaskOutcome::Panicked => (
+            EventKind::TaskPanicked,
+            &control.counters.panicked_tasks,
+            control.lifecycle_backtraces,
+        ),
+    };
     decrement_saturating(&control.counters.live_tasks);
     terminal_counter.fetch_add(1, Ordering::Relaxed);
-    record_now(control, worker_id, kind, task_id.get(), 0, 0, 0, backtrace);
+    record_now(control, worker_id, kind, task.id.get(), 0, 0, 0, backtrace);
 }
 
 fn decrement_saturating(value: &AtomicU64) {
@@ -912,6 +1042,7 @@ pub(crate) fn next_transfer_id() -> TransferId {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Barrier;
     use std::thread;
 
     use super::*;
@@ -925,6 +1056,13 @@ mod tests {
 
     fn type_descriptor_id(value: u64) -> TypeDescriptorId {
         TypeDescriptorId::from_raw(value).unwrap()
+    }
+
+    #[test]
+    fn allocated_type_descriptors_are_process_monotonic() {
+        let first = allocate_type_descriptor_id();
+        let second = allocate_type_descriptor_id();
+        assert!(first.get() < second.get());
     }
 
     fn source_snapshot() -> Snapshot {
@@ -1120,6 +1258,194 @@ mod tests {
             .count();
         assert_eq!(terminal_events, 1);
         seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn consuming_terminal_methods_are_first_report_wins() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            runtime_tasks: seismograph::recorder::RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let runtime = register_runtime(RuntimeMetadata::new("handle-terminal", 1));
+        let handle = runtime.handle();
+        let completed = handle.register_task(type_descriptor_id(1), None);
+        let completed_id = completed.id();
+        let completed_clone = completed.clone();
+        completed.completed(None);
+        completed_clone.canceled(None);
+        let canceled = handle.register_task(type_descriptor_id(2), None);
+        let canceled_id = canceled.id();
+        canceled.canceled(None);
+        let panicked = handle.register_task(type_descriptor_id(3), None);
+        let panicked_id = panicked.id();
+        panicked.panicked(None);
+
+        assert_eq!(
+            runtime.counters().snapshot(),
+            Counters {
+                spawned_tasks: 3,
+                completed_tasks: 1,
+                canceled_tasks: 1,
+                panicked_tasks: 1,
+                ..Counters::default()
+            }
+        );
+        let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+        let terminal_events = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id == runtime.id()
+                    && matches!(
+                        event.kind,
+                        EventKind::TaskCompleted | EventKind::TaskCanceled | EventKind::TaskPanicked
+                    ))
+                .then_some((event.kind, payload.subject_id))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            terminal_events,
+            [
+                (EventKind::TaskCompleted, completed_id.get()),
+                (EventKind::TaskCanceled, canceled_id.get()),
+                (EventKind::TaskPanicked, panicked_id.get()),
+            ]
+        );
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn outstanding_clone_and_poll_token_remain_safe_after_terminal_report() {
+        let _test = test_lock();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            runtime_tasks: seismograph::recorder::RecordingPolicy::all(false),
+            ..Default::default()
+        });
+        let runtime = register_runtime(RuntimeMetadata::new("outstanding-handle", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let worker_handle = worker.handle();
+        let task = runtime.handle().register_task(type_descriptor_id(1), None);
+        let task_id = task.id();
+        let retained = task.clone();
+        task.woken();
+        let poll = task.poll_started(&worker_handle);
+        task.completed(Some(worker.id()));
+        retained.woken();
+        retained.poll_finished(&worker_handle, poll);
+
+        let counters = runtime.counters().snapshot();
+        assert_eq!(
+            (
+                counters.spawned_tasks,
+                counters.live_tasks,
+                counters.completed_tasks,
+                counters.canceled_tasks,
+                counters.panicked_tasks,
+                counters.poll_count,
+            ),
+            (1, 0, 1, 0, 0, 1)
+        );
+        assert!(counters.poll_duration_nanos > 0);
+        let source = source_snapshot();
+        assert!(
+            source
+                .runtimes
+                .iter()
+                .find(|entry| entry.id == runtime.id())
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
+        let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+        let task_events = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id == runtime.id() && payload.subject_id == task_id.get()).then_some(event.kind)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(task_events.iter().filter(|kind| **kind == EventKind::TaskReady).count(), 1);
+        assert_eq!(task_events.iter().filter(|kind| **kind == EventKind::TaskCompleted).count(), 1);
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+    }
+
+    #[test]
+    fn live_task_snapshots_preserve_registration_order() {
+        let _test = test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("task-order", 1));
+        let handle = runtime.handle();
+        let tasks = (0..8)
+            .map(|index| handle.register_task(type_descriptor_id(index + 1), None))
+            .collect::<Vec<_>>();
+
+        let source = source_snapshot();
+        let task_ids = source
+            .runtimes
+            .iter()
+            .find(|entry| entry.id == runtime.id())
+            .unwrap()
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>();
+        assert_eq!(task_ids, tasks.iter().map(task::TaskHandle::id).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn concurrent_task_registration_retirement_and_snapshots_are_safe() {
+        let _test = test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("task-concurrency", 4));
+        let handle = runtime.handle();
+        let start = Arc::new(Barrier::new(5));
+        let snapshot_start = Arc::clone(&start);
+        let snapshotter = thread::spawn(move || {
+            snapshot_start.wait();
+            for _ in 0..64 {
+                let _snapshot = source_snapshot();
+            }
+        });
+        let workers = (0..4)
+            .map(|worker| {
+                let handle = handle.clone();
+                let start = Arc::clone(&start);
+                thread::spawn(move || {
+                    start.wait();
+                    for task_index in 0..128 {
+                        let task = handle.register_task(type_descriptor_id(worker * 128 + task_index + 1), None);
+                        task.completed(None);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        snapshotter.join().unwrap();
+
+        assert_eq!(
+            runtime.counters().snapshot(),
+            Counters {
+                spawned_tasks: 512,
+                completed_tasks: 512,
+                ..Counters::default()
+            }
+        );
+        assert!(
+            source_snapshot()
+                .runtimes
+                .iter()
+                .find(|entry| entry.id == runtime.id())
+                .unwrap()
+                .tasks
+                .is_empty()
+        );
     }
 
     #[test]

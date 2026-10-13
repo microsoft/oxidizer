@@ -265,6 +265,7 @@ dependencies = [
  "metabench",
  "mockall",
  "mutants",
+ "nix 0.31.3",
  "nonempty",
  "observed",
  "observed_testing",
@@ -272,6 +273,10 @@ dependencies = [
  "performables",
  "pin-project",
  "scopeguard",
+ "seismograph",
+ "seismograph_protocol",
+ "seismograph_runtime",
+ "serde_json",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -287,6 +292,7 @@ version = "0.1.3"
 dependencies = [
  "alloc_tracker",
  "criterion",
+ "ctor",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
@@ -754,6 +760,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.73.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "787ef8ef523575546b106a58213d6e6b06198a05c2f757258c68a74273670cfa"
+dependencies = [
+ "bitflags 2.13.1",
+ "cexpr",
+ "clang-sys",
+ "log",
+ "prettyplease 0.2.37",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "bit-vec"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1088,6 +1113,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cexpr"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1169,6 +1203,17 @@ checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
 dependencies = [
  "ciborium-io",
  "half",
+]
+
+[[package]]
+name = "clang-sys"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
+dependencies = [
+ "glob",
+ "libc",
+ "libloading",
 ]
 
 [[package]]
@@ -1508,6 +1553,12 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 dependencies = [
  "linktime-proc-macro",
 ]
+
+[[package]]
+name = "cty"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 
 [[package]]
 name = "darling"
@@ -2427,10 +2478,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9300d38d30facf6870c15bc9e243edcc47e5ddc270c9d2c1ae824a00b1faea79"
 dependencies = [
  "bincode-next",
+ "cty",
  "derive_more",
  "gungraun-macros",
  "gungraun-runner",
+ "valgrind-requests",
 ]
+
+[[package]]
+name = "gungraun-common"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc270ba55639babb5806b62d4bfbc35e15ca15791e3ec00c7b92b39c62a9d8eb"
 
 [[package]]
 name = "gungraun-macros"
@@ -3281,6 +3340,16 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
 
 [[package]]
 name = "libm"
@@ -6602,6 +6671,22 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "valgrind-requests"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "def0bceca49604595157f0604b14e8cf1658ef6af16ef0dbaf78596d1fae777f"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cfg-if",
+ "cty",
+ "gungraun-common",
+ "regex",
+ "rustc_version",
+ "strum",
 ]
 
 [[package]]

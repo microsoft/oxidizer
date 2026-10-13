@@ -119,8 +119,8 @@
 //!   stable task placement and explicit relocation of values.
 //! - [Time](crate::documentation::time) explains worker-driven timers, timeouts,
 //!   and controlled time in tests.
-//! - [Telemetry](crate::documentation::telemetry) explains runtime events
-//!   and links to [`observed`] for further details.
+//! - [Telemetry](crate::documentation::telemetry) explains application events
+//!   through [`observed`] and optional runtime diagnostics through Seismograph.
 //!
 //! The `documentation` module is included only for docs.rs builds and
 //! doc-test collection with all documentation features, including `test-util`;
@@ -133,6 +133,9 @@
 //! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`time`** - Enables clocks, timers, and timeouts.
+//! - **`seismograph`** - Enables Arty runtime/task diagnostics and `performables`
+//!   Arc/lock/channel hooks together, and implies `rt`. Disabled by default;
+//!   recording policies still determine which event streams are collected.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
 

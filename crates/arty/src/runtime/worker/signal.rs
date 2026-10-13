@@ -2,18 +2,26 @@
 // Licensed under the MIT License.
 
 use std::sync::Arc as StdArc;
+#[cfg(any(test, feature = "seismograph"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Wake, Waker};
 use std::time::Duration;
 
 use performables::arc::Arc;
 use performables::sync::condition::Condvar;
 use performables::sync::mutex::Mutex;
+#[cfg(any(test, feature = "seismograph"))]
+use seismograph_runtime::worker::WorkerHandle;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
+    #[cfg(any(test, feature = "seismograph"))]
+    telemetry: Option<WorkerHandle>,
+    #[cfg(any(test, feature = "seismograph"))]
+    parked: AtomicBool,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -40,9 +48,26 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn with_telemetry(telemetry: WorkerHandle) -> Self {
+        Self {
+            notified: Mutex::new(false),
+            ready: Condvar::new(),
+            telemetry: Some(telemetry),
+            parked: AtomicBool::new(false),
+        }
+    }
+
     pub(in crate::runtime) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
+        let notification = notified.as_mut().expect("the wait starts with its notification guard");
+        if **notification {
+            **notification = false;
+            return;
+        }
+        #[cfg(any(test, feature = "seismograph"))]
+        self.mark_parked();
         wait_until_deadline(
             &mut notified,
             timeout,
@@ -81,7 +106,32 @@ impl WorkerSignal {
 
     fn notify(&self) {
         *self.notified.lock() = true;
+        #[cfg(any(test, feature = "seismograph"))]
+        self.mark_unparked();
         self.wake_waiter();
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn command_received(&self) {
+        self.mark_unparked();
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    fn mark_parked(&self) {
+        if !self.parked.swap(true, Ordering::AcqRel)
+            && let Some(telemetry) = &self.telemetry
+        {
+            telemetry.parked();
+        }
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    fn mark_unparked(&self) {
+        if self.parked.swap(false, Ordering::AcqRel)
+            && let Some(telemetry) = &self.telemetry
+        {
+            telemetry.unparked();
+        }
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing the native notification strands the smoke test; flag handling is tested separately.
@@ -156,6 +206,30 @@ mod tests {
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
         assert!(!*signal.notified.lock());
+        assert!(signal.parked.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn repeated_idle_timeouts_remain_one_parked_interval() {
+        let signal = Arc::new(WorkerSignal::default());
+
+        signal.wait(Duration::ZERO);
+        signal.wait(Duration::ZERO);
+        assert!(signal.parked.load(Ordering::Acquire));
+
+        WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(!signal.parked.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn command_receipt_ends_a_parked_interval_before_dispatcher_wake() {
+        let signal = WorkerSignal::default();
+        signal.wait(Duration::ZERO);
+        assert!(signal.parked.load(Ordering::Acquire));
+
+        signal.command_received();
+
+        assert!(!signal.parked.load(Ordering::Acquire));
     }
 
     #[test]

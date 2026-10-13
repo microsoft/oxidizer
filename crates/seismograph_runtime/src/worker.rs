@@ -119,6 +119,73 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
+    /// Runtime owning this worker.
+    #[must_use]
+    #[inline]
+    pub fn runtime_id(&self) -> seismograph::recorder::runtime::RuntimeId {
+        self.runtime.id()
+    }
+
+    /// Returns the current live poll-timing generation, or zero when not requested.
+    #[must_use]
+    #[inline]
+    pub fn live_timing_generation(&self) -> u64 {
+        self.runtime.control.live_timing_generation.load(Ordering::Acquire)
+    }
+
+    /// Whether a live request or subscription currently needs worker observation.
+    #[must_use]
+    #[inline]
+    pub fn live_observation_enabled(&self) -> bool {
+        self.runtime.control.live_observers.load(Ordering::Relaxed) != 0
+    }
+
+    /// Prepares compact task metadata for delivery to this worker.
+    ///
+    /// The pending token is stored in the runtime's existing submitted factory.
+    /// Full inline poll instrumentation is constructed only after materialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the task size cannot be encoded or process task identities are exhausted.
+    #[must_use]
+    #[inline]
+    pub fn prepare_live_task(
+        &self,
+        descriptor: seismograph::recorder::runtime::TypeDescriptorId,
+        parent: Option<TaskId>,
+        future_size_bytes: usize,
+    ) -> crate::task::PendingTask {
+        crate::task::PendingTask::new(self.clone(), descriptor, parent, future_size_bytes)
+    }
+
+    pub(crate) fn runtime(&self) -> &RuntimeHandle {
+        &self.runtime
+    }
+
+    /// Registers a callback that routes task-data requests to this worker's native storage.
+    ///
+    /// The callback runs on the requester, not the worker, and must return promptly.
+    /// Move the request to the worker and respond at a safe point. Pending requests
+    /// are bounded to one per worker. Dropping the worker registration retires this provider.
+    pub fn register_task_provider(&self, provider: impl Fn(crate::live::TaskRequest) + Send + Sync + 'static) {
+        let _suppression = seismograph::recorder::SuppressionGuard::enter();
+        *crate::lock(&self.worker.task_provider) = Some(crate::live::TaskProvider(Arc::new(provider)));
+        self.runtime.control.live_inspection.store(true, Ordering::Release);
+    }
+
+    /// Publishes the current task without collecting timing or recording events.
+    #[inline]
+    pub fn task_entered(&self, task_id: TaskId) {
+        self.worker.current_task.store(task_id.get(), Ordering::Release);
+    }
+
+    /// Clears the independently readable current-task slot.
+    #[inline]
+    pub fn task_left(&self) {
+        self.worker.current_task.store(0, Ordering::Release);
+    }
+
     /// Returns the process-monotonic worker identity.
     #[must_use]
     pub fn id(&self) -> WorkerId {
@@ -218,7 +285,17 @@ impl WorkerHandle {
         self.task_poll_finished_with_control(&poll, poll.task.as_deref());
     }
 
-    pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) {
+    /// Finishes a requested poll observation and returns its elapsed nanoseconds.
+    #[must_use]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "consuming the token prevents finishing the same poll twice"
+    )]
+    pub fn task_poll_finished_measured(&self, poll: TaskPoll) -> u64 {
+        self.task_poll_finished_with_control(&poll, poll.task.as_deref())
+    }
+
+    pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) -> u64 {
         let finished_at = if let Some(task) = task
             && poll.session.is_some()
         {
@@ -226,6 +303,10 @@ impl WorkerHandle {
         } else {
             EventTimestamp::now()
         };
+        self.task_poll_finished_at(poll, task, finished_at)
+    }
+
+    pub(crate) fn task_poll_finished_at(&self, poll: &TaskPoll, task: Option<&TaskControl>, finished_at: EventTimestamp) -> u64 {
         let duration_nanos = duration_nanos(finished_at, poll.started_at);
         self.runtime.control.counters.poll_count.fetch_add(1, Ordering::Relaxed);
         self.runtime
@@ -249,6 +330,7 @@ impl WorkerHandle {
             0,
             BacktraceCapture::Never,
         );
+        duration_nanos
     }
 
     /// Starts a task instance transfer from this worker.
@@ -307,6 +389,7 @@ impl WorkerHandle {
     }
 
     fn stop(&self) {
+        crate::lock(&self.worker.task_provider).take();
         self.worker.current_task.store(0, Ordering::Relaxed);
         let previous = self.worker.state.swap(WorkerState::Stopped.wire_value(), Ordering::AcqRel);
         if previous != WorkerState::Stopped.wire_value() {

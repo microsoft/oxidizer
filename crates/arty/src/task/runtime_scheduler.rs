@@ -11,6 +11,8 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::TaskDescriptor;
 use crate::task::{Builtins, JoinHandle, Scheduler};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -118,6 +120,8 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'a,
         R: Send + 'static,
     {
+        #[cfg(any(test, feature = "seismograph"))]
+        let descriptor = TaskDescriptor::of_scoped::<F>();
         if Scheduler::is_current_worker_thread() {
             return Err(Error::block_on_from_worker());
         }
@@ -134,7 +138,11 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
+        #[cfg(any(test, feature = "seismograph"))]
+        let task = self.dispatcher.spawn_with_descriptor(descriptor, factory);
+        #[cfg(not(any(test, feature = "seismograph")))]
+        let task = self.dispatcher.spawn(factory);
+        futures::executor::block_on(task).map_err(Error::new)
     }
 
     /// Lets the runtime place an async task and relocates its payload.

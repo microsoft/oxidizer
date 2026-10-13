@@ -4757,6 +4757,8 @@ mod tests {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
                 name: "runtime".into(),
+                task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 configured_workers: 1,
                 lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
                 state: RuntimeState::Running,
@@ -4766,6 +4768,7 @@ mod tests {
                 workers: vec![
                     Worker {
                         id: WorkerId::from_raw(2).unwrap(),
+                        task_collection: seismograph_runtime::live::TaskCollection::Retained,
                         role: WorkerRole::Core,
                         state: WorkerState::Running,
                         processor_index: None,
@@ -4774,6 +4777,7 @@ mod tests {
                     },
                     Worker {
                         id: WorkerId::from_raw(3).unwrap(),
+                        task_collection: seismograph_runtime::live::TaskCollection::Retained,
                         role: WorkerRole::Blocking,
                         state: WorkerState::Parked,
                         processor_index: None,
@@ -4784,6 +4788,7 @@ mod tests {
                 tasks: vec![
                     Task {
                         id: seismograph::recorder::runtime::TaskId::from_raw(10).unwrap(),
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         parent: None,
                         type_descriptor: seismograph::recorder::runtime::TypeDescriptorId::from_raw(42).unwrap(),
                         future_size_bytes: None,
@@ -4805,6 +4810,7 @@ mod tests {
                     },
                     Task {
                         id: seismograph::recorder::runtime::TaskId::from_raw(11).unwrap(),
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         parent: None,
                         type_descriptor: seismograph::recorder::runtime::TypeDescriptorId::from_raw(43).unwrap(),
                         future_size_bytes: None,
@@ -4905,6 +4911,8 @@ mod tests {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
                 name: "executor".into(),
+                task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 configured_workers: 1,
                 lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
                 state: RuntimeState::Running,
@@ -4914,6 +4922,7 @@ mod tests {
                 workers: Vec::new(),
                 tasks: vec![Task {
                     id: TaskId::from_raw(1).unwrap(),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,

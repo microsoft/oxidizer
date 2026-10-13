@@ -16,6 +16,8 @@ use tick::Clock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::{TaskDescription, WorkerObservation};
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
@@ -96,6 +98,8 @@ where
     clock_driver: ClockDriver,
 
     signal: Arc<WorkerSignal>,
+    #[cfg(any(test, feature = "seismograph"))]
+    observation: Option<Rc<WorkerObservation>>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -156,8 +160,19 @@ where
             clock_driver,
             blocking_worker,
             signal,
+            #[cfg(any(test, feature = "seismograph"))]
+            observation: None,
             _single_threaded: PhantomData,
         }
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn enable_live_inspection(&mut self, worker: seismograph_runtime::worker::WorkerHandle) {
+        let observer = Rc::new(WorkerObservation::new(worker));
+        self.tasks
+            .set_poll_observer(Rc::clone(&observer) as Rc<dyn arty_executor::PollObserver>)
+            .expect("bootstrap configures inspection before executing worker cycles");
+        self.observation = Some(observer);
     }
 
     /// Worker thread entry point, invoked by bootstrap after startup coordination completes.
@@ -228,7 +243,35 @@ where
         for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
                 Ok(mut command) => {
+                    // The command can become visible before the dispatcher calls the worker
+                    // waker, so dequeue itself must end the parked interval before user work.
+                    #[cfg(any(test, feature = "seismograph"))]
+                    self.signal.command_received();
                     match &mut command {
+                        #[cfg(any(test, feature = "seismograph"))]
+                        AsyncWorkerCommand::InspectTasks { request } => {
+                            let request = request.take().expect("live task requests are handled exactly once");
+                            if request.is_canceled() {
+                                continue;
+                            }
+                            let _suppression = seismograph::recorder::SuppressionGuard::enter();
+                            let mut descriptions = Vec::new();
+                            let collection = match self.tasks.inspect(request.limit(), |task: &TaskDescription| {
+                                if let Some(observer) = &self.observation {
+                                    descriptions.push(observer.describe(task));
+                                }
+                            }) {
+                                Ok(arty_executor::InspectionStatus::Complete) => seismograph_runtime::live::TaskCollection::Complete,
+                                Ok(arty_executor::InspectionStatus::Truncated) => seismograph_runtime::live::TaskCollection::Truncated,
+                                Err(arty_executor::InspectionError::Busy) => seismograph_runtime::live::TaskCollection::Busy,
+                                Err(arty_executor::InspectionError::Disconnected) => seismograph_runtime::live::TaskCollection::Stopped,
+                                Err(arty_executor::InspectionError::Panicked) => {
+                                    descriptions.clear();
+                                    seismograph_runtime::live::TaskCollection::Failed
+                                }
+                            };
+                            request.respond(descriptions, collection);
+                        }
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {
                             if self.shutdown_signal.load(Ordering::Acquire) {
                                 self.begin_shutdown();

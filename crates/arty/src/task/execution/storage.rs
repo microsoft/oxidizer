@@ -11,6 +11,7 @@ use std::task::{Context, Poll};
 use observed::context::Transfer;
 use observed::{Sink, emit};
 
+use super::instrumentation::PendingInstrumentation;
 use crate::runtime::telemetry::events::TaskPanicked;
 
 pub(crate) type Panic = Box<dyn Any + Send + 'static>;
@@ -92,33 +93,42 @@ impl<T> Drop for TaskStorage<T> {
     }
 }
 
-pub(super) struct TaskFactory<F> {
+pub(super) struct TaskFactory<F, I: PendingInstrumentation> {
     inner: Option<F>,
     enrichment: Option<Transfer>,
     sink: Option<Sink>,
+    telemetry: Option<I>,
 }
 
-impl<F> TaskFactory<F> {
-    pub(super) fn new(inner: F, enrichment: Transfer, sink: Sink) -> Self {
+impl<F, I: PendingInstrumentation> TaskFactory<F, I> {
+    pub(super) fn new(inner: F, enrichment: Transfer, sink: Sink, telemetry: I) -> Self {
         Self {
             inner: Some(inner),
             enrichment: Some(enrichment),
             sink: Some(sink),
+            telemetry: Some(telemetry),
         }
     }
 
-    pub(super) fn into_parts(mut self) -> (F, Transfer, Sink) {
+    pub(super) fn into_parts(mut self) -> (F, Transfer, Sink, I) {
         (
             self.inner.take().expect("a queued factory is consumed exactly once"),
             self.enrichment
                 .take()
                 .expect("a queued factory retains enrichment until invocation"),
             self.sink.take().expect("a queued factory retains its sink until invocation"),
+            self.telemetry
+                .take()
+                .expect("a queued factory transfers its instrumentation exactly once"),
         )
+    }
+
+    pub(super) fn enqueued(&self) {
+        self.telemetry.as_ref().expect("remote factories retain task telemetry").enqueued();
     }
 }
 
-impl<F> Drop for TaskFactory<F> {
+impl<F, I: PendingInstrumentation> Drop for TaskFactory<F, I> {
     fn drop(&mut self) {
         let Some(factory) = self.inner.take() else {
             return;
@@ -129,6 +139,9 @@ impl<F> Drop for TaskFactory<F> {
             .expect("a queued factory retains enrichment until disposal")
             .apply_current_thread();
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
+            if let Some(telemetry) = self.telemetry.take() {
+                telemetry.panicked();
+            }
             emit!(
                 self.sink.as_ref().expect("a queued factory retains its sink until disposal"),
                 TaskPanicked
@@ -209,7 +222,7 @@ mod tests {
             }
 
             let sink = Sink::noop();
-            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context(), sink));
+            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context(), sink, ()));
         }));
         result.unwrap();
         assert!(dropped.load(std::sync::atomic::Ordering::Acquire));

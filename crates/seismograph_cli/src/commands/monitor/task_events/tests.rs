@@ -487,6 +487,8 @@ fn active_source() -> Snapshot {
         runtimes: vec![Runtime {
             id: RuntimeId::from_raw(1).unwrap(),
             name: "runtime".into(),
+            task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+            counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
             configured_workers: 1,
             lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
             state: RuntimeState::Running,
@@ -495,6 +497,7 @@ fn active_source() -> Snapshot {
             counters: Counters::default(),
             workers: Vec::new(),
             tasks: vec![Task {
+                metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                 id: TaskId::from_raw(1).unwrap(),
                 parent: None,
                 type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
