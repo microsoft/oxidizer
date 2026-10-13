@@ -136,6 +136,22 @@ fn duplicate_event_registration_is_rejected_instead_of_counting_twice() {
 }
 
 #[test]
+fn later_bindings_cannot_overwrite_the_first_configuration_error() {
+    let error = PerfCounterProcessor::builder()
+        .category("Service")
+        .instance("worker")
+        .bind_event::<LogOnly>()
+        .bind_event::<RequestCompleted>()
+        .bind_event::<Mixed>()
+        .manifest("resources.dll")
+        .unwrap_err();
+    assert_eq!(
+        error.source().unwrap().to_string(),
+        "cannot bind metrics on event `log.only`: the event must declare at least one metric instrument",
+    );
+}
+
+#[test]
 fn duplicate_metric_names_across_events_are_rejected() {
     let error = PerfCounterProcessor::builder()
         .category("Service")

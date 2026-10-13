@@ -1,0 +1,96 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"pointer.metrics\"\"#,\nr#\"\n        #[counter(bytes)]\n        #[updown_counter(delta)]\n        struct PointerMetrics {\n            #[unredacted]\n            bytes: usize,\n            #[unredacted]\n            delta: isize,\n        }\n        \"#,)"
+---
+struct PointerMetrics {
+    bytes: usize,
+    delta: isize,
+}
+const _: () = {
+    impl ::observed::Event for PointerMetrics {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "pointer.metrics",
+            ::core::option::Option::Some(::core::any::TypeId::of::<PointerMetrics>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "bytes",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "bytes",
+                            ::observed::metadata::MetricDescription::new(
+                                "pointer.metrics",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.bytes.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "delta",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "delta",
+                            ::observed::metadata::MetricDescription::new(
+                                "pointer.metrics",
+                                ::observed::metadata::InstrumentKind::UpDownCounter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.delta.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "pointer.metrics",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+            ::observed::metadata::MetricDescription::new(
+                    "pointer.metrics",
+                    ::observed::metadata::InstrumentKind::UpDownCounter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::I64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(self.bytes as u64),
+                    )
+                }
+                1usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::I64(self.delta as i64),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
+        }
+    }
+};

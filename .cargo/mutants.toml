@@ -47,6 +47,8 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # This constructor delegates to Default; replacing it with Default is identical.
+    'crates/observed_perf_counters/src/processor.rs:\d+:\d+: replace PerfCounterProcessor::builder -> PerfCounterProcessorBuilder with Default::default\(\)$',
     # There are no API contracts for what these must return because they
     # are for human-readable stringification. No purpose mutating them.
     "impl Debug",

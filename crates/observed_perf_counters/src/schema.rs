@@ -262,10 +262,42 @@ mod tests {
     }
 
     #[test]
+    fn schema_rejects_unsupported_aggregation_and_name_controls() {
+        let mut unsupported = spec("Value", 0);
+        unsupported.kind = InstrumentKind::Histogram;
+        assert_eq!(
+            CounterSchema::new("Service", "worker", &[unsupported]).unwrap_err().to_string(),
+            "invalid performance-counter configuration: unsupported native metric aggregation",
+        );
+        assert_eq!(
+            CounterSchema::new("Service", "worker", &[spec("line\nbreak", 0)])
+                .unwrap_err()
+                .to_string(),
+            "invalid performance-counter configuration: counter name contains a control character",
+        );
+    }
+
+    #[test]
+    fn exact_text_limits_are_accepted_but_the_next_code_unit_is_rejected() {
+        let schema = CounterSchema::new(&"s".repeat(MAX_NAME), &"i".repeat(MAX_NAME), &[spec(&"c".repeat(MAX_NAME), 0)]).unwrap();
+        assert_eq!(schema.counters.len(), 1);
+        let mut description = spec("Value", 0);
+        description.description = "d".repeat(MAX_TEXT);
+        CounterSchema::new("Service", "worker", &[description.clone()]).unwrap();
+        description.description.push('d');
+        CounterSchema::new("Service", "worker", &[description]).unwrap_err();
+    }
+
+    #[test]
     fn binding_order_and_instance_do_not_change_schema() {
         let left = CounterSchema::new("Service", "first", &[spec("Bytes", 0), spec("Requests", 1)]).unwrap();
         let right = CounterSchema::new("Service", "second", &[spec("Requests", 0), spec("Bytes", 1)]).unwrap();
         assert_eq!(left.manifest("service.dll").unwrap(), right.manifest("service.dll").unwrap());
+    }
+
+    #[test]
+    fn installed_counter_identity_is_stable() {
+        assert_eq!(counter_id("Bytes"), 1_414_435_675);
     }
 
     #[test]

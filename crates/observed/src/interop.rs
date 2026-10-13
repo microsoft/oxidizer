@@ -177,6 +177,13 @@ mod tests {
     }
 
     #[test]
+    fn foreign_events_default_to_no_numeric_slots() {
+        let event: &dyn DynEvent = &Bridged;
+        assert_eq!(event.metric_value(0), None);
+        assert_eq!(event.metric_value(usize::MAX), None);
+    }
+
+    #[test]
     fn emit_dyn_event_dispatches_through_the_sink_pipeline() {
         // The bridge entry point must actually reach the processors; dropping
         // the dispatch would silently lose every foreign event.

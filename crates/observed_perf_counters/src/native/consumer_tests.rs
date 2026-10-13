@@ -174,12 +174,12 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
             .build()
             .unwrap(),
     );
-    let query = Query::open(processor.schema(), "Bytes Sent", instance);
-    let requests = Query::open(processor.schema(), "Requests", instance);
-    let huge = Query::open(processor.schema(), "Huge", instance);
-    let disabled = Query::open(processor.schema(), "Disabled", instance);
-    let active = Query::open(processor.schema(), "Active Requests", instance);
-    let depth = Query::open(processor.schema(), "Queue Depth", instance);
+    let query = Query::open(&processor.schema, "Bytes Sent", instance);
+    let requests = Query::open(&processor.schema, "Requests", instance);
+    let huge = Query::open(&processor.schema, "Huge", instance);
+    let disabled = Query::open(&processor.schema, "Disabled", instance);
+    let active = Query::open(&processor.schema, "Active Requests", instance);
+    let depth = Query::open(&processor.schema, "Queue Depth", instance);
     let sink = Sink::new(
         "app",
         vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
@@ -232,6 +232,10 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "Perflib FFI runs natively; malformed measurements are tested by the portable processor suite"
+)]
 fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     struct Malformed;
     impl Event for Malformed {

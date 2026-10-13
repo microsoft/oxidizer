@@ -43,10 +43,14 @@ pub(crate) enum ErrorKind {
         source: Arc<observed::processing::MetricReadError>,
     },
     #[error("native performance counters require 64-bit Windows")]
+    #[cfg_attr(
+        all(not(test), windows, target_pointer_width = "64"),
+        expect(dead_code, reason = "returned only on unsupported targets")
+    )]
     UnsupportedPlatform,
     #[error("{operation} failed with Windows status {code}")]
     #[cfg_attr(
-        not(all(windows, target_pointer_width = "64")),
+        all(not(test), not(all(windows, target_pointer_width = "64"))),
         expect(dead_code, reason = "constructed only by native publishing")
     )]
     Windows { operation: &'static str, code: u32 },
@@ -56,7 +60,7 @@ pub(crate) enum ErrorKind {
     Underflow { counter_id: u32 },
     #[error("performance-counter collection failed with Windows status {code}; snapshots are frozen")]
     #[cfg_attr(
-        not(all(windows, target_pointer_width = "64")),
+        all(not(test), not(all(windows, target_pointer_width = "64"))),
         expect(dead_code, reason = "constructed only by native publishing")
     )]
     Collection { code: u32 },
@@ -94,5 +98,40 @@ impl Error {
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
         Self { kind }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn predicates_distinguish_configuration_platform_and_native_failures() {
+        let cases = [
+            (Error::configuration("bad name"), (true, false, None)),
+            (ErrorKind::UnsupportedPlatform.into(), (false, true, None)),
+            (
+                ErrorKind::Windows {
+                    operation: "start",
+                    code: 42,
+                }
+                .into(),
+                (false, false, Some(42)),
+            ),
+            (ErrorKind::Collection { code: 87 }.into(), (false, false, Some(87))),
+            (ErrorKind::Overflow { counter_id: 7 }.into(), (false, false, None)),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(
+                (
+                    error.is_invalid_configuration(),
+                    error.is_unsupported_platform(),
+                    error.windows_code()
+                ),
+                expected,
+            );
+            assert!(std::error::Error::source(&error).is_none());
+        }
     }
 }

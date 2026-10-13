@@ -1103,17 +1103,13 @@ fn generate_metric_items(def: &EventDef) -> TokenStream {
     if metrics.is_empty() {
         return quote! {};
     }
-    let reader = if arms.is_empty() {
-        quote! {}
-    } else {
-        quote! {
+    let reader = quote! {
             fn metric_value(&self, slot: usize) -> ::core::option::Option<::observed::metadata::MetricValue> {
                 match slot {
                     #(#arms)*
                     _ => ::core::option::Option::None,
                 }
             }
-        }
     };
     quote! {
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[#(#metrics)*];
@@ -1288,7 +1284,12 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
                         visitor(&FIELD_DESC, &|_| ::observed::Value::from(#placeholder))?;
                     }
                 }
+
             }
         },
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod metric_tests;

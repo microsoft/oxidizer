@@ -15,6 +15,7 @@ use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBind
 use observed::{Event, FlushError, Sink, emit, event};
 
 #[global_allocator]
+#[cfg(not(miri))]
 static ALLOCATOR: alloc_tracker::Allocator<std::alloc::System> = alloc_tracker::Allocator::system();
 
 #[event("request.completed")]
@@ -260,6 +261,44 @@ fn numeric_recording_does_not_visit_generic_fields() {
     assert_eq!(total.load(Ordering::Relaxed), 123);
 }
 
+#[test]
+fn standard_arc_processor_delegates_interest_and_delivery() {
+    let total = Arc::new(AtomicU64::new(0));
+    let mut bindings = MetricBindings::new();
+    bindings.bind_event::<AnotherRequest>(|_| Arc::clone(&total)).unwrap();
+    bindings.bind_event::<NumericOnly>(|_| Arc::clone(&total)).unwrap();
+    let processor = Arc::new(Processor { bindings });
+    assert!(EventProcessor::is_interested(&processor, &AnotherRequest::DESCRIPTION));
+    assert!(!EventProcessor::is_interested(&processor, &LogOnly::DESCRIPTION));
+    let adapter = NumericAdapter(&NumericOnly { amount: 99 });
+    let view = EventView::new_synthetic(&adapter, std::time::SystemTime::UNIX_EPOCH);
+    EventProcessor::process(&processor, &view);
+    assert_eq!(total.load(Ordering::Relaxed), 99);
+    EventProcessor::flush(&processor).unwrap();
+}
+
+#[test]
+fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored() {
+    struct LegacyNumeric;
+    impl Event for LegacyNumeric {
+        const DESCRIPTION: EventDescription = NumericOnly::DESCRIPTION;
+        const METRICS: &'static [MetricDescription] = &[MetricDescription::new("numeric", InstrumentKind::Counter, "", "")];
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+    let mut bindings = MetricBindings::<()>::default();
+    let adapter = NumericAdapter(&NumericOnly { amount: 19 });
+    let view = EventView::new_synthetic(&adapter, std::time::SystemTime::UNIX_EPOCH);
+    bindings
+        .record(&view, |(), _| panic!("unbound measurement must not be delivered"))
+        .unwrap();
+    bindings.bind_event::<LegacyNumeric>(|_| ()).unwrap();
+    let mut values = Vec::new();
+    bindings.record(&view, |(), value| values.push(value)).unwrap();
+    assert_eq!(values, [MetricValue::U64(19)]);
+}
+
 struct MissingSlot;
 
 impl Event for MissingSlot {
@@ -424,6 +463,7 @@ impl Event for Unidentified {
 #[test]
 fn unidentified_events_are_rejected_during_binding() {
     let mut bindings = MetricBindings::<()>::new();
+    assert!(!bindings.is_interested(&Unidentified::DESCRIPTION));
     assert_eq!(
         bindings.bind_event::<Unidentified>(|_| ()).unwrap_err().to_string(),
         "cannot bind metrics on event `unidentified`: a typed event identity is required",

@@ -284,12 +284,12 @@ templated_uri_macros = { path = "crates/templated_uri_macros", default-features 
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "=0.6.0" }
 terminal_size = { version = "0.4.4", default-features = false }
 testing_aids = { path = "crates/testing_aids", default-features = false }
+thiserror = { version = "2.0.20", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.12.0" }
 thread_aware_core = { path = "crates/thread_aware_core", default-features = false, version = "0.1.1" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "=0.12.0" }
 thread_local = { version = "1.1.8", default-features = false }
-thiserror = { version = "2.0.20", default-features = false }
 threadpool = { version = "1.8.1", default-features = false }
 tick = { path = "crates/tick", default-features = false, version = "0.7.1" }
 time = { version = "0.3.47", default-features = false }

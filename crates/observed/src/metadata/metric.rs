@@ -153,6 +153,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_description_preserves_the_selected_numeric_representation() {
+        for kind in [MetricValueKind::U64, MetricValueKind::I64, MetricValueKind::F64] {
+            let metric = MetricDescription::new("value", InstrumentKind::Gauge, "", "").with_value_kind(kind);
+            assert_eq!(metric.value_kind(), Some(kind));
+        }
+    }
+
+    #[test]
     fn instrument_kind_display_is_nonempty_and_unique() {
         use std::collections::HashSet;
 

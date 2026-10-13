@@ -146,9 +146,6 @@ impl PerfCounterProcessorBuilder {
     /// or a configuration/native startup error. Partial startup is cleaned up.
     pub fn build(self) -> Result<PerfCounterProcessor, Error> {
         let schema = self.schema()?;
-        if !cfg!(all(windows, target_pointer_width = "64")) {
-            return Err(ErrorKind::UnsupportedPlatform.into());
-        }
         #[cfg(all(windows, target_pointer_width = "64"))]
         {
             let totals = (0..self.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
@@ -180,7 +177,7 @@ impl PerfCounterProcessorBuilder {
 /// or library image. This is not a portable interface between Rust DLLs.
 pub struct PerfCounterProcessor {
     bindings: MetricBindings<MetricTarget>,
-    schema: CounterSchema,
+    pub(crate) schema: CounterSchema,
     totals: Arc<[AtomicU64]>,
     error: Mutex<Option<Error>>,
     #[cfg(all(windows, target_pointer_width = "64"))]
@@ -200,11 +197,6 @@ impl PerfCounterProcessor {
     #[must_use]
     pub fn builder() -> PerfCounterProcessorBuilder {
         PerfCounterProcessorBuilder::default()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn schema(&self) -> &CounterSchema {
-        &self.schema
     }
 
     fn report(&self, error: Error) {
@@ -232,7 +224,7 @@ impl PerfCounterProcessor {
             (InstrumentKind::UpDownCounter, MetricValue::I64(delta)) => total
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add_signed(delta))
                 .err()
-                .map(|_| delta < 0),
+                .map(|_| delta.is_negative()),
             _ => {
                 self.report(Error::configuration("measurement does not match the prepared integer metric"));
                 return;
@@ -284,7 +276,7 @@ impl EventProcessor for PerfCounterProcessor {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(test, windows, target_pointer_width = "64"))]
+#[cfg(test)]
 mod tests {
     use observed::{Sink, emit, event};
 
@@ -298,6 +290,7 @@ mod tests {
         bytes_sent: u32,
     }
 
+    #[cfg(all(windows, target_pointer_width = "64"))]
     #[event("huge.increment")]
     #[counter(value, name = "Huge")]
     struct HugeIncrement {
@@ -333,7 +326,14 @@ mod tests {
     }
 
     fn named_values(processor: &PerfCounterProcessor) -> Vec<(String, u64)> {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let values = crate::native::test_snapshot(&processor.native, &processor.schema);
+        #[cfg(not(all(windows, target_pointer_width = "64")))]
+        let values = processor
+            .schema
+            .counters
+            .iter()
+            .map(|counter| processor.totals[counter.source_index].load(Ordering::Relaxed));
         let mut named = processor
             .schema
             .counters
@@ -354,16 +354,169 @@ mod tests {
     }
 
     #[test]
-    fn integer_updates_publish_add_adjust_and_replace_semantics() {
+    fn overflow_diagnostics_identify_the_actual_metric_in_the_sorted_schema() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Metric identity")
+                .instance("worker")
+                .bind_event::<IntegerMeasurements>(),
+        );
+        let target = MetricTarget {
+            index: 0,
+            kind: InstrumentKind::Counter,
+        };
+        processor.record(&target, MetricValue::U64(u64::MAX));
+        processor.record(&target, MetricValue::U64(1));
+        let id = processor.schema.counters.iter().find(|counter| counter.name == "Bytes").unwrap().id;
+        assert!(
+            processor
+                .flush()
+                .unwrap_err()
+                .to_string()
+                .contains(&format!("metric {id} overflowed u64"))
+        );
+    }
+
+    fn build_for_test(builder: PerfCounterProcessorBuilder) -> PerfCounterProcessor {
+        #[cfg(all(windows, target_pointer_width = "64", not(miri)))]
+        {
+            builder.build().unwrap()
+        }
+        #[cfg(any(not(all(windows, target_pointer_width = "64")), miri))]
+        {
+            let schema = builder.schema().unwrap();
+            let totals: Arc<[AtomicU64]> = (0..builder.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
+            #[cfg(all(windows, target_pointer_width = "64", miri))]
+            let native = crate::native::testing::start_mock(&schema, Arc::clone(&totals));
+            PerfCounterProcessor {
+                bindings: builder.bindings,
+                schema,
+                totals,
+                error: Mutex::new(None),
+                #[cfg(all(windows, target_pointer_width = "64", miri))]
+                native,
+            }
+        }
+    }
+
+    #[test]
+    fn reports_the_first_failure_and_rejects_inconsistent_measurements() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Error retention")
+                .instance("worker")
+                .bind_event::<WideGauge>(),
+        );
+        assert!(processor.is_interested(&WideGauge::DESCRIPTION));
+        assert!(!processor.is_interested(&RequestCompleted::DESCRIPTION));
+        processor.record(
+            &MetricTarget {
+                index: 0,
+                kind: InstrumentKind::Gauge,
+            },
+            MetricValue::I64(-1),
+        );
+        let original = processor.flush().unwrap_err().to_string();
+        assert!(original.contains("measurement does not match the prepared integer metric"));
+        processor.report(ErrorKind::Overflow { counter_id: 7 }.into());
+        assert_eq!(processor.flush().unwrap_err().to_string(), original);
+        assert_eq!(named_values(&processor), [("Value".into(), 0)]);
+        assert!(format!("{processor:?}").contains("Error retention"));
+        assert_eq!(processor.schema.category, "Error retention");
+        assert!(format!("{:?}", PerfCounterProcessor::builder()).contains("PerfCounterProcessorBuilder"));
+    }
+
+    #[test]
+    fn poisoned_processor_state_surfaces_through_flush_and_diagnostics() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Poisoned processor")
+                .instance("worker")
+                .bind_event::<WideGauge>(),
+        );
+        let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = processor.error.lock();
+            panic!("inject error-state poison");
+        }));
+        processor.report(ErrorKind::Overflow { counter_id: 9 }.into());
+        assert!(processor.flush().unwrap_err().to_string().contains("state lock was poisoned"));
+    }
+
+    struct MissingSlot;
+
+    impl Event for MissingSlot {
+        const DESCRIPTION: EventDescription =
+            EventDescription::new("missing.slot", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
+        const METRICS: &'static [observed::metadata::MetricDescription] =
+            &[
+                observed::metadata::MetricDescription::new("Missing", InstrumentKind::Counter, "", "")
+                    .with_value_kind(MetricValueKind::U64),
+            ];
+        fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
+            std::ops::ControlFlow::Continue(())
+        }
+    }
+
+    impl observed::interop::DynEvent for MissingSlot {
+        fn name(&self) -> &'static str {
+            "missing.slot"
+        }
+        fn body(&self) -> Option<std::borrow::Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<std::borrow::Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<std::borrow::Cow<'static, str>> {
+            None
+        }
+        fn description(&self) -> EventDescription {
+            Self::DESCRIPTION
+        }
+        fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
+            std::ops::ControlFlow::Continue(())
+        }
+    }
+
+    #[test]
+    fn malformed_measurements_preserve_the_numeric_read_error_source() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Read error")
+                .instance("worker")
+                .bind_event::<MissingSlot>(),
+        );
+        processor.process(&EventView::new_synthetic(&MissingSlot, std::time::SystemTime::UNIX_EPOCH));
+        let error = processor.flush().unwrap_err();
+        let backend = std::error::Error::source(&error).unwrap().downcast_ref::<Error>().unwrap();
+        let source = std::error::Error::source(backend).unwrap();
+        assert!(source.is::<observed::processing::MetricReadError>());
+        assert_eq!(
+            source.to_string(),
+            "event `missing.slot` has invalid metric slot 0: no measurement supplied"
+        );
+    }
+    #[test]
+    fn integer_updates_publish_add_adjust_and_replace_semantics() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed integer updates")
                 .instance("worker")
-                .bind_event::<IntegerMeasurements>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<IntegerMeasurements>(),
+        ));
         let sink = test_sink(&processor);
         emit!(
             sink,
@@ -406,15 +559,14 @@ mod tests {
 
     #[test]
     fn subtraction_below_zero_retains_previous_value_and_other_metrics_continue() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed underflow")
                 .instance("worker")
-                .bind_event::<IntegerMeasurements>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<IntegerMeasurements>(),
+        ));
         let sink = test_sink(&processor);
         emit!(
             sink,
@@ -454,15 +606,14 @@ mod tests {
 
     #[test]
     fn signed_extremes_are_checked_without_negation_overflow() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed signed extremes")
                 .instance("worker")
-                .bind_event::<ActiveDelta>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<ActiveDelta>(),
+        ));
         let sink = test_sink(&processor);
         emit!(sink, ActiveDelta { delta: i64::MIN });
         assert_eq!(named_values(&processor), [("Active".into(), 0)]);
@@ -478,15 +629,14 @@ mod tests {
 
     #[test]
     fn upward_overflow_retains_previous_value_and_surfaces_through_flush() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed updown overflow")
                 .instance("worker")
-                .bind_event::<ActiveDelta>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<ActiveDelta>(),
+        ));
         let sink = test_sink(&processor);
         emit!(sink, ActiveDelta { delta: i64::MAX });
         emit!(sink, ActiveDelta { delta: i64::MAX });
@@ -498,15 +648,14 @@ mod tests {
 
     #[test]
     fn gauges_accept_the_full_unsigned_range_without_accumulating() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed wide gauge")
                 .instance("worker")
-                .bind_event::<WideGauge>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<WideGauge>(),
+        ));
         let sink = test_sink(&processor);
         emit!(sink, WideGauge { value: u64::MAX });
         assert_eq!(named_values(&processor), [("Value".into(), u64::MAX)]);
@@ -517,21 +666,21 @@ mod tests {
 
     #[test]
     fn concurrent_integer_updates_do_not_lose_deltas_or_wrap() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed concurrent integers")
                 .instance("worker")
-                .bind_event::<IntegerMeasurements>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<IntegerMeasurements>(),
+        ));
         let sink = test_sink(&processor);
+        let iterations = if cfg!(miri) { 8 } else { 1000 };
         std::thread::scope(|scope| {
             for _ in 0..4 {
                 let sink = &sink;
                 scope.spawn(move || {
-                    for _ in 0..1000 {
+                    for _ in 0..iterations {
                         emit!(
                             sink,
                             IntegerMeasurements {
@@ -562,12 +711,14 @@ mod tests {
         );
         assert_eq!(
             named_values(&processor),
-            [("Active".into(), 0), ("Bytes".into(), 148_000), ("Depth".into(), 3)]
+            [("Active".into(), 0), ("Bytes".into(), 4 * iterations * 37), ("Depth".into(), 3)]
         );
         sink.flush().unwrap();
     }
 
     #[test]
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    #[cfg_attr(miri, ignore = "Perflib FFI runs natively; snapshot storage is tested separately under Miri")]
     fn concurrent_typed_emission_publishes_exact_native_values_and_rejects_overflow() {
         let _native_tests = crate::native::TEST_NATIVE.lock();
         let processor = Arc::new(

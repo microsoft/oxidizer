@@ -37,6 +37,9 @@ exclude_globs = [
     "crates/rallocator/src/hal/win64/**",
     "crates/fetch_winhttp/**",
     "crates/fetch_winhttp_impl/**",
+    # Perflib code is not compiled on Linux; Windows retains its full mutation suite.
+    "crates/observed_perf_counters/src/native.rs",
+    "crates/observed_perf_counters/src/native/**",
 ]
 all_features = true
 cap_lints = true
@@ -58,6 +61,8 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # This constructor delegates to Default; replacing it with Default is identical.
+    'crates/observed_perf_counters/src/processor.rs:\d+:\d+: replace PerfCounterProcessor::builder -> PerfCounterProcessorBuilder with Default::default\(\)$',
     # Shared exclusions copied from mutants.toml.
     # There are no API contracts for what these must return because they
     # are for human-readable stringification. No purpose mutating them.

@@ -24,11 +24,10 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
-use windows_sys::Win32::Foundation::{ERROR_BUSY, ERROR_INVALID_DATA, ERROR_SUCCESS, ERROR_UNHANDLED_EXCEPTION, GetLastError, HANDLE};
+use windows_sys::Win32::Foundation::{ERROR_BUSY, ERROR_INVALID_DATA, ERROR_SUCCESS, ERROR_UNHANDLED_EXCEPTION, HANDLE};
 use windows_sys::Win32::System::Performance::{
     PERF_ATTRIB_BY_REFERENCE, PERF_COLLECT_END, PERF_COLLECT_START, PERF_COUNTER_INFO, PERF_COUNTERSET_INFO, PERF_COUNTERSET_INSTANCE,
-    PERF_COUNTERSET_MULTI_INSTANCES, PERF_DETAIL_NOVICE, PERF_NUMBER_DECIMAL, PERF_SIZE_LARGE, PerfCreateInstance, PerfDeleteInstance,
-    PerfSetCounterRefValue, PerfSetCounterSetInfo, PerfStartProvider, PerfStopProvider,
+    PERF_COUNTERSET_MULTI_INSTANCES, PERF_DETAIL_NOVICE,
 };
 use windows_sys::core::GUID;
 
@@ -36,16 +35,23 @@ use crate::Error;
 use crate::error::ErrorKind;
 use crate::schema::CounterSchema;
 
+mod api;
+use api::{Api, SystemApi};
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod consumer_tests;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod testing;
 
 // A bounded, non-blocking callback must finish within Perflib's one-second
 // deadline. Limit total snapshot work across all active providers in this image.
 const MAX_PUBLISHED_COUNTERS: usize = 4096;
 // winperf.h's PERF_COUNTER_LARGE_RAWCOUNT is PERF_SIZE_LARGE | PERF_TYPE_NUMBER |
 // PERF_NUMBER_DECIMAL | PERF_DISPLAY_NO_SUFFIX; the last two omitted flags are 0.
-const COUNTER_TYPE: u32 = PERF_SIZE_LARGE | PERF_NUMBER_DECIMAL;
+const COUNTER_TYPE: u32 = 0x0001_0100;
 
 struct CounterStorage {
     totals: Arc<[AtomicU64]>,
@@ -82,37 +88,46 @@ pub(crate) fn test_snapshot(provider: &Provider, schema: &CounterSchema) -> Vec<
     tests::registered_values(provider, schema)
 }
 
-fn fault(code: u32) -> u32 {
+fn fault(state: &AtomicU32, code: u32) -> u32 {
     // Retain the first failure without allocating or locking in an FFI callback.
-    let _previous = COLLECTION_FAULT.compare_exchange(ERROR_SUCCESS, code, Ordering::AcqRel, Ordering::Acquire);
+    let _previous = state.compare_exchange(ERROR_SUCCESS, code, Ordering::AcqRel, Ordering::Acquire);
     code
 }
 
 fn collect(request: u32) -> u32 {
+    collect_with(&REGISTRY, &COLLECTION_FAULT, request)
+}
+
+fn collect_with(registry: &Mutex<Registry>, state: &AtomicU32, request: u32) -> u32 {
     if request != PERF_COLLECT_START && request != PERF_COLLECT_END {
         return ERROR_SUCCESS;
     }
-    let existing = COLLECTION_FAULT.load(Ordering::Acquire);
+    let existing = state.load(Ordering::Acquire);
     if existing != ERROR_SUCCESS {
         return existing;
     }
-    let mut registry = match REGISTRY.try_lock_result() {
+    let mut registry = match registry.try_lock_result() {
         Ok(Some(registry)) => registry,
-        Ok(None) => return fault(ERROR_BUSY),
-        Err(_) => return fault(ERROR_INVALID_DATA),
+        Ok(None) => return fault(state, ERROR_BUSY),
+        Err(_) => return fault(state, ERROR_INVALID_DATA),
     };
-    if COLLECTION_FAULT.load(Ordering::Acquire) != ERROR_SUCCESS {
-        return COLLECTION_FAULT.load(Ordering::Acquire);
+    collect_locked(&mut registry, state, request)
+}
+
+fn collect_locked(registry: &mut Registry, state: &AtomicU32, request: u32) -> u32 {
+    let existing = state.load(Ordering::Acquire);
+    if existing != ERROR_SUCCESS {
+        return existing;
     }
     if request == PERF_COLLECT_END {
         let Some(readers) = registry.readers.checked_sub(1) else {
-            return fault(ERROR_INVALID_DATA);
+            return fault(state, ERROR_INVALID_DATA);
         };
         registry.readers = readers;
         return ERROR_SUCCESS;
     }
     let Some(readers) = registry.readers.checked_add(1) else {
-        return fault(ERROR_INVALID_DATA);
+        return fault(state, ERROR_INVALID_DATA);
     };
     if registry.readers == 0 {
         for provider in &registry.providers {
@@ -131,13 +146,18 @@ fn collect(request: u32) -> u32 {
 
 unsafe extern "system" fn control_callback(request: u32, _buffer: *mut c_void, _buffer_size: u32) -> u32 {
     // Never dereference the unneeded native buffer and never unwind into Windows.
-    std::panic::catch_unwind(|| collect(request)).unwrap_or_else(|_| fault(ERROR_UNHANDLED_EXCEPTION))
+    callback_with(|| collect(request))
+}
+
+fn callback_with(collect: impl FnOnce() -> u32 + std::panic::UnwindSafe) -> u32 {
+    std::panic::catch_unwind(collect).unwrap_or_else(|_| fault(&COLLECTION_FAULT, ERROR_UNHANDLED_EXCEPTION))
 }
 
 pub(crate) struct Provider {
     handle: HANDLE,
     instance: Option<NonNull<PERF_COUNTERSET_INSTANCE>>,
     storage: Arc<CounterStorage>,
+    api: Arc<dyn Api>,
 }
 
 // SAFETY: handles/pointers are owned, not thread-affine, and are only used by
@@ -150,6 +170,10 @@ unsafe impl Sync for Provider {}
 
 impl Provider {
     pub(crate) fn start(schema: &CounterSchema, name: &str, totals: Arc<[AtomicU64]>) -> Result<Self, Error> {
+        Self::start_with(schema, name, totals, Arc::new(SystemApi).coerce::<dyn Api>(|api| api))
+    }
+
+    fn start_with(schema: &CounterSchema, name: &str, totals: Arc<[AtomicU64]>, api: Arc<dyn Api>) -> Result<Self, Error> {
         let mut template = template(schema)?;
         let storage = Arc::new(CounterStorage {
             published: (0..totals.len()).map(|_| UnsafeCell::new(0)).collect(),
@@ -166,46 +190,32 @@ impl Provider {
         }
 
         let provider_guid = guid(schema.provider_id);
-        let mut handle = std::ptr::null_mut();
-        // SAFETY: the GUID and output handle are valid for the call. The static
-        // callback outlives the provider and cannot unwind.
-        let code = unsafe { PerfStartProvider(&raw const provider_guid, Some(control_callback), &raw mut handle) };
-        if let Err(error) = status("PerfStartProvider", code) {
-            remove_storage(&storage);
-            return Err(error);
-        }
+        let handle = api.start(&provider_guid).inspect_err(|_| remove_storage(&storage))?;
         let mut provider = Self {
             handle,
             instance: None,
             storage,
+            api,
         };
         let template_size =
             u32::try_from(template.len() * size_of::<u64>()).map_err(|_overflow| Error::configuration("native template exceeds ULONG"))?;
         // SAFETY: template has the native header followed by NumCounters native
         // records, eight-byte alignment, and exactly template_size initialized bytes.
-        let code = unsafe { PerfSetCounterSetInfo(provider.handle, template.as_mut_ptr().cast(), template_size) };
+        let code = unsafe { provider.api.set_info(provider.handle, &mut template, template_size) };
         status("PerfSetCounterSetInfo", code)?;
 
         let counter_set_guid = guid(schema.counter_set_id);
         let name = name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         // SAFETY: the provider is live and name is validated, terminated UTF-16.
         // The counter-set GUID matches the registered template.
-        let instance = unsafe { PerfCreateInstance(provider.handle, &raw const counter_set_guid, name.as_ptr(), std::process::id()) };
-        provider.instance = Some(NonNull::new(instance).ok_or_else(|| {
-            // SAFETY: GetLastError immediately follows failed PerfCreateInstance
-            // on this thread, with no intervening Windows call.
-            let code = unsafe { GetLastError() };
-            Error::from(ErrorKind::Windows {
-                operation: "PerfCreateInstance",
-                code,
-            })
-        })?);
+        let instance = unsafe { provider.api.create(provider.handle, &counter_set_guid, &name) }?;
+        provider.instance = Some(instance);
         for counter in &schema.counters {
             let address = provider.storage.published[counter.source_index].get().cast::<c_void>();
             // SAFETY: instance belongs to this provider, counter.id is in its
             // template, and address is stable eight-byte u64 storage. Registration
             // occurs once; the registry retains storage through cleanup.
-            let code = unsafe { PerfSetCounterRefValue(provider.handle, instance, counter.id, address) };
+            let code = unsafe { provider.api.set_reference(provider.handle, instance, counter.id, address) };
             status("PerfSetCounterRefValue", code)?;
         }
         Ok(provider)
@@ -225,7 +235,7 @@ impl Drop for Provider {
         if let Some(instance) = self.instance {
             // SAFETY: Drop exclusively owns this live provider and its instance.
             // Backing storage is retained in both self and REGISTRY.
-            let code = unsafe { PerfDeleteInstance(self.handle, instance.as_ptr()) };
+            let code = unsafe { self.api.delete(self.handle, instance) };
             if code != ERROR_SUCCESS {
                 tracing::error!(code, "observed_perf_counters.instance.delete_failed");
             }
@@ -233,7 +243,7 @@ impl Drop for Provider {
         // SAFETY: self exclusively owns the provider handle. PerfStopProvider
         // removes registration and frees associated native resources; storage
         // cannot be released before this call succeeds.
-        let code = unsafe { PerfStopProvider(self.handle) };
+        let code = unsafe { self.api.stop(self.handle) };
         if code == ERROR_SUCCESS {
             remove_storage(&self.storage);
         } else {
@@ -254,7 +264,11 @@ pub(crate) fn check_collection() -> Result<(), Error> {
 }
 
 fn remove_storage(storage: &Arc<CounterStorage>) {
-    let mut registry = match REGISTRY.lock_result() {
+    remove_storage_with(&REGISTRY, storage);
+}
+
+fn remove_storage_with(registry: &Mutex<Registry>, storage: &Arc<CounterStorage>) {
+    let mut registry = match registry.lock_result() {
         Ok(registry) => registry,
         Err(poisoned) => {
             tracing::error!("observed_perf_counters.registry.poisoned");
@@ -277,10 +291,10 @@ fn guid(value: uuid::Uuid) -> GUID {
 }
 
 fn template(schema: &CounterSchema) -> Result<Vec<u64>, Error> {
+    const _: () = assert!(size_of::<PERF_COUNTERSET_INSTANCE>() == 32);
+    const _: () = assert!(size_of::<PERF_COUNTERSET_INFO>().is_multiple_of(8));
+    const _: () = assert!(size_of::<PERF_COUNTER_INFO>().is_multiple_of(8));
     let size = size_of::<PERF_COUNTERSET_INFO>() + schema.counters.len() * size_of::<PERF_COUNTER_INFO>();
-    if size_of::<PERF_COUNTERSET_INSTANCE>() != 32 || !size.is_multiple_of(size_of::<u64>()) {
-        return Err(Error::configuration("unexpected Windows performance-counter ABI layout"));
-    }
     let count = u32::try_from(schema.counters.len()).map_err(|_overflow| Error::configuration("native counter count exceeds ULONG"))?;
     let mut buffer = vec![0_u64; size / size_of::<u64>()];
     let header = PERF_COUNTERSET_INFO {
@@ -386,7 +400,11 @@ mod tests {
         )
         .unwrap();
         let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(4096), AtomicU64::new(7)].into();
-        let provider = Provider::start(&schema, "worker-中文🦀", Arc::clone(&totals)).unwrap();
+        let provider = if cfg!(miri) {
+            testing::start_mock(&schema, Arc::clone(&totals))
+        } else {
+            Provider::start(&schema, "worker-中文🦀", Arc::clone(&totals)).unwrap()
+        };
         let first = Collection::begin();
         let expected = schema
             .counters
@@ -410,7 +428,11 @@ mod tests {
         assert_eq!(registered_values(&provider, &schema), updated);
         drop(next);
         drop(provider);
-        let restarted = Provider::start(&schema, "worker", totals).unwrap();
+        let restarted = if cfg!(miri) {
+            testing::start_mock(&schema, totals)
+        } else {
+            Provider::start(&schema, "worker", totals).unwrap()
+        };
         drop(restarted);
     }
 
@@ -438,10 +460,47 @@ mod tests {
         )
         .unwrap();
         let buffer = template(&schema).unwrap();
+        assert_eq!(
+            buffer.len() * 8,
+            size_of::<PERF_COUNTERSET_INFO>() + 2 * size_of::<PERF_COUNTER_INFO>()
+        );
         let base = buffer.as_ptr();
         // SAFETY: template produced an aligned, initialized native header.
         let header = unsafe { base.cast::<PERF_COUNTERSET_INFO>().read() };
-        assert_eq!(header.NumCounters, 2);
+        assert_eq!(
+            (
+                (
+                    header.CounterSetGuid.data1,
+                    header.CounterSetGuid.data2,
+                    header.CounterSetGuid.data3,
+                    header.CounterSetGuid.data4
+                ),
+                (
+                    header.ProviderGuid.data1,
+                    header.ProviderGuid.data2,
+                    header.ProviderGuid.data3,
+                    header.ProviderGuid.data4
+                ),
+                header.NumCounters,
+                header.InstanceType,
+            ),
+            (
+                (
+                    GUID::from_u128(schema.counter_set_id.as_u128()).data1,
+                    GUID::from_u128(schema.counter_set_id.as_u128()).data2,
+                    GUID::from_u128(schema.counter_set_id.as_u128()).data3,
+                    GUID::from_u128(schema.counter_set_id.as_u128()).data4
+                ),
+                (
+                    GUID::from_u128(schema.provider_id.as_u128()).data1,
+                    GUID::from_u128(schema.provider_id.as_u128()).data2,
+                    GUID::from_u128(schema.provider_id.as_u128()).data3,
+                    GUID::from_u128(schema.provider_id.as_u128()).data4
+                ),
+                2,
+                PERF_COUNTERSET_MULTI_INSTANCES,
+            ),
+        );
         for (index, counter) in schema.counters.iter().enumerate() {
             let offset = size_of::<PERF_COUNTERSET_INFO>() + index * size_of::<PERF_COUNTER_INFO>();
             // SAFETY: offset identifies an initialized record in this buffer.
@@ -449,8 +508,16 @@ mod tests {
             // SAFETY: address is aligned and points at one complete native record.
             let record = unsafe { address.cast::<PERF_COUNTER_INFO>().read() };
             assert_eq!(
-                (record.CounterId, record.Type, record.Attrib, record.Size, record.Offset),
-                (counter.id, COUNTER_TYPE, PERF_ATTRIB_BY_REFERENCE, 8, 0)
+                (
+                    record.CounterId,
+                    record.Type,
+                    record.Attrib,
+                    record.Size,
+                    record.Offset,
+                    record.DetailLevel,
+                    record.Scale
+                ),
+                (counter.id, 0x0001_0100, PERF_ATTRIB_BY_REFERENCE, 8, 0, PERF_DETAIL_NOVICE, 0)
             );
         }
     }
