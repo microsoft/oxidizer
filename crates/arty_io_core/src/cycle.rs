@@ -15,8 +15,8 @@ pub struct Cycle {
 impl Cycle {
     /// Creates the inputs for one driver invocation.
     ///
-    /// The runtime must use [`Duration::ZERO`] for `max_wait` when no waiting is allowed,
-    /// including during initialization.
+    /// The runtime must use [`Duration::ZERO`] when no waiting is allowed, including for every
+    /// secondary driver.
     #[must_use]
     #[inline]
     pub const fn new(max_wait: Duration) -> Self {

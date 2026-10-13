@@ -7,10 +7,9 @@ use crate::{Driver, DriverError, DriverInstance, DriverOptions};
 
 /// A consumer-facing I/O handle that creates worker-local drivers.
 ///
-/// The runtime registers each concrete context type once. On its first request, it creates the
-/// context, clones and relocates it to every active worker, creates a driver on each worker, and
-/// completes each driver's zero-wait initialization cycle before publishing the context. Later
-/// requests reuse the registration.
+/// The runtime creates one registration for each concrete context type. The first context
+/// retrieval creates the context, clones and relocates it to every async worker, and creates one
+/// driver on each worker. Later retrievals return a clone of the existing context.
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// Configuration used to create the context.
     type ContextOptions;
@@ -18,29 +17,28 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     /// The driver type created by this context.
     type Driver: Driver;
 
-    /// Creates the context for a registration.
+    /// Creates the context for the first retrieval of this concrete context type.
     ///
-    /// The runtime calls this method at most once per registered context type, passing
-    /// `options`. Repeated calls should return equivalent contexts.
+    /// The runtime calls this method once and passes the options supplied by the caller.
     #[must_use]
     fn context(options: Self::ContextOptions) -> Self;
 
-    /// Creates a driver for the worker described by `options`.
+    /// Creates a driver for the async worker described by `options`.
     ///
-    /// The runtime calls this method on the owning worker after cloning and relocating the
-    /// context. Implementations must return promptly without waiting for another runtime worker.
-    /// The context may outlive the driver and must reject operations after admission closes.
-    ///
-    /// The context must not be published yet. The runtime first completes a zero-wait
-    /// [`Driver::execute_cycle`] to establish notification and finish initialization.
+    /// The runtime calls this method on each async worker after cloning and relocating the context.
+    /// Implementations must finish all driver setup before returning and must not wait for work to
+    /// execute on another async worker. The context may outlive the driver and must reject new
+    /// operations after [`Driver::shutdown`] closes it.
     ///
     /// A successful instance must select a role listed by [`DriverOptions::allowed_roles`].
-    /// Return an error when the driver supports none of the allowed roles.
+    /// One context registration must select the same role on every async worker. Return an error
+    /// when the driver supports none of the allowed roles.
     ///
     /// # Errors
     ///
-    /// Returns an error if initialization fails. The implementation must clean up partial
-    /// construction before returning an error. If the successfully returned driver's initial
-    /// cycle fails, the runtime drops that unpublished driver without publishing the context.
+    /// Returns an error if driver creation fails. The implementation must clean up partial
+    /// construction before returning. The runtime treats the failure as fatal, does not publish
+    /// the context, and starts runtime shutdown on every async worker. It calls
+    /// [`Driver::shutdown`] on every driver that was created successfully.
     fn driver(&mut self, options: DriverOptions) -> Result<DriverInstance<Self::Driver>, DriverError>;
 }

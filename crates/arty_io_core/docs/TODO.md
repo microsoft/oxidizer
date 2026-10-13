@@ -1,20 +1,13 @@
 # Driver contract follow-ups
 
-## TL;DR
-
-- Add a `DriverProvider` between `IoContext` and `Driver`.
-- Make `Driver::shutdown` infallible.
-- Keep `Driver::execute_cycle` fallible.
+These items should be resolved before the contract is stabilized. They do not
+block evaluation of the current API.
 
 ## Separate context from driver creation
 
-`IoContext` has two audiences today:
-
-- endpoint authors use it to start I/O;
-- the runtime uses it to create worker-local drivers.
-
-This makes a consumer-facing type carry runtime lifecycle methods. Add a
-`DriverProvider` to keep those roles separate.
+`IoContext` is both the application-facing I/O handle and the factory for
+worker-local drivers. Consider moving driver creation to a `DriverProvider` so
+endpoint authors do not need to implement runtime lifecycle methods.
 
 The intended split is:
 
@@ -33,41 +26,17 @@ Before changing the API, settle:
 - which `Clone`, `Send`, and `ThreadAware` bounds each type needs;
 - when the runtime publishes the context relative to driver initialization.
 
-The extra type is intentional. It gives endpoint code and runtime code narrower
-interfaces and makes their different responsibilities visible.
+## Stabilize `thread_aware_core`
 
-## Make shutdown infallible
+`Thread` and `ThreadAware` are part of this crate's public API. Stabilize those
+types and their relocation contract before stabilizing `arty_io_core`.
 
-Change:
+## Move shutdown to `Drop`
 
-```rust
-fn shutdown(self) -> Result<(), DriverError>;
-```
+Consider removing `Driver::shutdown` and requiring each driver to drain its
+resources from `Drop`. An infallible shutdown method would otherwise duplicate
+`Drop`.
 
-to:
-
-```rust
-fn shutdown(self);
-```
-
-The runtime continues shutting down the other drivers regardless of the result,
-so the error does not change control flow. Drivers must still close admission,
-drain for a bounded time, remain safe to drop, and never panic.
-
-This change has a cost. The runtime can no longer emit one uniform telemetry
-event when a driver reports an unclean shutdown. Each driver must report its
-own shutdown anomaly, closer to the failing operating-system call. We should
-explicitly accept that loss of runtime-level telemetry before making shutdown
-infallible.
-
-## Keep cycle execution fallible
-
-Keep:
-
-```rust
-fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
-```
-
-Operating-system failures can make a cycle fail. A driver may retry internally,
-but an error returned to the runtime means recovery failed. The runtime should
-treat the driver as poisoned, stop normal cycles, and begin shutdown.
+This removes the runtime's ability to emit one uniform event when a driver
+cannot finish draining. Each driver would need to report that condition itself.
+Resolve that telemetry tradeoff before removing the current fallible method.

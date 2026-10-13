@@ -1,19 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// A driver's fixed waiting role on its runtime worker.
+/// A driver's fixed role on its async worker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DriverRole {
-    /// The driver permitted to block its runtime worker.
+    /// The driver permitted to wait for I/O on its async worker.
     ///
-    /// A worker has at most one primary. It runs after all secondaries and may wait for up to
-    /// [`Cycle::max_wait`](crate::Cycle::max_wait). A zero wait bound means no waiting.
+    /// An async worker has at most one primary. It runs after all secondaries and may wait for up
+    /// to [`Cycle::max_wait`](crate::Cycle::max_wait).
     Primary,
-    /// A driver whose worker-local cycle must not block.
+    /// A driver that must not wait for I/O on its async worker.
     ///
-    /// The runtime invokes this driver before the primary, and it must not wait on the worker.
-    ///
-    /// Indefinite waits require independent execution capacity for every simultaneously blocked
-    /// observer.
+    /// The runtime invokes this driver before the primary with
+    /// `Cycle::max_wait() == Duration::ZERO`. The driver must arrange notification when another
+    /// cycle is needed, unless it completes operations entirely on a background thread.
     Secondary,
 }

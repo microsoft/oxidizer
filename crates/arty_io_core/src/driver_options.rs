@@ -8,7 +8,7 @@ use thread_aware_core::Thread;
 use crate::DriverRole;
 
 #[derive(Debug)]
-/// Per-worker inputs to [`IoContext::driver`](crate::IoContext::driver).
+/// Inputs for creating a driver on one async worker.
 pub struct DriverOptions {
     thread: Thread,
     owner_waker: Waker,
@@ -16,7 +16,7 @@ pub struct DriverOptions {
 }
 
 impl DriverOptions {
-    /// Creates options for a driver on `thread`.
+    /// Creates options for a driver on the async worker represented by `thread`.
     #[must_use]
     pub fn new(thread: Thread, owner_waker: Waker, allowed_roles: Vec<DriverRole>) -> Self {
         Self {
@@ -26,19 +26,19 @@ impl DriverOptions {
         }
     }
 
-    /// Returns the worker that will own the driver.
+    /// Returns the async worker that will own the driver.
     #[must_use]
     pub const fn thread(&self) -> &Thread {
         &self.thread
     }
 
-    /// Returns the waker for requesting another cycle from the runtime.
+    /// Returns the waker that wakes the owning async worker.
     #[must_use]
     pub const fn owner_waker(&self) -> &Waker {
         &self.owner_waker
     }
 
-    /// Returns the waiting roles the runtime can accept from this driver.
+    /// Returns the roles that the runtime can accept for this registration.
     #[must_use]
     pub fn allowed_roles(&self) -> &[DriverRole] {
         &self.allowed_roles

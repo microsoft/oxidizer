@@ -7,62 +7,58 @@ use crate::{Cycle, DriverError};
 
 /// A worker-local I/O driver.
 ///
-/// The runtime calls every method on the owning worker. Drivers need not be [`Send`] or
-/// [`Sync`]. Drivers own native observers, queue sharing, routing, and cancellation.
+/// The runtime creates one driver for each async worker and calls its methods on that worker.
+/// Drivers need not be [`Send`] or [`Sync`]. A driver owns the worker-local state needed to
+/// submit I/O and process completed operations.
 ///
-/// Dropping a driver must always be memory-safe. State reachable through contexts, callbacks,
-/// observers, or wakers must remain valid independently of the driver.
+/// Dropping a driver must remain memory-safe even when its context still exists.
 pub trait Driver: 'static {
-    /// Returns a waker that interrupts a pending completion wait.
+    /// Returns a waker that makes a waiting [`execute_cycle`](Self::execute_cycle) return promptly.
     ///
-    /// Wake-ups must be latched: a wake raised before a wait makes the next blocking wait return
-    /// promptly, including when the wake originates on the driver's owning worker. Waking ends
-    /// only the wait; pending completions still require processing.
+    /// A wake that happens just before `execute_cycle` starts waiting must remain recorded so the
+    /// wait still returns promptly. Waking ends the wait but does not process I/O completions.
     ///
     /// The returned waker may be called from any thread and remains safe to invoke after the
-    /// driver is dropped. It must return promptly without joining work or waiting for a lock held
-    /// by the completion path.
+    /// driver is dropped. It must return promptly.
     #[must_use]
     fn waker(&self) -> Waker;
 
     /// Processes submissions and completions, optionally waiting for I/O.
     ///
-    /// The runtime invokes secondaries before the primary with the same [`Cycle::max_wait`].
-    /// Only the primary may wait on the worker, for up to that duration; a zero wait bound means
-    /// no waiting. Secondaries may arm background waits within the same bound but must not wait
-    /// for them to finish.
+    /// The runtime invokes secondary drivers first and always gives them
+    /// `Cycle::max_wait() == Duration::ZERO`. A secondary processes completions that are ready
+    /// now, or returns immediately when another thread processes its notifications.
     ///
-    /// Before publishing a context, the runtime runs a zero-wait cycle. In this initial call,
-    /// the driver must establish native notification and recheck work queued during construction.
+    /// The runtime invokes the primary driver last. The primary may wait for I/O for up to
+    /// [`Cycle::max_wait`].
     ///
-    /// The driver must process a bounded batch. If serviceable work remains, it must wake the
-    /// owner through the waker supplied in [`DriverOptions`](crate::DriverOptions) before
-    /// returning. In-flight operations alone do not indicate serviceable work.
+    /// The driver processes completed operations and returns rather than looping indefinitely.
+    /// If more completed operations are already ready when it returns, it must call the owner
+    /// waker from [`DriverOptions`](crate::DriverOptions). A secondary that needs another cycle
+    /// when a later notification arrives must also arrange for that waker to be called. A primary
+    /// does not need to wake the worker for later completions because its next `execute_cycle`
+    /// call performs the worker's I/O wait.
     ///
     /// # Errors
     ///
-    /// Returns an error if driver infrastructure fails, not if an individual I/O operation
-    /// fails. The runtime rolls back an unpublished driver/context pair on initialization
-    /// failure; during normal operation it reports the error and shuts down the worker's drivers.
+    /// Returns an error if the driver cannot continue. The runtime treats this as fatal and starts
+    /// runtime shutdown. An individual application I/O failure belongs to that operation's result,
+    /// not this method.
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
 
-    /// Closes admission and blocks for a bounded time while draining driver resources.
+    /// Closes the context to new operations and waits for operations that already started.
     ///
-    /// Drain active operations, callbacks, and observers, or return an error. Context handles
-    /// remain valid as closed handles and do not themselves delay shutdown.
-    ///
-    /// The driver must make progress locally or on independent threads. Normal cycles have
-    /// stopped: shutdown must not depend on cycle coordination or another driver on the same worker.
-    ///
-    /// Dropping must remain memory-safe after either result. Cancellation alone does not prove
-    /// that native code has stopped accessing operation storage.
+    /// The runtime calls this method synchronously after it stops calling `execute_cycle` on the
+    /// async worker. The driver must make progress by itself or on its own threads. It must not
+    /// require another driver on that async worker to run. The driver chooses a finite time limit
+    /// and returns an error instead of waiting indefinitely.
     ///
     /// The runtime attempts remaining drivers after an error. It may shut down secondaries before
     /// the primary.
     ///
     /// # Errors
     ///
-    /// Returns an error if graceful cleanup cannot be completed.
+    /// Returns an error if operations do not finish and the driver cannot complete shutdown.
     fn shutdown(self) -> Result<(), DriverError>
     where
         Self: Sized;
