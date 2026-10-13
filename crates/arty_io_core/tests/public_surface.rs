@@ -16,6 +16,7 @@ use std::{fmt, thread};
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverRole, IoContext};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
+use testing_aids::TEST_TIMEOUT;
 use thread_aware_core::{Thread, ThreadAware};
 
 assert_impl_all!(DriverOptions: Send, Sync, fmt::Debug);
@@ -123,7 +124,7 @@ fn shutdown_waits_for_active_operations_not_contexts() {
 
     drop(operation);
 
-    shutdown_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+    shutdown_rx.recv_timeout(TEST_TIMEOUT).unwrap().unwrap();
     shutdown_thread.join().unwrap();
 }
 
