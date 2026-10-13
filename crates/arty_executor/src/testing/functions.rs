@@ -8,12 +8,11 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::thread;
 
-use infinity_pool::RawBlindPool;
-use plurality::{Box as PoolBox, Pool};
+use plurality::{Box as PoolBox, MultiPool, Pool};
 use scopeguard::{Always, ScopeGuard};
 
 use crate::wake::{WakeShared, WakerState};
-use crate::{CycleOutcome, Executor, RawPooledCastTypeErasedTask, TaskRef, TypeErasedTask, WakeSignal};
+use crate::{CycleOutcome, Executor, TaskRef, TypeErasedTask, WakeSignal};
 
 /// Creates a new `Executor` with a scopeguard that ensures safe shutdown on drop.
 #[must_use]
@@ -36,20 +35,15 @@ pub struct WakerStateAllocationProbe {
     fresh: Option<Arc<WakerState>>,
     shared: Arc<WakeShared>,
     task_ref: TaskRef,
-    _task_storage: RawBlindPool,
+    _task_storage: MultiPool,
 }
 
 impl WakerStateAllocationProbe {
     /// Creates a probe and warms one pool slot so later pooled replacements reuse it.
     #[must_use]
     pub fn new() -> Self {
-        let mut task_storage = RawBlindPool::new();
-        let task = task_storage.insert(AllocationProbeTask { _nonzero: 0 });
-        let task_ref = TaskRef::new(
-            // SAFETY: The probe storage owns the task for the complete lifetime of every state
-            // carrying this opaque reference, and the benchmark never dereferences it.
-            unsafe { task.cast_type_erased_task() }.into_shared(),
-        );
+        let task_storage = MultiPool::new();
+        let task_ref = TaskRef::new(task_storage.alloc_box(AllocationProbeTask { _nonzero: 0 }));
         let mut probe = Self {
             pool: Pool::new(),
             pooled: None,

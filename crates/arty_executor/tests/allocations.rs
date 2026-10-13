@@ -12,7 +12,7 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{CycleOutcome, Executor, TaskSet};
+use arty_executor::{CycleOutcome, Executor, JoinError, TaskSet};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
@@ -24,7 +24,7 @@ const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 3;
 #[cfg(not(debug_assertions))]
 const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
-fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<()> {
+fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
     let mut handle = pin!(tasks.add(async {}));
     let _ = executor.execute_cycle();
     handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
@@ -42,12 +42,11 @@ fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
 
 #[test]
 fn spawn_and_complete_one_only_allocates_debug_diagnostics() {
-    // SAFETY: The test drives shutdown to `CycleOutcome::Shutdown` before dropping the executor.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(()));
+        assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
     }
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -56,7 +55,7 @@ fn spawn_and_complete_one_only_allocates_debug_diagnostics() {
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(()));
+            assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
         }
     }
 
