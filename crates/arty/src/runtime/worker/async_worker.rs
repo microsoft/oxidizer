@@ -270,6 +270,12 @@ where
                                     seismograph_runtime::live::TaskCollection::Failed
                                 }
                             };
+                            let collection = if self.observation.as_ref().is_some_and(|observer| observer.take_failure()) {
+                                descriptions.clear();
+                                seismograph_runtime::live::TaskCollection::Failed
+                            } else {
+                                collection
+                            };
                             request.respond(descriptions, collection);
                         }
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {

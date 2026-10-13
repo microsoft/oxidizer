@@ -106,6 +106,7 @@ pub(crate) struct WorkerObservation {
     worker: WorkerHandle,
     measured: RefCell<Option<HashMap<TaskId, MeasuredTask>>>,
     active: RefCell<Option<ObservedPoll>>,
+    failed: Cell<bool>,
 }
 
 impl WorkerObservation {
@@ -114,6 +115,7 @@ impl WorkerObservation {
             worker,
             measured: RefCell::new(None),
             active: RefCell::new(None),
+            failed: Cell::new(false),
         }
     }
 
@@ -143,11 +145,26 @@ impl WorkerObservation {
             task.metrics = measurement.metrics;
             task.metrics_scope = TaskMetricsScope::PollsSince(measurement.since);
         }
+
         task
+    }
+
+    pub(crate) fn take_failure(&self) -> bool {
+        self.failed.replace(false)
     }
 }
 
 impl arty_executor::PollObserver for WorkerObservation {
+    fn inspection_failed(&self, _error: arty_executor::InspectionError) {
+        if let Some(active) = self.active.borrow_mut().take()
+            && active.tracks_parent
+        {
+            ACTIVE_TASK.set(active.previous_task);
+        }
+        self.worker.task_left();
+        self.failed.set(true);
+    }
+
     fn enabled(&self) -> bool {
         let recording = recording_requested();
         let enabled = self.worker.live_observation_enabled() || recording;
@@ -306,7 +323,8 @@ impl RuntimeTelemetry {
         self.worker_handles
             .get(worker_index)
             .expect("live providers identify registered workers")
-            .register_task_provider(provider);
+            .register_task_provider(provider)
+            .expect("bootstrap registers task providers before worker retirement");
     }
 
     pub(crate) fn register(
@@ -682,5 +700,22 @@ mod tests {
             processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
             0
         );
+    }
+
+    #[test]
+    fn a_failed_poll_description_is_reported_and_discards_partial_observation_state() {
+        use arty_executor::PollObserver as _;
+
+        let (sink, _processor) = test_emitter(TEST_ID);
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, sink);
+        let observer = super::WorkerObservation::new(runtime.worker_handles[0].clone());
+        let task_id = seismograph_runtime::allocate_task_id();
+        observer.poll_started(&super::TaskDescription::Identity(task_id));
+        assert!(observer.active.borrow().is_some());
+        observer.inspection_failed(arty_executor::InspectionError::Panicked);
+        assert!(observer.active.borrow().is_none());
+        assert!(observer.take_failure());
+        assert!(!observer.take_failure());
+        drop(workers);
     }
 }

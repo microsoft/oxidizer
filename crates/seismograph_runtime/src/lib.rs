@@ -1134,10 +1134,13 @@ mod tests {
         let pending = Arc::new(Mutex::new(None));
         let request_slot = Arc::clone(&pending);
         let worker_handle = worker.handle();
-        worker.handle().register_task_provider(move |request| {
-            worker_handle.task_entered(task_id);
-            *lock(&request_slot) = Some(request);
-        });
+        worker
+            .handle()
+            .register_task_provider(move |request| {
+                worker_handle.task_entered(task_id);
+                *lock(&request_slot) = Some(request);
+            })
+            .unwrap();
         let snapshot = source_snapshot();
         let runtime_snapshot = snapshot.runtimes.iter().find(|entry| entry.id == runtime.id()).unwrap();
         let observed = &runtime_snapshot.workers[0];

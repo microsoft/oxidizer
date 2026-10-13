@@ -22,6 +22,8 @@ pub enum TaskState {
 /// passed to `poll_started` are owned values; references to futures do not escape.
 /// Start and finish callbacks are paired only for polls whose inspector returned
 /// a description. Tasks without descriptions invoke neither callback.
+/// Description panics skip that observation and invoke [`Self::inspection_failed`];
+/// the task still runs. The runtime must report or otherwise handle that error.
 /// Implementations must not panic, just like the executor's owner waker: these
 /// callbacks belong to the runtime, not to an external monitor or exporter.
 pub trait PollObserver: std::fmt::Debug {
@@ -33,6 +35,12 @@ pub trait PollObserver: std::fmt::Debug {
 
     /// Finishes the observation after polling, including tasks that completed.
     fn poll_finished(&self, completed: bool);
+
+    /// Reports a failed task description without treating it as a task panic.
+    ///
+    /// No finish callback is issued for this observation. Discard any partially
+    /// started observation state and report the diagnostic failure to its consumer.
+    fn inspection_failed(&self, error: InspectionError);
 }
 
 /// Whether a bounded inspection visited every live task.

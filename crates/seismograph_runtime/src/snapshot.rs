@@ -602,9 +602,6 @@ fn read_worker(reader: &mut Reader<'_>, schema_version: u16) -> Result<Worker, E
 }
 
 fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
-    if matches!(task.metrics_scope, TaskMetricsScope::PollsSince(at) if at.ticks() == 0) {
-        return Err(());
-    }
     writer.u64(task.id.get())?;
     writer.u64(task.parent.map_or(0, TaskId::get))?;
     writer.u64(task.type_descriptor.get())?;
@@ -688,7 +685,7 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
     let metrics_scope = match (metrics_tag, metrics_since) {
         (0, 0) => TaskMetricsScope::Lifetime,
         (1, 0) => TaskMetricsScope::Uncollected,
-        (2, ticks) if ticks != 0 => TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(ticks)),
+        (2, ticks) => TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(ticks)),
         _ => return Err(malformed()),
     };
     if !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
@@ -1059,6 +1056,21 @@ mod tests {
 
         assert_eq!(bytes.len(), 435);
         assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn zero_tick_observation_windows_are_valid_and_distinct_from_uncollected_data() {
+        for scope in [
+            TaskMetricsScope::Lifetime,
+            TaskMetricsScope::Uncollected,
+            TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(0)),
+        ] {
+            let mut snapshot = fixture();
+            snapshot.runtimes[0].tasks[0].metrics_scope = scope;
+            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+            encode(&snapshot, &mut bytes).unwrap();
+            assert_eq!(decode(&bytes).unwrap(), snapshot);
+        }
     }
 
     #[test]

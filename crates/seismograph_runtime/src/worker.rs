@@ -168,10 +168,26 @@ impl WorkerHandle {
     /// The callback runs on the requester, not the worker, and must return promptly.
     /// Move the request to the worker and respond at a safe point. Pending requests
     /// are bounded to one per worker. Dropping the worker registration retires this provider.
-    pub fn register_task_provider(&self, provider: impl Fn(crate::live::TaskRequest) + Send + Sync + 'static) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the worker has already stopped. A rejected callback
+    /// is dropped rather than retained by process-lifetime metadata.
+    pub fn register_task_provider(
+        &self,
+        provider: impl Fn(crate::live::TaskRequest) + Send + Sync + 'static,
+    ) -> Result<(), seismograph::Error> {
         let _suppression = seismograph::recorder::SuppressionGuard::enter();
-        *crate::lock(&self.worker.task_provider) = Some(crate::live::TaskProvider(Arc::new(provider)));
+        let replacement = crate::live::TaskProvider(Arc::new(provider));
+        let mut slot = crate::lock(&self.worker.task_provider);
+        if self.worker.state.load(Ordering::Acquire) == WorkerState::Stopped.wire_value() {
+            return Err(seismograph::Error::new("cannot register a task provider on a stopped worker"));
+        }
+        let previous = slot.replace(replacement);
+        drop(slot);
+        drop(previous);
         self.runtime.control.live_inspection.store(true, Ordering::Release);
+        Ok(())
     }
 
     /// Publishes the current task without collecting timing or recording events.
@@ -389,9 +405,13 @@ impl WorkerHandle {
     }
 
     fn stop(&self) {
-        crate::lock(&self.worker.task_provider).take();
+        let mut slot = crate::lock(&self.worker.task_provider);
         self.worker.current_task.store(0, Ordering::Relaxed);
         let previous = self.worker.state.swap(WorkerState::Stopped.wire_value(), Ordering::AcqRel);
+        let provider = slot.take();
+        drop(slot);
+        // Callback destruction can execute user code; never hold the slot mutex here.
+        drop(provider);
         if previous != WorkerState::Stopped.wire_value() {
             self.record(
                 EventKind::WorkerStopped,

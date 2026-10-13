@@ -135,9 +135,15 @@ struct RequestedObserver {
     enabled: Rc<Cell<bool>>,
     descriptions: Rc<Cell<usize>>,
     completions: Rc<Cell<usize>>,
+    failures: Rc<Cell<usize>>,
 }
 
 impl PollObserver for RequestedObserver {
+    fn inspection_failed(&self, error: InspectionError) {
+        assert_eq!(error, InspectionError::Panicked);
+        self.failures.set(self.failures.get() + 1);
+    }
+
     fn enabled(&self) -> bool {
         self.enabled.get()
     }
@@ -163,6 +169,7 @@ fn disabled_observers_do_not_describe_tasks_and_enable_at_a_cycle_boundary() {
             enabled: Rc::clone(&enabled),
             descriptions: Rc::clone(&descriptions),
             completions: Rc::clone(&completions),
+            failures: Rc::new(Cell::new(0)),
         }))
         .unwrap();
     for requested in [false, true, false] {
@@ -190,6 +197,7 @@ fn enabled_observers_only_finish_polls_that_produced_a_description() {
             enabled: Rc::new(Cell::new(true)),
             descriptions: Rc::clone(&descriptions),
             completions: Rc::clone(&completions),
+            failures: Rc::new(Cell::new(0)),
         }))
         .unwrap();
     let ordinary = tasks.add(ready(()));
@@ -198,4 +206,37 @@ fn enabled_observers_only_finish_polls_that_produced_a_description() {
     let _ = executor.execute_cycle();
     assert_eq!((descriptions.get(), completions.get()), (1, 1));
     drop((ordinary, omitted, described));
+}
+
+#[test]
+fn a_poll_description_panic_is_reported_without_preventing_task_execution() {
+    let executor = new_guarded_executor(Waker::noop().clone());
+    let tasks = executor.tasks();
+    let descriptions = Rc::new(Cell::new(0));
+    let completions = Rc::new(Cell::new(0));
+    let failures = Rc::new(Cell::new(0));
+    let polled = Rc::new(Cell::new(false));
+    tasks
+        .set_poll_observer(Rc::new(RequestedObserver {
+            enabled: Rc::new(Cell::new(true)),
+            descriptions: Rc::clone(&descriptions),
+            completions: Rc::clone(&completions),
+            failures: Rc::clone(&failures),
+        }))
+        .unwrap();
+    let did_poll = Rc::clone(&polled);
+    let failed = tasks.add_with_inspection(
+        poll_fn(move |_| {
+            did_poll.set(true);
+            Poll::Ready(())
+        }),
+        |_, _| -> Option<TaskState> { panic!("description failed") },
+    );
+    let healthy = tasks.add_with_inspection(ready(()), |_, state| Some(state));
+    let _ = executor.execute_cycle();
+    assert_eq!(
+        (polled.get(), failures.get(), descriptions.get(), completions.get()),
+        (true, 1, 1, 1)
+    );
+    drop((failed, healthy));
 }

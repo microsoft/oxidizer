@@ -26,28 +26,43 @@ use crate::{
 };
 
 trait ObservePoll: Copy {
-    fn started(self, task: Pin<&dyn TypeErasedTask>) -> bool;
+    fn started(self, task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError>;
     fn finished(self, completed: bool);
+    fn failed(self, error: InspectionError);
 }
 
 impl ObservePoll for () {
-    fn started(self, _task: Pin<&dyn TypeErasedTask>) -> bool {
-        false
+    fn started(self, _task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError> {
+        Ok(false)
     }
     fn finished(self, _completed: bool) {}
+    fn failed(self, _error: InspectionError) {}
 }
 
 impl ObservePoll for &dyn PollObserver {
-    fn started(self, task: Pin<&dyn TypeErasedTask>) -> bool {
+    fn started(self, task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError> {
         let mut observed = false;
-        task.inspect(TaskState::Running, &mut |description| {
-            self.poll_started(description);
-            observed = true;
-        });
-        observed
+        let mut in_callback = false;
+        let description = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task.inspect(TaskState::Running, &mut |description| {
+                in_callback = true;
+                self.poll_started(description);
+                in_callback = false;
+                observed = true;
+            });
+        }));
+        match description {
+            Ok(()) => Ok(observed),
+            // Runtime-owned observer callbacks retain their must-not-panic contract.
+            Err(panic) if in_callback => std::panic::resume_unwind(panic),
+            Err(_panic) => Err(InspectionError::Panicked),
+        }
     }
     fn finished(self, completed: bool) {
         self.poll_finished(completed);
+    }
+    fn failed(self, error: InspectionError) {
+        self.inspection_failed(error);
     }
 }
 
@@ -505,7 +520,13 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
-            let has_description = observer.started(task);
+            let has_description = match observer.started(task) {
+                Ok(has_description) => has_description,
+                Err(error) => {
+                    observer.failed(error);
+                    false
+                }
+            };
             let outcome = task.poll();
             if has_description {
                 observer.finished(outcome.is_ready());

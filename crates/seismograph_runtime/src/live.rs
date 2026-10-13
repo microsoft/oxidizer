@@ -518,9 +518,12 @@ mod tests {
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let task = runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 7);
         let description = task.snapshot(crate::snapshot::TaskActivityState::Waiting, Some(worker.id()));
-        worker.handle().register_task_provider(move |request| {
-            request.respond(vec![description.clone(), description.clone()], TaskCollection::Complete);
-        });
+        worker
+            .handle()
+            .register_task_provider(move |request| {
+                request.respond(vec![description.clone(), description.clone()], TaskCollection::Complete);
+            })
+            .unwrap();
         let batches = collect(
             &runtime.handle(),
             QueryOptions {
@@ -539,9 +542,12 @@ mod tests {
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let pending = Arc::new(Mutex::new(None));
         let slot = Arc::clone(&pending);
-        worker.handle().register_task_provider(move |request| {
-            *lock(&slot) = Some(request);
-        });
+        worker
+            .handle()
+            .register_task_provider(move |request| {
+                *lock(&slot) = Some(request);
+            })
+            .unwrap();
         let options = QueryOptions {
             timeout: Duration::from_millis(1),
             ..QueryOptions::default()
@@ -567,7 +573,7 @@ mod tests {
         let _test = crate::tests::test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("panic-provider", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        worker.handle().register_task_provider(|_| panic!("provider"));
+        worker.handle().register_task_provider(|_| panic!("provider")).unwrap();
         let batches = collect(&runtime.handle(), QueryOptions::default(), &AtomicBool::new(false));
         assert_eq!(batches[0].collection, TaskCollection::Failed);
         assert!(!lock(&runtime.handle.control.workers)[0].request_pending.load(Ordering::Acquire));
@@ -578,7 +584,7 @@ mod tests {
         let _test = crate::tests::test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("stopped-provider", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        worker.handle().register_task_provider(drop);
+        worker.handle().register_task_provider(drop).unwrap();
         let failed = collect(&runtime.handle(), QueryOptions::default(), &AtomicBool::new(false));
         drop(worker);
         let stopped = collect(&runtime.handle(), QueryOptions::default(), &AtomicBool::new(false));
@@ -586,6 +592,55 @@ mod tests {
             (failed[0].collection, stopped[0].collection),
             (TaskCollection::Failed, TaskCollection::Stopped)
         );
+    }
+
+    #[test]
+    fn a_retained_handle_cannot_install_a_provider_after_worker_retirement() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("retired-registration", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let handle = worker.handle();
+        drop(worker);
+        let marker = Arc::new(());
+        let callback_marker = Arc::clone(&marker);
+        let error = handle
+            .register_task_provider(move |_| {
+                std::hint::black_box(&callback_marker);
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "cannot register a task provider on a stopped worker");
+        assert_eq!(Arc::strong_count(&marker), 1);
+        assert!(lock(&handle.runtime().control.workers)[0].task_provider.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn racing_registration_and_retirement_never_retain_a_callback_on_a_stopped_worker() {
+        let _test = crate::tests::test_lock();
+        for _ in 0..32 {
+            let runtime = register_runtime(RuntimeMetadata::new("registration-race", 1));
+            let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let handle = worker.handle();
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let retiring = Arc::clone(&start);
+            let stopped = thread::spawn(move || {
+                retiring.wait();
+                drop(worker);
+            });
+            let marker = Arc::new(());
+            let callback_marker = Arc::clone(&marker);
+            start.wait();
+            match handle.register_task_provider(move |_| {
+                std::hint::black_box(&callback_marker);
+            }) {
+                Ok(()) => {}
+                Err(error) => assert_eq!(error.to_string(), "cannot register a task provider on a stopped worker"),
+            }
+            stopped.join().unwrap();
+            assert_eq!(Arc::strong_count(&marker), 1);
+            let workers = lock(&handle.runtime().control.workers);
+            assert_eq!(workers[0].state.load(Ordering::Acquire), WorkerState::Stopped.wire_value());
+            assert!(lock(&workers[0].task_provider).is_none());
+        }
     }
 
     #[test]
@@ -611,7 +666,8 @@ mod tests {
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         worker
             .handle()
-            .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete));
+            .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete))
+            .unwrap();
         let subscription = subscribe(
             runtime.id(),
             SubscriptionOptions {
