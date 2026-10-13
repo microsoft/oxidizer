@@ -106,8 +106,7 @@ after a [`DriverError`][__link11]. Each driver closes admission and drains its r
 bounded wait, independently of other drivers on the same worker. Contexts remain valid as
 closed handles.
 
-See the [design notes][__link12] for the lifecycle and ownership model and the [contract decisions][__link13] for
-alternatives that were considered and rejected.
+See the [design notes][__link12] for the lifecycle and ownership model.
 
 
 <hr/>
@@ -115,13 +114,12 @@ alternatives that were considered and rejected.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbPmY1dEKTf0obb9lz5Fgy9PUb76OLmX93BysbeR7rFlJXqJlhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbdEm5QVLF76MbvX2ekrT7EYYbVTyxSN02alAbDzDrK0DlsQhhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
  [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
  [__link12]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
- [__link13]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DECISIONS.md
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions

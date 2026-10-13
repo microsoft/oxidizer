@@ -102,11 +102,9 @@
 //! bounded wait, independently of other drivers on the same worker. Contexts remain valid as
 //! closed handles.
 //!
-//! See the [design notes] for the lifecycle and ownership model and the [contract decisions] for
-//! alternatives that were considered and rejected.
+//! See the [design notes] for the lifecycle and ownership model.
 //!
 //! [design notes]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
-//! [contract decisions]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DECISIONS.md
 
 mod cycle;
 mod driver;

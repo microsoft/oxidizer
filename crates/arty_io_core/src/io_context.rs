@@ -7,9 +7,6 @@ use crate::{Driver, DriverError, DriverInstance, DriverOptions};
 
 /// A consumer-facing I/O handle that creates worker-local drivers.
 ///
-/// Combining the handle and factory keeps the shared contract small and avoids a separate
-/// provider construction and relocation API.
-///
 /// The runtime registers each concrete context type once. On its first request, it creates the
 /// context, clones and relocates it to every active worker, creates a driver on each worker, and
 /// completes each driver's zero-wait initialization cycle before publishing the context. Later
