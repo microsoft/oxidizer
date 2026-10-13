@@ -890,13 +890,10 @@ thread_local! {
 mod tests {
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::pin::Pin;
-    use std::rc::Rc;
 
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::TypeErasedTask;
 
     #[derive(Clone, Copy)]
     enum TaskLocation {
