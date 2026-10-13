@@ -378,8 +378,9 @@ impl Sink {
         }
     }
 
-    /// Builds an event via `build` and dispatches it to the processors that
-    /// want it, unless an attached [`EventSampler`] drops it.
+    /// Dispatches the event that `build` returns to the processors that want
+    /// it, unless an attached [`EventSampler`] drops it. `build` runs only if
+    /// at least one processor receives the event.
     ///
     /// Called by the [`emit!`](crate::emit!) macro with the captured
     /// [`SourceLocation`]; prefer that macro over calling this directly.

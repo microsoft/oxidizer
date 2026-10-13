@@ -30,8 +30,8 @@ use crate::metadata::EventDescription;
 pub trait EventProcessor: Send + Sync {
     /// Decides whether this processor wants the event.
     ///
-    /// Called **before** the event is constructed, at most once per emission
-    /// for each Sink the processor belongs to, and not at all when that Sink's
+    /// Called at most once per emission for each Sink the processor belongs
+    /// to, and not at all when that Sink's
     /// [`EventSampler`](crate::EventSampler) drops the event without asking.
     /// Keep it cheap.
     ///

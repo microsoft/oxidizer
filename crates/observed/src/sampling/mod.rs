@@ -3,9 +3,9 @@
 
 //! Event sampling for [`Sink`](crate::Sink)s.
 //!
-//! Before an event is built, a Sink with an attached [`EventSampler`] asks it
-//! whether the event goes ahead; a sampler attached to a composite decides once
-//! for all of its leaves. The sampler receives an [`EventSamplingContext`] with
+//! A Sink with an attached [`EventSampler`] asks it whether the event goes
+//! ahead before asking its processors; a sampler attached to a composite
+//! decides once for all of its leaves. The sampler receives an [`EventSamplingContext`] with
 //! the event description, and can ask through it whether any of the Sink's
 //! processors wants the event. Attach one with
 //! [`Sink::with_event_sampler`](crate::Sink::with_event_sampler); a Sink without
@@ -100,8 +100,8 @@ pub trait EventSampler: Send + Sync + 'static {
     /// processors.
     ///
     /// Called once for every event emitted through a Sink that has
-    /// processors, before the event is built; a sampler attached to a
-    /// composite is called once for all of its leaves.
+    /// processors, before that Sink's processors are asked; a sampler attached
+    /// to a composite is called once for all of its leaves.
     /// [`EventSamplingDecision::Continue`] delivers the event to the processors
     /// that want it, and [`EventSamplingDecision::Drop`] runs none of them.
     /// Each processor is asked at most once: a sampler can ask through
