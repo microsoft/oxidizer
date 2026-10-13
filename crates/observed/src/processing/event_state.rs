@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Lazy typed event construction and its type-erased view.
+//! Type-erased adapter for constructed typed events.
 
 use std::borrow::Cow;
 use std::ops::ControlFlow;
@@ -11,31 +11,16 @@ use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, LogDescription, SourceLocation};
 use crate::processing::FieldVisitorFn;
 
-/// Holds a typed event builder until processor interest permits construction.
-pub(crate) struct IntermediateEvent<F> {
-    build: F,
-    source_location: SourceLocation,
-}
-
-impl<T: Event, F: FnOnce() -> T> IntermediateEvent<F> {
-    pub(crate) fn typed(build: F, source_location: SourceLocation) -> Self {
-        Self { build, source_location }
-    }
-
-    /// Evaluates the event and returns an [`EvaluatedEvent`] that
-    /// implements [`DynEvent`] and can be passed directly to processors.
-    pub(crate) fn evaluate(self) -> EvaluatedEvent<T> {
-        EvaluatedEvent {
-            event: (self.build)(),
-            source_location: self.source_location,
-        }
-    }
-}
-
 /// Adapts a constructed typed event and its source location to [`DynEvent`].
 pub(crate) struct EvaluatedEvent<T: Event> {
     event: T,
     source_location: SourceLocation,
+}
+
+impl<T: Event> EvaluatedEvent<T> {
+    pub(crate) fn new(event: T, source_location: SourceLocation) -> Self {
+        Self { event, source_location }
+    }
 }
 
 impl<T: Event> DynEvent for EvaluatedEvent<T> {

@@ -14,7 +14,7 @@ mod processor;
 
 use std::ops::ControlFlow;
 
-pub(crate) use event_state::IntermediateEvent;
+pub(crate) use event_state::EvaluatedEvent;
 pub use event_view::EventView;
 pub use processor::EventProcessor;
 

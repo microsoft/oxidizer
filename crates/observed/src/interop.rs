@@ -14,6 +14,11 @@
 //! [`emit_dyn_event`] takes an already-built `&dyn DynEvent` and dispatches it
 //! directly through the sink's normal pipeline.
 //!
+//! Here, "dynamic" means access through a type-erased interface, not metadata
+//! that must change between calls. Both typed and dynamic events can carry
+//! runtime field values. The dynamic interface borrows an existing value and
+//! does not require a heap allocation.
+//!
 //! # Privacy
 //!
 //! Field values still travel through each processor's redaction engine, exactly
@@ -77,7 +82,8 @@ pub trait DynEvent: Send + Sync {
     /// Returns the event description (metadata) for processor prefiltering.
     ///
     /// Compile-time events return `T::DESCRIPTION` (static metadata).
-    /// Dynamic events construct an `EventDescription` from runtime values.
+    /// A dynamic adaptor provides a description that may be fixed or derived
+    /// from the foreign source's metadata.
     ///
     /// This must carry the event's complete signal metadata: a processor
     /// selects on it alone, so a signal omitted here means the event never
