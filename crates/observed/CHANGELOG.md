@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `EventSamplingContext::processors_interested`.
+
+### Changed
+
+- A Sink calls its event sampler before `EventProcessor::is_interested`.
+- `EventProcessor::is_interested` runs at most once per event per Sink.
+- A sampler attached to a composite decides once per event for all leaves.
+
+### Removed
+
+- `EventSamplingContext::sink_id`.
+- `EventSamplingContext::timestamp`.
+- The public `EventSamplingContext::new`.
+
 ## [0.27.0] - 2026-10-05
 
 ### Changed

@@ -4,6 +4,8 @@
 //! Core sink type and lifecycle.
 
 use std::any::type_name;
+use std::cell::LazyCell;
+use std::slice;
 use std::sync::Arc;
 
 use performables::arc::{Arc as PerformableArc, PerProcess};
@@ -14,7 +16,7 @@ use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
-use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
+use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision, InterestedProcessors};
 use crate::{Event, FlushError, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
@@ -214,9 +216,9 @@ impl Sink {
     /// `MySampler` itself instead.
     ///
     /// For a composite, the new sampler replaces every sampler previously
-    /// attached to its leaves. Only the new sampler runs. A [`Sink::noop`]
-    /// value is returned unchanged. A sink that is not interested in an event
-    /// never calls the sampler.
+    /// attached to its leaves and decides once per event for all of them. A
+    /// [`Sink::noop`] value is returned unchanged, and a Sink whose leaves have
+    /// no processors never calls the sampler.
     ///
     /// See [`EventSampler::sample`] for the invocation and decision contract.
     ///
@@ -235,13 +237,13 @@ impl Sink {
     /// use observed::{EventSampler, Sink};
     /// # struct DropAll;
     /// # impl EventSampler for DropAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
     /// #         EventSamplingDecision::Drop
     /// #     }
     /// # }
     /// # struct KeepAll;
     /// # impl EventSampler for KeepAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
     /// #         EventSamplingDecision::Continue
     /// #     }
     /// # }
@@ -376,8 +378,8 @@ impl Sink {
         }
     }
 
-    /// Builds an event via `build` when at least one processor is interested
-    /// and dispatches it to each interested processor.
+    /// Builds an event via `build` and dispatches it to the processors that
+    /// want it, unless an attached [`EventSampler`] drops it.
     ///
     /// Called by the [`emit!`](crate::emit!) macro with the captured
     /// [`SourceLocation`]; prefer that macro over calling this directly.
@@ -396,50 +398,17 @@ impl Sink {
         }
 
         let description = state.description();
-        if !self.is_interested_in(&description) {
-            return;
-        }
-
-        // Build the event value BEFORE taking the reentrancy guard. `evaluate`
-        // runs ordinary user code - a field initializer may call a helper that
-        // legitimately emits telemetry of its own, often to an unrelated sink.
-        // The hazard the guard exists for starts when processors run, so
-        // holding it across construction would silently drop that telemetry.
-        let event = state.evaluate();
-
-        let Some(_guard) = super::try_acquire_reentrancy_guard() else {
-            return;
-        };
-
-        self.dispatch_to_processors(&event, &description);
+        let event = LazyCell::new(|| state.evaluate());
+        let get_event = || LazyCell::force(&event) as &dyn DynEvent;
+        self.dispatch_to_processors(&get_event, &description);
     }
 
-    /// Returns `true` if at least one processor is interested in the event.
-    ///
-    /// For Composite, returns `true` if any child is interested.
-    fn is_interested_in(&self, description: &EventDescription) -> bool {
+    fn dispatch_to_processors<'e>(&self, get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
         match &*self.inner {
-            SinkInner::Single(state) => state.is_interested(description),
-            SinkInner::Composite { children } => children.iter().any(|c| c.is_interested(description)),
-            SinkInner::Noop { .. } => false,
-        }
-    }
-
-    /// Dispatches a `DynEvent` to interested processors - or, for a Composite
-    /// sink, delegates dispatch to each child leaf so every leaf constructs its
-    /// own `EventView` rooted at itself (which walks its own enrichment slot).
-    ///
-    /// The reentrancy guard acquired in [`Sink::emit_impl`] is held across all
-    /// sibling dispatches, so composites safely iterate children without the
-    /// guard falsely tripping.
-    fn dispatch_to_processors(&self, event: &dyn DynEvent, description: &EventDescription) {
-        match &*self.inner {
-            SinkInner::Single(state) => state.dispatch(event, description),
+            SinkInner::Single(state) => dispatch(slice::from_ref(state), get_event, description),
             SinkInner::Composite { children } => {
-                for child in children {
-                    if child.is_interested(description) {
-                        child.dispatch(event, description);
-                    }
+                for leaves in children.chunk_by(SingleSinkState::shares_sampler_with) {
+                    dispatch(leaves, get_event, description);
                 }
             }
             SinkInner::Noop { .. } => {}
@@ -531,28 +500,58 @@ impl SingleSinkState {
         self
     }
 
-    /// Returns `true` if any of this leaf's processors is interested in the event.
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        self.processors.iter().any(|p| p.is_interested(description))
+    fn shares_sampler_with(&self, other: &Self) -> bool {
+        matches!((&self.sampler, &other.sampler), (Some(sampler), Some(other_sampler)) if Arc::ptr_eq(sampler, other_sampler))
     }
 
-    /// Offers the event context to this leaf's [`EventSampler`], then builds an
-    /// [`EventView`] rooted at this leaf's enrichment slot and hands it to each
-    /// interested processor unless the sampler dropped it.
-    fn dispatch(&self, event: &dyn DynEvent, description: &EventDescription) {
-        // Reading the leaf's clock keeps timestamps off `SystemTime::now()`,
-        // so frozen clocks make this Miri-safe.
-        let timestamp = self.clock.system_time();
+    fn view<'e>(&self, event: &'e dyn DynEvent) -> EventView<'e> {
+        EventView::new(
+            event,
+            self.enrichment.current(),
+            self.isolated_enrichment,
+            self.id,
+            self.clock.system_time(),
+        )
+    }
+}
 
-        if let Some(sampler) = &self.sampler
-            && sampler.sample(&EventSamplingContext::new(description, self.id, timestamp)) == EventSamplingDecision::Drop
-        {
-            return;
-        }
+fn dispatch<'e>(leaves: &[SingleSinkState], get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
+    if leaves.iter().all(|leaf| leaf.processors.is_empty()) {
+        return;
+    }
 
-        let view = EventView::new(event, self.enrichment.current(), self.isolated_enrichment, self.id, timestamp);
-        for processor in self.processors.iter() {
-            if processor.is_interested(description) {
+    let Some(guard) = super::try_acquire_reentrancy_guard() else {
+        return;
+    };
+
+    let get_interested_processors = || -> InterestedProcessors {
+        leaves
+            .iter()
+            .flat_map(|leaf| leaf.processors.iter())
+            .map(|processor| processor.is_interested(description))
+            .collect()
+    };
+    let context = EventSamplingContext::new(description, &get_interested_processors);
+    if let Some(sampler) = &leaves[0].sampler
+        && sampler.sample(&context) == EventSamplingDecision::Drop
+    {
+        return;
+    }
+    let interested_processors = context.into_interested_processors();
+    if !interested_processors.contains(&true) {
+        return;
+    }
+
+    drop(guard);
+    let event = get_event();
+
+    let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot is free again once the event is built");
+
+    let mut interested_processors = interested_processors.into_iter();
+    for leaf in leaves {
+        let view = LazyCell::new(|| leaf.view(event));
+        for (processor, wants) in leaf.processors.iter().zip(interested_processors.by_ref()) {
+            if wants {
                 processor.process(&view);
             }
         }
@@ -563,6 +562,7 @@ impl SingleSinkState {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::cell::Cell;
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -609,15 +609,20 @@ mod tests {
     }
 
     #[test]
-    fn noop_sink_interest_dispatch_and_flush() {
+    fn noop_sink_dispatch_and_flush() {
         // `emit_impl` gates on `is_noop()`, so these no-op arms are only reachable
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
-        let description = EventDescription::new("dummy", None, None, None, false, false);
+        let built = Cell::new(false);
+        let get_event = || {
+            built.set(true);
+            &DummyDyn as &dyn DynEvent
+        };
 
-        assert!(!noop.is_interested_in(&description));
-        noop.dispatch_to_processors(&DummyDyn, &description);
+        noop.dispatch_to_processors(&get_event, &dummy_description());
         noop.flush().expect("noop flush should succeed");
+
+        assert!(!built.get());
     }
 
     /// A processor whose `flush` always fails, used to pin the error-propagation
@@ -710,7 +715,7 @@ mod tests {
     struct AlwaysOffSampler;
 
     impl EventSampler for AlwaysOffSampler {
-        fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+        fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
             EventSamplingDecision::Drop
         }
     }
@@ -770,25 +775,220 @@ mod tests {
             SimpleClock::new_frozen(),
         );
 
-        let description = dummy_description();
-        assert!(sink.is_interested_in(&description));
-        sink.dispatch_to_processors(&DummyDyn, &description);
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
         assert_eq!(uninterested.processed.load(Ordering::Relaxed), 0);
         assert_eq!(interested.processed.load(Ordering::Relaxed), 1);
     }
 
-    /// A leaf sink is interested only if one of its processors is: the check is
-    /// a real query over the processors, not an unconditional yes.
-    #[test]
-    fn single_sink_is_not_interested_when_no_processor_is() {
-        let sink = Sink::new(
-            "uninterested",
-            vec![Arc::new(NeverInterestedProcessor::default()) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        );
+    /// A processor that wants every event or none, counting how often it is
+    /// asked and how many events it receives.
+    struct CountingProcessor {
+        wants: bool,
+        asked: AtomicUsize,
+        processed: AtomicUsize,
+    }
 
-        assert!(!sink.is_interested_in(&dummy_description()));
+    impl CountingProcessor {
+        fn new(wants: bool) -> Arc<Self> {
+            Arc::new(Self {
+                wants,
+                asked: AtomicUsize::new(0),
+                processed: AtomicUsize::new(0),
+            })
+        }
+
+        fn asked(&self) -> usize {
+            self.asked.load(Ordering::Relaxed)
+        }
+
+        fn processed(&self) -> usize {
+            self.processed.load(Ordering::Relaxed)
+        }
+    }
+
+    impl EventProcessor for CountingProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            self.asked.fetch_add(1, Ordering::Relaxed);
+            self.wants
+        }
+
+        fn process(&self, _event: &EventView<'_>) {
+            self.processed.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    /// Returns a fixed decision without asking the processors.
+    struct FixedSampler {
+        decision: EventSamplingDecision,
+        calls: Arc<AtomicUsize>,
+    }
+
+    fn fixed_sampler(decision: EventSamplingDecision) -> (FixedSampler, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sampler = FixedSampler {
+            decision,
+            calls: Arc::clone(&calls),
+        };
+        (sampler, calls)
+    }
+
+    impl EventSampler for FixedSampler {
+        fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.decision
+        }
+    }
+
+    /// Continues every other event, starting with the first.
+    struct EveryOtherSampler {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl EventSampler for EveryOtherSampler {
+        fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
+            if self.calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
+                EventSamplingDecision::Continue
+            } else {
+                EventSamplingDecision::Drop
+            }
+        }
+    }
+
+    fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> Sink {
+        Sink::new(
+            id,
+            processors
+                .iter()
+                .map(|processor| Arc::clone(processor) as Arc<dyn EventProcessor>)
+                .collect(),
+            SimpleClock::new_frozen(),
+        )
+    }
+
+    #[test]
+    fn composite_sampler_decides_once_per_event_for_every_leaf() {
+        let first = CountingProcessor::new(true);
+        let second = CountingProcessor::new(true);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sink = Sink::composite([counting_leaf("first", &[&first]), counting_leaf("second", &[&second])])
+            .with_event_sampler(EveryOtherSampler { calls: Arc::clone(&calls) });
+
+        for _ in 0..4 {
+            crate::interop::emit_dyn_event(&sink, &DummyDyn);
+        }
+
+        assert_eq!(calls.load(Ordering::Relaxed), 4);
+        assert_eq!(first.processed(), 2);
+        assert_eq!(second.processed(), 2);
+    }
+
+    #[test]
+    fn leaf_samplers_in_composite_decide_for_their_own_leaf() {
+        let dropped = CountingProcessor::new(true);
+        let kept = CountingProcessor::new(true);
+        let (drop_sampler, drop_calls) = fixed_sampler(EventSamplingDecision::Drop);
+        let (keep_sampler, keep_calls) = fixed_sampler(EventSamplingDecision::Continue);
+        let sink = Sink::composite([
+            counting_leaf("dropped", &[&dropped]).with_event_sampler(drop_sampler),
+            counting_leaf("kept", &[&kept]).with_event_sampler(keep_sampler),
+        ]);
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!(drop_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(keep_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(dropped.processed(), 0);
+        assert_eq!(kept.processed(), 1);
+    }
+
+    #[test]
+    fn composite_sampler_delivers_to_leaf_beside_processorless_leaf() {
+        let processor = CountingProcessor::new(true);
+        let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
+        let sink = Sink::composite([
+            Sink::new("processorless", Vec::new(), SimpleClock::new_frozen()),
+            counting_leaf("full", &[&processor]),
+        ])
+        .with_event_sampler(sampler);
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(processor.processed(), 1);
+    }
+
+    #[test]
+    fn processorless_leaf_in_composite_never_calls_its_sampler() {
+        let processor = CountingProcessor::new(true);
+        let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
+        let sink = Sink::composite([
+            Sink::new("processorless", Vec::new(), SimpleClock::new_frozen()).with_event_sampler(sampler),
+            counting_leaf("full", &[&processor]),
+        ]);
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(processor.processed(), 1);
+    }
+
+    #[test]
+    fn continue_without_asking_asks_each_processor_once() {
+        let interested = CountingProcessor::new(true);
+        let uninterested = CountingProcessor::new(false);
+        let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
+        let sink = counting_leaf("mixed", &[&uninterested, &interested]).with_event_sampler(sampler);
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!((interested.asked(), uninterested.asked()), (1, 1));
+        assert_eq!((interested.processed(), uninterested.processed()), (1, 0));
+    }
+
+    #[test]
+    fn sampler_asking_twice_asks_each_processor_once() {
+        struct AskTwiceSampler;
+
+        impl EventSampler for AskTwiceSampler {
+            fn sample(&self, context: &EventSamplingContext<'_>) -> EventSamplingDecision {
+                assert!(context.processors_interested());
+                assert!(context.processors_interested());
+                EventSamplingDecision::Continue
+            }
+        }
+
+        let interested = CountingProcessor::new(true);
+        let uninterested = CountingProcessor::new(false);
+        let sink = counting_leaf("mixed", &[&uninterested, &interested]).with_event_sampler(AskTwiceSampler);
+
+        crate::interop::emit_dyn_event(&sink, &DummyDyn);
+
+        assert_eq!((interested.asked(), uninterested.asked()), (1, 1));
+        assert_eq!((interested.processed(), uninterested.processed()), (1, 0));
+    }
+
+    #[test]
+    fn continued_event_no_processor_wants_is_never_built() {
+        let uninterested = CountingProcessor::new(false);
+        let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
+        let sink = counting_leaf("uninterested", &[&uninterested]).with_event_sampler(sampler);
+        let built = Cell::new(false);
+        let get_event = || {
+            built.set(true);
+            &DummyDyn as &dyn DynEvent
+        };
+
+        sink.dispatch_to_processors(&get_event, &dummy_description());
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(!built.get());
+        assert_eq!(uninterested.processed(), 0);
     }
 
     #[test]

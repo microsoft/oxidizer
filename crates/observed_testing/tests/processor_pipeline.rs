@@ -314,6 +314,55 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
     assert!(inner_processor.is_empty(), "reentrant event should be dropped, not forwarded");
 }
 
+#[test]
+fn reentrant_emit_from_is_interested_is_dropped() {
+    use observed::FlushError;
+    use observed::metadata::EventDescription;
+    use observed::processing::{EventProcessor, EventView};
+
+    #[event("internal.heartbeat")]
+    #[trace]
+    struct Heartbeat;
+
+    struct ReentrantInterestProcessor {
+        own_sink: Mutex<Option<Sink>>,
+        events: Mutex<Vec<String>>,
+    }
+
+    impl EventProcessor for ReentrantInterestProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            let own_sink = self.own_sink.lock().expect("lock is not poisoned").take();
+            if let Some(own_sink) = own_sink {
+                emit!(own_sink, Heartbeat);
+            }
+            true
+        }
+
+        fn process(&self, event: &EventView<'_>) {
+            self.events.lock().expect("lock is not poisoned").push(event.name().to_owned());
+        }
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    let processor = Arc::new(ReentrantInterestProcessor {
+        own_sink: Mutex::new(None),
+        events: Mutex::new(Vec::new()),
+    });
+    let sink = Sink::new(
+        "test",
+        vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
+        tick::SimpleClock::new_frozen(),
+    );
+    *processor.own_sink.lock().expect("lock is not poisoned") = Some(sink.clone());
+
+    emit!(sink, ProbeEvent::new(1));
+
+    assert_eq!(*processor.events.lock().expect("lock is not poisoned"), ["test.probe"]);
+}
+
 // ---------------------------------------------------------------------------
 // Cost of emitting: what is deferred, and what is not
 // ---------------------------------------------------------------------------

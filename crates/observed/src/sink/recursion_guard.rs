@@ -5,10 +5,10 @@
 //! processors are running* from re-entering the pipeline on the current
 //! thread.
 //!
-//! The guard covers processor dispatch only. Building an event value is
-//! ordinary user code - a field initializer may call a helper that emits
-//! telemetry of its own - so the guard is taken after the event has been
-//! constructed and only for the dispatch itself.
+//! The guard covers the event sampler call and processor dispatch. Building an
+//! event value is ordinary user code - a field initializer may call a helper
+//! that emits telemetry of its own - so the guard is released while the event
+//! is built.
 //!
 //! # Scope: thread-wide, not per-sink
 //!
