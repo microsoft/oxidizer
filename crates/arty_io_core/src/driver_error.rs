@@ -12,12 +12,6 @@ pub struct DriverError {
     kind: DriverErrorKind,
 }
 
-#[derive(Debug)]
-enum DriverErrorKind {
-    Message(Box<str>),
-    Source(Box<dyn Error + Send + Sync + 'static>),
-}
-
 impl DriverError {
     /// Creates an error with the given message.
     #[must_use]
@@ -52,4 +46,10 @@ impl Error for DriverError {
             DriverErrorKind::Source(source) => Some(source.as_ref()),
         }
     }
+}
+
+#[derive(Debug)]
+enum DriverErrorKind {
+    Message(Box<str>),
+    Source(Box<dyn Error + Send + Sync + 'static>),
 }

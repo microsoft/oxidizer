@@ -107,10 +107,13 @@
 //! operations and waits for operations already in progress, using a finite limit chosen by the
 //! driver. The runtime reports a [`DriverError`] and continues shutting down the remaining
 //! drivers. Contexts remain valid as closed handles.
-//!
-//! See the [design notes] for the lifecycle and ownership model.
-//!
-//! [design notes]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
+pub use cycle::Cycle;
+pub use driver::Driver;
+pub use driver_error::DriverError;
+pub use driver_instance::DriverInstance;
+pub use driver_options::DriverOptions;
+pub use driver_role::DriverRole;
+pub use io_context::IoContext;
 
 mod cycle;
 mod driver;
@@ -119,11 +122,3 @@ mod driver_instance;
 mod driver_options;
 mod driver_role;
 mod io_context;
-
-pub use cycle::Cycle;
-pub use driver::Driver;
-pub use driver_error::DriverError;
-pub use driver_instance::DriverInstance;
-pub use driver_options::DriverOptions;
-pub use driver_role::DriverRole;
-pub use io_context::IoContext;

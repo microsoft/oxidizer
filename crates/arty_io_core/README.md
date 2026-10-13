@@ -112,22 +112,19 @@ operations and waits for operations already in progress, using a finite limit ch
 driver. The runtime reports a [`DriverError`][__link13] and continues shutting down the remaining
 drivers. Contexts remain valid as closed handles.
 
-See the [design notes][__link14] for the lifecycle and ownership model.
-
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbxRSI90mF3CMb0EhSwJ6hj9kb1OzF13DZx68bqBh5Qh7KlwBhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb7HshLAVIwvgbmrYUSd__JkcbXB77tzAutOMbB0eT7DRV_CJhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
  [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
  [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
  [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
- [__link14]: https://github.com/microsoft/oxidizer/blob/main/crates/arty_io_core/docs/DESIGN.md
  [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
  [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
  [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions

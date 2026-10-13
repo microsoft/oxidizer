@@ -69,6 +69,7 @@ fn driver_is_boxable() {
 
 #[test]
 fn cycle_exposes_max_wait() {
+    // Any non-default duration proves that Cycle preserves the supplied value.
     let cycle = Cycle::new(Duration::from_millis(17));
     assert_eq!(cycle.max_wait(), Duration::from_millis(17));
 }
@@ -79,6 +80,7 @@ fn context_and_driver_creation_use_both_options() {
         C::context(options)
     }
 
+    // Any non-default option proves that IoContext::context receives the caller's value.
     let mut context: TestContext = context::<TestContext>(7);
     let instance = context.driver(driver_options()).unwrap();
     assert_eq!(instance.role, DriverRole::Primary);
@@ -224,6 +226,7 @@ impl IoContext for TestContext {
     }
 }
 
+/// Application handle. Cloning or retaining it does not count as an active operation.
 #[derive(Clone, Debug)]
 struct LeaseContext {
     state: Arc<LeaseState>,
@@ -265,18 +268,21 @@ impl IoContext for LeaseContext {
     }
 }
 
+/// Shared lock and notification state used by the context, operation leases, and driver.
 #[derive(Debug, Default)]
 struct LeaseState {
     lifecycle: Mutex<LeaseLifecycle>,
     changed: Condvar,
 }
 
+/// Admission state and active-operation count protected by `LeaseState::lifecycle`.
 #[derive(Debug, Default)]
 struct LeaseLifecycle {
     shutdown_started: bool,
     active_operations: usize,
 }
 
+/// Counted ownership of one operation that must finish before shutdown returns successfully.
 #[derive(Debug)]
 struct OperationLease {
     state: Arc<LeaseState>,
@@ -296,6 +302,7 @@ impl Drop for OperationLease {
     }
 }
 
+/// Driver that closes admission and waits for all `OperationLease` values to be dropped.
 #[derive(Debug)]
 struct LeaseDriver {
     state: Arc<LeaseState>,
@@ -332,6 +339,10 @@ impl Driver for LeaseDriver {
             lifecycle = self.state.changed.wait(lifecycle).unwrap_or_else(PoisonError::into_inner);
         }
 
+        assert_eq!(
+            lifecycle.active_operations, 0,
+            "successful shutdown requires all operations to drain"
+        );
         Ok(())
     }
 }

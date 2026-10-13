@@ -9,6 +9,8 @@ use std::time::Duration;
 #[derive(Debug)]
 pub struct Cycle {
     max_wait: Duration,
+    // A cycle describes one invocation on one async worker. Keeping it !Send and !Sync prevents
+    // runtimes from accidentally moving or sharing that invocation state across workers.
     _not_send: PhantomData<Rc<()>>,
 }
 
