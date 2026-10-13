@@ -532,12 +532,6 @@ impl<T> Arc<T, PerProcess> {
         StdArc::into_inner(Self::into_std_arc(this))
     }
 
-    /// Wraps an existing standard Arc.
-    #[must_use]
-    pub fn from_std(inner: StdArc<T>) -> Self {
-        Self::from_state(inner)
-    }
-
     /// Returns mutable access when this is the only strong reference.
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
         StdArc::get_mut(&mut this.state)
@@ -554,6 +548,12 @@ impl<T> Arc<T, PerProcess> {
 }
 
 impl<T: ?Sized> Arc<T, PerProcess> {
+    /// Wraps an existing standard Arc without reallocating or copying its value.
+    #[must_use]
+    pub fn from_std(inner: StdArc<T>) -> Self {
+        Self::from_state(inner)
+    }
+
     fn from_state_unrecorded(state: StdArc<T>) -> Self {
         Self {
             state,
@@ -1252,6 +1252,24 @@ mod tests {
         let cyclic = Arc::new_cyclic(Weak::strong_count);
 
         assert_eq!((StdArc::ptr_eq(&standard, &Arc::into_std_arc(value)), *cyclic), (true, 0));
+    }
+
+    #[test]
+    fn per_process_wraps_standard_slice_without_copying() {
+        let standard: StdArc<[u8]> = StdArc::from([1, 2, 3]);
+        let value = Arc::from_std(StdArc::clone(&standard));
+
+        assert_eq!(StdArc::strong_count(&standard), 2);
+        assert!(StdArc::ptr_eq(&standard, &Arc::into_std_arc(value)));
+    }
+
+    #[test]
+    fn per_process_wraps_standard_trait_object_without_copying() {
+        let standard: StdArc<dyn fmt::Display + Send + Sync> = StdArc::new(42);
+        let value = Arc::from_std(StdArc::clone(&standard));
+
+        assert_eq!(StdArc::strong_count(&standard), 2);
+        assert!(StdArc::ptr_eq(&standard, &Arc::into_std_arc(value)));
     }
 
     #[test]

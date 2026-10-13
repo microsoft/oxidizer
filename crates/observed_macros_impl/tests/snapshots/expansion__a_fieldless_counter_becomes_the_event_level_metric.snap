@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"heartbeat\"\"#,\nr#\"\n            #[counter(name = \"heartbeat.total\", desc = \"heartbeats\", unit = \"1\")]\n            struct Heartbeat {\n                #[unredacted]\n                shard: i64,\n            }\n            \"#,)"
+expression: "expand_event(r#\"\"heartbeat\"\"#,\nr#\"\n        #[counter(name = \"heartbeat.total\", desc = \"heartbeats\", unit = \"1\")]\n        struct Heartbeat {\n            #[unredacted]\n            shard: i64,\n        }\n        \"#,)"
 ---
 struct Heartbeat {
     shard: i64,
@@ -27,6 +27,28 @@ const _: () = {
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             ::core::ops::ControlFlow::Continue(())
+        }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "heartbeat.total",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "heartbeats",
+                    "1",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0 => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(1_u64),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
         }
     }
 };

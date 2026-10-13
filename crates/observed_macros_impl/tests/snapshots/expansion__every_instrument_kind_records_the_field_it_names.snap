@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"operation\"\"#,\nr#\"\n            #[info]\n            #[counter(hits, name = \"operation.hits\", desc = \"completed operations\", unit = \"1\")]\n            #[updown_counter(queue_delta)]\n            #[gauge(level)]\n            #[histogram(duration_ms, unit = \"ms\")]\n            struct Operation {\n                #[unredacted]\n                hits: u64,\n                #[unredacted]\n                queue_delta: i64,\n                #[unredacted]\n                level: f64,\n                #[unredacted]\n                duration_ms: f32,\n            }\n            \"#,)"
+expression: "expand_event(r#\"\"operation\"\"#,\nr#\"\n        #[info]\n        #[counter(hits, name = \"operation.hits\", desc = \"completed operations\", unit = \"1\")]\n        #[updown_counter(queue_delta)]\n        #[gauge(level)]\n        #[histogram(duration_ms, unit = \"ms\")]\n        struct Operation {\n            #[unredacted]\n            hits: u64,\n            #[unredacted]\n            queue_delta: i64,\n            #[unredacted]\n            level: f64,\n            #[unredacted]\n            duration_ms: f32,\n        }\n        \"#,)"
 ---
 struct Operation {
     hits: u64,
@@ -115,6 +115,72 @@ const _: () = {
                 )?;
             }
             ::core::ops::ControlFlow::Continue(())
+        }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "operation.hits",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "completed operations",
+                    "1",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+            ::observed::metadata::MetricDescription::new(
+                    "operation",
+                    ::observed::metadata::InstrumentKind::UpDownCounter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::I64),
+            ::observed::metadata::MetricDescription::new(
+                    "operation",
+                    ::observed::metadata::InstrumentKind::Gauge,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::F64),
+            ::observed::metadata::MetricDescription::new(
+                    "operation",
+                    ::observed::metadata::InstrumentKind::Histogram,
+                    "",
+                    "ms",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::F64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(
+                            ::core::convert::From::from(self.hits),
+                        ),
+                    )
+                }
+                1usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::I64(
+                            ::core::convert::From::from(self.queue_delta),
+                        ),
+                    )
+                }
+                2usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::F64(
+                            ::core::convert::From::from(self.level),
+                        ),
+                    )
+                }
+                3usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::F64(
+                            ::core::convert::From::from(self.duration_ms),
+                        ),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
         }
     }
 };

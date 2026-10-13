@@ -5,7 +5,7 @@
 
 use std::ops::ControlFlow;
 
-use crate::metadata::EventDescription;
+use crate::metadata::{EventDescription, MetricDescription, MetricValue};
 use crate::processing::FieldVisitorFn;
 
 /// A structured telemetry event.
@@ -42,6 +42,16 @@ pub trait Event: Send + Sync {
     /// Static metadata describing this event's shape, severity, and fields.
     const DESCRIPTION: EventDescription;
 
+    /// All metric instruments declared on this event, in generated slot order.
+    ///
+    /// Destinations inspect this metadata once when binding an entire event.
+    /// The fieldless counter, if present, comes first, followed by field-backed
+    /// instruments in field declaration order. Numeric slots are read through
+    /// [`metric_value`](Self::metric_value). Destinations reject unsupported
+    /// instrument kinds or numeric representations instead of silently omitting
+    /// measurements.
+    const METRICS: &'static [MetricDescription] = &[];
+
     /// Lazily visits all fields on this event.
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`](crate::metadata::FieldDescriptor) and a getter
@@ -53,4 +63,16 @@ pub trait Event: Send + Sync {
     /// - **`data_class = <expr>`**: wraps the value in [`data_privacy::Sensitive`] before redaction.
     /// - **`unredacted`**: bypasses redaction; the type must implement `Into<Value>`.
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()>;
+
+    /// Reads a generated numeric metric slot without visiting general fields.
+    ///
+    /// The event macro generates direct numeric field access, separate from
+    /// the general-purpose field visitor. The default keeps existing manual
+    /// implementations compatible; it declares no supported metric slots.
+    /// A slot is the index of its instrument in [`METRICS`](Self::METRICS),
+    /// not a native counter ID.
+    #[must_use]
+    fn metric_value(&self, _slot: usize) -> Option<MetricValue> {
+        None
+    }
 }

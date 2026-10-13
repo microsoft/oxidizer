@@ -51,6 +51,36 @@
 //! }
 //! ```
 //!
+//! # Whole-event metric bindings
+//!
+//! Metric destinations register an event type at startup. The event macro
+//! supplies its instruments' names, descriptions, units, and numeric slots:
+//!
+//! ```
+//! use observed::processing::MetricBindings;
+//! use observed::{Event, event};
+//!
+//! #[event("request.completed")]
+//! #[counter(bytes_sent, name = "bytes_sent", unit = "By")]
+//! struct RequestCompleted {
+//!     #[unredacted]
+//!     bytes_sent: u32,
+//! }
+//!
+//! let mut bindings = MetricBindings::new();
+//! // A destination prepares one target for each declared instrument.
+//! bindings
+//!     .bind_event::<RequestCompleted>(|metric| metric.instrument_name())
+//!     .unwrap();
+//! assert_eq!(RequestCompleted::METRICS[0].unit(), "By");
+//! ```
+//!
+//! Destination processors use [`MetricBindings`](processing::MetricBindings)
+//! to associate complete events with prepared targets. Numeric recording selects event
+//! identities and generated slots without string matching, hashing, allocating,
+//! redacting, or enumerating generic fields. The existing sink's timestamp,
+//! context, and sampling behavior is unchanged.
+//!
 //! # Enrichment
 //!
 //! Enrichment attaches key-value context to **every event** emitted within a scope.
@@ -354,6 +384,20 @@ pub use observed_macros::Enrichment;
 /// The leading positional `<field>` names the struct field whose value is
 /// recorded by the instrument. The referenced field **must exist**, otherwise
 /// compilation fails. A fieldless `#[counter]` records `1` for every emission.
+///
+/// ## Whole-event metric bindings
+///
+/// The macro generates [`Event::METRICS`], containing every declared instrument
+/// in numeric slot order. A fieldless counter comes first, followed by
+/// field-backed instruments in field declaration order. Numeric slots preserve
+/// unsigned integers, signed integers, and floats through [`Event::metric_value`].
+/// The generated metadata declares each slot's representation.
+///
+/// Backends register entire events with prepared destinations at startup through
+/// [`MetricBindings`](processing::MetricBindings). Numeric extraction does
+/// not visit generic fields or use the instrument name at emission time.
+/// Backends reject events containing unsupported kinds or numeric types.
+/// Existing field routing, enrichment, timestamps, and sampling are unchanged.
 ///
 /// Value-type constraints are enforced at compile time:
 ///

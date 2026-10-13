@@ -202,6 +202,7 @@ object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.27.0" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.26.0" }
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.26.0" }
+observed_perf_counters = { path = "crates/observed_perf_counters", default-features = false, version = "0.1.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.4.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
@@ -288,6 +289,7 @@ thread_aware_core = { path = "crates/thread_aware_core", default-features = fals
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "=0.12.0" }
 thread_local = { version = "1.1.8", default-features = false }
+thiserror = { version = "2.0.20", default-features = false }
 threadpool = { version = "1.8.1", default-features = false }
 tick = { path = "crates/tick", default-features = false, version = "0.7.1" }
 time = { version = "0.3.47", default-features = false }

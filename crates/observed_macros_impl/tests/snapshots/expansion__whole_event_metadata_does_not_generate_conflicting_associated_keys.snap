@@ -1,0 +1,89 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n        #[counter(name = \"bytes_sent\")]\n        #[counter(bytes_sent)]\n        struct Request {\n            #[unredacted]\n            bytes_sent: u32,\n        }\n        \"#,)"
+---
+struct Request {
+    bytes_sent: u32,
+}
+const _: () = {
+    impl ::observed::Event for Request {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "bytes_sent",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "bytes_sent",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "bytes_sent",
+                            ::observed::metadata::MetricDescription::new(
+                                "request",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.bytes_sent.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "bytes_sent",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+            ::observed::metadata::MetricDescription::new(
+                    "request",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0 => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(1_u64),
+                    )
+                }
+                1usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(
+                            ::core::convert::From::from(self.bytes_sent),
+                        ),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
+        }
+    }
+};

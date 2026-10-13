@@ -28,6 +28,46 @@ impl std::fmt::Display for InstrumentKind {
     }
 }
 
+/// Numeric representation of a metric measurement after widening without loss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MetricValueKind {
+    /// Unsigned integer measurements, widened to `u64`.
+    U64,
+    /// Signed integer measurements, widened to `i64`.
+    I64,
+    /// Floating-point measurements, widened to `f64`.
+    F64,
+}
+
+/// A numeric metric measurement, separate from general telemetry field values.
+///
+/// Generated access preserves signedness and integer precision. This value
+/// carries no dimensions, redaction, or destination-specific aggregation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum MetricValue {
+    /// An unsigned integer increment or reading.
+    U64(u64),
+    /// A signed integer delta or reading.
+    I64(i64),
+    /// A floating-point observation.
+    F64(f64),
+}
+
+impl MetricValue {
+    /// The numeric representation of this measurement.
+    #[must_use]
+    #[inline]
+    pub const fn kind(self) -> MetricValueKind {
+        match self {
+            Self::U64(_) => MetricValueKind::U64,
+            Self::I64(_) => MetricValueKind::I64,
+            Self::F64(_) => MetricValueKind::F64,
+        }
+    }
+}
+
 /// Describes a metric instrument derived from event metadata.
 ///
 /// Two kinds of metric descriptions exist:
@@ -49,6 +89,7 @@ pub struct MetricDescription {
     ///
     /// [UCUM]: https://ucum.org/ucum
     unit: &'static str,
+    value_kind: Option<MetricValueKind>,
 }
 
 impl MetricDescription {
@@ -61,7 +102,24 @@ impl MetricDescription {
             kind,
             description,
             unit,
+            value_kind: None,
         }
+    }
+
+    /// Declares the numeric representation used by direct measurement access.
+    ///
+    /// Generated [`Event::METRICS`](crate::Event::METRICS) includes this metadata
+    /// so backends can reject unsupported numeric types during startup.
+    #[must_use]
+    pub const fn with_value_kind(mut self, kind: MetricValueKind) -> Self {
+        self.value_kind = Some(kind);
+        self
+    }
+
+    /// Numeric representation, or `None` for legacy or unspecified metadata.
+    #[must_use]
+    pub const fn value_kind(&self) -> Option<MetricValueKind> {
+        self.value_kind
     }
 
     /// Returns the `OTel` instrument name.

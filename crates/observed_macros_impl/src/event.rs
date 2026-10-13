@@ -261,7 +261,7 @@ impl FieldDef {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum InstrumentKindValue {
     Counter,
     UpDownCounter,
@@ -1021,6 +1021,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     let has_log = def.log.is_some();
 
     let visit_fields_body = generate_visit_fields_body(&def.fields, has_log);
+    let metric_items = generate_metric_items(def);
 
     quote! {
         const _: () = {
@@ -1042,8 +1043,81 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
                     #visit_fields_body
                     ::core::ops::ControlFlow::Continue(())
                 }
+
+                #metric_items
             }
         };
+    }
+}
+
+fn generate_metric_items(def: &EventDef) -> TokenStream {
+    let mut metrics = Vec::new();
+    let mut arms = Vec::new();
+    if let Some(metric) = &def.metric {
+        let name = metric.name.as_deref().unwrap_or(&def.event_name);
+        let description = metric.description.as_deref().unwrap_or("");
+        let unit = metric.unit.as_deref().unwrap_or("");
+        metrics.push(quote! {
+            ::observed::metadata::MetricDescription::new(
+                #name, ::observed::metadata::InstrumentKind::Counter, #description, #unit,
+            ).with_value_kind(::observed::metadata::MetricValueKind::U64),
+        });
+        arms.push(quote! { 0 => ::core::option::Option::Some(::observed::metadata::MetricValue::U64(1_u64)), });
+    }
+    for field in &def.fields {
+        let Some(metric) = &field.metric_value else {
+            continue;
+        };
+        let slot = metrics.len();
+        let field_ident = &field.ident;
+        let ty = &field.ty;
+        let name = &metric.name;
+        let kind = metric.kind;
+        let description = metric.description.as_deref().unwrap_or("");
+        let unit = metric.unit.as_deref().unwrap_or("");
+        // Metric value types were already validated while resolving instruments.
+        let representation = match numeric_kind(ty) {
+            Some(NumericKind::UnsignedInt) => format_ident!("U64"),
+            Some(NumericKind::SignedInt) => format_ident!("I64"),
+            Some(NumericKind::Float) => format_ident!("F64"),
+            None => unreachable!("instrument value types are validated before code generation"),
+        };
+        metrics.push(quote! {
+            ::observed::metadata::MetricDescription::new(
+                #name, ::observed::metadata::InstrumentKind::#kind, #description, #unit,
+            ).with_value_kind(::observed::metadata::MetricValueKind::#representation),
+        });
+        let value = match strip_type_wrappers(ty) {
+            syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "usize") => {
+                quote! { self.#field_ident as u64 }
+            }
+            syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "isize") => {
+                quote! { self.#field_ident as i64 }
+            }
+            _ => quote! { ::core::convert::From::from(self.#field_ident) },
+        };
+        arms.push(quote! {
+            #slot => ::core::option::Option::Some(::observed::metadata::MetricValue::#representation(#value)),
+        });
+    }
+    if metrics.is_empty() {
+        return quote! {};
+    }
+    let reader = if arms.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            fn metric_value(&self, slot: usize) -> ::core::option::Option<::observed::metadata::MetricValue> {
+                match slot {
+                    #(#arms)*
+                    _ => ::core::option::Option::None,
+                }
+            }
+        }
+    };
+    quote! {
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[#(#metrics)*];
+        #reader
     }
 }
 

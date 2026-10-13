@@ -24,7 +24,7 @@ use std::borrow::Cow;
 use std::ops::ControlFlow;
 
 use crate::Sink;
-use crate::metadata::EventDescription;
+use crate::metadata::{EventDescription, MetricValue};
 use crate::processing::{FieldVisitorFn, IntermediateEvent};
 
 /// Adaptor for foreign event types that cannot implement [`Event`](crate::Event) directly.
@@ -86,6 +86,15 @@ pub trait DynEvent: Send + Sync {
     /// [`LogDescription`](crate::metadata::LogDescription) returned here, so
     /// this one statement decides both routing and the exported level.
     fn description(&self) -> EventDescription;
+
+    /// Reads an event-local numeric metric slot without visiting generic fields.
+    ///
+    /// Foreign adapters need not support typed metric bindings. Those that do
+    /// must expose the same slots and type identity as the registered event.
+    #[must_use]
+    fn metric_value(&self, _slot: usize) -> Option<MetricValue> {
+        None
+    }
 }
 
 /// Emits a pre-constructed [`DynEvent`] through the given [`Sink`].

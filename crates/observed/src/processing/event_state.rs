@@ -8,7 +8,7 @@ use std::ops::ControlFlow;
 
 use crate::Event;
 use crate::interop::DynEvent;
-use crate::metadata::{EventDescription, SourceLocation};
+use crate::metadata::{EventDescription, MetricValue, SourceLocation};
 use crate::processing::FieldVisitorFn;
 
 /// An intermediate event state that can be either a lazy typed event or a pre-constructed dynamic
@@ -131,6 +131,13 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
         match self {
             Self::Typed(_, _) => T::DESCRIPTION,
             Self::Dyn(event) => event.description(),
+        }
+    }
+
+    fn metric_value(&self, slot: usize) -> Option<MetricValue> {
+        match self {
+            Self::Typed(event, _) => event.metric_value(slot),
+            Self::Dyn(event) => event.metric_value(slot),
         }
     }
 }

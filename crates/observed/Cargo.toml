@@ -68,6 +68,10 @@ name = "observed_benchmarks"
 harness = false
 required-features = ["test-util"]
 
+[[bench]]
+name = "observed_counters"
+harness = false
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

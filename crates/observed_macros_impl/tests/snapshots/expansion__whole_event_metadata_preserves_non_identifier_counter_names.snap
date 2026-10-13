@@ -1,0 +1,52 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n        #[counter(name = \"!\")]\n        struct Request;\n        \"#,)"
+---
+struct Request;
+const _: () = {
+    impl ::observed::Event for Request {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "!",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "!",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0 => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(1_u64),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
+        }
+    }
+};

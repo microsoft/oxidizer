@@ -17,12 +17,13 @@
 
 use std::borrow::Cow;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::time::SystemTime;
+
+use performables::arc::Arc;
 
 use crate::enrichment::{EnrichmentNode, OptEnrichmentNode};
 use crate::interop::DynEvent;
-use crate::metadata::{EventDescription, FieldDescriptor, LogDescription, LogFieldEntry, MetricFieldEntry};
+use crate::metadata::{EventDescription, FieldDescriptor, LogDescription, LogFieldEntry, MetricFieldEntry, MetricValue};
 use crate::processing::FieldValueFn;
 use crate::{Severity, SinkId, Value};
 
@@ -221,6 +222,16 @@ impl<'a> EventView<'a> {
     #[inline]
     pub fn description(&self) -> EventDescription {
         self.event.description()
+    }
+
+    /// Reads a generated numeric measurement without enumerating event fields.
+    ///
+    /// The slot is an index in [`Event::METRICS`](crate::Event::METRICS). This access
+    /// performs no conversion through [`Value`], redaction, or enrichment.
+    #[must_use]
+    #[inline]
+    pub fn metric_value(&self, slot: usize) -> Option<MetricValue> {
+        self.event.metric_value(slot)
     }
 
     /// Visits event fields lazily.

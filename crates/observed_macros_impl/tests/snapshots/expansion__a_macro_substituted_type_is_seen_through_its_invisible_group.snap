@@ -79,5 +79,29 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
+            ::observed::metadata::MetricDescription::new(
+                    "macro.built",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                )
+                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+        ];
+        fn metric_value(
+            &self,
+            slot: usize,
+        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
+            match slot {
+                0usize => {
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValue::U64(
+                            ::core::convert::From::from(self.hits),
+                        ),
+                    )
+                }
+                _ => ::core::option::Option::None,
+            }
+        }
     }
 };

@@ -1,0 +1,457 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! The only module that lends pointers to Perflib.
+//!
+//! Perflib performs ordinary reads of reference counters, so publishing a
+//! pointer to an `AtomicU64` and writing it concurrently is not our safety model.
+//! Emission only modifies separate atomic totals. On `PERF_COLLECT_START` we
+//! copy totals to native cells before collection and freeze those cells until
+//! all matching `PERF_COLLECT_END` notifications. Overlapping collections share
+//! the snapshot. The documented callback contract is the synchronization
+//! boundary: <https://learn.microsoft.com/windows/win32/api/perflib/nc-perflib-perflibrequest>
+//!
+//! PERFLIBREQUEST has no user context or provider identity. Consequently one
+//! image-local registry gates all providers using this callback. Callbacks do
+//! not wait for locks, allocate snapshots, emit `observed` events, or call user code. Any callback
+//! failure permanently freezes snapshots; flush reports it. Keeping a frozen
+//! value is preferable to allowing a write during a potentially active read.
+
+use std::cell::UnsafeCell;
+use std::ffi::c_void;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+use performables::arc::Arc;
+use performables::sync::mutex::Mutex;
+use windows_sys::Win32::Foundation::{ERROR_BUSY, ERROR_INVALID_DATA, ERROR_SUCCESS, ERROR_UNHANDLED_EXCEPTION, GetLastError, HANDLE};
+use windows_sys::Win32::System::Performance::{
+    PERF_ATTRIB_BY_REFERENCE, PERF_COLLECT_END, PERF_COLLECT_START, PERF_COUNTER_INFO, PERF_COUNTERSET_INFO, PERF_COUNTERSET_INSTANCE,
+    PERF_COUNTERSET_MULTI_INSTANCES, PERF_DETAIL_NOVICE, PERF_NUMBER_DECIMAL, PERF_SIZE_LARGE, PerfCreateInstance, PerfDeleteInstance,
+    PerfSetCounterRefValue, PerfSetCounterSetInfo, PerfStartProvider, PerfStopProvider,
+};
+use windows_sys::core::GUID;
+
+use crate::Error;
+use crate::error::ErrorKind;
+use crate::schema::CounterSchema;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod consumer_tests;
+
+// A bounded, non-blocking callback must finish within Perflib's one-second
+// deadline. Limit total snapshot work across all active providers in this image.
+const MAX_PUBLISHED_COUNTERS: usize = 4096;
+// winperf.h's PERF_COUNTER_LARGE_RAWCOUNT is PERF_SIZE_LARGE | PERF_TYPE_NUMBER |
+// PERF_NUMBER_DECIMAL | PERF_DISPLAY_NO_SUFFIX; the last two omitted flags are 0.
+const COUNTER_TYPE: u32 = PERF_SIZE_LARGE | PERF_NUMBER_DECIMAL;
+
+struct CounterStorage {
+    totals: Arc<[AtomicU64]>,
+    published: Box<[UnsafeCell<u64>]>,
+}
+
+// SAFETY: published cells are only written under REGISTRY with readers == 0,
+// before a successful collection-start callback returns. They remain unchanged
+// through the last collection-end callback. Emission never touches them. All
+// pointers remain valid until the provider has been stopped; the registry owns
+// a strong reference even if cleanup fails.
+unsafe impl Sync for CounterStorage {}
+
+#[derive(Default)]
+struct Registry {
+    providers: Vec<Arc<CounterStorage>>,
+    readers: u32,
+}
+
+// These globals cannot be replaced with per-provider state: the Windows
+// callback ABI does not carry a context. Nothing here is shared across DLLs.
+static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
+    providers: Vec::new(),
+    readers: 0,
+});
+static COLLECTION_FAULT: AtomicU32 = AtomicU32::new(ERROR_SUCCESS);
+
+#[cfg(test)]
+pub(crate) static TEST_NATIVE: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_snapshot(provider: &Provider, schema: &CounterSchema) -> Vec<u64> {
+    let _collection = tests::Collection::begin();
+    tests::registered_values(provider, schema)
+}
+
+fn fault(code: u32) -> u32 {
+    // Retain the first failure without allocating or locking in an FFI callback.
+    let _previous = COLLECTION_FAULT.compare_exchange(ERROR_SUCCESS, code, Ordering::AcqRel, Ordering::Acquire);
+    code
+}
+
+fn collect(request: u32) -> u32 {
+    if request != PERF_COLLECT_START && request != PERF_COLLECT_END {
+        return ERROR_SUCCESS;
+    }
+    let existing = COLLECTION_FAULT.load(Ordering::Acquire);
+    if existing != ERROR_SUCCESS {
+        return existing;
+    }
+    let mut registry = match REGISTRY.try_lock_result() {
+        Ok(Some(registry)) => registry,
+        Ok(None) => return fault(ERROR_BUSY),
+        Err(_) => return fault(ERROR_INVALID_DATA),
+    };
+    if COLLECTION_FAULT.load(Ordering::Acquire) != ERROR_SUCCESS {
+        return COLLECTION_FAULT.load(Ordering::Acquire);
+    }
+    if request == PERF_COLLECT_END {
+        let Some(readers) = registry.readers.checked_sub(1) else {
+            return fault(ERROR_INVALID_DATA);
+        };
+        registry.readers = readers;
+        return ERROR_SUCCESS;
+    }
+    let Some(readers) = registry.readers.checked_add(1) else {
+        return fault(ERROR_INVALID_DATA);
+    };
+    if registry.readers == 0 {
+        for provider in &registry.providers {
+            for (total, published) in provider.totals.iter().zip(&provider.published) {
+                let value = total.load(Ordering::Relaxed);
+                // SAFETY: the registry lock excludes other snapshot writers.
+                // No collection is active (readers == 0), and this consumer
+                // cannot read until its collection-start callback returns.
+                unsafe { published.get().write(value) };
+            }
+        }
+    }
+    registry.readers = readers;
+    ERROR_SUCCESS
+}
+
+unsafe extern "system" fn control_callback(request: u32, _buffer: *mut c_void, _buffer_size: u32) -> u32 {
+    // Never dereference the unneeded native buffer and never unwind into Windows.
+    std::panic::catch_unwind(|| collect(request)).unwrap_or_else(|_| fault(ERROR_UNHANDLED_EXCEPTION))
+}
+
+pub(crate) struct Provider {
+    handle: HANDLE,
+    instance: Option<NonNull<PERF_COUNTERSET_INSTANCE>>,
+    storage: Arc<CounterStorage>,
+}
+
+// SAFETY: handles/pointers are owned, not thread-affine, and are only used by
+// startup or exclusive Drop. Shared access only reads COLLECTION_FAULT. Storage
+// synchronization and lifetime are established above independently of handles.
+unsafe impl Send for Provider {}
+// SAFETY: sharing Provider cannot access instance memory or mutate the handles.
+// Counter emission updates separate AtomicU64 values, not native instance data.
+unsafe impl Sync for Provider {}
+
+impl Provider {
+    pub(crate) fn start(schema: &CounterSchema, name: &str, totals: Arc<[AtomicU64]>) -> Result<Self, Error> {
+        let mut template = template(schema)?;
+        let storage = Arc::new(CounterStorage {
+            published: (0..totals.len()).map(|_| UnsafeCell::new(0)).collect(),
+            totals,
+        });
+        {
+            let mut registry = REGISTRY.lock_result().map_err(|_poisoned| Error::from(ErrorKind::Poisoned))?;
+            check_collection()?;
+            let count = registry.providers.iter().map(|provider| provider.published.len()).sum::<usize>();
+            if count + storage.published.len() > MAX_PUBLISHED_COUNTERS {
+                return Err(Error::configuration("too many native counters active in this executable image"));
+            }
+            registry.providers.push(Arc::clone(&storage));
+        }
+
+        let provider_guid = guid(schema.provider_id);
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: the GUID and output handle are valid for the call. The static
+        // callback outlives the provider and cannot unwind.
+        let code = unsafe { PerfStartProvider(&raw const provider_guid, Some(control_callback), &raw mut handle) };
+        if let Err(error) = status("PerfStartProvider", code) {
+            remove_storage(&storage);
+            return Err(error);
+        }
+        let mut provider = Self {
+            handle,
+            instance: None,
+            storage,
+        };
+        let template_size =
+            u32::try_from(template.len() * size_of::<u64>()).map_err(|_overflow| Error::configuration("native template exceeds ULONG"))?;
+        // SAFETY: template has the native header followed by NumCounters native
+        // records, eight-byte alignment, and exactly template_size initialized bytes.
+        let code = unsafe { PerfSetCounterSetInfo(provider.handle, template.as_mut_ptr().cast(), template_size) };
+        status("PerfSetCounterSetInfo", code)?;
+
+        let counter_set_guid = guid(schema.counter_set_id);
+        let name = name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        // SAFETY: the provider is live and name is validated, terminated UTF-16.
+        // The counter-set GUID matches the registered template.
+        let instance = unsafe { PerfCreateInstance(provider.handle, &raw const counter_set_guid, name.as_ptr(), std::process::id()) };
+        provider.instance = Some(NonNull::new(instance).ok_or_else(|| {
+            // SAFETY: GetLastError immediately follows failed PerfCreateInstance
+            // on this thread, with no intervening Windows call.
+            let code = unsafe { GetLastError() };
+            Error::from(ErrorKind::Windows {
+                operation: "PerfCreateInstance",
+                code,
+            })
+        })?);
+        for counter in &schema.counters {
+            let address = provider.storage.published[counter.source_index].get().cast::<c_void>();
+            // SAFETY: instance belongs to this provider, counter.id is in its
+            // template, and address is stable eight-byte u64 storage. Registration
+            // occurs once; the registry retains storage through cleanup.
+            let code = unsafe { PerfSetCounterRefValue(provider.handle, instance, counter.id, address) };
+            status("PerfSetCounterRefValue", code)?;
+        }
+        Ok(provider)
+    }
+
+    #[expect(
+        clippy::unused_self,
+        reason = "collection status applies to every live provider sharing the callback ABI"
+    )]
+    pub(crate) fn check(&self) -> Result<(), Error> {
+        check_collection()
+    }
+}
+
+impl Drop for Provider {
+    fn drop(&mut self) {
+        if let Some(instance) = self.instance {
+            // SAFETY: Drop exclusively owns this live provider and its instance.
+            // Backing storage is retained in both self and REGISTRY.
+            let code = unsafe { PerfDeleteInstance(self.handle, instance.as_ptr()) };
+            if code != ERROR_SUCCESS {
+                tracing::error!(code, "observed_perf_counters.instance.delete_failed");
+            }
+        }
+        // SAFETY: self exclusively owns the provider handle. PerfStopProvider
+        // removes registration and frees associated native resources; storage
+        // cannot be released before this call succeeds.
+        let code = unsafe { PerfStopProvider(self.handle) };
+        if code == ERROR_SUCCESS {
+            remove_storage(&self.storage);
+        } else {
+            // REGISTRY retains the storage permanently: a cleanup error must
+            // never turn a potentially registered native reference into a UAF.
+            tracing::error!(code, "observed_perf_counters.provider.stop_failed_storage_retained");
+        }
+    }
+}
+
+pub(crate) fn check_collection() -> Result<(), Error> {
+    let code = COLLECTION_FAULT.load(Ordering::Acquire);
+    if code == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(ErrorKind::Collection { code }.into())
+    }
+}
+
+fn remove_storage(storage: &Arc<CounterStorage>) {
+    let mut registry = match REGISTRY.lock_result() {
+        Ok(registry) => registry,
+        Err(poisoned) => {
+            tracing::error!("observed_perf_counters.registry.poisoned");
+            poisoned.into_inner()
+        }
+    };
+    registry.providers.retain(|candidate| !Arc::ptr_eq(candidate, storage));
+}
+
+fn status(operation: &'static str, code: u32) -> Result<(), Error> {
+    if code == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(ErrorKind::Windows { operation, code }.into())
+    }
+}
+
+fn guid(value: uuid::Uuid) -> GUID {
+    GUID::from_u128(value.as_u128())
+}
+
+fn template(schema: &CounterSchema) -> Result<Vec<u64>, Error> {
+    let size = size_of::<PERF_COUNTERSET_INFO>() + schema.counters.len() * size_of::<PERF_COUNTER_INFO>();
+    if size_of::<PERF_COUNTERSET_INSTANCE>() != 32 || !size.is_multiple_of(size_of::<u64>()) {
+        return Err(Error::configuration("unexpected Windows performance-counter ABI layout"));
+    }
+    let count = u32::try_from(schema.counters.len()).map_err(|_overflow| Error::configuration("native counter count exceeds ULONG"))?;
+    let mut buffer = vec![0_u64; size / size_of::<u64>()];
+    let header = PERF_COUNTERSET_INFO {
+        CounterSetGuid: guid(schema.counter_set_id),
+        ProviderGuid: guid(schema.provider_id),
+        NumCounters: count,
+        InstanceType: PERF_COUNTERSET_MULTI_INSTANCES,
+    };
+    let base = buffer.as_mut_ptr();
+    // SAFETY: buffer is sized and aligned for the native header. All fields are
+    // initialized, and the header is copied into otherwise zeroed storage.
+    unsafe { base.cast::<PERF_COUNTERSET_INFO>().write(header) };
+    for (index, counter) in schema.counters.iter().enumerate() {
+        let record = PERF_COUNTER_INFO {
+            CounterId: counter.id,
+            Type: COUNTER_TYPE,
+            Attrib: PERF_ATTRIB_BY_REFERENCE,
+            Size: 8,
+            DetailLevel: PERF_DETAIL_NOVICE,
+            Scale: 0,
+            // CTRPP emits zero placeholders. Perflib assigns instance-relative
+            // offsets from these ordered eight-byte slots during registration.
+            Offset: 0,
+        };
+        let offset = size_of::<PERF_COUNTERSET_INFO>() + index * size_of::<PERF_COUNTER_INFO>();
+        // SAFETY: offset selects one of count records within the allocation.
+        // The header size and record stride preserve native eight-byte alignment.
+        let destination = unsafe { base.add(offset / size_of::<u64>()) };
+        // SAFETY: destination is aligned native record storage, valid for write.
+        unsafe { destination.cast::<PERF_COUNTER_INFO>().write(record) };
+    }
+    Ok(buffer)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use observed::metadata::InstrumentKind;
+
+    use super::*;
+    use crate::schema::CounterSpec;
+
+    pub(super) struct Collection;
+
+    impl Collection {
+        pub(super) fn begin() -> Self {
+            assert_eq!(collect(PERF_COLLECT_START), ERROR_SUCCESS);
+            Self
+        }
+    }
+
+    impl Drop for Collection {
+        fn drop(&mut self) {
+            assert_eq!(collect(PERF_COLLECT_END), ERROR_SUCCESS);
+        }
+    }
+
+    pub(super) fn registered_values(provider: &Provider, schema: &CounterSchema) -> Vec<u64> {
+        let instance = provider.instance.unwrap().as_ptr();
+        // SAFETY: provider retains this live instance until Drop.
+        let header = unsafe { instance.read() };
+        schema
+            .counters
+            .iter()
+            .map(|counter| {
+                assert!(counter.offset + 8 <= header.dwSize);
+                let base = instance.cast::<u8>();
+                // SAFETY: instance allocation covers this aligned reference slot,
+                // verified against dwSize; instance layout is immutable after setup.
+                let slot = unsafe { base.add(counter.offset as usize) };
+                // SAFETY: the slot contains the reference registered during startup.
+                let pointer = unsafe { slot.cast::<*const u64>().read_unaligned() };
+                assert_eq!(pointer, provider.storage.published[counter.source_index].get().cast_const());
+                // SAFETY: the address was checked against our owned u64 cell, and
+                // an active Collection keeps it frozen against snapshot writers.
+                unsafe { pointer.read() }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn registered_native_references_are_frozen_through_overlapping_collections() {
+        let _native_tests = TEST_NATIVE.lock();
+        let schema = CounterSchema::new(
+            "Native snapshots",
+            "worker",
+            &[
+                CounterSpec {
+                    name: "Bytes".into(),
+                    unit: "By".into(),
+                    description: String::new(),
+                    source_index: 0,
+                    kind: InstrumentKind::Counter,
+                },
+                CounterSpec {
+                    name: "Requests".into(),
+                    unit: String::new(),
+                    description: String::new(),
+                    source_index: 1,
+                    kind: InstrumentKind::Counter,
+                },
+            ],
+        )
+        .unwrap();
+        let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(4096), AtomicU64::new(7)].into();
+        let provider = Provider::start(&schema, "worker-中文🦀", Arc::clone(&totals)).unwrap();
+        let first = Collection::begin();
+        let expected = schema
+            .counters
+            .iter()
+            .map(|counter| totals[counter.source_index].load(Ordering::Relaxed))
+            .collect::<Vec<_>>();
+        assert_eq!(registered_values(&provider, &schema), expected);
+        totals[0].store(8192, Ordering::Relaxed);
+        totals[1].store(9, Ordering::Relaxed);
+        let second = Collection::begin();
+        assert_eq!(registered_values(&provider, &schema), expected);
+        drop(first);
+        assert_eq!(registered_values(&provider, &schema), expected);
+        drop(second);
+        let next = Collection::begin();
+        let updated = schema
+            .counters
+            .iter()
+            .map(|counter| totals[counter.source_index].load(Ordering::Relaxed))
+            .collect::<Vec<_>>();
+        assert_eq!(registered_values(&provider, &schema), updated);
+        drop(next);
+        drop(provider);
+        let restarted = Provider::start(&schema, "worker", totals).unwrap();
+        drop(restarted);
+    }
+
+    #[test]
+    fn native_template_matches_ctrpp_u64_reference_records() {
+        let schema = CounterSchema::new(
+            "Layout test",
+            "worker",
+            &[
+                CounterSpec {
+                    name: "Bytes".into(),
+                    unit: "By".into(),
+                    description: String::new(),
+                    source_index: 0,
+                    kind: InstrumentKind::Counter,
+                },
+                CounterSpec {
+                    name: "Requests".into(),
+                    unit: String::new(),
+                    description: String::new(),
+                    source_index: 1,
+                    kind: InstrumentKind::Counter,
+                },
+            ],
+        )
+        .unwrap();
+        let buffer = template(&schema).unwrap();
+        let base = buffer.as_ptr();
+        // SAFETY: template produced an aligned, initialized native header.
+        let header = unsafe { base.cast::<PERF_COUNTERSET_INFO>().read() };
+        assert_eq!(header.NumCounters, 2);
+        for (index, counter) in schema.counters.iter().enumerate() {
+            let offset = size_of::<PERF_COUNTERSET_INFO>() + index * size_of::<PERF_COUNTER_INFO>();
+            // SAFETY: offset identifies an initialized record in this buffer.
+            let address = unsafe { base.add(offset / size_of::<u64>()) };
+            // SAFETY: address is aligned and points at one complete native record.
+            let record = unsafe { address.cast::<PERF_COUNTER_INFO>().read() };
+            assert_eq!(
+                (record.CounterId, record.Type, record.Attrib, record.Size, record.Offset),
+                (counter.id, COUNTER_TYPE, PERF_ATTRIB_BY_REFERENCE, 8, 0)
+            );
+        }
+    }
+}
