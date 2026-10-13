@@ -163,10 +163,12 @@ impl HttpClientBuilder {
     ///
     /// # Bounds
     ///
-    /// The output-size limit inherits the selected compression format's
-    /// streaming default, while the number of concatenated streams is capped at
-    /// 1,024 per decompression stage. Explicit bounds configured through
-    /// `options` apply while reading the body, even without buffering it.
+    /// Decompressed output is capped at 64 MiB by default, while the number of
+    /// concatenated streams is capped at 1,024 per decompression stage.
+    /// Explicit bounds configured through `options` apply while reading the
+    /// body, even without buffering it. Pass `None` to
+    /// [`max_output_len`][DecompressionOptions::max_output_len] to explicitly
+    /// remove the output-size bound.
     /// Exceeding a decompression bound fails the body with the
     /// `compression_limit_exceeded` error label.
     ///

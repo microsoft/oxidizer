@@ -92,9 +92,9 @@ impl DecompressionFormat {
 /// Configures automatic response decompression and its resource limits.
 ///
 /// Decompression is off until [`formats`][Self::formats] names a format. The
-/// output limit inherits the selected compression format's default unless
-/// explicitly configured here. The stream count defaults to 1,024 so empty
-/// concatenated members cannot consume unbounded CPU.
+/// client accepts at most 64 MiB of decompressed output by default. The stream
+/// count defaults to 1,024 so empty concatenated members cannot consume
+/// unbounded CPU.
 /// Configured bounds apply while reading the body, including when streaming
 /// without buffering it.
 ///
@@ -135,8 +135,8 @@ enum StreamLimit {
 }
 
 impl DecompressionOptions {
-    /// Creates options with no enabled formats, an inherited output limit, and
-    /// the default 1,024-stream bound.
+    /// Creates options with no enabled formats, the default 64 MiB effective
+    /// output limit, and the default 1,024-stream bound.
     ///
     /// This is what [`Default`] returns.
     #[must_use]
@@ -169,10 +169,11 @@ impl DecompressionOptions {
 
     /// Bounds the total decompressed output, in bytes.
     ///
-    /// Inherits the compression format's limit when this setter is not called. Pass a byte count
-    /// or `Some(count)` to set a bound, or `None` to explicitly remove the output-size
-    /// bound. An explicit bound applies even when the caller streams the body into
-    /// a file or another service without buffering it in memory.
+    /// The client applies a 64 MiB bound when this setter is not called. Pass a
+    /// byte count or `Some(count)` to replace it, or `None` to explicitly remove
+    /// the output-size bound. An explicit bound applies even when the caller
+    /// streams the body into a file or another service without buffering it in
+    /// memory.
     ///
     /// This is independent of [`HttpBodyOptions::buffer_limit`][super::HttpBodyOptions::buffer_limit],
     /// which limits how much a body-buffering operation may retain.
