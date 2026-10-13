@@ -173,6 +173,14 @@
 //! * A hot-path field such as `Arc<Mutex<_>>`, `Arc<RwLock<_>>`, a `parking_lot` or
 //!   `tokio::sync` lock, `DashMap`, or another shared interior-mutability cell.
 //!
+//! These three signs mark a *suspect*, not a verdict. The trait deliberately permits a no-op
+//! [`relocate`](crate::ThreadAware::relocate) when nothing the type owns is location-dependent, and
+//! some state is process-wide by design. Before labeling the shape an anti-pattern, confirm the
+//! sharing is not intentional: a deliberate, documented process-wide share - an
+//! [`Arc<_, PerProcess>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html) or a
+//! `relocate` whose comment records the decision - is the reviewer-checklist exemption below, not a
+//! defect.
+//!
 //! In a thread-per-core runtime, `relocate` is the hook that lets a value split shared state so
 //! reads and writes stay core-local. A no-op `relocate` leaves every worker contending on one lock -
 //! the exact contention thread-awareness exists to remove - and nothing warns you, because the type
