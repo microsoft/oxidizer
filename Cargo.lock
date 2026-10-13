@@ -308,6 +308,10 @@ dependencies = [
 [[package]]
 name = "arty_io_core"
 version = "0.2.0"
+dependencies = [
+ "static_assertions",
+ "thread_aware_core",
+]
 
 [[package]]
 name = "arty_macros"
@@ -4667,9 +4671,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.17"
+version = "0.11.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
+checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
 dependencies = [
  "aws-lc-rs",
  "bytes",
