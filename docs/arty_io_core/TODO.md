@@ -41,13 +41,6 @@ markers, including the conditional behavior of `DriverInstance<D>`.
 promise unwind-safety markers. Keep broad source acceptance unless there is a
 concrete need to narrow it.
 
-## Keep `DriverError` independent of `ohno`
-
-Keep the current small `DriverError` representation for this contract. Do not
-add the `ohno` dependency for enrichment or backtrace capture unless a later
-consumer demonstrates that the added diagnostic state belongs at this boundary.
-Callers can wrap `DriverError` when they need application-level enrichment.
-
 ## Move shutdown to `Drop`
 
 Consider removing `Driver::shutdown` and requiring each driver to drain its
