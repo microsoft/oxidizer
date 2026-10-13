@@ -64,6 +64,8 @@ mod thread;
 use std::alloc::{GlobalAlloc, Layout};
 
 /// A stateless handle to the process's allocator.
+///
+/// For platform and deployment requirements, see [`rallocator!`].
 #[derive(Debug)]
 pub struct Rallocator;
 
@@ -109,6 +111,14 @@ unsafe fn reallocate_core(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut
 }
 
 /// Defines this crate's allocator as the executable's global allocator.
+///
+/// # Deployment requirements
+///
+/// Supports x86-64 and ARM64 on Linux with 4-KiB kernel pages, and Windows 10
+/// version 1809 or later with MSVC. This allocator is non-hardened.
+///
+/// Use a single statically linked allocator instance. Allocations must be freed
+/// by the instance that created them, not by independently linked copies in other DLLs.
 #[macro_export]
 macro_rules! rallocator {
     () => {
