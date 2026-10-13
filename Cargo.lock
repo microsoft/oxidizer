@@ -310,7 +310,6 @@ name = "arty_io_core"
 version = "0.2.0"
 dependencies = [
  "static_assertions",
- "testing_aids",
  "thread_aware_core",
 ]
 
