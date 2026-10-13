@@ -11,7 +11,6 @@ use crate::{Driver, DriverError, DriverInstance, DriverOptions};
 /// context, clones and relocates it to every active worker, creates a driver on each worker, and
 /// completes each driver's zero-wait initialization cycle before publishing the context. Later
 /// requests reuse the registration.
-///
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// Configuration used to create the context.
     type ContextOptions;
