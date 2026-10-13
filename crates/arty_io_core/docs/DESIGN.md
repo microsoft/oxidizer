@@ -26,6 +26,8 @@ Application code uses a handle rather than calling the worker's driver directly.
 Contexts can outlive drivers. The runtime calls each driver with exclusive
 access on its owning worker; contexts decide whether workers share queues, memory, or
 threads. Context relocation is an optimization, not a correctness requirement.
+`IoContext` also creates worker-local drivers. Keeping those responsibilities on
+one type avoids a separate provider construction and relocation contract.
 
 ## A walkthrough: two libraries, one worker
 
@@ -75,6 +77,8 @@ must remain safe even when shutdown fails.
 
 Normal cycles have stopped, so shutdown must progress without another driver
 on the same worker. The runtime continues cleanup after an error.
+The fallible result lets the runtime report incomplete cleanup consistently,
+even though it does not stop cleanup of the remaining drivers.
 
 ## Make failures explicit
 
@@ -83,6 +87,9 @@ during normal cycles shut down the worker's drivers. Shutdown failure returns
 `DriverError` without relaxing memory safety.
 
 These are infrastructure failures, distinct from individual I/O errors.
+Drivers perform any implementation-specific retries before returning an error;
+the runtime treats a returned error as terminal and does not classify it for
+recovery.
 
 ## Deliberate boundaries and trade-offs
 
@@ -97,6 +104,10 @@ methods or constructor arguments are compatibility commitments.
 Registries, type erasure, thread placement, cross-worker registration atomicity,
 shutdown ordering, memory pools, clocks, and telemetry remain outside this
 initial agreement.
+
+In particular, consuming shutdown is not available through `dyn Driver`.
+Runtimes that erase driver types can use a private owning adapter rather than
+making runtime storage part of this public contract.
 
 ## Potential improvement: driver awareness
 

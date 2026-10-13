@@ -7,6 +7,9 @@ use std::fmt;
 /// A failure to initialize, host, service, or shut down an I/O driver.
 ///
 /// An individual failed I/O operation belongs in that operation's result, not here.
+/// Drivers perform implementation-specific retries before returning this error. The runtime
+/// treats a returned driver error as terminal and begins shutdown rather than classifying it for
+/// recovery.
 #[derive(Debug)]
 pub struct DriverError {
     kind: DriverErrorKind,

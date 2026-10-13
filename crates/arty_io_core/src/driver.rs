@@ -58,7 +58,10 @@ pub trait Driver: 'static {
     /// that native code has stopped accessing operation storage.
     ///
     /// The runtime attempts remaining drivers after an error. It may shut down secondaries before
-    /// the primary.
+    /// the primary. The result allows the runtime to report incomplete cleanup consistently.
+    ///
+    /// This consuming method is intentionally unavailable through `dyn Driver`. A runtime that
+    /// erases driver types can use a private owning adapter for storage and shutdown.
     ///
     /// # Errors
     ///
