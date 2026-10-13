@@ -351,6 +351,7 @@ pub(crate) unsafe fn usable_size(ptr: *mut u8) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::classes;
@@ -429,9 +430,10 @@ mod tests {
         let dirty = allocate(layout);
         if dirty.is_null() {
             std::alloc::handle_alloc_error(layout);
+        } else {
+            // SAFETY: This checked, live allocation owns every byte in the layout.
+            unsafe { dirty.write_bytes(0x5a, layout.size()) };
         }
-        // SAFETY: This checked, live allocation owns every byte in the layout.
-        unsafe { dirty.write_bytes(0x5a, layout.size()) };
         crate::hal::fail_next(crate::hal::Failure::Decommit);
         // SAFETY: The initialized allocation is uniquely owned and retired once.
         unsafe { deallocate(dirty) };
