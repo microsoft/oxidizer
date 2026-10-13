@@ -156,7 +156,7 @@ fn driver_error_can_be_created_from_message_and_source() {
     assert!(error.source().is_none());
 
     let error = DriverError::from_source(SentinelError);
-    assert_eq!(error.to_string(), "i/o driver failed");
+    assert_eq!(error.to_string(), "sentinel");
     assert!(error.source().is_some_and(<dyn Error>::is::<SentinelError>));
 }
 

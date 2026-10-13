@@ -27,7 +27,7 @@ impl DriverError {
         }
     }
 
-    /// Creates an error that exposes `source` through [`Error::source`].
+    /// Creates an error that displays `source` and exposes it through [`Error::source`].
     #[must_use]
     pub fn from_source(source: impl Error + Send + Sync + 'static) -> Self {
         Self {
@@ -40,7 +40,7 @@ impl fmt::Display for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             DriverErrorKind::Message(message) => f.write_str(message),
-            DriverErrorKind::Source(_) => f.write_str("i/o driver failed"),
+            DriverErrorKind::Source(source) => fmt::Display::fmt(source, f),
         }
     }
 }
