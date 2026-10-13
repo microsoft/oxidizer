@@ -31,6 +31,23 @@ Before changing the API, settle:
 `Thread` and `ThreadAware` are part of this crate's public API. Stabilize those
 types and their relocation contract before stabilizing `arty_io_core`.
 
+## Review unwind-safety contracts
+
+Decide which public value types should promise `UnwindSafe` and
+`RefUnwindSafe` before stabilization. Add contract assertions for the intended
+markers, including the conditional behavior of `DriverInstance<D>`.
+
+`DriverError` currently accepts any `Error + Send + Sync` source, so it does not
+promise unwind-safety markers. Keep broad source acceptance unless there is a
+concrete need to narrow it.
+
+## Keep `DriverError` independent of `ohno`
+
+Keep the current small `DriverError` representation for this contract. Do not
+add the `ohno` dependency for enrichment or backtrace capture unless a later
+consumer demonstrates that the added diagnostic state belongs at this boundary.
+Callers can wrap `DriverError` when they need application-level enrichment.
+
 ## Move shutdown to `Drop`
 
 Consider removing `Driver::shutdown` and requiring each driver to drain its
