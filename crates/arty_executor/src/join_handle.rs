@@ -53,11 +53,11 @@ impl Error for JoinError {}
 
 /// Owns pooled result storage whose detached slots remain valid through their endpoints.
 #[derive(Clone, Debug)]
-pub(crate) struct JoinHandleStorage {
+pub(crate) struct JoinEventLake {
     events: LocalEventLake,
 }
 
-impl JoinHandleStorage {
+impl JoinEventLake {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {

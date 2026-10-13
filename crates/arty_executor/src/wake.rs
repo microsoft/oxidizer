@@ -92,7 +92,7 @@ pub(crate) struct WakeSignal {
 }
 
 impl WakeSignal {
-    pub(crate) fn new_pooled(shared: Arc<WakeShared>, task_ref: TaskRef) -> Self {
+    pub(crate) fn new(shared: Arc<WakeShared>, task_ref: TaskRef) -> Self {
         Self {
             task_ref,
             shared,
@@ -106,14 +106,14 @@ impl WakeSignal {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(
+    pub(crate) fn new_with_parts(
         awakened_queue: AwakenedQueue,
         probe_embedded_wake_signals: Arc<AtomicBool>,
         parent_waker: Waker,
         task_ref: TaskRef,
     ) -> Self {
         let shared = Arc::new(WakeShared::new(awakened_queue, probe_embedded_wake_signals, parent_waker));
-        Self::new_pooled(shared, task_ref)
+        Self::new(shared, task_ref)
     }
 
     /// Creates a fake wake signal that is not connected to an executor. This can be useful
@@ -124,7 +124,7 @@ impl WakeSignal {
         // This is fine because `WakeSignal` only uses the `TaskRef`, not the task behind it.
         let fake_task_ref = unsafe { TaskRef::fake() };
 
-        Self::new(
+        Self::new_with_parts(
             Arc::new(Mutex::new(VecDeque::new())),
             Arc::new(AtomicBool::new(false)),
             Waker::noop().clone(),
@@ -621,7 +621,7 @@ mod tests {
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(10)));
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Waker::noop().clone(),
@@ -660,7 +660,7 @@ mod tests {
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::new(AtomicBool::new(false)),
             Waker::noop().clone(),
@@ -692,7 +692,7 @@ mod tests {
         let fake_task_ref = unsafe { TaskRef::fake() };
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Waker::noop().clone(),
@@ -724,7 +724,7 @@ mod tests {
             waker_states: Mutex::new(Pool::builder().chunk_size(1).max_chunks(1).build()),
         });
         let retained = {
-            let signal = pin!(WakeSignal::new_pooled(Arc::clone(&shared), fake_task_ref));
+            let signal = pin!(WakeSignal::new(Arc::clone(&shared), fake_task_ref));
             // SAFETY: The signal remains pinned until the clone owns independent state.
             unsafe { signal.as_ref().waker() }
         };
@@ -835,7 +835,7 @@ mod tests {
         // We hold the lock - the signal cannot use the set.
         let awakened_set_lock_guard = awakened_queue.lock().unwrap();
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Arc::clone(&parent_waker).into(),
@@ -872,7 +872,7 @@ mod tests {
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
         let parent_waker = Arc::new(TestWaker::new());
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Arc::clone(&parent_waker).into(),
@@ -910,7 +910,7 @@ mod tests {
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
         let parent_waker = Arc::new(TestWaker::new());
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Arc::clone(&parent_waker).into(),
@@ -943,7 +943,7 @@ mod tests {
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(10)));
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Waker::noop().clone(),
@@ -1004,7 +1004,7 @@ mod tests {
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
 
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::clone(&probe_embedded_wake_signals),
             Waker::noop().clone(),
@@ -1034,7 +1034,7 @@ mod tests {
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
         let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
-        let signal = pin!(WakeSignal::new(
+        let signal = pin!(WakeSignal::new_with_parts(
             Arc::clone(&awakened_queue),
             Arc::new(AtomicBool::new(false)),
             Waker::from(Arc::new(PanicWake)),

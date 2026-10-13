@@ -3,7 +3,8 @@
 
 //! Functionality for testing, examples and benchmarks.
 //!
-//! Publicly exposed via the `test-util` Cargo feature.
+//! Supported helpers are exposed through `test-util`. Benchmark-only implementation
+//! fixtures are exposed through the internal `private-test-util` feature.
 
 #[cfg(any(test, feature = "test-util"))]
 mod functions;

@@ -281,9 +281,8 @@ where
     /// The future that will be polled by the executor to progress the task.
     future: F,
 
-    /// The result sender/receiver use pooled event storage provided by the executor, which allows
-    /// them to be allocation-free while still being safe by virtue of the executor's shutdown
-    /// process, which will not complete until all join handles have been dropped.
+    /// The result sender/receiver use pooled event storage whose detached slots are retained by
+    /// their endpoints. Join handles may therefore outlive both the task and the executor.
     result_tx: Option<PooledLocalSender<R>>,
 }
 
@@ -420,7 +419,7 @@ mod tests {
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { crate::TaskRef::fake() };
         let queue = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(1)));
-        let signal = WakeSignal::new(
+        let signal = WakeSignal::new_with_parts(
             Arc::clone(&queue),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             Waker::noop().clone(),

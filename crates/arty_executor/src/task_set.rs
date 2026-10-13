@@ -3,7 +3,7 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinHandle, JoinHandleStorage};
+use crate::{ExecutorCore, JoinEventLake, JoinHandle};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -19,14 +19,14 @@ pub struct TaskSet {
 
     // Retained independently so submissions after executor drop can still produce a valid
     // disconnected join handle.
-    join_handles: JoinHandleStorage,
+    join_events: JoinEventLake,
 }
 
 impl TaskSet {
     pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
         Self {
             core: Rc::downgrade(core),
-            join_handles: core.join_handle_storage(),
+            join_events: core.join_event_lake(),
         }
     }
 
@@ -42,7 +42,7 @@ impl TaskSet {
         R: 'static,
     {
         let Some(core) = self.core.upgrade() else {
-            return self.join_handles.disconnected();
+            return self.join_events.disconnected();
         };
 
         core.add_task(future)

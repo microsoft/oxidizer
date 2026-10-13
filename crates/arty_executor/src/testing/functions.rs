@@ -1,18 +1,29 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::VecDeque;
-use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::thread;
 
-use plurality::{Box as PoolBox, MultiPool, Pool};
 use scopeguard::{Always, ScopeGuard};
 
+use crate::{CycleOutcome, Executor};
+
+#[cfg(feature = "private-test-util")]
+use std::collections::VecDeque;
+#[cfg(feature = "private-test-util")]
+use std::pin::Pin;
+#[cfg(feature = "private-test-util")]
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "private-test-util")]
+use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "private-test-util")]
+use plurality::{Box as PoolBox, MultiPool, Pool};
+
+#[cfg(feature = "private-test-util")]
 use crate::wake::{WakeShared, WakerState};
-use crate::{CycleOutcome, Executor, TaskRef, TypeErasedTask, WakeSignal};
+#[cfg(feature = "private-test-util")]
+use crate::{TaskRef, TypeErasedTask, WakeSignal};
 
 /// Creates a new `Executor` with a scopeguard that ensures safe shutdown on drop.
 #[must_use]
@@ -28,6 +39,8 @@ pub fn new_guarded_executor(owner_waker: Waker) -> ScopeGuard<Executor, fn(Execu
 }
 
 /// Benchmark-only fixture comparing pooled wake-state churn with fresh `Arc` allocation.
+#[cfg(feature = "private-test-util")]
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct WakerStateAllocationProbe {
     pool: Pool<WakerState>,
@@ -38,6 +51,7 @@ pub struct WakerStateAllocationProbe {
     _task_storage: MultiPool,
 }
 
+#[cfg(feature = "private-test-util")]
 impl WakerStateAllocationProbe {
     /// Creates a probe and warms one pool slot so later pooled replacements reuse it.
     #[must_use]
@@ -82,12 +96,14 @@ impl WakerStateAllocationProbe {
     }
 }
 
+#[cfg(feature = "private-test-util")]
 impl Default for WakerStateAllocationProbe {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "private-test-util")]
 impl Drop for WakerStateAllocationProbe {
     #[cfg_attr(test, mutants::skip)] // Benchmark-fixture cleanup has no observable result to assert.
     fn drop(&mut self) {
@@ -100,10 +116,12 @@ impl Drop for WakerStateAllocationProbe {
     }
 }
 
+#[cfg(feature = "private-test-util")]
 struct AllocationProbeTask {
     _nonzero: u8,
 }
 
+#[cfg(feature = "private-test-util")]
 impl TypeErasedTask for AllocationProbeTask {
     fn poll(self: Pin<&Self>) -> std::task::Poll<()> {
         unreachable!("the allocation probe never polls its opaque task reference")

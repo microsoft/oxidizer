@@ -14,7 +14,7 @@ use plurality::MultiPool;
 use tick::SimpleClock;
 
 use crate::wake::WakeShared;
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, JoinHandleStorage, Task, TaskRef, WakeSignal};
+use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskRef, WakeSignal};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -54,7 +54,7 @@ struct ReentrancySafeState {
 
     /// Storage for result channels. Managed endpoints retain detached pool slots independently,
     /// allowing join handles to outlive the executor safely.
-    join_handles: JoinHandleStorage,
+    join_events: JoinEventLake,
 
     /// In shutdown mode, all tasks are cancelled and retired. New submissions produce a
     /// shutdown join error without registering a task.
@@ -122,7 +122,7 @@ impl ExecutorCore {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
                 task_storage: MultiPool::new(),
-                join_handles: JoinHandleStorage::new(),
+                join_events: JoinEventLake::new(),
                 shutting_down: false,
             }),
             exclusive: RefCell::new(ExclusiveState {
@@ -149,21 +149,21 @@ impl ExecutorCore {
         {
             let state = self.reentrancy_safe.borrow();
             if state.shutting_down {
-                return state.join_handles.disconnected();
+                return state.join_events.disconnected();
             }
         }
 
         let future = future.into_future();
         let mut state = self.reentrancy_safe.borrow_mut();
         if state.shutting_down {
-            return state.join_handles.disconnected();
+            return state.join_events.disconnected();
         }
-        let (result_tx, join_handle) = state.join_handles.rent::<R>();
+        let (result_tx, join_handle) = state.join_events.rent::<R>();
 
         let task = state.task_storage.alloc_box(Task::new(future, result_tx));
         let task_ref = TaskRef::new(task);
 
-        let wake_signal = WakeSignal::new_pooled(Arc::clone(&self.wake), task_ref);
+        let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
 
         // SAFETY: The task is alive (we own it and just created it) and we are on the thread
         // where it was created (because we just created it). The executor is the only thing that
@@ -181,8 +181,8 @@ impl ExecutorCore {
     }
 
     #[must_use]
-    pub(crate) fn join_handle_storage(&self) -> JoinHandleStorage {
-        self.reentrancy_safe.borrow().join_handles.clone()
+    pub(crate) fn join_event_lake(&self) -> JoinEventLake {
+        self.reentrancy_safe.borrow().join_events.clone()
     }
 
     #[must_use]
@@ -454,10 +454,13 @@ impl ExecutorCore {
         let inactive = &mut state_exclusive_real.inactive;
         let completed = &mut state_exclusive_real.completed;
 
-        TASKS_ABORTED_ON_SHUTDOWN.with(|x| {
-            x.batch(new.len().saturating_add(active.len().saturating_add(inactive.len())))
-                .observe_once();
-        });
+        let aborted_count = new.len().saturating_add(active.len().saturating_add(inactive.len()));
+        match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
+            Ok(Ok(())) => {}
+            Ok(Err(_access_error)) | Err(_access_error) => {
+                // Metrics TLS may already be destroyed when an executor itself lives in TLS.
+            }
+        }
 
         for task_ref in active.drain(..).chain(inactive.drain()).chain(new.drain(..)) {
             // Record ownership before calling user drop code so unwinding cannot lose the task.
@@ -504,7 +507,12 @@ impl Drop for ExecutorCore {
         }
 
         Self::drop_completed_tasks(state_exclusive, false);
-        EXECUTOR_PUSHER.with(MetricsPusher::push);
+        match EXECUTOR_PUSHER.try_with(MetricsPusher::push) {
+            Ok(()) => {}
+            Err(_access_error) => {
+                // Executor cleanup must remain safe after metrics TLS has been destroyed.
+            }
+        }
         debug_assert!(state_reentrant.task_storage.is_empty());
     }
 }

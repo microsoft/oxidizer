@@ -21,6 +21,7 @@ allowed_external_types = ["scopeguard::*"]
 
 [features]
 default = []
+private-test-util = []
 test-util = ["dep:scopeguard"]
 
 [dependencies]
@@ -54,4 +55,4 @@ workspace = true
 [[bench]]
 name = "ae_basic_operations"
 harness = false
-required-features = ["test-util"]
+required-features = ["private-test-util", "test-util"]

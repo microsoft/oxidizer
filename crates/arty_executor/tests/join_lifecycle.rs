@@ -11,6 +11,10 @@ use std::task::{Context, Poll, Waker};
 
 use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskSet};
 
+thread_local! {
+    static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
+}
+
 fn poll_once<R: 'static>(handle: &mut JoinHandle<R>) -> Poll<Result<R, JoinError>> {
     Pin::new(handle).poll(&mut Context::from_waker(Waker::noop()))
 }
@@ -49,6 +53,24 @@ fn direct_executor_drop_cancels_tasks_safely() {
     drop(executor);
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+#[test]
+fn executor_drop_during_thread_local_teardown_is_safe() {
+    std::thread::spawn(|| {
+        THREAD_LOCAL_EXECUTOR.with(|slot| {
+            assert!(slot.replace(Some(Executor::builder().build())).is_none());
+        });
+        THREAD_LOCAL_EXECUTOR.with(|slot| {
+            let executor = slot.borrow();
+            assert_eq!(
+                executor.as_ref().expect("thread-local executor is initialized").execute_cycle(),
+                CycleOutcome::Suspend
+            );
+        });
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]

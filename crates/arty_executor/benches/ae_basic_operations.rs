@@ -10,10 +10,9 @@
 //! and burst-10000 workloads. Add `--gungraun-arg '*::one_of_32'` to isolate
 //! wake consumption without measuring the large composites.
 //!
-//! Run with `cargo bench -p arty_executor --features test-util --bench ae_basic_operations
+//! Run with `cargo bench -p arty_executor --features test-util,private-test-util --bench ae_basic_operations
 //! -- --gungraun` on Linux, or select `--criterion` / `--allocations` on any platform.
-//! Use `--allocations --test` for one-shot allocation probes rather than full
-//! Criterion timing runs for every case.
+//! Allocation probes execute each declared native case once.
 //! Spawn measurements include allocator instructions, not just scheduler work.
 //! Lifecycle cases cover retired-waker no-ops and one pending-task shutdown.
 //! Allocation cases compare warmed pooled `WakerState` churn with a fresh `Arc`
@@ -77,13 +76,20 @@ struct ShutdownState {
 
 impl Drop for ShutdownState {
     fn drop(&mut self) {
-        self.handle = None;
+        let handle = self.handle.take();
         let Some(executor) = self.executor.take() else {
             return;
         };
         if !self.completed {
             finish_executor(executor);
+            return;
         }
+
+        let mut handle = handle.expect("completed shutdown benchmark retains its join handle");
+        assert!(matches!(
+            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Err(error)) if error.is_shutdown()
+        ));
     }
 }
 
@@ -345,7 +351,6 @@ fn decomposed_retired_wake_by_ref(state: &State) {
 #[metabench::benchmark(DECOMPOSED_SHUTDOWN_PENDING_ONE, DECOMPOSED, "shutdown_pending_one")]
 #[bench::pending_task(&mut shutdown_pending_state())]
 fn decomposed_shutdown_pending_one(state: &mut ShutdownState) -> CycleOutcome {
-    state.handle = None;
     let executor = state.executor.as_ref().expect("benchmark executor is present");
     executor.begin_shutdown();
     let outcome = executor.execute_cycle();
