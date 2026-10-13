@@ -155,6 +155,47 @@ fn shutdown_during_into_future_conversion_rejects_the_outer_task() {
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
 
+struct SubmitOnDrop {
+    tasks: TaskSet,
+    submitted: Rc<RefCell<Option<JoinHandle<usize>>>>,
+}
+
+impl Future for SubmitOnDrop {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
+
+impl Drop for SubmitOnDrop {
+    fn drop(&mut self) {
+        let handle = self.tasks.add(async { 42 });
+        assert!(self.submitted.replace(Some(handle)).is_none());
+    }
+}
+
+#[test]
+fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let submitted = Rc::new(RefCell::new(None));
+    let _outer_handle = tasks.add(SubmitOnDrop {
+        tasks: tasks.clone(),
+        submitted: Rc::clone(&submitted),
+    });
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+    executor.begin_shutdown();
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+    let mut submitted_handle = submitted.borrow_mut().take().expect("future destructor submitted a task");
+    assert!(matches!(
+        poll_once(&mut submitted_handle),
+        Poll::Ready(Err(error)) if error.is_shutdown()
+    ));
+}
+
 #[test]
 fn shutdown_retires_a_batch_of_queued_tasks() {
     const TASK_COUNT: usize = 32;

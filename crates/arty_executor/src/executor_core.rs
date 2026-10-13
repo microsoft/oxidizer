@@ -434,10 +434,12 @@ impl ExecutorCore {
         );
         state_reentrant.shutting_down = true;
 
-        Self::abort_tasks(&self.wake, &mut state_exclusive, &mut state_reentrant);
+        let aborted_count = Self::prepare_task_abort(&self.wake, &mut state_exclusive, &mut state_reentrant);
+        drop(state_reentrant);
+        Self::abort_prepared_tasks(&state_exclusive, aborted_count);
     }
 
-    fn abort_tasks(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
+    fn prepare_task_abort(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) -> usize {
         let mut awakened = wake.awakened.lock().expect(ERR_POISONED_LOCK);
         for &task_ref in awakened.iter() {
             // SAFETY: Shutdown has not released task storage yet; every queued reference remains live.
@@ -463,9 +465,19 @@ impl ExecutorCore {
         }
 
         for task_ref in active.drain(..).chain(inactive.drain()).chain(new.drain(..)) {
-            // Record ownership before calling user drop code so unwinding cannot lose the task.
             completed.push_back(task_ref);
+        }
 
+        aborted_count
+    }
+
+    fn abort_prepared_tasks(state_exclusive: &ExclusiveState, aborted_count: usize) {
+        let abort_start = state_exclusive
+            .completed
+            .len()
+            .checked_sub(aborted_count)
+            .expect("prepared task count cannot exceed completed task count");
+        for &task_ref in state_exclusive.completed.range(abort_start..) {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -503,7 +515,8 @@ impl Drop for ExecutorCore {
 
         if !state_reentrant.shutting_down {
             state_reentrant.shutting_down = true;
-            Self::abort_tasks(&self.wake, state_exclusive, state_reentrant);
+            let aborted_count = Self::prepare_task_abort(&self.wake, state_exclusive, state_reentrant);
+            Self::abort_prepared_tasks(state_exclusive, aborted_count);
         }
 
         Self::drop_completed_tasks(state_exclusive, false);
