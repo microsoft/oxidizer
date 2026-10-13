@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
 use std::task::{Wake, Waker};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverRole, IoContext};
@@ -107,7 +107,7 @@ fn shutdown_consumes_the_driver() {
 fn shutdown_waits_for_active_operations_not_contexts() {
     let mut context = LeaseContext::context(());
     let driver = context.driver(driver_options()).unwrap().driver;
-    let operation = context.begin_operation().expect("admission is open before shutdown");
+    let operation = context.begin_operation().unwrap();
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
     let shutdown_thread = thread::spawn(move || {
@@ -335,8 +335,23 @@ impl Driver for LeaseDriver {
         lifecycle.shutdown_started = true;
         self.state.changed.notify_all();
 
+        let deadline = Instant::now() + TEST_TIMEOUT;
         while lifecycle.active_operations != 0 {
-            lifecycle = self.state.changed.wait(lifecycle).unwrap_or_else(PoisonError::into_inner);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(DriverError::from_message("active operations did not drain before the test timeout"));
+            }
+
+            let (next, wait_result) = self
+                .state
+                .changed
+                .wait_timeout(lifecycle, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
+            lifecycle = next;
+
+            if wait_result.timed_out() && lifecycle.active_operations != 0 {
+                return Err(DriverError::from_message("active operations did not drain before the test timeout"));
+            }
         }
 
         assert_eq!(
