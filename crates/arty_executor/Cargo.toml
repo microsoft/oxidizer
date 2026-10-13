@@ -26,7 +26,6 @@ test-util = ["dep:scopeguard"]
 
 [dependencies]
 events_once = { workspace = true }
-foldhash = { workspace = true, features = ["std"] }
 nm = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
@@ -37,6 +36,7 @@ tick = { workspace = true, features = ["fast-instant"] }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
+foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
 mockall = { workspace = true }
