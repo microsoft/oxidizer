@@ -20,6 +20,8 @@ pub enum TaskState {
 /// The executor checks [`Self::enabled`] once per cycle. Disabled observers do
 /// not describe tasks, read clocks, or receive per-poll callbacks. Descriptions
 /// passed to `poll_started` are owned values; references to futures do not escape.
+/// Start and finish callbacks are paired only for polls whose inspector returned
+/// a description. Tasks without descriptions invoke neither callback.
 /// Implementations must not panic, just like the executor's owner waker: these
 /// callbacks belong to the runtime, not to an external monitor or exporter.
 pub trait PollObserver: std::fmt::Debug {

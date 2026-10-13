@@ -175,5 +175,27 @@ fn disabled_observers_do_not_describe_tasks_and_enable_at_a_cycle_boundary() {
         let _ = executor.execute_cycle();
         drop(task);
     }
+
     assert_eq!((produced.get(), descriptions.get(), completions.get()), (1, 1, 1));
+}
+
+#[test]
+fn enabled_observers_only_finish_polls_that_produced_a_description() {
+    let executor = new_guarded_executor(Waker::noop().clone());
+    let tasks = executor.tasks();
+    let descriptions = Rc::new(Cell::new(0));
+    let completions = Rc::new(Cell::new(0));
+    tasks
+        .set_poll_observer(Rc::new(RequestedObserver {
+            enabled: Rc::new(Cell::new(true)),
+            descriptions: Rc::clone(&descriptions),
+            completions: Rc::clone(&completions),
+        }))
+        .unwrap();
+    let ordinary = tasks.add(ready(()));
+    let omitted = tasks.add_with_inspection(ready(()), |_, _| None::<TaskState>);
+    let described = tasks.add_with_inspection(ready(()), |_, state| Some(state));
+    let _ = executor.execute_cycle();
+    assert_eq!((descriptions.get(), completions.get()), (1, 1));
+    drop((ordinary, omitted, described));
 }

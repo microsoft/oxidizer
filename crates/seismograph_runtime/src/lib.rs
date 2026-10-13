@@ -765,19 +765,22 @@ impl RuntimeControl {
             RuntimeState::Stopped => Some(EventTimestamp::from_ticks(self.retired_at.load(Ordering::Acquire))),
             RuntimeState::Running | RuntimeState::Stopping => None,
         };
-        let workers = lock(&self.workers).iter().map(|worker| worker.snapshot()).collect();
         let mut tasks = lock(&self.tasks)
             .values()
             .map(|task| task.snapshot(observation))
             .collect::<Vec<_>>();
         tasks.sort_unstable_by_key(|task| task.id);
-        let mut workers: Vec<Worker> = workers;
-        let task_source = if self.live_inspection.load(Ordering::Acquire) {
-            let batches = live::collect(
+        let batches = self.live_inspection.load(Ordering::Acquire).then(|| {
+            live::collect(
                 &RuntimeHandle { control: Arc::clone(self) },
                 live::QueryOptions::default(),
                 &std::sync::atomic::AtomicBool::new(false),
-            );
+            )
+        });
+        // A query can activate observation while a worker enters a long poll.
+        // Sample the independently readable worker slots after that boundary.
+        let mut workers: Vec<_> = lock(&self.workers).iter().map(|worker| worker.snapshot()).collect();
+        let task_source = if let Some(batches) = batches {
             for batch in batches {
                 if let Some(worker) = workers.iter_mut().find(|worker| worker.id == batch.worker_id) {
                     worker.task_collection = batch.collection;
@@ -1120,6 +1123,30 @@ mod tests {
             ),
             (RuntimeState::Stopped, true, WorkerState::Stopped, Some(3), true)
         );
+    }
+
+    #[test]
+    fn a_poll_started_during_live_collection_is_visible_even_if_the_query_times_out() {
+        let _test = test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("activated-poll", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task_id = allocate_task_id();
+        let pending = Arc::new(Mutex::new(None));
+        let request_slot = Arc::clone(&pending);
+        let worker_handle = worker.handle();
+        worker.handle().register_task_provider(move |request| {
+            worker_handle.task_entered(task_id);
+            *lock(&request_slot) = Some(request);
+        });
+        let snapshot = source_snapshot();
+        let runtime_snapshot = snapshot.runtimes.iter().find(|entry| entry.id == runtime.id()).unwrap();
+        let observed = &runtime_snapshot.workers[0];
+        assert_eq!(
+            (observed.current_task, observed.task_collection),
+            (Some(task_id), live::TaskCollection::TimedOut)
+        );
+        drop(lock(&pending).take());
+        worker.handle().task_left();
     }
 
     #[test]

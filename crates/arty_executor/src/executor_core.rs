@@ -26,18 +26,25 @@ use crate::{
 };
 
 trait ObservePoll: Copy {
-    fn started(self, task: Pin<&dyn TypeErasedTask>);
+    fn started(self, task: Pin<&dyn TypeErasedTask>) -> bool;
     fn finished(self, completed: bool);
 }
 
 impl ObservePoll for () {
-    fn started(self, _task: Pin<&dyn TypeErasedTask>) {}
+    fn started(self, _task: Pin<&dyn TypeErasedTask>) -> bool {
+        false
+    }
     fn finished(self, _completed: bool) {}
 }
 
 impl ObservePoll for &dyn PollObserver {
-    fn started(self, task: Pin<&dyn TypeErasedTask>) {
-        task.inspect(TaskState::Running, &mut |description| self.poll_started(description));
+    fn started(self, task: Pin<&dyn TypeErasedTask>) -> bool {
+        let mut observed = false;
+        task.inspect(TaskState::Running, &mut |description| {
+            self.poll_started(description);
+            observed = true;
+        });
+        observed
     }
     fn finished(self, completed: bool) {
         self.poll_finished(completed);
@@ -498,9 +505,11 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
-            observer.started(task);
+            let has_description = observer.started(task);
             let outcome = task.poll();
-            observer.finished(outcome.is_ready());
+            if has_description {
+                observer.finished(outcome.is_ready());
+            }
             match outcome {
                 task::Poll::Ready(()) => {
                     // The task has completed, so we can move it to the completed list.

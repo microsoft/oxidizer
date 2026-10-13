@@ -72,7 +72,7 @@ fn duration(value: Option<u64>) -> String {
 }
 
 fn observed_poll_count(metrics: &ExecutionMetrics, live: bool) -> String {
-    if live && metrics.poll_samples.is_empty() {
+    if live && metrics.source_polls.is_none() && metrics.poll_samples.is_empty() {
         "-".into()
     } else {
         format_count(metrics.poll_count)
@@ -424,7 +424,17 @@ fn draw_task_statistics(
         )));
     }
     if summary_height >= 3 {
-        lines.push(Line::from(axis(window)));
+        lines.push(Line::from(task.metrics.source_polls.map_or_else(
+            || axis(window),
+            |source| {
+                format!(
+                    "Task window polls {} · total {} · max {}",
+                    format_count(source.poll_count),
+                    format_runtime_duration(source.poll_duration_nanos),
+                    duration(task.metrics.max_poll_nanos),
+                )
+            },
+        )));
     }
     if summary_height >= 5 {
         lines.extend([poll_line, ready_line]);
@@ -690,6 +700,26 @@ mod tests {
                 observed_poll_count(&observed, true),
             ],
             ["-", "0", "1"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn source_window_counts_display_even_without_retained_samples() {
+        let measured = ExecutionMetrics {
+            source_polls: Some(seismograph_runtime::snapshot::TaskMetrics {
+                poll_count: 7,
+                ..Default::default()
+            }),
+            poll_count: 7,
+            ..ExecutionMetrics::default()
+        };
+        let zero = ExecutionMetrics {
+            source_polls: Some(seismograph_runtime::snapshot::TaskMetrics::default()),
+            ..ExecutionMetrics::default()
+        };
+        assert_eq!(
+            [observed_poll_count(&measured, true), observed_poll_count(&zero, true)],
+            ["7", "0"].map(String::from)
         );
     }
 

@@ -72,8 +72,11 @@
 //! Older servers retain the total-rate chart and explicitly mark detailed counters
 //! unavailable; rebuild the application as well as the monitor for the new view.
 //! Metric caveats are in F1 help rather than below the Info metrics.
-//! Runtime task rows show completed worker-local poll counts, observed execution
-//! fraction, median poll duration, maximum poll duration and inline future bytes.
+//! Runtime task rows show declared live task-window poll counts and maximum durations when
+//! collected source metrics are available; otherwise counts use retained worker-local
+//! samples. Worker counts, execution fractions, medians and histograms remain based
+//! on retained attributed observations. Source sums do not reconstruct lost distributions.
+//! Task Statistics also shows source-window total poll time and inline future bytes.
 //! Future size excludes executor bookkeeping and separately allocated buffers.
 //! A dash indicates unavailable metadata or observations, not a measured zero.
 //!

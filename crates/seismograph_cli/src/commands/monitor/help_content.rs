@@ -365,16 +365,17 @@ const RUNTIME_TASKS: &Section = section!("RUNTIME TASKS";
     "Task" => "Runtime task ID.",
     "Future B" => "Inline size of the submitted future, in exact bytes; synchronous tasks use their closure size. Excludes executor bookkeeping, runtime wrappers and separately allocated buffers. Zero is a genuinely zero-sized body; '-' means unavailable in the producer or an older recording.",
     "State(global)" => "Task-global coherently observed source activity, not execution on this historical worker; unknown for legacy or raced source state. Source-associated tasks remain visible without any completed retained polls.",
-    "Polls" => "Number of retained completed polls on THIS selected worker. Zero completed polls displays 0; not a lifetime counter.",
+    "Polls" => "Live tasks with collected source metrics show task-global observation-window counts, including polls absent from the event ring; not unqualified lifetime counts. Otherwise this is the retained completed poll count on THIS selected worker. Uncollected live data is '-', while a collected zero is 0. Global counts are not summed into worker rows.",
     "Observed %" => "Union of this task's observed polls on THIS worker / the same displayed per-runtime window duration. Open coherent source polls can contribute. Lower bound, not CPU utilization; unavailable is '-'.",
     "Median poll" => "Median completed poll duration on THIS worker. Even populations use the midpoint rounded down to nanoseconds. '-' means no samples, while 0ns is a genuine measured zero.",
-    "Max poll" => "Largest completed retained poll duration on THIS worker; '-' without samples. Open polls are not completed duration samples.",
+    "Max poll" => "Live collected source metrics provide the task-global observation-window maximum. Otherwise the maximum is from retained completed polls on THIS worker. '-' means unavailable; open polls are not completed samples.",
     "Units / zero" => "Durations use ns/us/ms/s; histogram ranges use inclusive nanoseconds. Zero completed polls is 0. Missing durations are '-', never an invented zero.",
     "Up/Down / Enter / Backspace" => "Select task / focus Statistics / return to Workers. Press e to focus the task's operations below, or t to switch its Poll/Ready histogram.",
     "[ / ] / r" => "Cycle Task, Future B, Polls, Observed %, Median poll and Max poll sorts / reverse direction. Unknown values stay last in either direction. Task selection and detail positions reset.",
 );
 
 const RUNTIME_ACTIVITY: &Section = section!("RUNTIME ACTIVITY";
+    "Task window polls / total / max" => "Task-global source-window poll count, elapsed poll duration sum and maximum. These survive event-ring overwrites and remain source totals when individual events are filtered. They do not supply individual samples, a median, worker occupancy, or a reconstructed histogram.",
     "Running for / Ready for" => "Age at the coherent per-task source observation. Running is inside a poll; Ready is queued and eligible for a poll. Long ages are shown prominently even without a completed poll. '-' means unavailable, not zero.",
     "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Older activity schemas without that ID need an exact retained runtime/task/poll-start timestamp match to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Legacy captures and raced observations have unknown activity rather than guessed ages.",
     "repoll" => "A wake during a running poll requests another poll. This is not yet queue waiting: for a self-wake, ready wait starts at poll finish, not at the raw wake timestamp.",
