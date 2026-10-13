@@ -3497,7 +3497,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "metabench"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "alloc_tracker",
  "bolero",
@@ -3523,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "metabench_macros_impl",
  "mutants",
@@ -3532,7 +3532,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros_impl"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bolero",
  "proc-macro-crate 3.5.0",
@@ -4667,9 +4667,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -5806,7 +5806,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
