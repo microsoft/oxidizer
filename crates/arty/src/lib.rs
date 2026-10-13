@@ -11,7 +11,7 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
-//! Multi-worker application runtime with thread-affine async tasks.
+//! Single-threaded, thread-aware application runtime.
 //!
 //! An Arty runtime can have several workers, but each async task stays on one
 //! worker throughout its life. This lets it use thread-local and non-[`Send`]
