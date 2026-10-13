@@ -63,9 +63,9 @@ pub(crate) use wake::*;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod testing;
 
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, test))]
 mod wake_diagnostic;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, test))]
 pub(crate) use wake_diagnostic::*;
 
 #[cfg(test)]

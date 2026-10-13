@@ -8,14 +8,14 @@ use std::cell::UnsafeCell;
 use std::marker::{PhantomData, PhantomPinned};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, test))]
 use std::sync::Arc;
 use std::task;
 
 use events_once::PooledLocalSender;
 
 use crate::WakeSignal;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
 
 /// A task registered with the async task executor, in its fully typed form.
@@ -48,8 +48,8 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     wake_signal: UnsafeCell<Option<WakeSignal>>,
 
-    /// In debug builds, we store backtraces of waker clones here, to help detect waker leaks.
-    #[cfg(debug_assertions)]
+    /// Unit tests store backtraces of waker clones here to exercise leak diagnostics.
+    #[cfg(all(debug_assertions, test))]
     diagnostic_waker_registry: Arc<DiagnosticWakerRegistry>,
 
     // Technically, the wakers also touch the wake signal from other threads but that is
@@ -72,7 +72,7 @@ where
                 result_tx: Some(result_tx),
             })),
             wake_signal: UnsafeCell::new(None),
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
             _single_threaded: PhantomData,
             _requires_pin: PhantomPinned,
@@ -128,8 +128,8 @@ where
             // independently pooled state and may outlive both the poll and the task.
             let waker = unsafe { wake_signal.waker_ref() };
 
-            // In debug builds, a diagnostic layer records where wakers were cloned.
-            #[cfg(debug_assertions)]
+            // Unit tests wrap the waker to exercise clone backtrace diagnostics.
+            #[cfg(all(debug_assertions, test))]
             let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
 
             let mut cx = task::Context::from_waker(&waker);

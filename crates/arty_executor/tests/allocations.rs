@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Verifies warmed spawn-and-complete operations add no allocations beyond debug-only waker diagnostics.
+//! Verifies warmed spawn-and-complete operations reuse storage.
 
 #![cfg(not(miri))]
 #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
@@ -20,7 +20,7 @@ static ALLOCATOR: Allocator<System> = Allocator::system();
 const WARM_UP_OPERATIONS: usize = 2;
 const MEASURED_OPERATIONS: usize = 1_000;
 #[cfg(debug_assertions)]
-const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 3;
+const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 1;
 #[cfg(not(debug_assertions))]
 const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
@@ -41,7 +41,7 @@ fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
 }
 
 #[test]
-fn spawn_and_complete_one_only_allocates_debug_diagnostics() {
+fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
@@ -63,15 +63,15 @@ fn spawn_and_complete_one_only_allocates_debug_diagnostics() {
     assert_eq!(
         allocations,
         EXPECTED_ALLOCATIONS_PER_OPERATION * MEASURED_OPERATIONS as u64,
-        "warmed spawn-and-complete operations must allocate only the three per-task debug diagnostic objects, and nothing in release builds"
+        "warmed spawn-and-complete operations must allocate only one debug bookkeeping object and nothing in release builds"
     );
     #[cfg(not(debug_assertions))]
     assert_eq!(
         bytes, 0,
-        "warmed release-mode task registration, polling, result consumption, and reclamation must reuse existing storage"
+        "warmed task registration, polling, result consumption, and reclamation must reuse existing storage"
     );
     #[cfg(debug_assertions)]
-    assert_ne!(bytes, 0, "debug diagnostic objects must be visible to the allocation tracker");
+    assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     executor.begin_shutdown();
