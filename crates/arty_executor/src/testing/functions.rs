@@ -1,13 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::Waker;
-use std::thread;
-
-use scopeguard::{Always, ScopeGuard};
-
-use crate::{CycleOutcome, Executor};
-
 #[cfg(feature = "private-test-util")]
 use std::collections::VecDeque;
 #[cfg(feature = "private-test-util")]
@@ -16,12 +9,16 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 #[cfg(feature = "private-test-util")]
 use std::sync::{Arc, Mutex};
+use std::task::Waker;
+use std::thread;
 
 #[cfg(feature = "private-test-util")]
 use plurality::{Box as PoolBox, MultiPool, Pool};
+use scopeguard::{Always, ScopeGuard};
 
 #[cfg(feature = "private-test-util")]
 use crate::wake::{WakeShared, WakerState};
+use crate::{CycleOutcome, Executor};
 #[cfg(feature = "private-test-util")]
 use crate::{TaskRef, TypeErasedTask, WakeSignal};
 
