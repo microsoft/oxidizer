@@ -671,6 +671,51 @@ fn channel_futures_are_send_for_send_values() {
     assert_send(receiver.wait_for_async(|value| *value == 2));
 }
 
+#[cfg(feature = "seismograph")]
+#[expect(clippy::unwrap_used, reason = "setup and snapshot failures must fail the enclosing telemetry test")]
+fn blocking_send_records_contention_once() {
+    let (sender, receiver) = bounded(1);
+    sender.try_send(1).unwrap();
+    let (started_sender, started_receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started_sender.send(seismograph::recorder::current_thread_id()).unwrap();
+        sender.send(2)
+    });
+    let sender_thread_id = started_receiver.recv_timeout(TEST_DEADLINE).unwrap();
+    let deadline = Instant::now() + TEST_DEADLINE;
+    loop {
+        assert!(!worker.is_finished(), "the full queue must block the sender");
+        let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap().events;
+        if snapshot
+            .events
+            .iter()
+            .any(|event| event.thread_id == sender_thread_id && event.kind == EventKind::ChannelSendContention)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the blocked sender must record contention before the deadline"
+        );
+        std::thread::sleep(THREAD_POLL_INTERVAL);
+    }
+
+    assert_eq!(receiver.try_recv(), Ok(1));
+    assert_eq!(join_with_timeout(worker), Ok(()));
+    assert_eq!(receiver.try_recv(), Ok(2));
+    let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap().events;
+    assert_eq!(
+        snapshot
+            .events
+            .iter()
+            .filter(|event| event.thread_id == sender_thread_id && event.kind == EventKind::ChannelSendContention)
+            .count(),
+        1,
+    );
+}
+
 #[test]
 #[cfg(feature = "seismograph")]
 #[expect(
@@ -811,5 +856,6 @@ fn channel_operations_share_runtime_telemetry_identity() {
     }
     assert_eq!((sent_events, received_events), (3, 3));
     assert_eq!(contention_counts.into_values().collect::<Vec<_>>(), [1, 1]);
+    blocking_send_records_contention_once();
     seismograph::recorder(Configuration::default());
 }

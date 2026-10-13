@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Ready blocking operations must not allocate waiter storage.
+//! Ready blocking channel and barrier operations must not allocate waiter storage.
 
 #![cfg(not(miri))] // Native allocation counting; channel and barrier behavior remains covered under Miri.
 

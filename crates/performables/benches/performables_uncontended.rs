@@ -67,10 +67,10 @@ fn queue_recv(queue: &mut Queue) -> u64 {
     black_box(&queue.1).recv().expect("the fixture provides a buffered value")
 }
 
-#[metabench::benchmark(QUEUE_TIMEOUT, READY_BLOCKING, "queue_recv_timeout")]
+#[metabench::benchmark(QUEUE_RECV_TIMEOUT, READY_BLOCKING, "queue_recv_timeout")]
 #[bench::bounded(&mut ready_queue(true))]
 #[bench::unbounded(&mut ready_queue(false))]
-fn queue_timeout(queue: &mut Queue) -> u64 {
+fn queue_recv_timeout(queue: &mut Queue) -> u64 {
     black_box(&queue.1)
         .recv_timeout(Duration::ZERO)
         .expect("an already buffered value completes even at a zero deadline")
@@ -94,9 +94,9 @@ fn oneshot_recv(receiver: &mut Option<OneshotReceiver<u64>>) -> u64 {
         .expect("the fixture provides a completed oneshot")
 }
 
-#[metabench::benchmark(ONESHOT_TIMEOUT, READY_BLOCKING, "oneshot_recv_timeout")]
+#[metabench::benchmark(ONESHOT_RECV_TIMEOUT, READY_BLOCKING, "oneshot_recv_timeout")]
 #[bench::value(&mut ready_oneshot())]
-fn oneshot_timeout(receiver: &mut Option<OneshotReceiver<u64>>) -> u64 {
+fn oneshot_recv_timeout(receiver: &mut Option<OneshotReceiver<u64>>) -> u64 {
     black_box(receiver.take().expect("each batch supplies a fresh receiver"))
         .recv_timeout(Duration::ZERO)
         .expect("an already completed oneshot succeeds even at a zero deadline")
@@ -120,9 +120,9 @@ fn barrier_sync(barrier: &Barrier) -> bool {
     black_box(barrier).wait().is_leader()
 }
 
-#[metabench::benchmark(BARRIER_ASYNC, READY_BLOCKING, "barrier_async_blocking")]
+#[metabench::benchmark(BARRIER_ASYNC_BLOCKING, READY_BLOCKING, "barrier_async_blocking")]
 #[bench::value(&Barrier::<mode::Async>::new(1))]
-fn barrier_async(barrier: &Barrier<mode::Async>) -> bool {
+fn barrier_async_blocking(barrier: &Barrier<mode::Async>) -> bool {
     black_box(barrier).wait().is_leader()
 }
 
@@ -136,14 +136,14 @@ fn ready_blocking_benchmarks(criterion: &mut Criterion) {
             bencher.iter_batched_ref(|| ready_queue(bounded), queue_recv, READY_BATCH);
         });
         group.bench_function(format!("queue_recv_timeout/{name}"), |bencher| {
-            bencher.iter_batched_ref(|| ready_queue(bounded), queue_timeout, READY_BATCH);
+            bencher.iter_batched_ref(|| ready_queue(bounded), queue_recv_timeout, READY_BATCH);
         });
     }
     group.bench_function(ONESHOT_RECV.benchmark_name(), |bencher| {
         bencher.iter_batched_ref(ready_oneshot, oneshot_recv, READY_BATCH);
     });
-    group.bench_function(ONESHOT_TIMEOUT.benchmark_name(), |bencher| {
-        bencher.iter_batched_ref(ready_oneshot, oneshot_timeout, READY_BATCH);
+    group.bench_function(ONESHOT_RECV_TIMEOUT.benchmark_name(), |bencher| {
+        bencher.iter_batched_ref(ready_oneshot, oneshot_recv_timeout, READY_BATCH);
     });
     group.bench_function(WATCH_CHANGED.benchmark_name(), |bencher| {
         bencher.iter_batched_ref(ready_watch, watch_changed, READY_BATCH);
@@ -153,8 +153,8 @@ fn ready_blocking_benchmarks(criterion: &mut Criterion) {
     group.bench_function(BARRIER_SYNC.benchmark_name(), |bencher| {
         bencher.iter(|| barrier_sync(&sync_barrier));
     });
-    group.bench_function(BARRIER_ASYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| barrier_async(&async_barrier));
+    group.bench_function(BARRIER_ASYNC_BLOCKING.benchmark_name(), |bencher| {
+        bencher.iter(|| barrier_async_blocking(&async_barrier));
     });
     group.finish();
 }
@@ -417,11 +417,11 @@ metabench::main!(
         RW_LOCK_WRITE_PERFORMABLES_ASYNC,
         QUEUE_SEND,
         QUEUE_RECV,
-        QUEUE_TIMEOUT,
+        QUEUE_RECV_TIMEOUT,
         ONESHOT_RECV,
-        ONESHOT_TIMEOUT,
+        ONESHOT_RECV_TIMEOUT,
         WATCH_CHANGED,
         BARRIER_SYNC,
-        BARRIER_ASYNC,
+        BARRIER_ASYNC_BLOCKING,
     ],
 );

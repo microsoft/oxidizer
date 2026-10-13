@@ -260,10 +260,10 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub async fn send_async(&self, value: T) -> Result<(), Error<T>> {
-        self.send_with_recording(value, ContentionRecording::Pending).await
+        self.send_with_recording_async(value, ContentionRecording::Pending).await
     }
 
-    async fn send_with_recording(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
+    async fn send_with_recording_async(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
         let mut value = value;
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -301,7 +301,7 @@ impl<T> Sender<T> {
             Err((code, value)) => {
                 debug_assert_eq!(code, ERROR_FULL, "queue send reports only full or closed");
                 self.shared.record(EventKind::ChannelSendContention);
-                block_on(self.send_with_recording(value, ContentionRecording::Recorded))
+                block_on(self.send_with_recording_async(value, ContentionRecording::Recorded))
             }
         }
     }
@@ -404,10 +404,10 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub async fn recv_async(&self) -> Result<T, Error> {
-        self.recv_with_recording(ContentionRecording::Pending).await
+        self.recv_with_recording_async(ContentionRecording::Pending).await
     }
 
-    async fn recv_with_recording(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
+    async fn recv_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -441,7 +441,7 @@ impl<T> Receiver<T> {
     /// have been received.
     pub fn recv(&self) -> Result<T, Error> {
         match self.try_recv() {
-            Err(error) if error.is_empty() => block_on(self.recv_with_recording(ContentionRecording::Recorded)),
+            Err(error) if error.is_empty() => block_on(self.recv_with_recording_async(ContentionRecording::Recorded)),
             result => result,
         }
     }
@@ -458,7 +458,7 @@ impl<T> Receiver<T> {
             Err(error) if error.is_empty() => {}
             result => return result,
         }
-        match block_on_until(self.recv_with_recording(ContentionRecording::Recorded), deadline) {
+        match block_on_until(self.recv_with_recording_async(ContentionRecording::Recorded), deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -1100,10 +1100,10 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub async fn changed_async(&self) -> Result<(), Error> {
-        self.changed_with_recording(ContentionRecording::Pending).await
+        self.changed_with_recording_async(ContentionRecording::Pending).await
     }
 
-    async fn changed_with_recording(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
+    async fn changed_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -1162,7 +1162,7 @@ impl<T> WatchReceiver<T> {
             return result;
         }
         telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
-        block_on(self.changed_with_recording(ContentionRecording::Recorded))
+        block_on(self.changed_with_recording_async(ContentionRecording::Recorded))
     }
 
     fn try_changed(&self) -> Option<Result<(), Error>> {

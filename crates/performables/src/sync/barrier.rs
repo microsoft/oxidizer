@@ -128,6 +128,10 @@ impl Barrier<Async> {
     }
 
     /// Blocks the current thread until all participants reach the barrier.
+    ///
+    /// This method must not run on an executor thread required to make progress
+    /// on another participant. Inside an async task, await [`Self::wait_async`]
+    /// instead so the executor can run the remaining participants.
     pub fn wait(&self) -> BarrierWaitResult {
         match self.arrive() {
             Arrival::Leader => BarrierWaitResult { leader: true },
@@ -279,6 +283,7 @@ impl BarrierWaitResult {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
     use std::task::Waker;
