@@ -575,23 +575,74 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
 }
 
 #[tokio::test]
-async fn default_layer_rejects_output_beyond_its_decompressed_body_limit() {
+async fn decompressed_body_limit_can_be_raised_or_removed() {
     const DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN: usize = 64 * 1024 * 1024;
 
     let output_len = DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN + 1;
     let compressed = compress(Format::Zstd, &vec![0_u8; output_len]);
-    let handler = client().decompress_responses(&[Format::Zstd]).layer(responds_with(move || {
-        HttpResponseBuilder::new_fake()
-            .status(StatusCode::OK)
-            .header(CONTENT_ENCODING, HeaderValue::from_static("zstd"))
-            .bytes(compressed.clone())
-            .build()
-    }));
+    let raised = DecompressorLimits::new().max_output_len(NonZeroU64::new(output_len as u64).unwrap());
 
-    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
-    let error = response.into_body().into_bytes().await.unwrap_err();
+    for (limits, succeeds) in [
+        (None, false),
+        (Some(raised), true),
+        (Some(DecompressorLimits::new().unbounded_output_len()), true),
+    ] {
+        let layer = client().decompress_responses(&[Format::Zstd]);
+        let layer = match limits {
+            Some(limits) => layer.limits(limits),
+            None => layer,
+        };
+        let response_body = compressed.clone();
+        let handler = layer.layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("zstd"))
+                .bytes(response_body.clone())
+                .build()
+        }));
 
-    assert_eq!(error.label(), "compression_limit_exceeded");
+        let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+        let result = response.into_body().into_bytes().await;
+
+        if succeeds {
+            assert_eq!(result.unwrap().len(), output_len);
+        } else {
+            assert_eq!(result.unwrap_err().label(), "compression_limit_exceeded");
+        }
+    }
+}
+
+#[tokio::test]
+async fn compressed_stream_limit_can_be_removed() {
+    const FIRST_REJECTED_STREAM_COUNT: usize = 1_025;
+
+    let member = compress(Format::Gzip, b"");
+    let compressed = BytesView::from_views((0..FIRST_REJECTED_STREAM_COUNT).map(|_| member.clone()));
+
+    for (limits, succeeds) in [(None, false), (Some(DecompressorLimits::new().unbounded_streams()), true)] {
+        let layer = client().decompress_responses(&[Format::Gzip]);
+        let layer = match limits {
+            Some(limits) => layer.limits(limits),
+            None => layer,
+        };
+        let response_body = compressed.clone();
+        let handler = layer.layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+                .bytes(response_body.clone())
+                .build()
+        }));
+
+        let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+        let result = response.into_body().into_bytes().await;
+
+        if succeeds {
+            assert!(result.unwrap().is_empty());
+        } else {
+            assert_eq!(result.unwrap_err().label(), "compression_limit_exceeded");
+        }
+    }
 }
 
 #[tokio::test]

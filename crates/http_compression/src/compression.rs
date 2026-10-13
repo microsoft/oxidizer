@@ -36,10 +36,15 @@ const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 /// distinguish.
 const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
 
+/// Maximum compressed streams decoded from one HTTP body unless the caller overrides it.
+const DEFAULT_MAX_DECOMPRESSED_STREAMS: u64 = 1024;
+
 const fn default_decompressor_limits() -> DecompressorLimits {
-    DecompressorLimits::new().max_output_len(
-        NonZeroU64::new(DEFAULT_MAX_DECOMPRESSED_BODY_LEN).expect("DEFAULT_MAX_DECOMPRESSED_BODY_LEN is a non-zero constant"),
-    )
+    DecompressorLimits::new()
+        .max_output_len(
+            NonZeroU64::new(DEFAULT_MAX_DECOMPRESSED_BODY_LEN).expect("DEFAULT_MAX_DECOMPRESSED_BODY_LEN is a non-zero constant"),
+        )
+        .max_streams(NonZeroU64::new(DEFAULT_MAX_DECOMPRESSED_STREAMS).expect("DEFAULT_MAX_DECOMPRESSED_STREAMS is a non-zero constant"))
 }
 
 /// How to handle a compression format that is not enabled.
@@ -248,10 +253,11 @@ pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
 impl<R> CompressionLayer<R> {
     /// Bounds the cost of decompressing a single body.
     ///
-    /// Decompressed output defaults to 64 MiB. Bounds left unset in `limits` keep the layer's
-    /// defaults; explicit bounds replace them, and
+    /// Decompressed output defaults to 64 MiB and at most 1,024 compressed streams. Bounds left
+    /// unset in `limits` keep the layer's defaults; explicit bounds replace them, and
     /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] explicitly removes the
-    /// output cap.
+    /// output cap while [`unbounded_streams`][DecompressorLimits::unbounded_streams] removes the
+    /// stream-count cap.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.config.limits = limits.with_fallbacks(default_decompressor_limits());
@@ -311,8 +317,8 @@ impl CompressionLayer<Server> {
     /// unchanged, including its `Content-Encoding` metadata. This exception
     /// avoids installing a decoder that cannot produce a compressed member.
     ///
-    /// Decompression rejects output beyond 64 MiB by default. Set [`limits`][Self::limits] when the
-    /// application needs a different bound.
+    /// Decompression rejects output beyond 64 MiB or 1,024 compressed streams by default. Set
+    /// [`limits`][Self::limits] when the application needs different bounds.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);
