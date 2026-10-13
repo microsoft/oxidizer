@@ -17,10 +17,11 @@ pub(crate) const RESERVE_MIN: usize = 65536;
 const VM_FLAGS_ANYWHERE: libc::c_int = 1;
 const VM_INHERIT_COPY: u32 = 1;
 #[cfg(test)]
-// OS_CLOCK_MACH_ABSOLUTE_TIME from os/clock.h.
-const WAIT_CLOCK: u32 = 32;
+const OS_CLOCK_MACH_ABSOLUTE_TIME: u32 = 32;
 #[cfg(test)]
 const WAIT_TIMEOUT_NANOS: u64 = 30_000_000_000;
+// Limit transient reuse failures to four syscalls, yielding between retries.
+const REUSE_MAX_ATTEMPTS: usize = 4;
 
 #[link(name = "System")]
 unsafe extern "C" {
@@ -110,14 +111,27 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
 /// The writable, page-granular range is caller-owned; REUSABLE additionally
 /// requires that all objects and accesses in the range have been retired.
 unsafe fn advise(address: *mut u8, size: usize, advice: libc::c_int) -> bool {
-    loop {
+    advise_with(advice, || {
         // SAFETY: The caller owns the complete range and meets the advice's
         // access and object-lifetime requirements.
         if unsafe { libc::madvise(address.cast(), size, advice) } == 0 {
-            return true;
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error().raw_os_error())
         }
-        if std::io::Error::last_os_error().raw_os_error() != Some(libc::EAGAIN) {
-            return false;
+    })
+}
+
+fn advise_with(advice: libc::c_int, mut call: impl FnMut() -> Result<(), Option<i32>>) -> bool {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match call() {
+            Ok(()) => return true,
+            Err(Some(libc::EAGAIN)) if advice == libc::MADV_FREE_REUSE && attempts < REUSE_MAX_ATTEMPTS => {
+                std::thread::yield_now();
+            }
+            Err(_) => return false,
         }
     }
 }
@@ -141,7 +155,7 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32) {
                 u64::from(expected),
                 std::mem::size_of::<u32>(),
                 0,
-                WAIT_CLOCK,
+                OS_CLOCK_MACH_ABSOLUTE_TIME,
                 WAIT_TIMEOUT_NANOS,
             )
         };
@@ -176,7 +190,9 @@ fn check_wait_error(error: Option<i32>) {
 }
 
 fn check_wake_error(error: Option<i32>) {
-    crate::abort::require(error == Some(libc::ENOENT));
+    // The original waiter may have departed and its address may now belong to
+    // a different ulock opcode. ENOENT and EDOM both denote a stale wake key.
+    crate::abort::require(matches!(error, Some(libc::ENOENT | libc::EDOM)));
 }
 
 #[cfg(test)]
@@ -198,7 +214,9 @@ mod tests {
     fn mach_reservations_preserve_requested_alignment() {
         for alignment in [1, PAGE, RESERVE_MIN, 1 << 20, 1 << 24] {
             let pointer = reserve(RESERVE_MIN, alignment);
-            assert!(!pointer.is_null());
+            if pointer.is_null() {
+                std::alloc::handle_alloc_error(std::alloc::Layout::from_size_align(RESERVE_MIN, alignment).unwrap());
+            }
             assert_eq!(pointer.addr() % alignment, 0);
             // SAFETY: The test owns the entire fresh reservation.
             assert!(unsafe { commit(pointer, RESERVE_MIN) });
@@ -234,7 +252,9 @@ mod tests {
     #[test]
     fn rejected_advice_leaves_owned_pages_accessible() {
         let pointer = reserve(RESERVE_MIN, RESERVE_MIN);
-        assert!(!pointer.is_null());
+        if pointer.is_null() {
+            std::alloc::handle_alloc_error(std::alloc::Layout::from_size_align(RESERVE_MIN, RESERVE_MIN).unwrap());
+        }
         // SAFETY: The test owns this complete, page-aligned reservation.
         assert!(unsafe { commit(pointer, PAGE) });
         // SAFETY: The committed page is exclusively writable.
@@ -256,8 +276,16 @@ mod tests {
                 let word = AtomicU32::new(0);
                 // SAFETY: The live, aligned word matches the expected value.
                 // A one-nanosecond timeout bounds this intentional failed wait.
-                let result =
-                    unsafe { os_sync_wait_on_address_with_timeout(word.as_ptr().cast(), 0, std::mem::size_of::<u32>(), 0, WAIT_CLOCK, 1) };
+                let result = unsafe {
+                    os_sync_wait_on_address_with_timeout(
+                        word.as_ptr().cast(),
+                        0,
+                        std::mem::size_of::<u32>(),
+                        0,
+                        OS_CLOCK_MACH_ABSOLUTE_TIME,
+                        1,
+                    )
+                };
                 assert_eq!(result, -1);
                 assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ETIMEDOUT));
                 check_wait_result(result);
@@ -274,9 +302,105 @@ mod tests {
         wait(&word, 0);
         wake_one(word.as_ptr());
         check_wake_error(Some(libc::ENOENT));
+        check_wake_error(Some(libc::EDOM));
         for error in [libc::EINTR, libc::ENOMEM, libc::EFAULT] {
             check_wait_error(Some(error));
         }
+    }
+
+    #[test]
+    fn stale_wake_tolerates_an_address_reused_by_an_eight_byte_waiter() {
+        use std::sync::atomic::AtomicU64;
+        use std::time::{Duration, Instant};
+
+        let word = AtomicU64::new(0);
+        let error = std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| {
+                while word.load(Ordering::Acquire) == 0 {
+                    // SAFETY: The aligned eight-byte atomic remains live until
+                    // this thread joins. The timeout bounds a failed protocol.
+                    let result = unsafe {
+                        os_sync_wait_on_address_with_timeout(
+                            word.as_ptr().cast(),
+                            0,
+                            std::mem::size_of::<u64>(),
+                            0,
+                            OS_CLOCK_MACH_ABSOLUTE_TIME,
+                            WAIT_TIMEOUT_NANOS,
+                        )
+                    };
+                    check_wait_result(result);
+                }
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let error = loop {
+                // SAFETY: Probe the numeric wait key with the allocator's
+                // four-byte opcode; wake does not access the atomic contents.
+                let result = unsafe { os_sync_wake_by_address_any(word.as_ptr().cast(), std::mem::size_of::<u32>(), 0) };
+                let error = if result == -1 {
+                    std::io::Error::last_os_error().raw_os_error()
+                } else {
+                    None
+                };
+                if error != Some(libc::ENOENT) || Instant::now() >= deadline {
+                    break error;
+                }
+                std::thread::yield_now();
+            };
+            if error == Some(libc::EDOM) {
+                wake_one(word.as_ptr().cast());
+            }
+            word.store(1, Ordering::Release);
+            // SAFETY: The live atomic's own eight-byte opcode releases its
+            // waiter even if the mismatched probe did not observe EDOM.
+            let result = unsafe { os_sync_wake_by_address_any(word.as_ptr().cast(), std::mem::size_of::<u64>(), 0) };
+            if result == -1 {
+                check_wake_error(std::io::Error::last_os_error().raw_os_error());
+            }
+            waiter.join().unwrap();
+            error
+        });
+        assert_eq!(error, Some(libc::EDOM));
+    }
+
+    #[test]
+    fn reclaim_does_not_retry_kernel_pressure() {
+        let mut calls = 0;
+        assert!(!advise_with(libc::MADV_FREE_REUSABLE, || {
+            calls += 1;
+            Err(Some(libc::EAGAIN))
+        }));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn reuse_retries_are_bounded_and_can_recover() {
+        let mut calls = 0;
+        assert!(advise_with(libc::MADV_FREE_REUSE, || {
+            calls += 1;
+            if calls < REUSE_MAX_ATTEMPTS {
+                Err(Some(libc::EAGAIN))
+            } else {
+                Ok(())
+            }
+        }));
+        assert_eq!(calls, REUSE_MAX_ATTEMPTS);
+        calls = 0;
+        assert!(!advise_with(libc::MADV_FREE_REUSE, || {
+            calls += 1;
+            Err(Some(libc::EAGAIN))
+        }));
+        assert_eq!(calls, REUSE_MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn unexpected_advice_errors_do_not_retry() {
+        let mut calls = 0;
+        assert!(!advise_with(libc::MADV_FREE_REUSE, || {
+            calls += 1;
+            Err(Some(libc::EINVAL))
+        }));
+        assert_eq!(calls, 1);
     }
 
     #[test]

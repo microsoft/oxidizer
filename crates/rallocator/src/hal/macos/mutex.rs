@@ -1,17 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Inline owner-pool locking: Darwin's std mutex allocates on its first lock.
+//! Inline allocator locking: Darwin's std mutex allocates on its first lock.
 
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::PoisonError;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{PoisonError, TryLockError};
 
 #[link(name = "System")]
 unsafe extern "C" {
     fn os_unfair_lock_lock(lock: *mut u32);
+    fn os_unfair_lock_trylock(lock: *mut u32) -> bool;
     fn os_unfair_lock_unlock(lock: *mut u32);
 }
 
@@ -38,6 +39,25 @@ impl<T> Mutex<T> {
         // SAFETY: The initialized four-byte native lock remains stationary
         // while shared borrows or guards exist; the pool itself is static.
         unsafe { os_unfair_lock_lock(self.lock.get()) };
+        self.guard()
+    }
+
+    pub(crate) fn try_lock(&self) -> Result<MutexGuard<'_, T>, TryLockError<MutexGuard<'_, T>>> {
+        // SAFETY: The inline lock remains stationary during this shared borrow.
+        // A successful attempt grants this thread the exclusive value lease.
+        if unsafe { os_unfair_lock_trylock(self.lock.get()) } {
+            self.guard().map_err(TryLockError::Poisoned)
+        } else {
+            Err(TryLockError::WouldBlock)
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_poisoned(&self) -> bool {
+        self.poisoned.load(Ordering::Relaxed)
+    }
+
+    fn guard(&self) -> Result<MutexGuard<'_, T>, PoisonError<MutexGuard<'_, T>>> {
         let guard = MutexGuard {
             mutex: self,
             panicking: std::thread::panicking(),
@@ -106,6 +126,17 @@ mod tests {
     }
 
     #[test]
+    fn first_try_lock_and_contended_retry_use_the_inline_lock() {
+        let value = Mutex::new(0);
+        let mut first = value.try_lock().unwrap();
+        *first = 42;
+        assert!(matches!(value.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(first);
+        assert_eq!(*value.try_lock().unwrap(), 42);
+        assert!(!value.is_poisoned());
+    }
+
+    #[test]
     fn unwinding_poisons_the_pool_lock_and_releases_its_lease() {
         let value = Mutex::new(0);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -119,6 +150,12 @@ mod tests {
         };
         let guard = error.into_inner();
         assert_eq!(*guard, 42);
+        drop(guard);
+        assert!(value.is_poisoned());
+        let Err(TryLockError::Poisoned(error)) = value.try_lock() else {
+            panic!("try_lock must report poisoning after acquiring the released lock");
+        };
+        assert_eq!(*error.into_inner(), 42);
     }
 
     #[test]

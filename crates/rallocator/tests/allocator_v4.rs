@@ -104,7 +104,9 @@ fn zeroed_large_allocations_clear_dirty_backend_ranges() {
     for _ in 0..8 {
         // SAFETY: The valid layout requests an exclusively owned large range.
         let dirty = unsafe { Rallocator.alloc(layout) };
-        assert!(!dirty.is_null());
+        if dirty.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
         // SAFETY: All layout bytes are exclusively writable.
         unsafe { dirty.write_bytes(0x5a, layout.size()) };
         // SAFETY: Retire this complete large range, allowing OS reclamation.
