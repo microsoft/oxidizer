@@ -180,17 +180,16 @@
 //!
 //! Pick one fix:
 //!
-//! * Derive [`ThreadAware`](crate::ThreadAware) and let a per-worker strategy such as
+//! * Derive [`ThreadAware`](crate::ThreadAware) and let a partitioned strategy materialize an
+//!   instance during `relocate`:
 //!   [`performables::arc::Arc<T, PerThread>`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html)
-//!   or [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html)
-//!   materialize a separate instance during `relocate`.
+//!   for one instance per worker, or
+//!   [`PerNuma`](https://docs.rs/performables/latest/performables/arc/struct.PerNuma.html) for one
+//!   per NUMA node (shared by the workers on that node).
 //! * If the state is intentionally shared, make the read path lock-free, for example with an
 //!   `arc_swap::ArcSwap` snapshot.
 //! * If the type really needs a manual impl, make `relocate` re-home the state instead of
 //!   no-op'ing.
-//!
-//! The instance that prompted this entry was `oxidizer_config`'s config `View`, addressed in
-//! AB#7982033.
 //!
 //! ## `Clone` does not relocate
 //!
@@ -249,8 +248,8 @@
 //! * Could a per-worker
 //!   [`performables::arc::Arc`](https://docs.rs/performables/latest/performables/arc/struct.Arc.html)
 //!   strategy, an `arc_swap::ArcSwap` snapshot, or per-worker cloning remove the lock?
-//! * Is every `#[thread_aware(skip)]` justified, and avoided on fields whose type already
-//!   implements [`ThreadAware`](crate::ThreadAware)?
+//! * Is every `#[thread_aware(skip)]` justified, and avoided on fields whose type carries real
+//!   affinity (a meaningful [`relocate`](crate::ThreadAware::relocate), not an inert no-op)?
 //!
 //! # Testing
 //!

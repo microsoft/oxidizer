@@ -23,14 +23,22 @@ Report a suspected instance only when the evidence points to all three:
    - `DashMap`, shared cells, or other process-wide concurrent containers
    - wrapper structs that hide one of the above
 
-Also inspect `#[thread_aware(skip)]` fields. Flag them when the skipped field already implements
-`ThreadAware`, or when the skip hides shared mutable state that the rest of the type relies on for a
-hot path.
+Also inspect `#[thread_aware(skip)]` fields, but flag a skip only when it drops affinity the type
+actually needs: the skipped field's type has a *meaningful* `relocate` that re-homes per-worker
+state, or the skip hides shared mutable hot-path state and nothing records the sharing as
+intentional. A skip is the author's deliberate decision, so an inert field or a documented
+process-wide share is not a finding.
 
 Do not flag:
 
 - Types using `#[derive(ThreadAware)]` unless a skipped field itself matches the risky shape.
-- Truly inert fields with documented no-affinity semantics.
+- Truly inert fields with documented no-affinity semantics, including primitives and other types
+  (`usize`, `String`, function pointers, and the like) whose own `ThreadAware` impl is an
+  intentional no-op - skipping them changes nothing.
+- A documented, intentional process-wide share: a `#[thread_aware(skip)]` carrying a
+  `performables::arc::Arc<_, PerProcess>`, or one whose comment states the value is deliberately
+  shared across all workers. The recorded rationale is the signal that the share is by design, not
+  an oversight.
 - Intentionally shared, lock-free snapshots such as `arc_swap::ArcSwap` unless there is still a
   contended lock on the read path.
 
@@ -43,8 +51,9 @@ For each suspected instance, include:
 - Why it matches the signature.
 - The suggested fix:
   - Prefer `#[derive(ThreadAware)]` when forwarding to fields is enough.
-  - Use a per-worker strategy such as `performables::arc::Arc<T, PerThread>` or `PerNuma` when each
-    worker should get its own instance on `relocate`.
+  - Use `performables::arc::Arc<T, PerThread>` when each worker should get its own instance on
+    `relocate`, or `PerNuma` when one instance per NUMA node (shared by the workers on that node) is
+    the right granularity.
   - Use a lock-free shared snapshot such as `arc_swap::ArcSwap` when the state is intentionally
     shared.
   - Otherwise make the manual `relocate` genuinely re-home the state, rebuild locality caches, or
