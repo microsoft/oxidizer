@@ -517,6 +517,24 @@ mod tests {
     }
 
     #[test]
+    fn completed_join_error_still_emits_observed_runtime_stopped() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let mut wait_for_shutdown = MockWaitForShutdown::new();
+        wait_for_shutdown
+            .expect_wait()
+            .returning(|| Err(Error::new("worker join completed with a failure")));
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(wait_for_shutdown, NonEmpty::new(endpoint(worker_tx, &threads[0])), sink);
+
+        assert!(dispatcher.join().is_err());
+        assert_eq!(
+            processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
+            1
+        );
+    }
+
+    #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // Once the worker has closed the command channel (e.g. because it is shutting down)
         // we ignore any further spawn requests (they simply return disconnected join handles).
