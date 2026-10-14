@@ -55,10 +55,9 @@ These are the primary crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
-- [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with passive allocation hints and telemetry.
-  - [Supported platforms](./crates/rallocator/README.md#supported-platforms)
-  - [Design guide](./crates/rallocator/README.md#design-guide)
-  - [Implementation guide](./crates/rallocator/README.md#implementation-guide)
+- [`rallocator`](./crates/rallocator/README.md) - Windows and Linux x64/ARM64 owner-return allocator with Seismograph allocation events.
+  - [Allocation recording](./crates/rallocator/README.md#allocation-recording)
+  - [Migration from v1](./crates/rallocator/README.md#migration-from-v1)
 - [`seismograph_cli`](./crates/seismograph_cli/README.md) - Live monitoring and snapshot tools for seismograph telemetry.
 - [`seismograph`](./crates/seismograph/README.md) - High-performance process telemetry with extensible snapshot sources.
 - [`seismograph_io`](./crates/seismograph_io/README.md) - Structured I/O event instrumentation for Seismograph.

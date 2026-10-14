@@ -8,14 +8,12 @@
     reason = "The example keeps retained allocations visible and uses small bounded worker identifiers"
 )]
 
-//! Demonstrates caller tracking, scoped heaps, and snapshot capture.
+//! Demonstrates allocation event recording and snapshot capture.
 
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
-use allocation_hints::heaps::{Heap, bump};
-use allocation_hints::with_hint;
 use seismograph::recorder::Configuration;
 
 rallocator::rallocator!();
@@ -38,8 +36,7 @@ fn main() {
         .map(|worker| worker.join().expect("worker must not panic"))
         .collect();
 
-    let heap = Heap::bump(bump::Options::new());
-    let scoped = with_hint(&heap, || vec![1, 2, 3]);
+    let scoped = vec![1, 2, 3];
     let live = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
     live.write_file("snapshot-live.seismograph").unwrap();
 

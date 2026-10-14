@@ -6,9 +6,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{error, fmt, io};
 
+use crate::runner::terminal_text;
+
 #[derive(Debug)]
 pub(crate) enum Error {
     InvalidMode(String),
+    Probe(String),
     UnsupportedMode {
         mode: &'static str,
         reason: &'static str,
@@ -25,7 +28,6 @@ pub(crate) enum Error {
     ConflictingOutputOptions,
     ConflictingBaselineOptions,
     CurrentExecutable(io::Error),
-    CurrentDirectory(io::Error),
     HelpOutput(io::Error),
     ConsoleOutput(io::Error),
     Spawn {
@@ -91,6 +93,7 @@ impl fmt::Display for Error {
     #[expect(clippy::renamed_function_params, reason = "the descriptive name improves readability")]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Probe(message) => write!(formatter, "native benchmark probe failed: {}", terminal_text(message)),
             Self::InvalidMode(mode) => {
                 write!(
                     formatter,
@@ -130,7 +133,6 @@ impl fmt::Display for Error {
             Self::ConflictingOutputOptions => formatter.write_str("--no-output, --output, --export-json, and --export-md cannot conflict"),
             Self::ConflictingBaselineOptions => formatter.write_str("--no-baseline cannot be combined with --baseline"),
             Self::CurrentExecutable(error) => write!(formatter, "failed to locate the benchmark executable: {error}"),
-            Self::CurrentDirectory(error) => write!(formatter, "failed to locate the benchmark working directory: {error}"),
             Self::HelpOutput(error) => write!(formatter, "failed to write help text: {error}"),
             Self::ConsoleOutput(error) => write!(formatter, "failed to write console output: {error}"),
             Self::Spawn { mode, source } => write!(formatter, "failed to launch the {mode} worker: {source}"),
@@ -144,9 +146,9 @@ impl fmt::Display for Error {
             Self::CreateWorkerToken(error) => write!(formatter, "failed to create an internal worker token: {error}"),
             Self::ConsumeWorkerToken(error) => write!(formatter, "failed to consume an internal worker token: {error}"),
             Self::PerfControl(error) => write!(formatter, "failed to control Linux perf counters: {error}"),
-            Self::PerfWorkloadNotMeasured => formatter.write_str("the perf worker did not execute an instrumented workload"),
+            Self::PerfWorkloadNotMeasured => formatter.write_str("the perf worker did not execute its generated probe"),
             Self::VtuneControl(error) => write!(formatter, "failed to control the VTune collection: {error}"),
-            Self::VtuneWorkloadNotMeasured => formatter.write_str("the vtune worker did not execute an instrumented workload"),
+            Self::VtuneWorkloadNotMeasured => formatter.write_str("the vtune worker did not execute its generated probe"),
             Self::MultipleModeFailures(failures) => {
                 formatter.write_str("multiple benchmark failures occurred")?;
                 for failure in failures {
@@ -162,7 +164,9 @@ impl fmt::Display for Error {
                 "unsupported report schema {found} in {}; expected schema {expected}",
                 path.display()
             ),
-            Self::DuplicateReportBenchmark(identity) => write!(formatter, "report contains duplicate benchmark '{identity}'"),
+            Self::DuplicateReportBenchmark(identity) => {
+                write!(formatter, "report contains duplicate benchmark '{}'", terminal_text(identity))
+            }
             Self::Metadata(message) => write!(formatter, "failed to collect environment metadata: {message}"),
             Self::InvalidThreshold(value) => write!(
                 formatter,
@@ -183,7 +187,6 @@ impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::CurrentExecutable(source)
-            | Self::CurrentDirectory(source)
             | Self::HelpOutput(source)
             | Self::ConsoleOutput(source)
             | Self::CreateWorkerToken(source)
@@ -204,6 +207,23 @@ impl error::Error for Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_diagnostics_escape_untrusted_messages() {
+        let message = "unsupported option --bad\n\u{1b}[31m\r\t\u{061c}\u{200e}\u{200f}\u{202e}\u{2066}";
+        let error = Error::Probe(message.to_owned());
+        assert_eq!(
+            error.to_string(),
+            r"native benchmark probe failed: unsupported option --bad\n\u{1b}[31m\r\t\u{61c}\u{200e}\u{200f}\u{202e}\u{2066}"
+        );
+        assert!(matches!(error, Error::Probe(raw) if raw == message));
+    }
+
+    #[test]
+    fn duplicate_report_diagnostics_escape_disk_supplied_identities() {
+        let error = Error::DuplicateReportBenchmark("case\n\u{1b}[31m\u{202e}".into());
+        assert_eq!(error.to_string(), r"report contains duplicate benchmark 'case\n\u{1b}[31m\u{202e}'");
+    }
 
     #[test]
     fn source_returns_the_wrapped_io_error_for_control_protocol_variants() {

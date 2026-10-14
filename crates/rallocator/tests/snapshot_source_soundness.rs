@@ -1,73 +1,77 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Snapshot allocations retain ordinary ownership lifetimes without entering telemetry.
+//! Allocator-backed capture cleanup through source failure and unwinding.
+#![cfg(not(miri))]
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use seismograph::snapshot::{SnapshotContext, SnapshotOptions, Source, SourceData, SourceId};
+use seismograph::snapshot::{SnapshotContext, SnapshotOptions, Source, SourceData, SourceId};
 
-    rallocator::rallocator!();
+rallocator::rallocator!();
 
-    static MODE: AtomicUsize = AtomicUsize::new(0);
-    static ESCAPED: Mutex<Option<Vec<u8>>> = Mutex::new(None);
-    static SOURCE: Source = Source::new(SourceId::new(u64::MAX), "soundness-test", 1, capture);
+static MODE: AtomicUsize = AtomicUsize::new(0);
+static CACHE: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+static SOURCE: Source = Source::new(SourceId::new(0x534f_554e_444e_4553), "failure-recovery", 1, capture);
 
-    fn capture(_context: SnapshotContext<'_>) -> Result<SourceData, seismograph::Error> {
-        match MODE.load(Ordering::Relaxed) {
-            0 => Err(seismograph::Error::new("injected source failure")),
-            1 => panic!("{}", String::from("injected source panic")),
-            _ => {
-                *ESCAPED.lock().unwrap() = Some(vec![0x5a; 3 * 1024 * 1024]);
-                SourceData::copy_from(&[1, 2, 3])
-            }
+#[expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "the test source deliberately injects failure and an owned panic"
+)]
+fn capture(_context: SnapshotContext<'_>) -> Result<SourceData, seismograph::Error> {
+    *CACHE.lock().unwrap() = Some(vec![0x5a; 16_384]);
+    match MODE.load(Ordering::Relaxed) {
+        0 => Err(seismograph::Error::new("injected source failure")),
+        1 => std::panic::panic_any(String::from("injected owned source panic")),
+        _ => {
+            let mut data = SourceData::zeroed(4)?;
+            data.as_mut_bytes().copy_from_slice(b"pass");
+            Ok(data)
         }
     }
+}
 
-    #[test]
-    fn source_errors_panics_and_retained_data_outlive_capture() {
-        // Keep source registration in this test, after the successful capture.
-        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        assert!(!seismograph::snapshot::snapshot_collection_active());
-        std::thread::spawn(move || {
-            assert!(!seismograph::snapshot::snapshot_collection_active());
-            let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
-            assert!(decoded.sources.iter().any(|source| source.id == seismograph_rallocator::source::ID));
-            drop(snapshot);
-        })
-        .join()
-        .unwrap();
-
-        seismograph::snapshot::register_source(&SOURCE);
-
+#[test]
+fn allocator_backed_capture_recovers_after_source_error_and_panic() {
+    let retained = vec![0xa5; 32_768];
+    seismograph::snapshot::register_source(&SOURCE);
+    seismograph::recorder(seismograph::recorder::Configuration {
+        allocations: seismograph::recorder::RecordingPolicy::all(false),
+        ..Default::default()
+    });
+    for (mode, message) in [(0, "injected source failure"), (1, "source panicked")] {
+        MODE.store(mode, Ordering::Relaxed);
         let error = seismograph::snapshot(SnapshotOptions::default()).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            format!("seismograph source {} failed: injected source failure", u64::MAX)
-        );
-        drop(error);
-
-        MODE.store(1, Ordering::Relaxed);
-        let error = seismograph::snapshot(SnapshotOptions::default()).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "seismograph source {} failed: seismograph source panicked during snapshot capture",
-                u64::MAX
-            )
-        );
-        assert!(!seismograph::snapshot::snapshot_collection_active());
-        drop(error);
-
-        MODE.store(2, Ordering::Relaxed);
-        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        drop(snapshot);
-        let retained = ESCAPED.lock().unwrap().take().unwrap();
-        std::thread::spawn(move || assert!(retained.iter().all(|byte| *byte == 0x5a)))
-            .join()
-            .unwrap();
+        assert!(error.to_string().contains(message), "{error}");
+        let cache = CACHE.lock().unwrap().take().unwrap();
+        assert_eq!(cache, vec![0x5a; 16_384]);
+        drop(cache);
+        assert_eq!(retained, vec![0xa5; 32_768]);
     }
+    MODE.store(2, Ordering::Relaxed);
+    let recording = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    let decoded = seismograph::snapshot::decode(recording.as_bytes()).unwrap();
+    assert_eq!(
+        decoded
+            .sources
+            .iter()
+            .find(|source| source.id == SourceId::new(0x534f_554e_444e_4553))
+            .unwrap()
+            .data,
+        b"pass"
+    );
+    let native = decoded
+        .sources
+        .iter()
+        .find(|source| source.id == seismograph_rallocator::source::ID)
+        .unwrap();
+    assert_eq!(native.schema_version, 3);
+    assert!(seismograph_rallocator::decode(&native.data).unwrap().global.local_limit_bytes > 0);
+    assert_eq!(CACHE.lock().unwrap().take().unwrap(), vec![0x5a; 16_384]);
+    drop(retained);
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    CACHE.lock().unwrap().take();
 }

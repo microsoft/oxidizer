@@ -4,11 +4,10 @@
 [package]
 name = "rallocator"
 version = "0.2.0"
-description = "A high-performance global allocator with passive allocation hints and telemetry."
+description = "Windows and Linux x64/ARM64 owner-return allocator with Seismograph allocation events."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
 categories = ["memory-management"]
-
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -16,111 +15,30 @@ license.workspace = true
 homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
+# v1 benchmark sources are retained unchanged, but are not v4 build targets.
+autobenches = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[target.'cfg(loom)'.dev-dependencies]
-loom.workspace = true
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-pc-windows-msvc",
+]
 
-[features]
-default = ["caller-symbolization"]
-caller-symbolization = ["dep:backtrace"]
-loom = []
-tuning-telemetry = []
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { workspace = true, features = [
-    "Win32_System_Memory",
-    "Win32_System_SystemInformation",
-    "Win32_System_Kernel",
-    "Win32_System_Threading",
-] }
+[package.metadata.anvil.miri]
+# Native VM reservations and CPU prefetch instructions have no Miri backend.
+# Native tests, coverage and cargo careful remain enabled.
+# Mutation testing is excluded by the workspace mutation configurations.
+exclude = true
 
 [dependencies]
-allocation_hints.workspace = true
-# hashbrown 0.17 uses this older allocator trait version for system-backed tables.
-allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
-backtrace = { workspace = true, features = ["std"], optional = true }
-hashbrown = { workspace = true, features = ["allocator-api2"] }
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
-
-[dev-dependencies]
-criterion.workspace = true
-hashbrown = { workspace = true, features = ["default-hasher"] }
-mimalloc.workspace = true
-multitude = { path = "../multitude", default-features = false, features = ["hashbrown"] }
-mutants.workspace = true
-performables = { path = "../performables", features = ["seismograph"] }
-seismograph = { path = "../seismograph", features = ["monitor"] }
-seismograph_runtime = { path = "../seismograph_runtime" }
-
-[[test]]
-name = "snapshot_mappings"
-harness = false
-
-# Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
-# discover this target; the actual Loom build is selected by `--cfg loom`.
-[[test]]
-name = "loom"
-required-features = ["loom"]
-
-[[bench]]
-name = "mimalloc"
-harness = false
-
-[[bench]]
-name = "rallocator"
-harness = false
-
-[[bench]]
-name = "rallocator_threaded"
-harness = false
-
-[[bench]]
-name = "rallocator_threaded_mimalloc"
-harness = false
-
-[[bench]]
-name = "bump_multitude"
-harness = false
-
-[[bench]]
-name = "bump_allocation_hints"
-harness = false
-
-[[bench]]
-name = "bump_system"
-harness = false
-
-[[bench]]
-name = "bump_mimalloc"
-harness = false
-
-[[bench]]
-name = "bump_rallocator_global"
-harness = false
-
-[[bench]]
-name = "tracking_aggregates"
-harness = false
-
-[[bench]]
-name = "rallocator_tracking_events"
-harness = false
-
-[[bench]]
-name = "rallocator_tracking_events_1_in_20"
-harness = false
-
-[[bench]]
-name = "rallocator_tracking_events_1_in_100"
-harness = false
-
-[[bench]]
-name = "tracking_all_callers"
-harness = false
 
 # >>> anvil-managed: anvil-lints
 [lints]

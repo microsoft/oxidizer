@@ -9,15 +9,21 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::app::{App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
+use super::app::{App, CacheFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
 use super::help_content::Section;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Context {
     Browser,
     Info,
-    HeapBuckets,
-    HeapHotspots,
+    NativeMemory,
+    NativeGlobal,
+    NativeOwner,
+    NativeClasses,
+    NativeRanges,
+    NativeCaches,
+    NativeReturns,
+    NativeObservation,
     Allocations,
     PrimitiveTypes,
     PrimitiveOperations,
@@ -91,10 +97,7 @@ impl App {
     fn panel_help_context(&self, tab: MonitorTab) -> Context {
         match tab {
             MonitorTab::Info => Context::Info,
-            MonitorTab::Heaps => match self.heap_view.focus {
-                HeapFocus::Buckets => Context::HeapBuckets,
-                HeapFocus::Hotspots => Context::HeapHotspots,
-            },
+            MonitorTab::Heaps => self.heap_view.native.help(),
             MonitorTab::Allocations => Context::Allocations,
             MonitorTab::Primitives => match self.primitive_view.focus {
                 PrimitiveFocus::Types => Context::PrimitiveTypes,
@@ -323,11 +326,8 @@ mod tests {
         let mut app = offline();
         assert_eq!(app.panel_help_context(MonitorTab::Info), Context::Info);
         assert_eq!(app.panel_help_context(MonitorTab::Allocations), Context::Allocations);
-        for (focus, expected) in [
-            (HeapFocus::Buckets, Context::HeapBuckets),
-            (HeapFocus::Hotspots, Context::HeapHotspots),
-        ] {
-            app.heap_view.focus = focus;
+        for (root, expected) in [(0, Context::NativeMemory), (1, Context::NativeGlobal), (2, Context::NativeOwner)] {
+            app.heap_view.native.root = root;
             assert_eq!(app.panel_help_context(MonitorTab::Heaps), expected);
         }
         for (focus, expected) in [
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn scrolling_uses_wrapped_lines_and_clamps_after_resize() {
         let mut app = offline();
-        app.help = Some(Help::new(Context::HeapBuckets, true));
+        app.help = Some(Help::new(Context::NativeOwner, true));
         render(&app, 32, 12);
         let page = app.help.as_ref().unwrap().page.get();
         app.handle_key(KeyCode::PageDown);

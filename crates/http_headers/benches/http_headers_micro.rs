@@ -2141,6 +2141,7 @@ fn downstream_agent() -> (HeaderMap, DownstreamAgent) {
     (empty_map(), DownstreamAgent(field_value(USER_AGENT_VALUE)))
 }
 
+#[derive(Clone, Copy)]
 struct RawUserAgentSource;
 
 impl FieldSource for RawUserAgentSource {

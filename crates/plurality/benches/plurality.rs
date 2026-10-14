@@ -126,34 +126,6 @@ fn plurality_multi_box(pool: plurality::MultiPool) -> plurality::MultiPool {
     pool
 }
 
-#[metabench::benchmark(DYN_BOX_INFINITY_PINNED, "dyn_box", "infinity_pinned")]
-#[bench::run(ops::setup_infinity_pinned(ops::CAP))]
-fn infinity_pinned(pool: infinity_pool::PinnedPool<ops::Obj>) -> infinity_pool::PinnedPool<ops::Obj> {
-    ops::infinity_pinned(black_box(&pool), 0);
-    pool
-}
-
-#[metabench::benchmark(DYN_BOX_INFINITY_LOCAL_PINNED, "dyn_box", "infinity_local_pinned")]
-#[bench::run(ops::setup_infinity_local_pinned(ops::CAP))]
-fn infinity_local_pinned(pool: infinity_pool::LocalPinnedPool<ops::Obj>) -> infinity_pool::LocalPinnedPool<ops::Obj> {
-    ops::infinity_local_pinned(black_box(&pool), 0);
-    pool
-}
-
-#[metabench::benchmark(DYN_BOX_INFINITY_BLIND, "dyn_box", "infinity_blind")]
-#[bench::run(ops::setup_infinity_blind(ops::CAP))]
-fn infinity_blind(pool: infinity_pool::BlindPool) -> infinity_pool::BlindPool {
-    ops::infinity_blind(black_box(&pool), 0);
-    pool
-}
-
-#[metabench::benchmark(DYN_BOX_INFINITY_LOCAL_BLIND, "dyn_box", "infinity_local_blind")]
-#[bench::run(ops::setup_infinity_local_blind(ops::CAP))]
-fn infinity_local_blind(pool: infinity_pool::LocalBlindPool) -> infinity_pool::LocalBlindPool {
-    ops::infinity_local_blind(black_box(&pool), 0);
-    pool
-}
-
 #[metabench::benchmark(DYN_BOX_STD_BOX, "dyn_box", "std_box")]
 #[bench::run(ops::setup_std_box(ops::CAP))]
 fn std_box(_setup: ()) {
@@ -256,25 +228,6 @@ pool_benchmark!(
     pool_shared::setup_deadpool(pool_shared::CAP),
     deadpool::unmanaged::Pool<pool_shared::Obj>
 );
-#[cfg(target_os = "linux")]
-pool_benchmark!(
-    POOL_COMPARISON_CHURN_INFINITY_PINNED,
-    pool_infinity_pinned,
-    pool_shared::infinity_pinned,
-    "infinity_pinned",
-    pool_shared::setup_infinity_pinned(pool_shared::CAP),
-    infinity_pool::PinnedPool<pool_shared::Obj>
-);
-#[cfg(target_os = "linux")]
-pool_benchmark!(
-    mut POOL_COMPARISON_CHURN_INFINITY_RAW,
-    pool_infinity_raw,
-    pool_shared::infinity_raw,
-    "infinity_raw",
-    pool_shared::setup_infinity_raw(pool_shared::CAP),
-    infinity_pool::RawPinnedPool<pool_shared::Obj>
-);
-
 mod graph_churn {
     use core::ops::Deref;
     use std::alloc::{GlobalAlloc, Layout};
@@ -570,10 +523,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 
     let plurality = ops::setup_plurality(ops::CAP);
     let plurality_multi = ops::setup_plurality_multi(ops::CAP);
-    let infinity = ops::setup_infinity_pinned(ops::CAP);
-    let infinity_local = ops::setup_infinity_local_pinned(ops::CAP);
-    let infinity_blind = ops::setup_infinity_blind(ops::CAP);
-    let infinity_local_blind = ops::setup_infinity_local_blind(ops::CAP);
     ops::setup_std_box(ops::CAP);
 
     let mut dyn_box = criterion.benchmark_group(DYN_BOX_PLURALITY_BOX.group_name());
@@ -590,10 +539,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     }
     dyn_loop!(DYN_BOX_PLURALITY_BOX, plurality_box, &plurality);
     dyn_loop!(DYN_BOX_PLURALITY_MULTI_BOX, plurality_multi_box, &plurality_multi);
-    dyn_loop!(DYN_BOX_INFINITY_PINNED, infinity_pinned, &infinity);
-    dyn_loop!(DYN_BOX_INFINITY_LOCAL_PINNED, infinity_local_pinned, &infinity_local);
-    dyn_loop!(DYN_BOX_INFINITY_BLIND, infinity_blind, &infinity_blind);
-    dyn_loop!(DYN_BOX_INFINITY_LOCAL_BLIND, infinity_local_blind, &infinity_local_blind);
     dyn_box.bench_function(DYN_BOX_STD_BOX.benchmark_name(), |bencher| {
         bencher.iter(|| {
             for i in 0..N {
@@ -612,8 +557,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         let object_pool = pool_shared::setup_object_pool(pool_shared::CAP);
         let opool = pool_shared::setup_opool(pool_shared::CAP);
         let deadpool = pool_shared::setup_deadpool(pool_shared::CAP);
-        let infinity = pool_shared::setup_infinity_pinned(pool_shared::CAP);
-        let mut infinity_raw = pool_shared::setup_infinity_raw(pool_shared::CAP);
 
         let mut churn = criterion.benchmark_group(POOL_COMPARISON_CHURN_PLURALITY_BOX.group_name());
         macro_rules! churn_loop {
@@ -643,8 +586,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         churn_loop!(POOL_COMPARISON_CHURN_OBJECT_POOL_PULL, pool_shared::object_pool_pull, &object_pool);
         churn_loop!(POOL_COMPARISON_CHURN_OPOOL_GET, pool_shared::opool_get, &opool);
         churn_loop!(POOL_COMPARISON_CHURN_DEADPOOL_GET, pool_shared::deadpool_get, &deadpool);
-        churn_loop!(POOL_COMPARISON_CHURN_INFINITY_PINNED, pool_shared::infinity_pinned, &infinity);
-        churn_loop!(POOL_COMPARISON_CHURN_INFINITY_RAW, pool_shared::infinity_raw, &mut infinity_raw);
         churn.finish();
     }
 
@@ -715,10 +656,6 @@ metabench::main!(
             benchmarks = [
                 DYN_BOX_PLURALITY_BOX,
                 DYN_BOX_PLURALITY_MULTI_BOX,
-                DYN_BOX_INFINITY_PINNED,
-                DYN_BOX_INFINITY_LOCAL_PINNED,
-                DYN_BOX_INFINITY_BLIND,
-                DYN_BOX_INFINITY_LOCAL_BLIND,
                 DYN_BOX_STD_BOX,
             ],
             gungraun_config = callgrind_branch_config(),
@@ -733,8 +670,6 @@ metabench::main!(
                 POOL_COMPARISON_CHURN_OBJECT_POOL_PULL,
                 POOL_COMPARISON_CHURN_OPOOL_GET,
                 POOL_COMPARISON_CHURN_DEADPOOL_GET,
-                POOL_COMPARISON_CHURN_INFINITY_PINNED,
-                POOL_COMPARISON_CHURN_INFINITY_RAW,
             ],
         },
     },
@@ -774,10 +709,6 @@ metabench::main!(
             benchmarks = [
                 DYN_BOX_PLURALITY_BOX,
                 DYN_BOX_PLURALITY_MULTI_BOX,
-                DYN_BOX_INFINITY_PINNED,
-                DYN_BOX_INFINITY_LOCAL_PINNED,
-                DYN_BOX_INFINITY_BLIND,
-                DYN_BOX_INFINITY_LOCAL_BLIND,
                 DYN_BOX_STD_BOX,
             ],
             gungraun_config = callgrind_branch_config(),

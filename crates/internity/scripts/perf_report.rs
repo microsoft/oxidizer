@@ -24,14 +24,14 @@ serde_json = "1"
 //! live-heap measurement remains the dedicated `internity_mem` target because it
 //! reports steady-state retained bytes, not a metabench engine metric.
 
-use std::collections::{BTreeMap, btree_map::Entry};
-use std::env;
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::error::Error;
 use std::fmt::Write as _;
-use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::{env, fs};
 
 use clap::Parser;
 use serde::Deserialize;
@@ -129,10 +129,7 @@ const THREAD_COUNTS: &[&str] = &["1", "2", "4", "8"];
 
 /// Rows that have no repeatable single-threaded criterion timing in this suite
 /// because they are backed by a process-global, persistent table.
-const CRITERION_OMITTED: &[&str] = &[
-    "internity_compare/insert/ustr",
-    "internity_compare/insert/string_cache",
-];
+const CRITERION_OMITTED: &[&str] = &["internity_compare/insert/ustr", "internity_compare/insert/string_cache"];
 
 #[derive(Deserialize)]
 struct JsonReport {
@@ -190,7 +187,7 @@ fn index_report(report: JsonReport) -> Result<ReportIndex, BoxErr> {
 }
 
 fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
-    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("time")?;
     let value = metric.value.as_f64();
     match metric.unit.as_deref()? {
         "ps" => Some(value * 1e-3),
@@ -204,6 +201,40 @@ fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
 
 fn lookup_time(report: &ReportIndex, key: &str) -> Option<f64> {
     criterion_time_ns(report, key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonReport, criterion_time_ns, index_report};
+
+    #[test]
+    fn schema_nine_primary_estimate_and_units() {
+        for (value, unit, expected) in [
+            (serde_json::json!(1250), "ps", 1.25),
+            (serde_json::json!(1.25), "ns", 1.25),
+            (serde_json::json!(1.25), "µs", 1250.0),
+            (serde_json::json!(1.25), "us", 1250.0),
+            (serde_json::json!(1.25), "ms", 1_250_000.0),
+            (serde_json::json!(1.25), "s", 1_250_000_000.0),
+        ] {
+            let fixture = serde_json::json!({
+                "schema_version": 9,
+                "entries": [{
+                    "identity": "example",
+                    "results": {"criterion": {"metrics": {
+                        "time": {"value": value, "unit": unit}
+                    }}}
+                }]
+            });
+            let report: JsonReport = serde_json::from_value(fixture).unwrap();
+            let mut report = index_report(report).unwrap();
+            assert_eq!(criterion_time_ns(&report, "example"), Some(expected));
+            let metrics = &mut report.get_mut("example").unwrap().results.get_mut("criterion").unwrap().metrics;
+            let time = metrics.remove("time").unwrap();
+            metrics.insert("median".to_string(), time);
+            assert_eq!(criterion_time_ns(&report, "example"), None);
+        }
+    }
 }
 
 fn validate_criterion(report: &ReportIndex) -> Result<(), BoxErr> {
@@ -262,7 +293,7 @@ fn header() -> String {
          refresh these numbers.\n\n",
     );
     out.push_str(
-        "All timing figures are wall-clock medians measured by Criterion. They are\n\
+        "All timing figures are primary wall-clock estimates measured by Criterion. They are\n\
          machine-dependent: the ratios between rows are the durable signal, not the\n\
          absolute values.\n\n",
     );
@@ -331,14 +362,12 @@ fn render_single(out: &mut String, report: &ReportIndex) {
 /// Render each concurrent operation as a single table: one row per interner, one
 /// column per thread count, and a trailing delta at the highest thread count.
 fn render_concurrent(out: &mut String, report: &ReportIndex) {
-    let top = THREAD_COUNTS
-        .last()
-        .expect("THREAD_COUNTS is a non-empty compile-time constant");
+    let top = THREAD_COUNTS.last().expect("THREAD_COUNTS is a non-empty compile-time constant");
 
     out.push_str("## Concurrent scaling\n\n");
     out.push_str(
         "One table per operation, with a column per thread count. Each cell is the \
-         wall-clock median of the whole parallel phase at that thread count, so the total \
+         primary wall-clock estimate of the whole parallel phase at that thread count, so the total \
          work grows with the thread count and the numbers show how each interner holds up \
          under contention rather than a per-thread speedup. The trailing column is the \
          delta against internity at the highest thread count, which is where the designs \
@@ -366,11 +395,7 @@ fn render_concurrent(out: &mut String, report: &ReportIndex) {
                 let _ = write!(out, " {} |", fmt_ns(time));
             }
             let top_time = lookup_time(report, &format!("{group}/{row}/{top}"));
-            let _ = writeln!(
-                out,
-                " {} |",
-                fmt_delta(top_time, reference, *row == "internity")
-            );
+            let _ = writeln!(out, " {} |", fmt_delta(top_time, reference, *row == "internity"));
         }
         out.push('\n');
     }
@@ -450,14 +475,7 @@ fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<Str
     Ok(combined)
 }
 
-fn run_metabench(
-    cwd: &Path,
-    json_path: &Path,
-    markdown_path: &Path,
-    samples: &str,
-    measurement: &str,
-    warmup: &str,
-) -> Result<(), BoxErr> {
+fn run_metabench(cwd: &Path, json_path: &Path, markdown_path: &Path, samples: &str, measurement: &str, warmup: &str) -> Result<(), BoxErr> {
     println!("==> Running criterion metabench suite");
     let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     cmd.current_dir(cwd).arg("bench").arg("--bench").arg("internity").arg("--");
@@ -506,8 +524,7 @@ fn run(args: &Args) -> Result<(), BoxErr> {
     let warmup = args.warm_up_time.unwrap_or(1).to_string();
 
     let metabench_dir = crate_dir.join("target").join("metabench").join("internity");
-    fs::create_dir_all(&metabench_dir)
-        .map_err(|e| format!("creating {}: {e}", metabench_dir.display()))?;
+    fs::create_dir_all(&metabench_dir).map_err(|e| format!("creating {}: {e}", metabench_dir.display()))?;
     let json_path = metabench_dir.join("report.json");
     let markdown_path = metabench_dir.join("report.md");
 
@@ -530,11 +547,7 @@ fn run(args: &Args) -> Result<(), BoxErr> {
     let out_path = docs_dir.join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| format!("writing {}: {e}", out_path.display()))?;
 
-    println!(
-        "Wrote {} ({} metabench identities)",
-        out_path.display(),
-        entry_count,
-    );
+    println!("Wrote {} ({} metabench identities)", out_path.display(), entry_count,);
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())
 }

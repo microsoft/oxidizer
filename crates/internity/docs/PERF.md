@@ -157,6 +157,12 @@ The established comparison timing figures below are wall-clock medians measured 
 machine-dependent: the ratios between rows are the durable signal, not the
 absolute values.
 
+These historical timing figures have not been rerun for the metabench schema 9
+migration. Current `scripts/perf_report.rs` output reads Criterion's primary
+estimate from `criterion/time`, not the historical median metric. A median
+across independent runs, where used, is a separate aggregation of per-run
+estimates.
+
 This report is a curated set of customer-facing scenarios. The crate also carries
 internal Callgrind instruction-count benches in the consolidated metabench target
 (`benches/internity.rs`); the matched cases used above are part of that target.
@@ -207,7 +213,7 @@ One table per operation, comparing internity against every other interner measur
 
 ## Concurrent scaling
 
-One table per operation, with a column per thread count. Each cell is the wall-clock median of the whole parallel phase at that thread count, so the total work grows with the thread count and the numbers show how each interner holds up under contention rather than a per-thread speedup. The trailing column is the delta against internity at the highest thread count, which is where the designs separate most; per-thread-count deltas are omitted to keep the tables readable.
+One table per operation, with a column per thread count. Each historical cell is the wall-clock median of the whole parallel phase at that thread count, so the total work grows with the thread count and the numbers show how each interner holds up under contention rather than a per-thread speedup. The trailing column is the delta against internity at the highest thread count, which is where the designs separate most; per-thread-count deltas are omitted to keep the tables readable.
 
 ### `insert` — concurrent
 

@@ -73,12 +73,27 @@ The following package-level exclusions are intentional:
 - `rest_over_grpc` keeps its runtime transcoding tests under Miri, but omits
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
-- `rallocator` keeps its library and allocator integration suites under Miri,
-  but omits `tests/telemetry.rs` and `tests/performables_telemetry.rs`. Those
-  binaries repeatedly capture and decode process-wide snapshots or validate a
-  safe dependency graph; direct Miri tests in the library, `performables`, and
-  `seismograph` cover the unsafe internals, while native tests and
-  `cargo careful` retain the end-to-end assertions.
+- `rallocator` uses v4 backends for Windows x64/ARM64 MSVC and Linux
+  x64/AArch64 with 4-KiB kernel pages. Its native
+  allocator and event-bridge suites run on both platforms, including Linux
+  runtime analysis through `cargo careful`. Its manifest explicitly excludes
+  Miri because native VM reservations and CPU prefetch instructions have no
+  interpreter backend. Miri is not a supported allocator backend; the old v1
+  Miri backend and telemetry test binaries are removed.
+  `seismograph` retains its independent portable runtime-analysis coverage,
+  and the schema-3 native owner/backend inventory codec in
+  `seismograph_rallocator` is platform-independent, as is its separate
+  allocation-event projection. Neither requires the native allocator backend
+  to run under Miri.
+  Its custom-global-allocator allocation-count fixture runs natively and under
+  `cargo careful`, not Miri. The separate native-schema integration tests retain
+  borrowed encoding and error-path coverage under Miri. This avoids exercising
+  Windows `System` allocation-header bookkeeping through the counting wrapper
+  during interpreter test-harness teardown.
+  The schema truncation regression retains every byte prefix natively and under
+  `cargo careful`. Miri checks the complete wire header, each owner header, and
+  the final eight bytes before every owner boundary instead of repeating the
+  same decoder reads for every byte in the observation arrays.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native

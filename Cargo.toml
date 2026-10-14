@@ -124,6 +124,7 @@ deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
+either-or-both = { version = "0.3", default-features = false }
 events_once = { version = "0.5.32", default-features = false }
 fakeable = { path = "crates/fakeable", default-features = false, version = "0.2.0" }
 fakeable_impl = { path = "crates/fakeable_impl", default-features = false, version = "=0.2.0" }
@@ -148,7 +149,7 @@ futures-util = { version = "0.3.31", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 # Keep the library and summary parser aligned with gungraun-runner's schema.
 gungraun = { version = "=0.19.4", default-features = false }
-gungraun-summary = { version = "=6.0.0", default-features = false }
+gungraun-runner = { version = "=0.19.4", default-features = false }
 h3 = { version = "0.0.8", default-features = false }
 h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
@@ -169,7 +170,6 @@ hyper-rustls = { version = "0.27.9", default-features = false }
 hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
 idna = { version = "1.1.0", default-features = false }
-infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 internity = { path = "crates/internity", default-features = false, version = "0.2.1" }
 internity_macros = { path = "crates/internity_macros", default-features = false, version = "=0.2.1" }
