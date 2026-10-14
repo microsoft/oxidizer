@@ -499,16 +499,6 @@ impl SingleSinkState {
         self
     }
 
-    fn view<'e>(&self, event: &'e dyn DynEvent) -> EventView<'e> {
-        EventView::new(
-            event,
-            self.enrichment.current(),
-            self.isolated_enrichment,
-            self.id,
-            self.clock.system_time(),
-        )
-    }
-
     fn dispatch<'e>(&self, get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
         if self.processors.is_empty() {
             return;
@@ -534,7 +524,13 @@ impl SingleSinkState {
 
         let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot is free again once the event is built");
 
-        let view = self.view(event);
+        let view = EventView::new(
+            event,
+            self.enrichment.current(),
+            self.isolated_enrichment,
+            self.id,
+            self.clock.system_time(),
+        );
         self.processors[first_interested_processor].process(&view);
         for processor in &self.processors[first_interested_processor + 1..] {
             if processor.is_interested(description) {
