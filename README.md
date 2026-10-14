@@ -44,6 +44,7 @@ These are the primary crates built out of this repo:
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fetch_winhttp`](./crates/fetch_winhttp/README.md) - WinHTTP-based HTTP transport for the fetch client (Windows only).
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`future_assert`](./crates/future_assert/README.md) - Manual polling assertions for futures in tests, without an async runtime.
 - [`http_compression`](./crates/http_compression/README.md) - HTTP request and response body compression and decompression.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`http_headers`](./crates/http_headers/README.md) - Fast, ergonomic typed HTTP headers with borrowed views.
