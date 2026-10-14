@@ -782,6 +782,52 @@ mod tests {
     }
 
     #[test]
+    fn collected_window_counts_without_samples_sort_with_available_retained_evidence() {
+        let worker = RuntimeWorkerSummary {
+            tasks: vec![
+                RuntimeTaskSummary {
+                    task_id: 1,
+                    metrics_scope: Some(seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(
+                        EventTimestamp::from_ticks(10),
+                    )),
+                    metrics: ExecutionMetrics {
+                        source_polls: Some(TaskMetrics::default()),
+                        ..ExecutionMetrics::default()
+                    },
+                    ..RuntimeTaskSummary::default()
+                },
+                RuntimeTaskSummary {
+                    task_id: 2,
+                    metrics_scope: Some(seismograph_runtime::snapshot::TaskMetricsScope::Lifetime),
+                    metrics: ExecutionMetrics {
+                        poll_count: 1,
+                        poll_samples: vec![10],
+                        ..ExecutionMetrics::default()
+                    },
+                    ..RuntimeTaskSummary::default()
+                },
+            ],
+            ..RuntimeWorkerSummary::default()
+        };
+        assert_eq!(
+            worker
+                .sorted_tasks(RuntimeTaskSort::Polls, false)
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(
+            worker
+                .sorted_tasks(RuntimeTaskSort::Polls, true)
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            [2, 1]
+        );
+    }
+
+    #[test]
     fn spawned_task_preserves_nonzero_parent_identity() {
         let mut spawned = event(EventKind::TaskSpawned, None, 10, 1, 1);
         if let EventPayload::Runtime(runtime) = &mut spawned.payload {
