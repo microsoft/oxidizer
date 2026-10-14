@@ -12,8 +12,8 @@ possible. With `panic = "abort"`, the process aborts instead.
 Arty does not promise recovery from panics in destructors, custom wakers, join
 notifications, telemetry processors, or other cleanup and notification hooks.
 These panics may unwind the worker thread or abort if another panic is already
-in progress. Values moved into tasks must not panic from `Drop`, and custom
-wakers and telemetry processors must not panic.
+in progress. User-provided destructors, custom wakers, join notifications,
+telemetry processors, and other cleanup or notification hooks must not panic.
 
 Arty catches cleanup panics only when needed to protect memory safety or release
 runtime-owned task storage exactly once. These catches must be narrow. A panic
