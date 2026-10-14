@@ -3224,20 +3224,42 @@ mod tests {
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
-        let before = statistics().allocated_bytes;
+        // Clear may release retired history without replacing this thread's active ring.
+        let retired = std::thread::spawn(|| {
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+            });
+            // SAFETY: published recorders live for the process lifetime, including after retirement.
+            unsafe { &*local_recorder() }
+        })
+        .join()
+        .unwrap();
+        assert!(retired.retired.load(Ordering::Acquire));
+        // SAFETY: this thread owns the process-lifetime recorder and its writer context.
+        let recorder = unsafe { &*local_recorder() };
+        let active_storage = || {
+            let ring = recorder.ring().unwrap();
+            (ring.slots.as_ptr(), ring.capacity())
+        };
+        let before = active_storage();
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (enabled, 0, before)
         );
+        {
+            let _ring = retired.ring_lock();
+            assert!(retired.ring().is_none());
+            assert_eq!(retired.ring_capacity.load(Ordering::Acquire), 0);
+        }
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
-        assert_eq!(statistics().retained_events, 1);
+        assert_eq!(try_statistics().unwrap().retained_events, 1);
         configure(Configuration::default());
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (Configuration::default(), 0, before)
         );
     }
