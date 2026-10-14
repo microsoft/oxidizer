@@ -1054,7 +1054,9 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-        TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        TEST_LOCK
+            .lock()
+            .expect("a preceding recording-fixture test failed; its shared process state is no longer trustworthy")
     }
 
     fn type_descriptor_id(value: u64) -> TypeDescriptorId {
@@ -1244,11 +1246,19 @@ mod tests {
 
     #[cfg(target_pointer_width = "64")]
     #[test]
-    #[should_panic(expected = "size must be smaller")]
     fn unrepresentable_future_size_panics_before_registering() {
         let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("unrepresentable-future-size", 1));
-        let _task = runtime.handle().register_task_with_size(type_descriptor_id(1), None, usize::MAX);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.handle().register_task_with_size(type_descriptor_id(1), None, usize::MAX)
+        }))
+        .unwrap_err();
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap();
+        assert!(message.contains("size must be smaller"));
     }
 
     #[test]

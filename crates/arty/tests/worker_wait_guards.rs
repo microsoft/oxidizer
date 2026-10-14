@@ -38,6 +38,10 @@ fn async_worker_stop_returns_without_self_joining() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "nested runtime stop intentionally returns before its workers can be joined; native and careful suites retain cancellation-destructor guards, while executor/storage Miri tests retain unsafe lifecycle coverage"
+)]
 fn cancellation_destructors_remain_worker_guarded() {
     struct Probe {
         block_on_runtime: Runtime,

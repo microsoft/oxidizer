@@ -943,13 +943,43 @@ mod tests {
                 .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete))
                 .unwrap();
         }
-        let canceled = Cancellation::default();
+        let canceled = Arc::new(Cancellation::default());
+        let stop_if_no_response = Arc::clone(&canceled);
+        let (finished, completion) = mpsc::channel();
+        let deadline = thread::spawn(move || {
+            if completion.recv_timeout(Duration::from_secs(1)).is_err() {
+                stop_if_no_response.stopped.store(true, Ordering::Release);
+                stop_if_no_response.ready.notify_all();
+            }
+        });
         let mut calls = 0;
         run_subscription(&runtime.handle(), &canceled, SubscriptionOptions::default(), &mut |_batch| {
             calls += 1;
             canceled.stopped.store(true, Ordering::Release);
         });
+        finished.send(()).unwrap();
+        deadline.join().unwrap();
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn collection_without_pending_workers_returns_before_the_response_deadline() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("no-pending-response", 0));
+        let start = Instant::now();
+        let batches = collect(
+            &runtime.handle(),
+            QueryOptions {
+                timeout: Duration::from_secs(5),
+                ..QueryOptions::default()
+            },
+            &AtomicBool::new(false),
+        );
+        assert!(batches.is_empty());
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "an empty collection must not wait for an absent response"
+        );
     }
 
     #[test]
