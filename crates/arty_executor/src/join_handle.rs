@@ -3,47 +3,80 @@
 
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
+use std::sync::Mutex;
 use std::task;
 
-use events_once::{LocalEventLake, PooledLocalReceiver, PooledLocalSender};
+use events_once::{BoxedReceiver, BoxedSender, LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 
-/// A task failed to return its result because its executor shut down.
-///
-/// `arty_executor` does not recover task panics. A task panic that reaches this layer
-/// terminates the process, so shutdown is the only recoverable join failure reported here.
-#[derive(Clone, Copy, PartialEq, Eq)]
+use crate::{TaskPanic, TaskResult};
+
+/// A task failed to return its result.
 pub struct JoinError {
-    _private: (),
+    panic: Option<Mutex<TaskPanic>>,
 }
+
+impl PartialEq for JoinError {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_panic() == other.is_panic()
+    }
+}
+
+impl Eq for JoinError {}
 
 impl JoinError {
     #[must_use]
     const fn shutdown() -> Self {
-        Self { _private: () }
+        Self { panic: None }
     }
 
-    /// Returns `true` because executor shutdown is the only recoverable join failure.
+    pub(crate) fn panicked(panic: TaskPanic) -> Self {
+        Self {
+            panic: Some(Mutex::new(panic)),
+        }
+    }
+
+    /// Returns `true` if the task panicked.
     #[must_use]
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        clippy::unused_self,
-        reason = "predicate methods conventionally inspect an error value and leave room for future failure details"
-    )]
+    pub const fn is_panic(&self) -> bool {
+        self.panic.is_some()
+    }
+
+    /// Returns `true` if executor shutdown cancelled the task or rejected its submission.
+    #[must_use]
     pub const fn is_shutdown(&self) -> bool {
-        true
+        self.panic.is_none()
+    }
+
+    /// Returns the captured panic payload.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this error represents executor shutdown rather than a task panic.
+    #[must_use]
+    pub fn into_panic(self) -> TaskPanic {
+        self.panic
+            .expect("into_panic() requires a JoinError for which is_panic() is true")
+            .into_inner()
+            .expect("the private panic payload mutex cannot be poisoned")
     }
 }
 
 impl Display for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("task did not return a result because the executor is shut down")
+        f.write_str(if self.is_panic() {
+            "task panicked"
+        } else {
+            "runtime is shutting down"
+        })
     }
 }
 
 impl Debug for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(std::any::type_name::<Self>())
+            .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
             .finish()
     }
@@ -110,6 +143,61 @@ impl<R: 'static> Future for JoinHandle<R> {
     }
 }
 
+/// A cross-thread handle for receiving a task result.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct RemoteJoinHandle<R: Send + 'static> {
+    rx: BoxedReceiver<TaskResult<R>>,
+}
+
+impl<R: Send + 'static> RemoteJoinHandle<R> {
+    /// Creates a result sender and its matching join handle.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn channel() -> (RemoteTaskSender<R>, Self) {
+        let (tx, rx) = events_once::Event::boxed();
+        (RemoteTaskSender { tx }, Self { rx })
+    }
+}
+
+impl<R: Send + 'static> Future for RemoteJoinHandle<R> {
+    type Output = Result<R, JoinError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+        Pin::new(&mut self.get_mut().rx).poll(cx).map(|result| match result {
+            Ok(TaskResult::Completed(value)) => Ok(value),
+            Ok(TaskResult::Panicked(panic)) => Err(JoinError::panicked(panic)),
+            Err(_) => Err(JoinError::shutdown()),
+        })
+    }
+}
+
+/// The sending endpoint for a [`RemoteJoinHandle`].
+#[doc(hidden)]
+pub struct RemoteTaskSender<R: Send + 'static> {
+    tx: BoxedSender<TaskResult<R>>,
+}
+
+impl<R: Send + 'static> Debug for RemoteTaskSender<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteTaskSender").field("tx", &self.tx).finish()
+    }
+}
+
+impl<R: Send + 'static> RemoteTaskSender<R> {
+    /// Sends a successfully completed result.
+    #[doc(hidden)]
+    pub fn completed(self, result: R) -> Result<(), TaskPanic> {
+        catch_unwind(AssertUnwindSafe(|| self.tx.send(TaskResult::Completed(result))))
+    }
+
+    /// Sends a captured task panic.
+    #[doc(hidden)]
+    pub fn panicked(self, panic: TaskPanic) -> Result<(), TaskPanic> {
+        catch_unwind(AssertUnwindSafe(|| self.tx.send(TaskResult::Panicked(panic))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -129,8 +217,18 @@ mod tests {
         let error = JoinError::shutdown();
 
         assert!(error.is_shutdown());
-        assert_eq!(error.to_string(), "task did not return a result because the executor is shut down");
+        assert!(!error.is_panic());
+        assert_eq!(error.to_string(), "runtime is shutting down");
         assert!(format!("{error:?}").contains("is_shutdown: true"));
         assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn panic_error_exposes_its_payload() {
+        let error = JoinError::panicked(Box::new(42_u64));
+
+        assert!(error.is_panic());
+        assert!(!error.is_shutdown());
+        assert_eq!(*error.into_panic().downcast::<u64>().unwrap(), 42);
     }
 }

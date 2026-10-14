@@ -9,12 +9,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{mem, task};
 
+use events_once::PooledLocalSender;
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use observed::Sink;
 use plurality::MultiPool;
 use tick::SimpleClock;
 
 use crate::wake::WakeShared;
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskOptions, TaskRef, WakeSignal};
+use crate::{
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, RemoteTaskSender, Task, TaskOptions, TaskRef,
+    TypeErasedTask, WakeSignal,
+};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -28,6 +33,7 @@ pub(crate) struct ExecutorCore {
     reentrancy_safe: RefCell<ReentrancySafeState>,
     exclusive: RefCell<ExclusiveState>,
     wake: Arc<WakeShared>,
+    sink: Sink,
 
     _single_threaded: PhantomData<*const ()>,
 }
@@ -117,7 +123,7 @@ impl ExecutorCore {
     /// The `owner_waker` is used by the executor to wake up its owner when more work has
     /// arrived for the executor and calling `execute_cycle()` is desirable.
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker) -> Self {
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink) -> Self {
         Self {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
@@ -137,11 +143,12 @@ impl ExecutorCore {
                 Arc::new(AtomicBool::new(false)),
                 owner_waker,
             )),
+            sink,
             _single_threaded: PhantomData,
         }
     }
 
-    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions<R>) -> JoinHandle<R>
+    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
@@ -152,15 +159,37 @@ impl ExecutorCore {
                 return state.join_events.disconnected();
             }
         }
-
         let future = future.into_future();
+        self.register_task(move |result_tx, sink| Task::new_with_options(future, result_tx, options, sink))
+    }
+
+    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
+    where
+        F: IntoFuture<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        {
+            let state = self.reentrancy_safe.borrow();
+            if state.shutting_down {
+                return state.join_events.disconnected();
+            }
+        }
+        let future = future.into_future();
+        self.register_task(move |result_tx, sink| Task::new_remote(future, result_tx, options, sink, remote_result_tx))
+    }
+
+    fn register_task<R, T>(&self, create: impl FnOnce(PooledLocalSender<R>, Sink) -> T) -> JoinHandle<R>
+    where
+        R: 'static,
+        T: TypeErasedTask + 'static,
+    {
         let mut state = self.reentrancy_safe.borrow_mut();
         if state.shutting_down {
             return state.join_events.disconnected();
         }
         let (result_tx, join_handle) = state.join_events.rent::<R>();
 
-        let task_ref = TaskRef::new(state.task_storage.alloc_box(Task::new_with_options(future, result_tx, options)));
+        let task_ref = TaskRef::new(state.task_storage.alloc_box(create(result_tx, self.sink.clone())));
 
         let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
 

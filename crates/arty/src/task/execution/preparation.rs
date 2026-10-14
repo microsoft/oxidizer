@@ -2,18 +2,11 @@
 // Licensed under the MIT License.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::AtomicBool;
 
-use arty_executor::{TaskOptions, TaskOutcome, TaskSet};
-use events_once::{BoxedSender, Event};
-use observed::Sink;
+use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskSet, discard_task_panic};
 use observed::context::Transfer;
-use performables::arc::Arc;
 
 use crate::task::Builtins;
-use crate::task::execution::discard_panic;
-use crate::task::execution::remote::{RemoteTaskFuture, RemoteTaskOutcome};
-use crate::task::execution::result::TaskResult;
 use crate::task::execution::storage::TaskFactory;
 use crate::task::join::JoinHandle;
 
@@ -33,9 +26,6 @@ pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet
 pub(crate) fn prepare_remote<C, FF, F, R>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
-    sink: Sink,
-    placement: &'static str,
-    shutdown_signal: Arc<AtomicBool>,
 ) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
 where
     C: 'static,
@@ -43,20 +33,17 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
+    let (result_tx, result_rx) = RemoteJoinHandle::channel();
+    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
     let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
-        let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
+        let (future_factory, parent_task_enrichment) = future_factory.into_parts();
         let inner = async move { future_factory(cx).await };
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options = TaskOptions::observed(sink, parent_task_enrichment, placement, classify_remote_outcome);
-        drop(tasks.add_with_options(
-            RemoteTaskFuture::new_with_shutdown(inner, result_tx, Some(shutdown_signal)),
-            options,
-        ));
+        let options = TaskOptions::observed(parent_task_enrichment);
+        drop(tasks.add_with_remote_result(inner, options, result_tx));
     });
     (future_factory, JoinHandle::new(result_rx))
 }
@@ -65,8 +52,6 @@ pub(crate) fn prepare_remote_on_worker<FF, F, R>(
     future_factory: FF,
     builtins: Builtins,
     parent_task_enrichment: Transfer,
-    sink: Sink,
-    shutdown_signal: Arc<AtomicBool>,
     tasks: &TaskSet,
 ) -> JoinHandle<R>
 where
@@ -74,26 +59,11 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
+    let (result_tx, result_rx) = RemoteJoinHandle::channel();
     let inner = async move { future_factory(builtins).await };
-    let options = TaskOptions::observed(sink, parent_task_enrichment, "same_thread", classify_remote_outcome);
-    drop(tasks.add_with_options(
-        RemoteTaskFuture::new_with_shutdown(inner, result_tx, Some(shutdown_signal)),
-        options,
-    ));
+    let options = TaskOptions::observed(parent_task_enrichment);
+    drop(tasks.add_with_remote_result(inner, options, result_tx));
     JoinHandle::new(result_rx)
-}
-
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "TaskOptions classifiers inspect task outputs by reference"
-)]
-fn classify_remote_outcome(outcome: &RemoteTaskOutcome) -> Option<TaskOutcome> {
-    match outcome {
-        RemoteTaskOutcome::Succeeded => Some(TaskOutcome::Succeeded),
-        RemoteTaskOutcome::Panicked => Some(TaskOutcome::Panicked),
-        RemoteTaskOutcome::Cancelled => None,
-    }
 }
 
 pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
@@ -101,7 +71,7 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
+    let (result_tx, result_rx) = RemoteJoinHandle::channel();
     let task = BlockingTask {
         body: Some(body),
         result_tx: Some(result_tx),
@@ -111,7 +81,7 @@ where
 
 struct BlockingTask<F, R: Send + 'static> {
     body: Option<F>,
-    result_tx: Option<BoxedSender<TaskResult<R>>>,
+    result_tx: Option<RemoteTaskSender<R>>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -122,21 +92,15 @@ where
     fn run(mut self) {
         let body = self.body.take().expect("blocking task body is consumed exactly once");
         let result_tx = self.result_tx.take().expect("blocking task sender is consumed exactly once");
-        // We AssertUnwindSafe here because we consider the task completed on panic.
-        // Whatever it did to its internal state is now irrelevant and if it corrupted
-        // some shared state, that is not really something we can do anything about
-        // (a conscientious service will abort on panic to avoid that).
-        let body_result = catch_unwind(AssertUnwindSafe(body));
-
-        match body_result {
+        match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => {
-                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Completed(result)))) {
-                    discard_panic(panic);
+                if let Err(panic) = result_tx.completed(result) {
+                    discard_task_panic(panic);
                 }
             }
             Err(panic) => {
-                if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| result_tx.send(TaskResult::Panicked(panic)))) {
-                    discard_panic(disposal);
+                if let Err(disposal) = result_tx.panicked(panic) {
+                    discard_task_panic(disposal);
                 }
             }
         }
@@ -148,12 +112,12 @@ impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
         if let Some(body) = self.body.take()
             && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(body)))
         {
-            discard_panic(panic);
+            discard_task_panic(panic);
         }
         if let Some(sender) = self.result_tx.take()
             && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
         {
-            discard_panic(panic);
+            discard_task_panic(panic);
         }
     }
 }
@@ -165,12 +129,12 @@ mod tests {
     use std::pin::pin;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;
-    use performables::arc::Arc as PArc;
+    use observed::Sink;
 
     use super::*;
 
@@ -179,7 +143,6 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
-        let shutdown_signal = PArc::new(AtomicBool::new(false));
         let (factory, handle) = prepare_remote(
             move |()| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
@@ -192,9 +155,6 @@ mod tests {
                 }
             },
             sink.transfer_context(),
-            sink,
-            "any",
-            shutdown_signal,
         );
 
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -204,34 +164,6 @@ mod tests {
         let result = block_on(handle).unwrap();
 
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
-    }
-
-    #[test]
-    fn remote_factory_is_not_invoked_if_shutdown_starts_after_registration() {
-        let invoked = Arc::new(AtomicBool::new(false));
-        let shutdown_signal = PArc::new(AtomicBool::new(false));
-        let sink = Sink::noop();
-        let (factory, handle) = prepare_remote(
-            {
-                let invoked = Arc::clone(&invoked);
-                move |()| {
-                    invoked.store(true, Ordering::Relaxed);
-                    std::future::ready(())
-                }
-            },
-            sink.transfer_context(),
-            sink,
-            "any",
-            PArc::clone(&shutdown_signal),
-        );
-        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
-        factory((), &executor.tasks());
-
-        shutdown_signal.store(true, Ordering::Release);
-        run_to_completion(&executor);
-
-        assert!(!invoked.load(Ordering::Relaxed));
-        assert!(block_on(handle).unwrap_err().is_shutdown());
     }
 
     /// Drives the executor until it reports that no further progress can be made.
@@ -269,14 +201,7 @@ mod tests {
         struct Payload(u32);
 
         let sink = Sink::noop();
-        let shutdown_signal = PArc::new(AtomicBool::new(false));
-        let (factory, handle) = prepare_remote(
-            |()| -> std::future::Ready<()> { panic_any(Payload(42)) },
-            sink.transfer_context(),
-            sink,
-            "any",
-            shutdown_signal,
-        );
+        let (factory, handle) = prepare_remote(|()| -> std::future::Ready<()> { panic_any(Payload(42)) }, sink.transfer_context());
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         factory((), &executor.tasks());
         run_to_completion(&executor);

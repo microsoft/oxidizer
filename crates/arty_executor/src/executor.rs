@@ -55,10 +55,8 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 ///
 /// # Process termination
 ///
-/// `arty_executor` does not recover panics from task futures or their destructors. It catches such
-/// panics at the executor boundary and terminates the process. This also applies when executor
-/// cancellation runs during an existing unwind: a task destructor panic terminates rather than
-/// leaking task storage.
+/// Plain executor tasks terminate the process if their futures panic. Runtime integrations can
+/// register a remote result target that receives captured panics without unwinding the worker.
 #[derive(Debug)]
 pub struct Executor {
     core: Rc<ExecutorCore>,

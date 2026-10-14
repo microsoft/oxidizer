@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::Any;
 #[cfg(all(debug_assertions, test))]
 use std::backtrace::Backtrace;
 use std::cell::{Cell, UnsafeCell};
 use std::marker::{PhantomData, PhantomPinned};
+use std::mem::ManuallyDrop;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 #[cfg(all(debug_assertions, test))]
@@ -13,10 +13,11 @@ use std::sync::Arc;
 use std::task;
 
 use events_once::PooledLocalSender;
+use observed::Sink;
 
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{TaskOptions, TaskOutcome, WakeSignal};
+use crate::{RemoteTaskSender, TaskOptions, TaskPanic, WakeSignal, discard_task_panic};
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -48,7 +49,9 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     wake_signal: UnsafeCell<Option<WakeSignal>>,
 
-    options: TaskOptions<R>,
+    options: TaskOptions,
+
+    sink: Sink,
 
     poll_count: Cell<u64>,
 
@@ -71,18 +74,23 @@ where
     #[cfg(test)]
     #[must_use]
     pub(crate) fn new(future: F, result_tx: PooledLocalSender<R>) -> Self {
-        Self::new_with_options(future, result_tx, TaskOptions::default())
+        Self::new_with_options(future, result_tx, TaskOptions::default(), Sink::noop())
     }
 
     #[must_use]
-    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions<R>) -> Self {
+    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
+        Self::new_with_target(future, ResultTarget::Local(result_tx), options, sink)
+    }
+
+    fn new_with_target(future: F, result_target: ResultTarget<R>, options: TaskOptions, sink: Sink) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
-                future,
-                result_tx: Some(result_tx),
+                future: FutureStorage::new(future),
+                result_target: Some(result_target),
             })),
             wake_signal: UnsafeCell::new(None),
             options,
+            sink,
             poll_count: Cell::new(0),
             #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
@@ -100,6 +108,30 @@ where
     }
 }
 
+impl<F, R> Task<F, R>
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    pub(crate) fn new_remote(
+        future: F,
+        result_tx: PooledLocalSender<R>,
+        options: TaskOptions,
+        sink: Sink,
+        remote_result_tx: RemoteTaskSender<R>,
+    ) -> Self {
+        drop(result_tx);
+        Self::new_with_target(
+            future,
+            ResultTarget::Remote(Box::new(RemoteTaskResult {
+                result_tx: remote_result_tx,
+            })),
+            options,
+            sink,
+        )
+    }
+}
+
 impl<F, R> TypeErasedTask for Task<F, R>
 where
     F: Future<Output = R> + 'static,
@@ -111,7 +143,7 @@ where
     }
 
     fn report_created(&self) {
-        self.options.report_created();
+        self.options.report_created(&self.sink);
     }
 
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
@@ -155,14 +187,28 @@ where
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
-        let payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
+        let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-            // SAFETY: The payload is pinned with Task and only the executor accesses it.
-            // Cancellation must drop a polled future in place, just like completion.
-            unsafe { Pin::new_unchecked(payload) }.set(None);
-        })) {
-            on_unhandled_task_panic(panic);
+        let Some(payload) = maybe_payload.as_mut() else {
+            return;
+        };
+        let remote = payload.result_target.as_ref().is_some_and(ResultTarget::is_remote);
+        let result_target = payload.result_target.take();
+
+        // SAFETY: The future is pinned with Task and destroyed in place.
+        let future_panic = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err();
+        // SAFETY: The future was retired above, so clearing the payload cannot run user code.
+        unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
+
+        let result_panic =
+            result_target.and_then(|result_target| catch_unwind(AssertUnwindSafe(|| drop(result_target))).err());
+
+        for panic in [future_panic, result_panic].into_iter().flatten() {
+            if remote {
+                discard_task_panic(panic);
+            } else {
+                on_unhandled_task_panic(panic);
+            }
         }
     }
 
@@ -232,56 +278,71 @@ where
 
             let mut cx = task::Context::from_waker(&waker);
 
-            // The future we are polling is user code outside our control. It may panic! The executor
-            // does not support recovering from such a panic - we terminate the process if that happens.
-            // However, the executor is only one layer of runtime logic - in fact, we expect that
-            // some higher layer (the task scheduler) will wrap the user code with a panic-handler
-            // so we will never actually encounter a panic on this level. The panic trap here is simply
-            // a last-chance handler to terminate the application instead of allowing a safety
-            // violation to take place - if higher layers do their job, this panic trap will never
-            // activate.
-            //
-            // We `AssertUnwindSafe` here because as we are terminating the process, there is no
-            // validity violation that can occur no matter what the type of the future we are dealing
-            // with.
+            // Runtime integrations can provide a remote result target that receives captured
+            // panics. Plain executor tasks retain the fail-fast behavior.
             match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
                 Ok(x) => x,
-                Err(panic) => {
-                    self.options.report_terminal(TaskOutcome::Panicked, self.poll_count.get());
-                    on_unhandled_task_panic(panic);
-                }
+                Err(panic) => return self.finish_panicked(maybe_payload, wake_signal, panic),
             }
         };
 
         match poll_result {
             task::Poll::Ready(result) => {
-                let outcome = self.options.classify(&result);
                 wake_signal.retire();
-                let result_tx = payload
-                    .result_tx
+                let result_target = payload
+                    .result_target
                     .take()
-                    .expect("the result sender is present until this task completes");
+                    .expect("the result target is present until this task completes");
+                let remote = result_target.is_remote();
 
-                // Dropping the completed future executes user code and therefore needs the same
-                // panic containment as polling it.
-                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-                    // SAFETY: The payload is pinned with Task and only the executor accesses it.
-                    // Pin::set drops the future in place before clearing the payload.
-                    unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
-                    result_tx.send(result);
-                })) {
-                    self.options.report_terminal(TaskOutcome::Panicked, self.poll_count.get());
-                    on_unhandled_task_panic(panic);
+                // SAFETY: FutureStorage retires the future before returning Ready.
+                unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
+
+                if let Err(panic) = result_target.complete(result) {
+                    if remote {
+                        discard_task_panic(panic);
+                    } else {
+                        self.options.report_panicked(&self.sink, self.poll_count.get());
+                        on_unhandled_task_panic(panic);
+                    }
                 }
 
-                if let Some(outcome) = outcome {
-                    self.options.report_terminal(outcome, self.poll_count.get());
-                }
+                self.options.report_succeeded(&self.sink, self.poll_count.get());
 
                 task::Poll::Ready(())
             }
             task::Poll::Pending => task::Poll::Pending,
         }
+    }
+
+    fn finish_panicked(
+        self: Pin<&Self>,
+        maybe_payload: &mut Option<Payload<F, R>>,
+        wake_signal: Pin<&WakeSignal>,
+        panic: TaskPanic,
+    ) -> task::Poll<()> {
+        let payload = maybe_payload.as_mut().expect("a polled task retains its payload");
+        let Some(result_target) = payload.result_target.take() else {
+            on_unhandled_task_panic(panic);
+        };
+
+        if !result_target.is_remote() {
+            on_unhandled_task_panic(panic);
+        }
+
+        wake_signal.retire();
+        // SAFETY: The future is pinned with Task and destroyed in place.
+        if let Err(disposal) = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned() {
+            discard_task_panic(disposal);
+        }
+        // SAFETY: The future was retired above, so clearing the payload cannot run user code.
+        unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
+
+        if let Err(disposal) = result_target.panicked(panic) {
+            discard_task_panic(disposal);
+        }
+        self.options.report_panicked(&self.sink, self.poll_count.get());
+        task::Poll::Ready(())
     }
 }
 
@@ -291,7 +352,7 @@ where
 )]
 #[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
+fn on_unhandled_task_panic(panic: TaskPanic) -> ! {
     #[cfg(test)]
     std::panic::resume_unwind(panic);
 
@@ -302,8 +363,6 @@ fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
         eprintln!("unhandled panic in async task - terminating process");
     }
 
-    // This should never be reached if the higher layers of Arty runtime correctly wrap
-    // every task in a panic-handler designed to forward the panic to the awaiter.
     #[cfg(not(test))]
     std::process::abort();
 }
@@ -315,11 +374,121 @@ where
     R: 'static,
 {
     /// The future that will be polled by the executor to progress the task.
-    future: F,
+    future: FutureStorage<F>,
 
     /// The result sender/receiver use pooled event storage whose detached slots are retained by
     /// their endpoints. Join handles may therefore outlive both the task and the executor.
-    result_tx: Option<PooledLocalSender<R>>,
+    result_target: Option<ResultTarget<R>>,
+}
+
+enum ResultTarget<R: 'static> {
+    Local(PooledLocalSender<R>),
+    Remote(Box<dyn RemoteResult<R>>),
+}
+
+trait RemoteResult<R>: std::fmt::Debug {
+    fn complete(self: Box<Self>, result: R) -> Result<(), TaskPanic>;
+
+    fn panicked(self: Box<Self>, panic: TaskPanic) -> Result<(), TaskPanic>;
+}
+
+struct RemoteTaskResult<R: Send + 'static> {
+    result_tx: RemoteTaskSender<R>,
+}
+
+impl<R: Send + 'static> std::fmt::Debug for RemoteTaskResult<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteTaskResult").field("result_tx", &self.result_tx).finish()
+    }
+}
+
+impl<R: Send + 'static> RemoteResult<R> for RemoteTaskResult<R> {
+    fn complete(self: Box<Self>, result: R) -> Result<(), TaskPanic> {
+        self.result_tx.completed(result)
+    }
+
+    fn panicked(self: Box<Self>, panic: TaskPanic) -> Result<(), TaskPanic> {
+        self.result_tx.panicked(panic)
+    }
+}
+
+impl<R: 'static> ResultTarget<R> {
+    fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
+    fn complete(self, result: R) -> Result<(), TaskPanic> {
+        match self {
+            Self::Local(result_tx) => catch_unwind(AssertUnwindSafe(|| result_tx.send(result))),
+            Self::Remote(remote) => remote.complete(result),
+        }
+    }
+
+    fn panicked(self, panic: TaskPanic) -> Result<(), TaskPanic> {
+        match self {
+            Self::Local(_) => unreachable!("local task panics terminate the process"),
+            Self::Remote(remote) => remote.panicked(panic),
+        }
+    }
+}
+
+struct FutureStorage<F> {
+    inner: ManuallyDrop<F>,
+    live: bool,
+    _pinned: PhantomPinned,
+}
+
+impl<F> FutureStorage<F> {
+    fn new(inner: F) -> Self {
+        Self {
+            inner: ManuallyDrop::new(inner),
+            live: true,
+            _pinned: PhantomPinned,
+        }
+    }
+
+    fn destroy_pinned(self: Pin<&mut Self>) -> Result<(), TaskPanic> {
+        // SAFETY: destruction leaves the retired value in place and never moves it.
+        let this = unsafe { self.get_unchecked_mut() };
+        Self::destroy(&mut this.inner, &mut this.live)
+    }
+
+    fn destroy(inner: &mut ManuallyDrop<F>, live: &mut bool) -> Result<(), TaskPanic> {
+        if !std::mem::replace(live, false) {
+            return Ok(());
+        }
+        catch_unwind(AssertUnwindSafe(|| {
+            // SAFETY: the live value stays in place and is retired before its destructor runs.
+            unsafe { ManuallyDrop::drop(inner) };
+        }))
+    }
+}
+
+impl<F: Future> Future for FutureStorage<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+        // SAFETY: no operation moves inner after pinning.
+        let this = unsafe { self.get_unchecked_mut() };
+        assert!(this.live, "task future polled after completion");
+        // SAFETY: inner occupies the same pinned storage throughout its lifetime.
+        let outcome = unsafe { Pin::new_unchecked(&mut *this.inner) }.poll(cx);
+        if outcome.is_ready()
+            && let Err(panic) = Self::destroy(&mut this.inner, &mut this.live)
+        {
+            std::panic::resume_unwind(panic);
+        }
+        outcome
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
+impl<F> Drop for FutureStorage<F> {
+    fn drop(&mut self) {
+        if let Err(panic) = Self::destroy(&mut self.inner, &mut self.live) {
+            on_unhandled_task_panic(panic);
+        }
+    }
 }
 
 pub(crate) trait TypeErasedTask {
@@ -386,15 +555,6 @@ mod tests {
 
     use super::*;
     use crate::testing::TestSubjectFuture;
-
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        clippy::unnecessary_wraps,
-        reason = "TaskOptions classifiers receive outputs by reference and may omit terminal reporting"
-    )]
-    fn succeeded(_: &u64) -> Option<TaskOutcome> {
-        Some(TaskOutcome::Succeeded)
-    }
 
     struct PinnedDropFuture {
         polled_at: Cell<*const Self>,
@@ -563,7 +723,8 @@ mod tests {
                 }
             }),
             tx,
-            TaskOptions::observed(sink.clone(), sink.transfer_context(), "any", succeeded),
+            TaskOptions::observed(sink.transfer_context()),
+            sink,
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());

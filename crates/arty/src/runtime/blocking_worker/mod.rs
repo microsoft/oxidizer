@@ -68,6 +68,10 @@ impl BlockingWorker {
         })
     }
 
+    pub(in crate::runtime) fn sink(&self) -> &Sink {
+        &self.sink
+    }
+
     /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
     pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
     where

@@ -142,7 +142,7 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), "any", future_factory)
+        self.enqueue(self.next_worker_index(), future_factory)
     }
 
     pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -157,7 +157,7 @@ impl<WFS> DispatcherCore<WFS> {
         R: Send + 'static,
     {
         (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
+            .map(|index| self.enqueue(WorkerIndex(index), make_factory()))
             .collect()
     }
 
@@ -199,10 +199,10 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, "same_thread", future_factory)
+        self.enqueue(worker_index, future_factory)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: &'static str, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -217,13 +217,7 @@ impl<WFS> DispatcherCore<WFS> {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(
-            future_factory,
-            parent_task_enrichment,
-            self.sink.clone(),
-            placement,
-            Arc::clone(&self.shutdown_started),
-        );
+        let (future_factory, join_handle) = prepare_remote(future_factory, parent_task_enrichment);
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.

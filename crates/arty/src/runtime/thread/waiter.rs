@@ -5,12 +5,12 @@ use std::error::Error as StdError;
 use std::fmt::{self, Display};
 use std::thread::{self, ThreadId};
 
+use arty_executor::discard_task_panic;
 use performables::arc::Arc;
 use performables::sync::condition::Condvar;
 use performables::sync::mutex::{Mutex, MutexGuard};
 
 use crate::runtime::Error;
-use crate::task::execution::discard_panic;
 
 #[cfg_attr(test, mockall::automock)]
 pub(in crate::runtime) trait WaitForShutdown {
@@ -83,7 +83,7 @@ impl ThreadWaiter {
                             if failed_worker.is_none() {
                                 failed_worker = Some(worker_id);
                             }
-                            discard_panic(panic);
+                            discard_task_panic(panic);
                         }
                     }
                     *state.lock() = State::Completed(failed_worker);

@@ -69,7 +69,8 @@ pub mod __private {
     /// Preserves an entry point's return type while reporting root-task failure.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
-            Ok(error) => error.resume(),
+            Ok(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            Ok(_) => std::panic::resume_unwind(Box::new("runtime is shutting down")),
             Err(error) => std::panic::resume_unwind(Box::new(error.to_string())),
         }
     }

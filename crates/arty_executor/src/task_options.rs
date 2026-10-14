@@ -5,103 +5,84 @@ use data_privacy::classified;
 use observed::context::Transfer;
 use observed::{Sink, emit, event};
 
+use crate::TaskPanic;
+
 static SYSTEM_METADATA: data_privacy::DataClass = data_privacy::DataClass::new("arty", "SystemMetadata");
 
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone, Copy)]
 struct PlacementLabel(&'static str);
 
-/// The terminal outcome of an observed executor task.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TaskOutcome {
+pub(crate) enum TaskResult<R> {
     /// The task completed successfully.
-    Succeeded,
+    Completed(R),
 
-    /// The task caught and reported a panic.
-    Panicked,
+    /// The task panicked while being polled or disposed.
+    Panicked(TaskPanic),
 }
 
-/// Optional context and lifecycle reporting for a task registered with [`TaskSet`](crate::TaskSet).
-///
-/// The default options do not emit lifecycle telemetry. Runtime integrations can use
-/// [`observed`](Self::observed) to provide the sink, captured enrichment context, placement, and
-/// an output classifier that identifies the task's terminal outcome.
-#[derive(Debug)]
-pub struct TaskOptions<R> {
-    telemetry: Option<TaskTelemetry<R>>,
-}
-
-impl<R> TaskOptions<R> {
-    /// Creates options that emit task lifecycle telemetry through `sink`.
-    ///
-    /// The captured `context` is applied while the task is polled and while its lifecycle events
-    /// are emitted. `classify` returns the terminal outcome to report, or `None` when a completed
-    /// future does not represent a terminal task outcome, such as cancellation during shutdown.
-    #[must_use]
-    pub fn observed(sink: Sink, context: Transfer, placement: &'static str, classify: fn(&R) -> Option<TaskOutcome>) -> Self {
-        Self {
-            telemetry: Some(TaskTelemetry {
-                sink,
-                context,
-                placement,
-                classify,
-            }),
+impl<R> std::fmt::Debug for TaskResult<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed(_) => f.write_str("Completed(..)"),
+            Self::Panicked(_) => f.write_str("Panicked(..)"),
         }
+    }
+}
+
+/// Optional context for a task registered with [`TaskSet`](crate::TaskSet).
+///
+/// The default options do not apply any enrichment. Runtime integrations can capture the current
+/// observed context and attach it to a task with [`observed`](Self::observed).
+#[derive(Debug, Default)]
+pub struct TaskOptions {
+    context: Option<Transfer>,
+}
+
+impl TaskOptions {
+    /// Creates options that apply the captured observed `context` while the task is polled and
+    /// while its lifecycle events are emitted.
+    #[must_use]
+    pub fn observed(context: Transfer) -> Self {
+        Self { context: Some(context) }
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
-        let Some(telemetry) = &self.telemetry else {
+        let Some(context) = &self.context else {
             return f();
         };
 
-        let _guard = telemetry.context.apply_current_thread();
+        let _guard = context.apply_current_thread();
         f()
     }
 
-    pub(crate) fn report_created(&self) {
-        let Some(telemetry) = &self.telemetry else {
+    pub(crate) fn report_created(&self, sink: &Sink) {
+        if self.context.is_none() {
             return;
-        };
-
+        }
         self.with_context(|| {
             emit!(
-                telemetry.sink,
+                sink,
                 TaskCreated {
-                    placement: PlacementLabel(telemetry.placement)
+                    placement: PlacementLabel("any")
                 }
             );
         });
     }
 
-    pub(crate) fn classify(&self, result: &R) -> Option<TaskOutcome> {
-        self.telemetry.as_ref().and_then(|telemetry| (telemetry.classify)(result))
-    }
-
-    pub(crate) fn report_terminal(&self, outcome: TaskOutcome, polls: u64) {
-        let Some(telemetry) = &self.telemetry else {
+    pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
+        if self.context.is_none() {
             return;
-        };
-
-        match outcome {
-            TaskOutcome::Succeeded => emit!(telemetry.sink, TaskSucceeded { polls }),
-            TaskOutcome::Panicked => emit!(telemetry.sink, TaskPanicked { polls }),
         }
+        emit!(sink, TaskSucceeded { polls });
     }
-}
 
-impl<R> Default for TaskOptions<R> {
-    fn default() -> Self {
-        Self { telemetry: None }
+    pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
+        if self.context.is_none() {
+            return;
+        }
+        emit!(sink, TaskPanicked { polls });
     }
-}
-
-#[derive(Debug)]
-struct TaskTelemetry<R> {
-    sink: Sink,
-    context: Transfer,
-    placement: &'static str,
-    classify: fn(&R) -> Option<TaskOutcome>,
 }
 
 #[event("arty.rt.task.spawned")]
@@ -131,38 +112,20 @@ struct TaskPanicked {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use observed::Value;
     use observed_testing::{TEST_ID, test_emitter};
 
     use super::*;
 
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        clippy::unnecessary_wraps,
-        reason = "TaskOptions classifiers receive outputs by reference and may omit terminal reporting"
-    )]
-    fn succeeded(_: &()) -> Option<TaskOutcome> {
-        Some(TaskOutcome::Succeeded)
-    }
-
     #[test]
-    fn lifecycle_events_include_placement_and_poll_count() {
+    fn lifecycle_events_include_poll_count() {
         let (sink, processor) = test_emitter(TEST_ID);
-        let options = TaskOptions::observed(sink.clone(), sink.transfer_context(), "any", succeeded);
+        let options = TaskOptions::observed(sink.transfer_context());
 
-        options.report_created();
-        options.report_terminal(TaskOutcome::Succeeded, 3);
+        options.report_created(&sink);
+        options.report_succeeded(&sink, 3);
 
         let events = processor.events();
         assert_eq!(events[0].name(), "arty.rt.task.spawned");
-        assert_eq!(
-            events[0]
-                .dimensions()
-                .into_iter()
-                .find(|(key, _)| key == "placement")
-                .map(|(_, value)| value),
-            Some(Value::from("any"))
-        );
         assert_eq!(events[1].name(), "arty.rt.task.succeeded");
         assert_eq!(events[1].field_metrics()[0].field_key(), "polls");
         assert!((events[1].field_metrics()[0].value() - 3.0).abs() < f64::EPSILON);

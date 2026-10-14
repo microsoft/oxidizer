@@ -441,7 +441,7 @@ mod tests {
                 assert!(error.is_panic());
                 #[cfg(feature = "macros")]
                 {
-                    let payload = catch_unwind(AssertUnwindSafe(|| -> () { error.resume() })).unwrap_err();
+                    let payload = catch_unwind(AssertUnwindSafe(|| std::panic::resume_unwind(error.into_panic()))).unwrap_err();
                     assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
                 }
             }

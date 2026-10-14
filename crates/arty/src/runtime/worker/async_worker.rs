@@ -115,7 +115,10 @@ where
     {
         let (clock, clock_driver) = clock.activate();
 
-        let executor = Executor::builder().owner_waker(WorkerSignal::waker(&signal)).build();
+        let executor = Executor::builder()
+            .owner_waker(WorkerSignal::waker(&signal))
+            .sink(blocking_worker.sink().clone())
+            .build();
         let tasks = executor.tasks();
 
         let thread_state = Rc::new(OnceCell::new());

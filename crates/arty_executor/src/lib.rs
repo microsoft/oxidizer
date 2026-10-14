@@ -33,8 +33,8 @@
 //! retires that metadata before releasing task storage, so an escaped waker remains callable but
 //! becomes an inert no-op and cannot delay executor shutdown.
 //!
-//! Join handles similarly retain their pooled result storage independently. They may outlive the
-//! executor and return [`JoinError`] with [`JoinError::is_shutdown()`] after cancellation.
+//! Join handles similarly retain their result storage independently. They may outlive the executor
+//! and report shutdown cancellation or a captured task panic through [`JoinError`].
 
 mod builder;
 mod constants;
@@ -42,6 +42,7 @@ mod cycle_outcome;
 mod executor;
 mod executor_core;
 mod join_handle;
+mod panic;
 mod ptr_hash;
 mod task;
 mod task_options;
@@ -55,6 +56,7 @@ pub use cycle_outcome::*;
 pub use executor::*;
 pub(crate) use executor_core::*;
 pub use join_handle::*;
+pub use panic::*;
 pub(crate) use ptr_hash::*;
 pub(crate) use task::*;
 pub use task_options::*;

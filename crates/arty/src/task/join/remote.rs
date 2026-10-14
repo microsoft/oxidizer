@@ -4,13 +4,12 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use events_once::BoxedReceiver;
+use arty_executor::RemoteJoinHandle;
 use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
-use crate::task::execution::TaskResult;
 
 /// A handle for receiving an async or blocking task's result.
 ///
@@ -49,7 +48,7 @@ where
 {
     #[debug(ignore)]
     #[pin]
-    result_rx: Option<BoxedReceiver<TaskResult<R>>>,
+    inner: RemoteJoinHandle<R>,
     blocking_pool: Option<Arc<()>>,
     completed: bool,
 }
@@ -58,20 +57,18 @@ impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(in crate::task) fn new(result_rx: BoxedReceiver<TaskResult<R>>) -> Self {
+    pub(in crate::task) fn new(inner: RemoteJoinHandle<R>) -> Self {
         Self {
-            result_rx: Some(result_rx),
+            inner,
             blocking_pool: None,
             completed: false,
         }
     }
 
     pub(crate) fn shutdown() -> Self {
-        Self {
-            result_rx: None,
-            blocking_pool: None,
-            completed: false,
-        }
+        let (sender, inner) = RemoteJoinHandle::channel();
+        drop(sender);
+        Self::new(inner)
     }
 
     pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
@@ -100,24 +97,13 @@ where
     type Output = Result<R, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
+        let this = self.project();
         assert!(!*this.completed, "JoinHandle polled after completion");
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
-        let Some(result_rx) = this.result_rx.as_mut().as_pin_mut() else {
-            *this.completed = true;
-            return Poll::Ready(Err(JoinError::shutdown()));
-        };
-        match result_rx.poll(cx) {
-            Poll::Ready(Ok(result)) => {
+        match this.inner.poll(cx) {
+            Poll::Ready(result) => {
                 *this.completed = true;
-                match result {
-                    TaskResult::Completed(value) => Poll::Ready(Ok(value)),
-                    TaskResult::Panicked(panic) => Poll::Ready(Err(JoinError::panicked(panic))),
-                }
-            }
-            Poll::Ready(Err(_)) => {
-                *this.completed = true;
-                Poll::Ready(Err(JoinError::shutdown()))
+                Poll::Ready(result)
             }
             Poll::Pending => Poll::Pending,
         }

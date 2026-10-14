@@ -201,14 +201,7 @@ impl Scheduler {
             }
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
-            let join_handle = prepare_remote_on_worker(
-                future_factory,
-                current.builtins.clone(),
-                parent_task_enrichment,
-                sink,
-                self.dispatcher.shutdown_signal(),
-                &current.tasks,
-            );
+            let join_handle = prepare_remote_on_worker(future_factory, current.builtins.clone(), parent_task_enrichment, &current.tasks);
             Ok(join_handle)
         })
     }

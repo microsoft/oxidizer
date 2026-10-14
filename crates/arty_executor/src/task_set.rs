@@ -3,7 +3,7 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
+use crate::{ExecutorCore, JoinEventLake, JoinHandle, RemoteTaskSender, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -44,11 +44,11 @@ impl TaskSet {
         self.add_with_options(future, TaskOptions::default())
     }
 
-    /// Registers a future with lifecycle context and reporting options.
+    /// Registers a future with captured execution context.
     ///
     /// This behaves like [`add`](Self::add), while allowing runtime integrations to attach
-    /// observed context and classify the task's terminal output.
-    pub fn add_with_options<F, R>(&self, future: F, options: TaskOptions<R>) -> JoinHandle<R>
+    /// observed enrichment to the task.
+    pub fn add_with_options<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
@@ -58,6 +58,20 @@ impl TaskSet {
         };
 
         core.add_task(future, options)
+    }
+
+    /// Registers a task whose result is delivered to a cross-thread receiver.
+    #[doc(hidden)]
+    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
+    where
+        F: IntoFuture<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        let Some(core) = self.core.upgrade() else {
+            return self.join_events.disconnected();
+        };
+
+        core.add_remote_task(future, options, result_tx)
     }
 }
 

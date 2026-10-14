@@ -141,12 +141,6 @@ pub(crate) struct AsyncWorkerActive {
     pub delta: i64,
 }
 
-/// Emitted when a task panics.
-#[event("arty.rt.task.panicked")]
-#[error("task panicked")]
-#[counter(name = "arty.rt.task.panicked")]
-pub(crate) struct TaskPanicked;
-
 /// Emitted on the owner thread just before a runtime-owned OS thread is spawned.
 #[event("arty.rt.thread.spawn")]
 #[debug("spawning thread")]
@@ -335,20 +329,6 @@ mod tests {
             processor.single_event(),
             ExpectedEvent::without_severity("arty.rt.async_worker.active")
                 .dimension("delta", 1i64)
-                .metric()
-        );
-    }
-
-    #[test]
-    fn task_panicked_is_an_error_event() {
-        let (sink, processor) = test_emitter(TEST_ID);
-
-        emit!(sink, TaskPanicked);
-
-        assert_eq!(
-            processor.single_event(),
-            ExpectedEvent::new("arty.rt.task.panicked", Severity::Error)
-                .body("task panicked")
                 .metric()
         );
     }

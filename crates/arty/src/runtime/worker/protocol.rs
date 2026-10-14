@@ -4,8 +4,10 @@
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use arty_executor::discard_task_panic;
+
 use crate::task::Builtins;
-use crate::task::execution::{BoxedRemoteFutureFactory, discard_panic};
+use crate::task::execution::BoxedRemoteFutureFactory;
 
 pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     /// Schedules a new task for execution on this worker, providing the factory function that will
@@ -40,7 +42,7 @@ impl<TS> Drop for AsyncWorkerCommand<TS> {
             return;
         };
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(future_factory))) {
-            discard_panic(panic);
+            discard_task_panic(panic);
         }
     }
 }

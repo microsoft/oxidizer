@@ -3,6 +3,8 @@
 
 use std::task::Waker;
 
+use observed::Sink;
+
 use crate::{Executor, ExecutorCore};
 
 /// Builds an instance of [`Executor`].
@@ -10,6 +12,7 @@ use crate::{Executor, ExecutorCore};
 #[must_use]
 pub struct ExecutorBuilder {
     owner_waker: Waker,
+    sink: Sink,
 }
 
 impl ExecutorBuilder {
@@ -17,6 +20,7 @@ impl ExecutorBuilder {
     pub fn new() -> Self {
         Self {
             owner_waker: Waker::noop().clone(),
+            sink: Sink::noop(),
         }
     }
 
@@ -32,10 +36,18 @@ impl ExecutorBuilder {
         self
     }
 
+    /// Configures the observed sink used for task lifecycle events.
+    ///
+    /// The default sink is a no-op.
+    pub fn sink(mut self, sink: Sink) -> Self {
+        self.sink = sink;
+        self
+    }
+
     /// Builds the executor with the configured settings.
     #[must_use]
     pub fn build(self) -> Executor {
-        Executor::new(ExecutorCore::new(self.owner_waker))
+        Executor::new(ExecutorCore::new(self.owner_waker, self.sink))
     }
 }
 
