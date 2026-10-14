@@ -613,13 +613,21 @@ async fn decompressed_body_limit_can_be_raised_or_removed() {
 }
 
 #[tokio::test]
-async fn compressed_stream_limit_can_be_removed() {
-    const FIRST_REJECTED_STREAM_COUNT: usize = 1_025;
+async fn compressed_stream_limit_is_inclusive_and_can_be_raised_or_removed() {
+    const DEFAULT_STREAM_COUNT: usize = 1_024;
+    const FIRST_REJECTED_STREAM_COUNT: usize = DEFAULT_STREAM_COUNT + 1;
 
     let member = compress(Format::Gzip, b"");
-    let compressed = BytesView::from_views((0..FIRST_REJECTED_STREAM_COUNT).map(|_| member.clone()));
+    let at_limit = BytesView::from_views((0..DEFAULT_STREAM_COUNT).map(|_| member.clone()));
+    let over_limit = BytesView::from_views((0..FIRST_REJECTED_STREAM_COUNT).map(|_| member.clone()));
+    let raised = DecompressorLimits::new().max_streams(NonZeroU64::new(FIRST_REJECTED_STREAM_COUNT as u64).unwrap());
 
-    for (limits, succeeds) in [(None, false), (Some(DecompressorLimits::new().unbounded_streams()), true)] {
+    for (compressed, limits, succeeds) in [
+        (at_limit, None, true),
+        (over_limit.clone(), None, false),
+        (over_limit.clone(), Some(raised), true),
+        (over_limit, Some(DecompressorLimits::new().unbounded_streams()), true),
+    ] {
         let layer = client().decompress_responses(&[Format::Gzip]);
         let layer = match limits {
             Some(limits) => layer.limits(limits),

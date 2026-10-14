@@ -95,10 +95,10 @@ HTTP content-coding token and is ignored when supplied.
 
 ## Bounds
 
-Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams by
-default, including when they are streamed rather than buffered. Use
-[`limits`][__link16] to change either bound for an application’s budget.
-Removing them requires the explicit
+Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams per
+decompression stage by default, including when they are streamed rather than buffered. Use
+[`limits`][__link16] to change either bound for an application’s budget. Removing
+them requires the explicit
 [`unbounded_output_len`][__link17] and
 [`unbounded_streams`][__link18] methods.
 
@@ -122,7 +122,7 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb38nsz_65UMIbzkpYSI7jWt0bq4pT6GekIusb2zVFMklUWAFhZIKCa2NvbXByZXNzb3JzZTAuMi4wgnBodHRwX2NvbXByZXNzaW9uZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRTuyOUnubrsbZ7dRIlt5B_kbOluzi0YM-7QbBhIflEyby5JhZIKCa2NvbXByZXNzb3JzZTAuMi4wgnBodHRwX2NvbXByZXNzaW9uZTAuMi4w
  [__link0]: https://crates.io/crates/compressors/0.2.0
  [__link1]: https://docs.rs/http_compression/0.2.0/http_compression/?search=Compression
  [__link10]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::on_unsupported

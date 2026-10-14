@@ -253,8 +253,9 @@ pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
 impl<R> CompressionLayer<R> {
     /// Bounds the cost of decompressing a single body.
     ///
-    /// Decompressed output defaults to 64 MiB and at most 1,024 compressed streams. Bounds left
-    /// unset in `limits` keep the layer's defaults; explicit bounds replace them, and
+    /// Decompressed output defaults to 64 MiB and at most 1,024 compressed streams per
+    /// decompression stage. Bounds left unset in `limits` keep the layer's defaults; explicit
+    /// bounds replace them, and
     /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] explicitly removes the
     /// output cap while [`unbounded_streams`][DecompressorLimits::unbounded_streams] removes the
     /// stream-count cap.
@@ -317,8 +318,8 @@ impl CompressionLayer<Server> {
     /// unchanged, including its `Content-Encoding` metadata. This exception
     /// avoids installing a decoder that cannot produce a compressed member.
     ///
-    /// Decompression rejects output beyond 64 MiB or 1,024 compressed streams by default. Set
-    /// [`limits`][Self::limits] when the application needs different bounds.
+    /// Decompression rejects output beyond 64 MiB or 1,024 compressed streams per decompression
+    /// stage by default. Set [`limits`][Self::limits] when the application needs different bounds.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);

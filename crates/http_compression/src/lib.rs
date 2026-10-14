@@ -100,10 +100,10 @@
 //!
 //! # Bounds
 //!
-//! Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams by
-//! default, including when they are streamed rather than buffered. Use
-//! [`limits`][CompressionLayer::limits] to change either bound for an application's budget.
-//! Removing them requires the explicit
+//! Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams per
+//! decompression stage by default, including when they are streamed rather than buffered. Use
+//! [`limits`][CompressionLayer::limits] to change either bound for an application's budget. Removing
+//! them requires the explicit
 //! [`unbounded_output_len`][compressors::DecompressorLimits::unbounded_output_len] and
 //! [`unbounded_streams`][compressors::DecompressorLimits::unbounded_streams] methods.
 //!
