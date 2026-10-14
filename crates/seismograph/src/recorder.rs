@@ -3206,6 +3206,22 @@ mod tests {
 
     #[test]
     fn standalone_clear_reuses_rings_and_preserves_enabled_and_disabled_policies() {
+        fn install_recorder() -> &'static ThreadRecorder {
+            LOCAL_RECORDER.with(|local| {
+                assert!(local.recorder.get().is_null());
+                // Safe ownership lets the fixture inspect process-lifetime metadata without dereferencing raw pointers.
+                let recorder: &'static ThreadRecorder = Box::leak(Box::new(ThreadRecorder::new()));
+                RECORDERS
+                    .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+                        recorder.next.store(head, Ordering::Relaxed);
+                        Some(ptr::from_ref(recorder).cast_mut())
+                    })
+                    .unwrap();
+                local.recorder.set(ptr::from_ref(recorder));
+                recorder
+            })
+        }
+
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = Configuration {
             allocations: RecordingPolicy {
@@ -3221,22 +3237,21 @@ mod tests {
             ..timeout_configuration()
         };
         configure(enabled);
+        let recorder = install_recorder();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
         // Clear may release retired history without replacing this thread's active ring.
         let retired = std::thread::spawn(|| {
+            let recorder = install_recorder();
             record(EventClass::General, || {
                 Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
             });
-            // SAFETY: published recorders live for the process lifetime, including after retirement.
-            unsafe { &*local_recorder() }
+            recorder
         })
         .join()
         .unwrap();
         assert!(retired.retired.load(Ordering::Acquire));
-        // SAFETY: this thread owns the process-lifetime recorder and its writer context.
-        let recorder = unsafe { &*local_recorder() };
         let active_storage = || {
             let ring = recorder.ring().unwrap();
             (ring.slots.as_ptr(), ring.capacity())
