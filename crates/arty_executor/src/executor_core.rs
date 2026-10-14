@@ -187,29 +187,34 @@ impl ExecutorCore {
         R: 'static,
         T: TypeErasedTask + 'static,
     {
-        let mut state = self.reentrancy_safe.borrow_mut();
-        if state.shutting_down {
-            return state.join_events.disconnected();
-        }
-        let (task, join_handle) = create(&state.join_events, self.sink.clone());
+        let (task_ref, join_handle) = {
+            let mut state = self.reentrancy_safe.borrow_mut();
+            if state.shutting_down {
+                return state.join_events.disconnected();
+            }
+            let (task, join_handle) = create(&state.join_events, self.sink.clone());
 
-        let task_ref = TaskRef::new(state.task_storage.alloc_box(task));
+            let task_ref = TaskRef::new(state.task_storage.alloc_box(task));
 
-        let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
+            let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
 
-        // SAFETY: The task is alive (we own it and just created it) and we are on the thread
-        // where it was created (because we just created it). The executor is the only thing that
-        // creates references to the tasks and it only ever creates temporary non-overlapping
-        // references narrowly bounded to individual code blocks, ensuring that aliasing rules
-        // are upheld. Anything outside `ExecutorCore` only passes `TaskRef` by value, never
-        // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
-        let task = unsafe { task_ref.as_task() };
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
+            // where it was created (because we just created it). The executor is the only thing that
+            // creates references to the tasks and it only ever creates temporary non-overlapping
+            // references narrowly bounded to individual code blocks, ensuring that aliasing rules
+            // are upheld. Anything outside `ExecutorCore` only passes `TaskRef` by value, never
+            // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
+            let task = unsafe { task_ref.as_task() };
 
-        task.initialize(wake_signal);
-        task.report_created();
+            task.initialize(wake_signal);
+            state.new_tasks.push_back(task_ref);
+            (task_ref, join_handle)
+        };
 
-        state.new_tasks.push_back(task_ref);
-
+        // Telemetry processors are external code and may submit another task. The state borrow
+        // must be released before this call.
+        // SAFETY: The task was inserted into executor-owned storage above and remains live.
+        unsafe { task_ref.as_task() }.report_created();
         join_handle
     }
 

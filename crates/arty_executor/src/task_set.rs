@@ -30,25 +30,14 @@ impl TaskSet {
         }
     }
 
-    /// Registers a future to be processed by the executor as a new task.
+    /// Registers a future and its runtime integration options as a new task.
     ///
     /// The future will be polled until it completes, after which it will be dropped, unless the
     /// executor is commanded to shut down, in which case the future may be dropped before it
     /// completes. A submission after shutdown returns a join handle that resolves to
-    /// [`JoinError`](crate::JoinError).
-    pub fn add<F, R>(&self, future: F) -> JoinHandle<R>
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static,
-    {
-        self.add_with_options(future, TaskOptions::default())
-    }
-
-    /// Registers a future with captured execution context.
-    ///
-    /// This behaves like [`add`](Self::add), while allowing runtime integrations to attach
-    /// observed enrichment to the task.
-    pub fn add_with_options<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
+    /// [`JoinError`](crate::JoinError). Use [`TaskOptions::default()`] when no execution context
+    /// or placement metadata is required.
+    pub fn add<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
@@ -61,6 +50,11 @@ impl TaskSet {
     }
 
     /// Registers a task whose result is delivered to a cross-thread receiver.
+    ///
+    /// Arty uses this integration boundary to create a non-[`Send`] future on its destination
+    /// worker while returning a `Send` result handle to the submitting thread. Keeping the
+    /// concrete future at this call site lets the executor store it inline instead of behind a
+    /// `Pin<Box<dyn Future>>`.
     #[doc(hidden)]
     pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
     where

@@ -719,7 +719,7 @@ mod tests {
                 }
             }),
             tx,
-            TaskOptions::observed(sink.transfer_context()),
+            TaskOptions::observed(sink.transfer_context(), crate::TaskPlacement::Any),
             sink,
         ));
         let task = task.as_ref();
@@ -749,7 +749,7 @@ mod tests {
                     task::Poll::Pending
                 }
             }),
-            TaskOptions::observed(sink.transfer_context()),
+            TaskOptions::observed(sink.transfer_context(), crate::TaskPlacement::Any),
             sink,
             result_tx,
         ));
@@ -782,7 +782,7 @@ mod tests {
         let task = pin!(Task::new_with_options(
             pending::<u64>(),
             tx,
-            TaskOptions::observed(sink.transfer_context()),
+            TaskOptions::observed(sink.transfer_context(), crate::TaskPlacement::Any),
             sink,
         ));
         let task = task.as_ref();

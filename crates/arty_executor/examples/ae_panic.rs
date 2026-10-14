@@ -13,7 +13,7 @@
 use std::env;
 use std::process::Command;
 
-use arty_executor::Executor;
+use arty_executor::{Executor, TaskOptions};
 
 const EXPECTED_FAILURE_CHILD_ENV: &str = "ARTY_EXECUTOR_EXPECTED_FAILURE_CHILD";
 
@@ -40,9 +40,12 @@ fn run_example() {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
-    tasks.add(async move {
-        panic!("Panic from the async task!");
-    });
+    tasks.add(
+        async move {
+            panic!("Panic from the async task!");
+        },
+        TaskOptions::default(),
+    );
 
     _ = executor.execute_cycle();
 

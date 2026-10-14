@@ -141,8 +141,25 @@ mod tests {
     use testing_aids::YieldFuture;
 
     use super::*;
-    use crate::AWAKENED_CAPACITY;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
+    use crate::{AWAKENED_CAPACITY, JoinHandle, TaskOptions};
+
+    trait TestTaskSetExt {
+        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
+        where
+            F: IntoFuture<Output = R> + 'static,
+            R: 'static;
+    }
+
+    impl TestTaskSetExt for TaskSet {
+        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
+        where
+            F: IntoFuture<Output = R> + 'static,
+            R: 'static,
+        {
+            self.add(future, TaskOptions::default())
+        }
+    }
 
     #[test]
     fn smoke_test() {
@@ -162,7 +179,7 @@ mod tests {
             }
         };
 
-        let mut join_handle = tasks.add(future);
+        let mut join_handle = tasks.add_test(future);
 
         // This task completes immediately, so we only need one executor cycle to complete it.
         //
@@ -205,8 +222,8 @@ mod tests {
         let future1 = async move { 42 };
         let future2 = async move { 43 };
 
-        let mut join_handle1 = tasks.add(future1);
-        let mut join_handle2 = tasks.add(future2);
+        let mut join_handle1 = tasks.add_test(future1);
+        let mut join_handle2 = tasks.add_test(future2);
 
         // Both tasks complete immediately, so we only need one executor cycle to complete them.
         //
@@ -239,7 +256,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let wakes_self = future.wakes_self_on_next_poll();
 
-        let _join_handle = tasks.add(future);
+        let _join_handle = tasks.add_test(future);
 
         // Enable self-awakening.
         wakes_self.set(true);
@@ -282,8 +299,8 @@ mod tests {
         future1.on_poll(on_poll.clone());
         future2.on_poll(on_poll);
 
-        _ = tasks.add(future1);
-        _ = tasks.add(future2);
+        _ = tasks.add_test(future1);
+        _ = tasks.add_test(future2);
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -298,7 +315,7 @@ mod tests {
         let future_waker = future.waker();
         let future_complete = future.completes_on_next_poll();
 
-        let mut join_handle = tasks.add(future);
+        let mut join_handle = tasks.add_test(future);
 
         // The future should inactivate, leading to a Suspend outcome.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -334,11 +351,11 @@ mod tests {
             let future = TestSubjectFuture::new();
             future_wakers.push(future.waker());
             future_completes.push(future.completes_on_next_poll());
-            join_handles.push(tasks.add(future));
+            join_handles.push(tasks.add_test(future));
         }
 
         let inactive_future = TestSubjectFuture::new();
-        let mut inactive_join_handle = tasks.add(inactive_future);
+        let mut inactive_join_handle = tasks.add_test(inactive_future);
 
         // The futures should all inactivate, leading to a Suspend outcome.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -381,7 +398,7 @@ mod tests {
             }
         });
 
-        _ = tasks.add(future);
+        _ = tasks.add_test(future);
 
         // Task gets polled and then inactivates.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -426,7 +443,7 @@ mod tests {
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
 
-        tasks.add(signal_setter);
+        tasks.add_test(signal_setter);
 
         assert!(!drop_signal.get());
 
@@ -453,7 +470,7 @@ mod tests {
 
         // We add the task but do not keep any references to its join handle.
         // This task has nothing holding on to its resources, so it can be cleaned up at any time.
-        tasks.add(TestSubjectFuture::new());
+        tasks.add_test(TestSubjectFuture::new());
 
         executor.begin_shutdown();
 
@@ -465,7 +482,7 @@ mod tests {
         let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
-        let mut join_handle = tasks.add(TestSubjectFuture::new());
+        let mut join_handle = tasks.add_test(TestSubjectFuture::new());
 
         executor.begin_shutdown();
 
@@ -483,7 +500,7 @@ mod tests {
 
         executor.begin_shutdown();
 
-        let mut handle = tasks.add(async { 42 });
+        let mut handle = tasks.add_test(async { 42 });
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
 
         assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
@@ -492,7 +509,7 @@ mod tests {
     #[test]
     fn direct_drop_cancels_tasks_safely() {
         let executor = Executor::builder().build();
-        let mut handle = executor.tasks().add(std::future::pending::<()>());
+        let mut handle = executor.tasks().add_test(std::future::pending::<()>());
 
         drop(executor);
 
@@ -512,7 +529,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
 
-        tasks.add(future);
+        tasks.add_test(future);
 
         // It just inactivates immediately after storing the waker, so nothing else to do.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -538,7 +555,7 @@ mod tests {
             yield_future.await;
         };
 
-        _ = tasks.add(future);
+        _ = tasks.add_test(future);
 
         // The task is polled, which suspends due to the inner future's `Pending`.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
@@ -561,13 +578,13 @@ mod tests {
             let tasks = tasks.clone();
 
             async move {
-                tasks.add(async move {
+                tasks.add_test(async move {
                     inner_task_completed.set(true);
                 });
             }
         };
 
-        tasks.add(future);
+        tasks.add_test(future);
 
         // The outer task spawns a new task and completes. We get `Continue` because
         // the executor can see it has a new task enqueued, which it wants to process.
@@ -593,9 +610,9 @@ mod tests {
             for index in 0..2 {
                 let tasks_for_child = tasks.clone();
                 let polls = Rc::clone(&polls);
-                tasks.add(async move {
+                tasks.add_test(async move {
                     polls.borrow_mut().push(batch * 4 + index);
-                    tasks_for_child.add(async move {
+                    tasks_for_child.add_test(async move {
                         polls.borrow_mut().push(batch * 4 + index + 2);
                     });
                 });
@@ -629,7 +646,7 @@ mod tests {
             let polls = Rc::clone(&polls);
             move |_| polls.borrow_mut().push(2)
         });
-        tasks.add(future);
+        tasks.add_test(future);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         polls.borrow_mut().clear();
 
@@ -637,7 +654,7 @@ mod tests {
         completes.set(true);
         for index in 0..2 {
             let polls = Rc::clone(&polls);
-            tasks.add(async move {
+            tasks.add_test(async move {
                 polls.borrow_mut().push(index);
             });
         }
@@ -653,7 +670,7 @@ mod tests {
         let executor = Executor::builder().build();
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
-        executor.tasks().add(poll_fn({
+        executor.tasks().add_test(poll_fn({
             let waker = Rc::clone(&waker);
             let polls = Rc::clone(&polls);
             move |cx| {
@@ -684,7 +701,7 @@ mod tests {
                 let polls = Rc::clone(&polls);
                 move |_| polls.borrow_mut().push(index)
             });
-            executor.tasks().add(future);
+            executor.tasks().add_test(future);
         }
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -707,7 +724,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
         let completes = future.completes_on_next_poll();
-        let mut handle = executor.tasks().add(future);
+        let mut handle = executor.tasks().add_test(future);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
         let waker = future_waker.borrow().as_ref().unwrap().clone();
@@ -732,7 +749,7 @@ mod tests {
 
         let retained_waiter = Rc::new(RefCell::new(None));
 
-        let task = tasks.add({
+        let task = tasks.add_test({
             let retained_waiter = Rc::clone(&retained_waiter);
 
             poll_fn(move |cx| {

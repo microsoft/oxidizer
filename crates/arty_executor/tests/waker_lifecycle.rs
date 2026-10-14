@@ -10,19 +10,22 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor};
+use arty_executor::{CycleOutcome, Executor, TaskOptions};
 
 #[test]
 fn retained_waker_is_noop_after_shutdown() {
     let executor = Executor::builder().build();
     let retained = Rc::new(RefCell::new(None));
-    let task = executor.tasks().add(poll_fn({
-        let retained = Rc::clone(&retained);
-        move |cx| {
-            *retained.borrow_mut() = Some(cx.waker().clone());
-            Poll::Ready(())
-        }
-    }));
+    let task = executor.tasks().add(
+        poll_fn({
+            let retained = Rc::clone(&retained);
+            move |cx| {
+                *retained.borrow_mut() = Some(cx.waker().clone());
+                Poll::Ready(())
+            }
+        }),
+        TaskOptions::default(),
+    );
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     let retained = retained.borrow_mut().take().unwrap();
@@ -55,13 +58,16 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
 
     let executor = Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build();
     let retained = Rc::new(RefCell::new(None));
-    let task = executor.tasks().add(poll_fn({
-        let retained = Rc::clone(&retained);
-        move |cx| {
-            retained.borrow_mut().get_or_insert_with(|| cx.waker().clone());
-            Poll::<()>::Pending
-        }
-    }));
+    let task = executor.tasks().add(
+        poll_fn({
+            let retained = Rc::clone(&retained);
+            move |cx| {
+                retained.borrow_mut().get_or_insert_with(|| cx.waker().clone());
+                Poll::<()>::Pending
+            }
+        }),
+        TaskOptions::default(),
+    );
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     let retained = retained.borrow_mut().take().unwrap();
 

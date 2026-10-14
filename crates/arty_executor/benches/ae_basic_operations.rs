@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskSet};
+use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskOptions, TaskSet};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 
@@ -51,7 +51,7 @@ struct CycleState {
 
 fn cycle_state(pending_task: bool) -> CycleState {
     let executor = Executor::builder().build();
-    let handle = pending_task.then(|| executor.tasks().add(pending::<()>()));
+    let handle = pending_task.then(|| executor.tasks().add(pending::<()>(), TaskOptions::default()));
     CycleState { _handle: handle, executor }
 }
 
@@ -91,23 +91,29 @@ struct SelfWakingState {
 
 fn self_waking_state(clone_waker: bool) -> SelfWakingState {
     let executor = Executor::builder().build();
-    let handle = executor.tasks().add(SelfWakingFuture {
-        remaining_polls: SELF_WAKING_POLL_COUNT,
-        clone_waker,
-    });
+    let handle = executor.tasks().add(
+        SelfWakingFuture {
+            remaining_polls: SELF_WAKING_POLL_COUNT,
+            clone_waker,
+        },
+        TaskOptions::default(),
+    );
     SelfWakingState { _handle: handle, executor }
 }
 
 fn clone_waker_state() -> CloneWakerState {
     let executor = Executor::builder().build();
     let captured = Rc::new(RefCell::new(None));
-    let handle = executor.tasks().add({
-        let captured = Rc::clone(&captured);
-        poll_fn(move |cx| {
-            *captured.borrow_mut() = Some(cx.waker().clone());
-            Poll::Pending::<()>
-        })
-    });
+    let handle = executor.tasks().add(
+        {
+            let captured = Rc::clone(&captured);
+            poll_fn(move |cx| {
+                *captured.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending::<()>
+            })
+        },
+        TaskOptions::default(),
+    );
     CloneWakerState {
         _captured: captured,
         _handle: handle,
@@ -119,13 +125,16 @@ fn retained_waker_after_executor_drop() -> Waker {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
     let captured = Rc::new(RefCell::new(None));
-    let handle = tasks.add({
-        let captured = Rc::clone(&captured);
-        poll_fn(move |cx| {
-            *captured.borrow_mut() = Some(cx.waker().clone());
-            Poll::Pending::<()>
-        })
-    });
+    let handle = tasks.add(
+        {
+            let captured = Rc::clone(&captured);
+            poll_fn(move |cx| {
+                *captured.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending::<()>
+            })
+        },
+        TaskOptions::default(),
+    );
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     let retained = captured.borrow_mut().take().expect("the task captured its waker");
@@ -145,7 +154,7 @@ fn execute_cycle(state: &CycleState) -> CycleOutcome {
 #[metabench::benchmark(ADD_TASK, TASK, "add_task")]
 #[bench::ready(&executor_state())]
 fn add_task(state: &ExecutorState) -> JoinHandle<()> {
-    black_box(&state.tasks).add(async {})
+    black_box(&state.tasks).add(async {}, TaskOptions::default())
 }
 
 #[metabench::benchmark(SELF_WAKING_TASK, TASK, "self_waking_task")]

@@ -2,8 +2,38 @@
 // Licensed under the MIT License.
 
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use arty_executor::{TaskSet, discard_task_panic};
+
+use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
+
+pub(in crate::runtime) struct QueuedTaskFactory {
+    inner: Option<BoxedRemoteFutureFactory>,
+}
+
+impl QueuedTaskFactory {
+    pub(in crate::runtime) fn new(inner: BoxedRemoteFutureFactory) -> Self {
+        Self { inner: Some(inner) }
+    }
+
+    pub(in crate::runtime) fn register(mut self, builtins: Builtins, tasks: &TaskSet) {
+        let factory = self.inner.take().expect("a queued task factory is consumed exactly once");
+        factory(builtins, tasks);
+    }
+}
+
+impl Drop for QueuedTaskFactory {
+    fn drop(&mut self) {
+        let Some(factory) = self.inner.take() else {
+            return;
+        };
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
+            discard_task_panic(panic);
+        }
+    }
+}
 
 pub(in crate::runtime) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will
@@ -12,7 +42,7 @@ pub(in crate::runtime) enum AsyncWorkerCommand {
     /// inline instead of behind an extra box.
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
-    EnqueueTask { future_factory: BoxedRemoteFutureFactory },
+    EnqueueTask { future_factory: QueuedTaskFactory },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
@@ -30,5 +60,46 @@ impl fmt::Debug for AsyncWorkerCommand {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use arty_executor::TaskPlacement;
+    use observed::Sink;
+
+    use super::*;
+    use crate::task::execution::prepare_remote;
+
+    struct PanicWake(AtomicBool);
+
+    impl Wake for PanicWake {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::Release);
+            panic!("queued join cancellation notification");
+        }
+    }
+
+    #[test]
+    fn queued_factory_disposal_contains_join_notification_panic() {
+        let sink = Sink::noop();
+        let (factory, join) = prepare_remote(|_| async { 42 }, sink.transfer_context(), TaskPlacement::Any);
+        let mut join = pin!(join);
+        let wake = Arc::new(PanicWake(AtomicBool::new(false)));
+        let waker = Waker::from(Arc::clone(&wake));
+        assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(QueuedTaskFactory::new(factory)))).unwrap();
+
+        let Poll::Ready(Err(error)) = join.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+            panic!("discarded queued task must report shutdown");
+        };
+        assert!(error.is_shutdown());
+        assert!(wake.0.load(Ordering::Acquire));
     }
 }

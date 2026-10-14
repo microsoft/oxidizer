@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
+use arty_executor::TaskPlacement;
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
@@ -16,7 +17,7 @@ use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::worker::protocol::AsyncWorkerCommand;
+use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedTaskFactory};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -146,7 +147,7 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), future_factory)
+        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
     pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -161,7 +162,7 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), make_factory()))
+            .map(|index| self.enqueue(WorkerIndex(index), TaskPlacement::Any, make_factory()))
             .collect()
     }
 
@@ -171,6 +172,10 @@ impl DispatcherCore {
 
     pub(in crate::runtime) fn is_shutting_down(&self) -> bool {
         self.shutdown_started.load(Ordering::Acquire)
+    }
+
+    pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shutdown_started)
     }
 
     pub(in crate::runtime) fn is_current_blocking_task(&self) -> bool {
@@ -199,10 +204,10 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, future_factory)
+        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -217,11 +222,13 @@ impl DispatcherCore {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(future_factory, parent_task_enrichment);
+        let (future_factory, join_handle) = prepare_remote(future_factory, parent_task_enrichment, placement);
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask { future_factory });
+        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
+            future_factory: QueuedTaskFactory::new(future_factory),
+        });
 
         endpoint.waker.wake_by_ref();
 

@@ -1,15 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy::classified;
+use observed::Sink;
 use observed::context::Transfer;
-use observed::{Sink, emit, event};
 
-static SYSTEM_METADATA: data_privacy::DataClass = data_privacy::DataClass::new("arty", "SystemMetadata");
+use crate::telemetry;
 
-#[classified(SYSTEM_METADATA)]
-#[derive(Clone, Copy)]
-struct PlacementLabel(&'static str);
+/// Describes how the runtime selected the worker for a task.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TaskPlacement {
+    /// The runtime may select any worker.
+    #[default]
+    Any,
+
+    /// The task targets the scheduler's associated worker.
+    SameThread,
+}
 
 /// Optional context for a task registered with [`TaskSet`](crate::TaskSet).
 ///
@@ -18,14 +24,24 @@ struct PlacementLabel(&'static str);
 #[derive(Debug, Default)]
 pub struct TaskOptions {
     context: Option<Transfer>,
+    placement: TaskPlacement,
 }
 
 impl TaskOptions {
+    /// Creates options for a task with the specified worker-placement route.
+    #[must_use]
+    pub const fn new(placement: TaskPlacement) -> Self {
+        Self { context: None, placement }
+    }
+
     /// Creates options that apply the captured observed `context` while the task is polled and
     /// while its lifecycle events are emitted.
     #[must_use]
-    pub fn observed(context: Transfer) -> Self {
-        Self { context: Some(context) }
+    pub fn observed(context: Transfer, placement: TaskPlacement) -> Self {
+        Self {
+            context: Some(context),
+            placement,
+        }
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
@@ -41,74 +57,20 @@ impl TaskOptions {
         if self.context.is_none() {
             return;
         }
-        self.with_context(|| {
-            emit!(
-                sink,
-                TaskCreated {
-                    placement: PlacementLabel("any")
-                }
-            );
-        });
+        self.with_context(|| telemetry::report_created(sink, self.placement));
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
         if self.context.is_none() {
             return;
         }
-        emit!(sink, TaskSucceeded { polls });
+        telemetry::report_succeeded(sink, polls);
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
         if self.context.is_none() {
             return;
         }
-        emit!(sink, TaskPanicked { polls });
-    }
-}
-
-#[event("arty.rt.task.spawned")]
-#[counter(name = "arty.rt.task.spawned")]
-struct TaskCreated {
-    #[dimension(metric = "placement")]
-    placement: PlacementLabel,
-}
-
-#[event("arty.rt.task.succeeded")]
-#[counter(name = "arty.rt.task.succeeded")]
-#[histogram(polls, name = "arty.rt.task.succeeded.polls")]
-struct TaskSucceeded {
-    #[unredacted]
-    polls: u64,
-}
-
-#[event("arty.rt.task.panicked")]
-#[error("task panicked")]
-#[counter(name = "arty.rt.task.panicked")]
-#[histogram(polls, name = "arty.rt.task.panicked.polls")]
-struct TaskPanicked {
-    #[unredacted]
-    polls: u64,
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use observed_testing::{TEST_ID, test_emitter};
-
-    use super::*;
-
-    #[test]
-    fn lifecycle_events_include_poll_count() {
-        let (sink, processor) = test_emitter(TEST_ID);
-        let options = TaskOptions::observed(sink.transfer_context());
-
-        options.report_created(&sink);
-        options.report_succeeded(&sink, 3);
-
-        let events = processor.events();
-        assert_eq!(events[0].name(), "arty.rt.task.spawned");
-        assert_eq!(events[1].name(), "arty.rt.task.succeeded");
-        assert_eq!(events[1].field_metrics()[0].field_key(), "polls");
-        assert!((events[1].field_metrics()[0].value() - 3.0).abs() < f64::EPSILON);
+        telemetry::report_panicked(sink, polls);
     }
 }

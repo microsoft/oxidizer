@@ -7,11 +7,11 @@ use std::future::pending;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::Executor;
+use arty_executor::{Executor, TaskOptions};
 
 fn main() {
     let executor = Executor::builder().build();
-    let mut task = executor.tasks().add(pending::<()>());
+    let mut task = executor.tasks().add(pending::<()>(), TaskOptions::default());
 
     assert!(executor.has_tasks());
     drop(executor);

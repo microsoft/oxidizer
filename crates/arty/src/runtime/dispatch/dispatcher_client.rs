@@ -44,6 +44,10 @@ impl DispatcherClient {
         self.core.is_shutting_down()
     }
 
+    pub(crate) fn shutdown_signal(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.core.shutdown_signal()
+    }
+
     pub(crate) fn is_current_blocking_task(&self) -> bool {
         self.core.is_current_blocking_task()
     }

@@ -263,6 +263,28 @@ fn spawned_task_emits_spawned_and_completed() {
 }
 
 #[test]
+fn same_worker_spawn_reports_same_thread_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.scheduler().spawn(async |_| {}).await.unwrap();
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    let events = processor.events();
+    assert!(
+        events_named(&events, "arty.rt.task.spawned")
+            .iter()
+            .any(|event| dimension(event, "placement") == Some("same_thread".into()))
+    );
+}
+
+#[test]
 fn panicking_task_emits_panicked_event() {
     let (sink, processor) = test_emitter(TEST_ID);
 

@@ -93,6 +93,6 @@ storage and can drive shutdown to the terminal timeout. A fresh
 `std::sync::Arc` state was rejected as the default because it adds a heap
 allocation to task registration. `plurality::Pool<WakerState>` preserves stable
 addresses and cross-thread final release while reusing slots after warm-up. The
-focused allocation benchmark compares warmed pooled state replacement with a
-fresh `Arc` allocation; the end-to-end scheduling benchmarks cover production
-waker cloning, dropping, locking, and routing.
+public executor benchmarks cover borrowed and cloned self-wake paths, cloning
+during a pending cycle, and retained wake after executor drop. Allocation probes
+measure those end-to-end operations rather than the pool in isolation.

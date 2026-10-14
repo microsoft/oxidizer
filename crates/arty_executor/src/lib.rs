@@ -48,6 +48,7 @@ mod task;
 mod task_options;
 mod task_ref;
 mod task_set;
+mod telemetry;
 mod wake;
 
 pub use builder::*;

@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::{env, iter};
 
-use arty_executor::{CycleOutcome, Executor};
+use arty_executor::{CycleOutcome, Executor, TaskOptions};
 use nm::Report;
 
 // Two layers multiplied together is 10 million.
@@ -29,45 +29,51 @@ fn main() {
     // When our root task is done, it will set this signal to indicate that the app can exit.
     let shutdown_signal = Rc::new(Cell::new(false));
 
-    tasks.add({
-        let tasks = tasks.clone();
-        let shutdown_signal = Rc::clone(&shutdown_signal);
+    tasks.add(
+        {
+            let tasks = tasks.clone();
+            let shutdown_signal = Rc::clone(&shutdown_signal);
 
-        // The root task, which ultimately shuts down the executor.
-        async move {
-            let join_handles = iter::repeat_with(|| {
-                tasks.add({
-                    let tasks = tasks.clone();
+            // The root task, which ultimately shuts down the executor.
+            async move {
+                let join_handles = iter::repeat_with(|| {
+                    tasks.add(
+                        {
+                            let tasks = tasks.clone();
 
-                    // The first layer of spawned tasks.
-                    async move {
-                        let join_handles = iter::repeat_with(|| {
-                            tasks.add({
-                                // The second layer of spawned tasks.
-                                async move {
-                                    // This task does nothing, it only exists to complete.
+                            // The first layer of spawned tasks.
+                            async move {
+                                let join_handles = iter::repeat_with(|| {
+                                    tasks.add(
+                                        async move {
+                                            // This task does nothing, it only exists to complete.
+                                        },
+                                        TaskOptions::default(),
+                                    )
+                                })
+                                .take(second_layer_task_count)
+                                .collect::<Vec<_>>();
+
+                                for join_handle in join_handles {
+                                    join_handle.await.expect("the executor remains active until all work completes");
                                 }
-                            })
-                        })
-                        .take(second_layer_task_count)
-                        .collect::<Vec<_>>();
-
-                        for join_handle in join_handles {
-                            join_handle.await.expect("the executor remains active until all work completes");
-                        }
-                    }
+                            }
+                        },
+                        TaskOptions::default(),
+                    )
                 })
-            })
-            .take(first_layer_task_count)
-            .collect::<Vec<_>>();
+                .take(first_layer_task_count)
+                .collect::<Vec<_>>();
 
-            for join_handle in join_handles {
-                join_handle.await.expect("the executor remains active until all work completes");
+                for join_handle in join_handles {
+                    join_handle.await.expect("the executor remains active until all work completes");
+                }
+
+                shutdown_signal.set(true);
             }
-
-            shutdown_signal.set(true);
-        }
-    });
+        },
+        TaskOptions::default(),
+    );
 
     let mut shutdown_started = false;
 

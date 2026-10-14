@@ -3,7 +3,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskSet, discard_task_panic};
+use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic};
 use observed::context::Transfer;
 
 use crate::task::Builtins;
@@ -54,7 +54,11 @@ fn discard_panicking_drop<T>(value: T) {
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
 pub(crate) type BoxedRemoteFutureFactory = Box<dyn FnOnce(Builtins, &TaskSet) + Send + 'static>;
 
-pub(crate) fn prepare_remote<FF, F, R>(future_factory: FF, parent_task_enrichment: Transfer) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
+pub(crate) fn prepare_remote<FF, F, R>(
+    future_factory: FF,
+    parent_task_enrichment: Transfer,
+    placement: TaskPlacement,
+) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
 where
     FF: FnOnce(Builtins) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
@@ -69,7 +73,7 @@ where
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options = TaskOptions::observed(parent_task_enrichment);
+        let options = TaskOptions::observed(parent_task_enrichment, placement);
         drop(tasks.add_with_remote_result(inner, options, result_tx));
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -158,6 +162,7 @@ mod tests {
                 }
             },
             sink.transfer_context(),
+            TaskPlacement::Any,
         );
 
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -205,7 +210,11 @@ mod tests {
         struct Payload(u32);
 
         let sink = Sink::noop();
-        let (factory, handle) = prepare_remote(|_| -> std::future::Ready<()> { panic_any(Payload(42)) }, sink.transfer_context());
+        let (factory, handle) = prepare_remote(
+            |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
+            sink.transfer_context(),
+            TaskPlacement::Any,
+        );
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
         factory(builtins, &executor.tasks());

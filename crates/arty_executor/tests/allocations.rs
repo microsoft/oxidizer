@@ -12,7 +12,7 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{CycleOutcome, Executor, JoinError, TaskSet};
+use arty_executor::{CycleOutcome, Executor, JoinError, TaskOptions, TaskSet};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
@@ -25,7 +25,7 @@ const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 1;
 const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
 fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
-    let mut handle = pin!(tasks.add(async {}));
+    let mut handle = pin!(tasks.add(async {}, TaskOptions::default()));
     let _ = executor.execute_cycle();
     handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
 }

@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::{RemoteJoinHandle, TaskOptions, TaskSet};
+use arty_executor::{RemoteJoinHandle, TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -203,7 +203,7 @@ impl Scheduler {
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = RemoteJoinHandle::channel();
             let inner = async move { future_factory(builtins).await };
-            let options = TaskOptions::observed(parent_task_enrichment);
+            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             drop(current.tasks.add_with_remote_result(inner, options, result_tx));
             Ok(JoinHandle::new(result_rx))
         })
