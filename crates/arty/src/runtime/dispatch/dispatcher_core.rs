@@ -52,7 +52,7 @@ impl From<WorkerIndex> for usize {
 ///
 /// Commands are received as function calls to the dispatcher and delivered via message channels.
 #[derive(Debug)]
-pub(in crate::runtime) struct DispatcherCore {
+pub(crate) struct DispatcherCore {
     wait_for_shutdown: ThreadWaiter,
 
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
