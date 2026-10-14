@@ -81,8 +81,8 @@ assert_eq!(RequestCompleted::METRICS[0].unit(), "By");
 Destination processors use [`MetricBindings`][__link4]
 to associate complete events with prepared targets. Numeric recording selects event
 identities and generated slots without string matching, hashing, allocating,
-redacting, or enumerating generic fields. The existing sink’s timestamp,
-context, and sampling behavior is unchanged.
+redacting, or enumerating generic fields. Events emitted through a sink follow
+that sink’s timestamp, context, and sampling rules.
 
 ## Enrichment
 
@@ -186,7 +186,7 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQborqpmE7tuIMbLEcLn6hLhEIbyJAQuiTKjKUbZY028M1pAathZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjCCaG9ic2VydmVkZjAuMjcuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbq4rk7ouqcp8bX8rgE5nlUEkbzhcnnvvFb68by1etl4TdppNhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjCCaG9ic2VydmVkZjAuMjcuMA
  [__link0]: `emit!`
  [__link1]: https://docs.rs/data_privacy/0.13.0/data_privacy/?search=RedactionEngine
  [__link10]: https://docs.rs/observed/0.27.0/observed/?search=context::Transfer::with_enrichment

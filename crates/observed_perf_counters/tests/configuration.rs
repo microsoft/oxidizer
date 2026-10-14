@@ -3,13 +3,30 @@
 
 //! Cross-platform whole-event deployment and binding validation.
 
+use std::any::TypeId;
 use std::error::Error as _;
+use std::ops::ControlFlow;
 
 use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValueKind};
-use observed::processing::FieldVisitorFn;
+use observed::processing::{FieldVisitorFn, MetricBindingError};
 use observed::{Event, event};
 use observed_perf_counters::PerfCounterProcessor;
 use ohno::ErrorExt as _;
+
+// Match the primary diagnostic, not an ohno source's optional backtrace text.
+#[expect(clippy::unwrap_used, reason = "test helper requires the binding cause and its primary diagnostic")]
+fn primary_binding_message(error: &observed_perf_counters::Error) -> String {
+    error
+        .source()
+        .unwrap()
+        .downcast_ref::<MetricBindingError>()
+        .unwrap()
+        .message()
+        .lines()
+        .next()
+        .unwrap()
+        .to_owned()
+}
 
 #[event("request.completed")]
 #[counter(name = "Requests", desc = "completed requests")]
@@ -26,8 +43,8 @@ impl Event for UntypedEvent {
     const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("count", InstrumentKind::Counter)
         .value_kind(MetricValueKind::U64)
         .build()];
-    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
-        std::ops::ControlFlow::Continue(())
+    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        ControlFlow::Continue(())
     }
 }
 
@@ -89,7 +106,7 @@ fn binding_failure_retains_a_typed_source() {
         .manifest("MyServiceCounters.dll")
         .unwrap_err();
     assert!(error.is_invalid_configuration());
-    assert!(error.source().unwrap().is::<observed::processing::MetricBindingError>());
+    assert!(error.source().unwrap().is::<MetricBindingError>());
 }
 
 #[test]
@@ -117,12 +134,7 @@ fn events_without_metrics_are_rejected() {
         .manifest("MyServiceCounters.dll")
         .unwrap_err();
     assert_eq!(
-        error
-            .source()
-            .unwrap()
-            .downcast_ref::<observed::processing::MetricBindingError>()
-            .unwrap()
-            .message(),
+        primary_binding_message(&error),
         "cannot bind metrics on event `log.only`: the event must declare at least one metric instrument"
     );
 }
@@ -137,12 +149,7 @@ fn duplicate_event_registration_is_rejected_instead_of_counting_twice() {
         .manifest("MyServiceCounters.dll")
         .unwrap_err();
     assert_eq!(
-        error
-            .source()
-            .unwrap()
-            .downcast_ref::<observed::processing::MetricBindingError>()
-            .unwrap()
-            .message(),
+        primary_binding_message(&error),
         "cannot bind metrics on event `request.completed`: the event is already registered"
     );
 }
@@ -158,12 +165,7 @@ fn later_bindings_cannot_overwrite_the_first_configuration_error() {
         .manifest("resources.dll")
         .unwrap_err();
     assert_eq!(
-        error
-            .source()
-            .unwrap()
-            .downcast_ref::<observed::processing::MetricBindingError>()
-            .unwrap()
-            .message(),
+        primary_binding_message(&error),
         "cannot bind metrics on event `log.only`: the event must declare at least one metric instrument",
     );
 }
@@ -231,11 +233,10 @@ fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
     }
     struct MissingType;
     impl Event for MissingType {
-        const DESCRIPTION: EventDescription =
-            EventDescription::new("missing.type", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
+        const DESCRIPTION: EventDescription = EventDescription::new("missing.type", Some(TypeId::of::<Self>()), None, None, true, false);
         const METRICS: &'static [MetricDescription] = &[MetricDescription::new("Unknown", InstrumentKind::Counter, "", "")];
-        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
-            std::ops::ControlFlow::Continue(())
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
         }
     }
     let builder = || PerfCounterProcessor::builder().category("InvalidType").instance("worker");

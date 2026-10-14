@@ -18,7 +18,7 @@ use quote::{ToTokens, format_ident, quote};
 use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
+use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token, Type};
 
 use crate::field_attrs::{
     Dimension, FieldRedaction, IfNone, LogRouting, MetricRouting, SharedFieldAttrs, is_borrowed_str, is_mutable_reference_type,
@@ -233,7 +233,7 @@ struct FieldMetric {
 /// Parsed definition of a single field.
 struct FieldDef {
     ident: Ident,
-    ty: syn::Type,
+    ty: Type,
     /// Log-signal routing for the field (logged by default under its own name).
     log: LogRouting,
     /// Metric-dimension routing for the field.
@@ -382,8 +382,8 @@ pub(crate) enum NumericKind {
 /// parenthesis wrappers are transparent; `Option<T>` deliberately is **not**, so
 /// an optional field can never satisfy an instrument's value-type requirement.
 #[must_use]
-pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
-    let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
+pub(crate) fn numeric_kind(ty: &Type) -> Option<NumericKind> {
+    let Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
     let ident = type_path.path.segments.last()?.ident.to_string();
@@ -399,8 +399,8 @@ pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
 /// they can be rejected with a specific diagnostic instead of the generic
 /// "not a supported numeric type" one.
 #[must_use]
-pub(crate) fn is_128_bit_int(ty: &syn::Type) -> bool {
-    let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
+pub(crate) fn is_128_bit_int(ty: &Type) -> bool {
+    let Type::Path(type_path) = strip_type_wrappers(ty) else {
         return false;
     };
     type_path
@@ -412,10 +412,10 @@ pub(crate) fn is_128_bit_int(ty: &syn::Type) -> bool {
 
 /// Strips transparent `Paren`/`Group` wrappers from a type.
 #[must_use]
-pub(crate) fn strip_type_wrappers(ty: &syn::Type) -> &syn::Type {
+pub(crate) fn strip_type_wrappers(ty: &Type) -> &Type {
     match ty {
-        syn::Type::Paren(inner) => strip_type_wrappers(&inner.elem),
-        syn::Type::Group(inner) => strip_type_wrappers(&inner.elem),
+        Type::Paren(inner) => strip_type_wrappers(&inner.elem),
+        Type::Group(inner) => strip_type_wrappers(&inner.elem),
         other => other,
     }
 }
@@ -1050,6 +1050,8 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     }
 }
 
+/// Emits paired whole-event metadata and direct numeric readers in matching slot order,
+/// independent of generic field visiting, for prepared metric destinations.
 fn generate_metric_items(def: &EventDef) -> TokenStream {
     let mut metrics = Vec::new();
     let mut arms = Vec::new();
@@ -1090,10 +1092,10 @@ fn generate_metric_items(def: &EventDef) -> TokenStream {
                 .value_kind(::observed::metadata::MetricValueKind::#representation).build(),
         });
         let value = match strip_type_wrappers(ty) {
-            syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "usize") => {
+            Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "usize") => {
                 quote! { self.#field_ident as u64 }
             }
-            syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "isize") => {
+            Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "isize") => {
                 quote! { self.#field_ident as i64 }
             }
             _ => quote! { ::core::convert::From::from(self.#field_ident) },
@@ -1250,7 +1252,7 @@ fn value_expr(
 ///   [`Drop`](IfNone::Drop) skips the field entirely (`visitor` is never
 ///   called), while [`Fill`](IfNone::Fill) records the placeholder string
 ///   in place of the missing value.
-fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_desc: &TokenStream) -> TokenStream {
+fn generate_option_field_visit(field: &FieldDef, inner_ty: &Type, field_desc: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     let inner_is_ref = is_reference_type(inner_ty);
     let engine = quote! { _engine };

@@ -9,12 +9,23 @@
 //! a counter by name and ask Windows for its reading. Multiple application
 //! processes can publish the same counters, each through a named instance.
 //!
+//! # Native publication limitation
+//!
+//! The reference-cell protocol does not yet establish safe concurrent access
+//! when Windows proceeds after a collection-start callback times out. Native
+//! publication is not ready for deployment until that access contract is
+//! established or the storage design is replaced. See the
+//! [publication safety boundary](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md#publication-safety-boundary).
+//!
 //! # Usage
 //!
 //! ```no_run
+//! use std::process::id;
+//!
 //! use observed::{Sink, emit, event};
 //! use observed_perf_counters::PerfCounterProcessor;
 //! use performables::arc::Arc;
+//! use tick::SimpleClock;
 //!
 //! #[event("request.completed")]
 //! #[counter(bytes_sent, name = "Bytes Sent", unit = "By")]
@@ -23,10 +34,10 @@
 //!     bytes_sent: u32,
 //! }
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> Result<(), ohno::AppError> {
 //! let builder = PerfCounterProcessor::builder()
 //!     .category("MyService")
-//!     .instance(format!("worker-{}", std::process::id()))
+//!     .instance(format!("worker-{}", id()))
 //!     .bind_event::<RequestCompleted>();
 //!
 //! // Deployment tooling: save these definitions as MyServiceCounters.man.
@@ -34,7 +45,7 @@
 //!
 //! // Application startup: create this process's counter instance.
 //! let processor = Arc::into_std_arc(Arc::new(builder.build()?));
-//! let sink = Sink::new("app", vec![processor], tick::SimpleClock::new_system());
+//! let sink = Sink::new("app", vec![processor], SimpleClock::new_system());
 //! emit!(sink, RequestCompleted { bytes_sent: 4096 });
 //! # Ok(())
 //! # }
@@ -82,30 +93,40 @@
 //! `emit!` updates the readings without resolving counter names.
 //! Neither call installs the catalog entries.
 //!
-//! For `PerfSpy`, separately configure EDS to collect the category and instances.
+//! For `PerfSpy`, separately configure your deployment's EDS collection service
+//! to collect the category and instances.
 //! This crate exposes local counters; it does not send readings to a server.
 //!
 //! # Behavior
 //!
 //! Emission updates atomic `u64` storage without string lookup, allocation,
 //! redaction, or Windows API calls. Windows collection snapshots these values
-//! into registered reference cells. Existing `observed` sink timestamp and
-//! enrichment bookkeeping is unchanged; the backend does not extract enrichment.
+//! into registered reference cells. Events emitted through a sink follow that
+//! sink's timestamp, context, enrichment, and sampling rules; the backend does
+//! not extract enrichment.
 //!
 //! Values reset when the processor restarts. Snapshots are per-metric, not
 //! transactional across an event. Brief collection contention keeps the previous
 //! snapshot or returns a retryable busy response. Invalid callback state freezes
 //! snapshots until restart and surfaces through `flush`; emission still records.
 //!
-//! Shared ownership and locks use `performables`; standard atomics remain for
-//! numeric updates. The conversion to a standard pointer above is only the
-//! existing `Sink::new` API boundary. Native state is local to one executable or
-//! library image; never unload an image with a live provider.
+//! The conversion to a standard `Arc` above matches the `Sink::new` API boundary.
+//! Native state is local to one executable or library image; never unload an
+//! image with a live provider.
 //!
 //! See the Microsoft [provider guide](https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0)
 //! and [resource installation reference](https://learn.microsoft.com/windows/win32/perfctrs/ctrpp).
+//!
+//! # Maintainer guides
+//!
+//! See the [backend design and publication limits](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md)
+//! and [implementation guide](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/implementation.md).
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+pub use error::Error;
+pub use processor::{PerfCounterProcessor, PerfCounterProcessorBuilder};
 
 mod error;
 #[cfg(all(windows, target_pointer_width = "64"))]
@@ -115,9 +136,6 @@ mod schema;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod testing;
-
-pub use error::Error;
-pub use processor::{PerfCounterProcessor, PerfCounterProcessorBuilder};
 
 #[cfg(test)]
 testing_aids::init_tracing!();

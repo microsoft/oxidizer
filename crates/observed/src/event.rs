@@ -67,8 +67,8 @@ pub trait Event: Send + Sync {
     /// Reads a generated numeric metric slot without visiting general fields.
     ///
     /// The event macro generates direct numeric field access, separate from
-    /// the general-purpose field visitor. The default keeps existing manual
-    /// implementations compatible; it declares no supported metric slots.
+    /// the general-purpose field visitor. The default returns `None` for every
+    /// slot, declaring no supported numeric metric slots.
     /// A slot is the index of its instrument in [`METRICS`](Self::METRICS),
     /// not a native counter ID.
     #[must_use]

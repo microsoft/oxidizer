@@ -1,54 +1,37 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::num::NonZeroU32;
+
 use observed::metadata::InstrumentKind;
 use uuid::Uuid;
 
 use crate::Error;
+use crate::error::configuration::{
+    ApplicationIdentity, ControlCharacter, CounterCount, CounterIndexOverflow, CounterPathCharacter, DuplicateName, EmptyField,
+    IdCollision, InvalidXml, TextTooLong, UnsupportedAggregation,
+};
 
 // Fixed UUID namespace and format version make identities reproducible across
 // processes, binding order, and toolchains. Changing the ABI requires a new version.
 const NAMESPACE: Uuid = Uuid::from_u128(0x16a42c36_1b16_579f_bbea_96e29dba13d8);
-// Keep the original identity prefix so a crate rename does not change installed schemas.
+// Installation-format prefix, independent of the Rust crate name.
+// Changing it changes installed schema identities.
 const ABI_VERSION: &[u8] = b"observed_windows/perflib-v2/u64-reference/v1";
+// Conservative backend policy bounds template storage and collision-validation work.
 pub(crate) const MAX_COUNTERS: usize = 256;
+// Conservative backend policy bounds names and units in UTF-16 code units.
 const MAX_NAME: usize = 1023;
+// Conservative backend policy bounds descriptions and combined help text in UTF-16 code units.
 const MAX_TEXT: usize = 8192;
-// PERF_COUNTERSET_INSTANCE is 32 bytes. A reference slot occupies eight bytes
-// in our supported 64-bit ABI; it holds a pointer, not the counter data.
+// Conservative backend policy bounds resource filenames in UTF-16 code units.
+const MAX_APPLICATION_IDENTITY: usize = 255;
+// The native layout starts with PERF_COUNTERSET_INSTANCE, followed by pointer-sized
+// reference slots in the supported ABI; slots hold pointers, not counter readings.
 const INSTANCE_HEADER_SIZE: u32 = 32;
 const REFERENCE_SIZE: u32 = 8;
 
-#[derive(Clone, Debug)]
-pub(crate) struct CounterSpec {
-    pub(crate) name: String,
-    pub(crate) unit: String,
-    pub(crate) description: String,
-    pub(crate) source_index: usize,
-    pub(crate) kind: InstrumentKind,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CounterDefinition {
-    pub(crate) name: String,
-    pub(crate) unit: String,
-    pub(crate) description: String,
-    pub(crate) id: u32,
-    pub(crate) offset: u32,
-    pub(crate) source_index: usize,
-    pub(crate) kind: InstrumentKind,
-}
-
-impl CounterDefinition {
-    fn help(&self) -> String {
-        if self.unit.is_empty() {
-            self.description.clone()
-        } else {
-            format!("{} [unit: {}]", self.description, self.unit)
-        }
-    }
-}
-
+/// Validated layout shared by native registration and deployment manifests.
 #[derive(Clone, Debug)]
 pub(crate) struct CounterSchema {
     pub(crate) category: String,
@@ -58,13 +41,14 @@ pub(crate) struct CounterSchema {
 }
 
 impl CounterSchema {
+    /// Validates builder inputs and resolves native order while retaining source-slot indices.
     pub(crate) fn new(category: &str, instance: &str, specs: &[CounterSpec]) -> Result<Self, Error> {
         validate_text("category", category, MAX_NAME, true)?;
         validate_text("instance", instance, MAX_NAME, true)?;
         validate_name("category", category)?;
         validate_name("instance", instance)?;
         if specs.is_empty() || specs.len() > MAX_COUNTERS {
-            return Err(Error::configuration(format!("bind between 1 and {MAX_COUNTERS} counters")));
+            return Err(Error::configuration(CounterCount::new(specs.len(), MAX_COUNTERS)));
         }
 
         let provider_id = identity(b"provider", category.as_bytes());
@@ -94,20 +78,20 @@ impl CounterSchema {
         let mut fingerprint = Vec::new();
         append_part(&mut fingerprint, category.as_bytes());
         for (index, counter) in counters.iter_mut().enumerate() {
-            let index = u32::try_from(index).map_err(|_overflow| Error::configuration("too many counters"))?;
+            let index = u32::try_from(index).map_err(|_overflow| Error::configuration(CounterIndexOverflow::new()))?;
             counter.offset = INSTANCE_HEADER_SIZE + index * REFERENCE_SIZE;
-            append_part(&mut fingerprint, &counter.id.to_be_bytes());
+            append_part(&mut fingerprint, &counter.id.get().to_be_bytes());
             append_part(&mut fingerprint, &counter.offset.to_be_bytes());
             append_part(&mut fingerprint, counter.name.as_bytes());
             append_part(&mut fingerprint, counter.unit.as_bytes());
             append_part(&mut fingerprint, counter.description.as_bytes());
-            // Preserve existing cumulative-counter identities; other aggregation
-            // semantics must not reuse an installed counter's schema identity.
+            // Counters use the base fingerprint; other aggregation kinds append distinguishing
+            // tags. Changing this encoding changes installed schema identities.
             match counter.kind {
                 InstrumentKind::Counter => {}
                 InstrumentKind::UpDownCounter => append_part(&mut fingerprint, b"updown-counter"),
                 InstrumentKind::Gauge => append_part(&mut fingerprint, b"gauge"),
-                _ => return Err(Error::configuration("unsupported native metric aggregation")),
+                _ => return Err(Error::configuration(UnsupportedAggregation::new(counter.kind))),
             }
         }
         let counter_set_id = identity(b"counter-set", &fingerprint);
@@ -119,8 +103,9 @@ impl CounterSchema {
         })
     }
 
+    /// Formats deployment definitions matching the native layout and stable identities.
     pub(crate) fn manifest(&self, application_identity: &str) -> Result<String, Error> {
-        validate_text("application identity", application_identity, 255, true)?;
+        validate_text("application identity", application_identity, MAX_APPLICATION_IDENTITY, true)?;
         // A deployed binary filename, not an arbitrary path or command. lodctr
         // takes the binary directory separately, avoiding path interpretation.
         if application_identity.contains(['\\', '/', ':', '*', '?', '<', '>', '|', '"'])
@@ -128,9 +113,7 @@ impl CounterSchema {
                 .iter()
                 .any(|extension| application_identity.to_ascii_lowercase().ends_with(extension))
         {
-            return Err(Error::configuration(
-                "application identity must be a .dll or .exe filename without a directory",
-            ));
+            return Err(Error::configuration(ApplicationIdentity::new()));
         }
         let provider = self.provider_id.braced();
         let counter_set = self.counter_set_id.braced();
@@ -165,6 +148,40 @@ impl CounterSchema {
     }
 }
 
+/// Builder input retaining the source-slot index of the bound metric.
+#[derive(Clone, Debug)]
+pub(crate) struct CounterSpec {
+    pub(crate) name: String,
+    pub(crate) unit: String,
+    pub(crate) description: String,
+    pub(crate) source_index: usize,
+    pub(crate) kind: InstrumentKind,
+}
+
+/// Resolved native counter with its stable ID, reference offset, and source-slot index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CounterDefinition {
+    pub(crate) name: String,
+    pub(crate) unit: String,
+    pub(crate) description: String,
+    pub(crate) id: NonZeroU32,
+    pub(crate) offset: u32,
+    pub(crate) source_index: usize,
+    pub(crate) kind: InstrumentKind,
+}
+
+impl CounterDefinition {
+    /// Combines description and unit for deployment help text.
+    fn help(&self) -> String {
+        if self.unit.is_empty() {
+            self.description.clone()
+        } else {
+            format!("{} [unit: {}]", self.description, self.unit)
+        }
+    }
+}
+
+/// Derives an installation identity from the versioned, domain-separated encoding.
 fn identity(domain: &[u8], value: &[u8]) -> Uuid {
     let mut bytes = ABI_VERSION.to_vec();
     append_part(&mut bytes, domain);
@@ -172,64 +189,68 @@ fn identity(domain: &[u8], value: &[u8]) -> Uuid {
     Uuid::new_v5(&NAMESPACE, &bytes)
 }
 
+/// Length-prefixes each identity component so adjacent parts cannot be confused.
 fn append_part(bytes: &mut Vec<u8>, part: &[u8]) {
     bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
     bytes.extend_from_slice(part);
 }
 
-fn counter_id(name: &str) -> u32 {
+/// Derives a stable counter ID excluding the zero and wildcard sentinels.
+fn counter_id(name: &str) -> NonZeroU32 {
     let bytes = identity(b"counter-id", name.as_bytes()).into_bytes();
     // Counter IDs must not be zero or PERF_WILDCARD_COUNTER (u32::MAX).
-    (u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & 0x7fff_ffff) + 1
+    let id = (u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & 0x7fff_ffff) + 1;
+    NonZeroU32::new(id).expect("masking to 31 bits and adding one always yields a nonzero counter ID")
 }
 
+/// Rejects ID and case-normalized display-name collisions before native registration.
 fn validate_collisions(counters: &[CounterDefinition]) -> Result<(), Error> {
+    let mut folded_names = Vec::with_capacity(counters.len());
     for (index, counter) in counters.iter().enumerate() {
         if counters[..index].iter().any(|other| other.id == counter.id) {
-            return Err(Error::configuration(format!("counter ID collision for {:?}", counter.name)));
+            return Err(Error::configuration(IdCollision::new(counter.name.clone())));
         }
         // Conservatively reject Unicode case variants, including final sigma
         // and dotless i. Identity and resource text keep the original spelling.
         let folded = counter.name.to_lowercase().to_uppercase();
-        if counters[..index]
-            .iter()
-            .any(|other| other.name.to_lowercase().to_uppercase() == folded)
-        {
-            return Err(Error::configuration(format!("duplicate counter display name {:?}", counter.name)));
+        if folded_names.iter().any(|other| other == &folded) {
+            return Err(Error::configuration(DuplicateName::new(counter.name.clone())));
         }
+        folded_names.push(folded);
     }
     Ok(())
 }
 
-fn validate_name(field: &str, value: &str) -> Result<(), Error> {
+/// Keeps names usable as literal components of Windows counter paths.
+fn validate_name(field: &'static str, value: &str) -> Result<(), Error> {
     // These characters have structural meaning in PDH counter paths.
     if value.contains(['\\', '/', '(', ')', '*', '?', '#']) {
-        return Err(Error::configuration(format!(
-            "{field} contains a Windows counter-path metacharacter"
-        )));
+        return Err(Error::configuration(CounterPathCharacter::new(field)));
     }
     Ok(())
 }
 
-fn validate_text(field: &str, value: &str, maximum: usize, required: bool) -> Result<(), Error> {
+/// Enforces backend text limits and XML validity, with stricter rules for required names.
+fn validate_text(field: &'static str, value: &str, maximum: usize, required: bool) -> Result<(), Error> {
     if required && value.trim().is_empty() {
-        return Err(Error::configuration(format!("{field} must not be empty")));
+        return Err(Error::configuration(EmptyField::new(field)));
     }
     if value.encode_utf16().count() > maximum {
-        return Err(Error::configuration(format!("{field} exceeds {maximum} UTF-16 code units")));
+        return Err(Error::configuration(TextTooLong::new(field, maximum)));
     }
     // XML 1.0 permits TAB/LF/CR but no other C0 controls or U+FFFE/U+FFFF.
     if value.chars().any(
         |character| !matches!(character, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'),
     ) {
-        return Err(Error::configuration(format!("{field} contains NUL or an invalid XML character")));
+        return Err(Error::configuration(InvalidXml::new(field)));
     }
     if required && value.chars().any(char::is_control) {
-        return Err(Error::configuration(format!("{field} contains a control character")));
+        return Err(Error::configuration(ControlCharacter::new(field)));
     }
     Ok(())
 }
 
+/// Escapes attribute text without losing Unicode or permitted whitespace.
 fn xml_attribute(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -251,6 +272,8 @@ fn xml_attribute(value: &str) -> String {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use ohno::ErrorExt as _;
+
     use super::*;
 
     fn spec(name: &str, index: usize) -> CounterSpec {
@@ -267,16 +290,20 @@ mod tests {
     fn schema_rejects_unsupported_aggregation_and_name_controls() {
         let mut unsupported = spec("Value", 0);
         unsupported.kind = InstrumentKind::Histogram;
+        let error = CounterSchema::new("Service", "worker", &[unsupported]).unwrap_err();
+        let cause = error.find_source::<UnsupportedAggregation>().unwrap();
         assert_eq!(
-            CounterSchema::new("Service", "worker", &[unsupported]).unwrap_err().to_string(),
-            "invalid performance-counter configuration: unsupported native metric aggregation",
+            cause.message(),
+            "invalid performance-counter configuration: unsupported native metric aggregation Histogram",
         );
+        assert_eq!(cause.kind, InstrumentKind::Histogram);
+        let error = CounterSchema::new("Service", "worker", &[spec("line\nbreak", 0)]).unwrap_err();
+        let cause = error.find_source::<ControlCharacter>().unwrap();
         assert_eq!(
-            CounterSchema::new("Service", "worker", &[spec("line\nbreak", 0)])
-                .unwrap_err()
-                .to_string(),
+            cause.message(),
             "invalid performance-counter configuration: counter name contains a control character",
         );
+        assert_eq!(cause.field, "counter name");
     }
 
     #[test]
@@ -288,17 +315,22 @@ mod tests {
         description.description = "d".repeat(MAX_TEXT);
         CounterSchema::new("Service", "worker", &[description.clone()]).unwrap();
         description.description.push('d');
-        CounterSchema::new("Service", "worker", &[description]).unwrap_err();
+        let error = CounterSchema::new("Service", "worker", &[description]).unwrap_err();
+        let cause = error.find_source::<TextTooLong>().unwrap();
+        assert_eq!((cause.field, cause.maximum), ("description", MAX_TEXT));
     }
 
     #[test]
     fn a_valid_description_cannot_exceed_the_help_limit_after_appending_its_unit() {
         let mut counter = spec("Value", 0);
         counter.description = "d".repeat(MAX_TEXT);
+        let error = CounterSchema::new("Service", "worker", &[counter]).unwrap_err();
+        let cause = error.find_source::<TextTooLong>().unwrap();
         assert_eq!(
-            CounterSchema::new("Service", "worker", &[counter]).unwrap_err().to_string(),
+            cause.message(),
             "invalid performance-counter configuration: counter help exceeds 8192 UTF-16 code units",
         );
+        assert_eq!((cause.field, cause.maximum), ("counter help", MAX_TEXT));
     }
 
     #[test]
@@ -320,7 +352,11 @@ mod tests {
             );
             counter.description.push('d');
             assert_eq!(
-                CounterSchema::new("Service", "worker", &[counter]).unwrap_err().to_string(),
+                CounterSchema::new("Service", "worker", &[counter])
+                    .unwrap_err()
+                    .find_source::<TextTooLong>()
+                    .unwrap()
+                    .message(),
                 "invalid performance-counter configuration: counter help exceeds 8192 UTF-16 code units",
             );
         }
@@ -335,7 +371,7 @@ mod tests {
 
     #[test]
     fn installed_counter_identity_is_stable() {
-        assert_eq!(counter_id("Bytes"), 1_414_435_675);
+        assert_eq!(counter_id("Bytes").get(), 1_414_435_675);
     }
 
     #[test]
@@ -414,6 +450,16 @@ mod tests {
     }
 
     #[test]
+    fn name_validation_retains_typed_field_context() {
+        let empty = CounterSchema::new(" ", "worker", &[spec("Bytes", 0)]).unwrap_err();
+        assert_eq!(empty.find_source::<EmptyField>().unwrap().field, "category");
+        let invalid_xml = CounterSchema::new("Service", "worker", &[spec("bad\0name", 0)]).unwrap_err();
+        assert_eq!(invalid_xml.find_source::<InvalidXml>().unwrap().field, "counter name");
+        let counter_path = CounterSchema::new("Service", "worker", &[spec("bad\\name", 0)]).unwrap_err();
+        assert_eq!(counter_path.find_source::<CounterPathCharacter>().unwrap().field, "counter name");
+    }
+
+    #[test]
     fn utf16_not_utf8_determines_name_limit() {
         let accepted = CounterSchema::new(&"🦀".repeat(511), "worker", &[spec("Bytes", 0)]);
         let rejected = CounterSchema::new(&"🦀".repeat(512), "worker", &[spec("Bytes", 0)]);
@@ -423,21 +469,27 @@ mod tests {
 
     #[test]
     fn duplicate_names_and_ids_are_rejected() {
-        CounterSchema::new("Service", "worker", &[spec("Bytes", 0), spec("BYTES", 1)]).unwrap_err();
+        let duplicate = CounterSchema::new("Service", "worker", &[spec("Bytes", 0), spec("BYTES", 1)]).unwrap_err();
+        assert!(["Bytes", "BYTES"].contains(&duplicate.find_source::<DuplicateName>().unwrap().name.as_str()));
         CounterSchema::new("Service", "worker", &[spec("ı", 0), spec("I", 1)]).unwrap_err();
         CounterSchema::new("Service", "worker", &[spec("ẞς", 0), spec("ßσ", 1)]).unwrap_err();
         let mut schema = CounterSchema::new("Service", "worker", &[spec("Bytes", 0), spec("Requests", 1)]).unwrap();
         schema.counters[1].id = schema.counters[0].id;
-        assert!(validate_collisions(&schema.counters).is_err());
+        let collision = validate_collisions(&schema.counters).unwrap_err();
+        assert_eq!(collision.find_source::<IdCollision>().unwrap().name, schema.counters[1].name);
     }
 
     #[test]
     fn empty_and_oversized_schemas_are_rejected() {
-        CounterSchema::new("Service", "worker", &[]).unwrap_err();
+        let empty = CounterSchema::new("Service", "worker", &[]).unwrap_err();
+        let cause = empty.find_source::<CounterCount>().unwrap();
+        assert_eq!((cause.count, cause.maximum), (0, MAX_COUNTERS));
         let specs = (0..=MAX_COUNTERS)
             .map(|index| spec(&format!("Counter {index}"), index))
             .collect::<Vec<_>>();
-        CounterSchema::new("Service", "worker", &specs).unwrap_err();
+        let oversized = CounterSchema::new("Service", "worker", &specs).unwrap_err();
+        let cause = oversized.find_source::<CounterCount>().unwrap();
+        assert_eq!((cause.count, cause.maximum), (MAX_COUNTERS + 1, MAX_COUNTERS));
     }
 
     #[test]
@@ -446,5 +498,7 @@ mod tests {
         for name in ["", "resources", "C:\\resources.dll", "../resources.dll", "bad\0.dll", "bad\".dll"] {
             assert!(schema.manifest(name).is_err(), "{name:?}");
         }
+        let error = schema.manifest("C:\\resources.dll").unwrap_err();
+        assert!(error.find_source::<ApplicationIdentity>().is_some());
     }
 }

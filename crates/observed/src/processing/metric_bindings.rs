@@ -5,47 +5,14 @@
 
 use std::any::TypeId;
 
-use super::EventView;
 use crate::Event;
 use crate::metadata::{EventDescription, MetricDescription, MetricValue, MetricValueKind};
-
-/// An event has no type identity, no metrics, or is
-/// already registered with this destination.
-#[ohno::error]
-#[display("cannot bind metrics on event `{event_name}`: {reason}")]
-pub struct MetricBindingError {
-    event_name: &'static str,
-    reason: &'static str,
-}
-
-/// A bound event did not supply a numeric slot with the declared representation.
-///
-/// This indicates an inconsistent hand-written event implementation.
-/// Processors must report the failure through their diagnostics or flush API.
-#[ohno::error]
-#[display("event `{event_name}` has invalid metric slot {slot}: {reason}")]
-pub struct MetricReadError {
-    event_name: &'static str,
-    slot: usize,
-    reason: &'static str,
-}
-
-#[derive(Debug)]
-struct MetricTarget<T> {
-    value_kind: Option<MetricValueKind>,
-    target: T,
-}
-
-#[derive(Debug)]
-struct EventTargets<T> {
-    identity: TypeId,
-    metrics: Vec<MetricTarget<T>>,
-}
+use crate::processing::EventView;
 
 /// Backend-neutral bindings from complete event types to prepared metric targets.
 ///
 /// Configure bindings at startup, then share them read-only across processors.
-/// Event selection uses binary search over numeric Rust type identities; slot
+/// Recording selects registered Rust type identities and numeric slots; slot
 /// selection and extraction use generated numeric accessors. Recording performs
 /// no string matching, hashing, allocation, redaction, or generic field visits.
 ///
@@ -86,19 +53,16 @@ impl<T> MetricBindings<T> {
         let description = E::DESCRIPTION;
         let identity = description
             .type_id()
-            .ok_or_else(|| MetricBindingError::new(description.name(), "a typed event identity is required"))?;
+            .ok_or_else(|| MetricBindingError::from(MissingIdentity::new(description.name())))?;
         if E::METRICS.is_empty() {
-            return Err(MetricBindingError::new(
-                description.name(),
-                "the event must declare at least one metric instrument",
-            ));
+            return Err(MissingInstruments::new(description.name()).into());
         }
         // Sorted vectors avoid hashing and first-use cache mutation at emit time.
         let index = self
             .events
             .binary_search_by_key(&identity, |event| event.identity)
             .err()
-            .ok_or_else(|| MetricBindingError::new(description.name(), "the event is already registered"))?;
+            .ok_or_else(|| MetricBindingError::from(DuplicateEvent::new(description.name())))?;
         let metrics = E::METRICS
             .iter()
             .map(|metric| MetricTarget {
@@ -118,9 +82,9 @@ impl<T> MetricBindings<T> {
 
     /// Reads bound numeric measurements and passes them to backend targets.
     ///
-    /// Unbound and disabled events are ignored. Existing sink context and
-    /// sampling behavior is unchanged; this operation itself never inspects
-    /// enrichment or constructs signal records.
+    /// Unbound and disabled events are ignored. Events emitted through a sink
+    /// follow that sink's timestamp, context, and sampling rules. Direct numeric
+    /// recording never inspects enrichment or constructs signal records.
     ///
     /// # Errors
     ///
@@ -138,19 +102,18 @@ impl<T> MetricBindings<T> {
         for (slot, metric) in targets.metrics.iter().enumerate() {
             let value = event
                 .metric_value(slot)
-                .ok_or_else(|| MetricReadError::new(description.name(), slot, "no measurement supplied"))?;
-            if metric.value_kind.is_some_and(|kind| kind != value.kind()) {
-                return Err(MetricReadError::new(
-                    description.name(),
-                    slot,
-                    "numeric representation differs from its declaration",
-                ));
+                .ok_or_else(|| MetricReadError::from(MissingMeasurement::new(description.name(), slot)))?;
+            if let Some(expected) = metric.value_kind
+                && expected != value.kind()
+            {
+                return Err(MismatchedRepresentation::new(description.name(), slot, expected, value.kind()).into());
             }
             record(&metric.target, value);
         }
         Ok(())
     }
 
+    // Common identity lookup for interest checks and numeric recording.
     fn targets(&self, description: &EventDescription) -> Option<&EventTargets<T>> {
         let identity = description.type_id()?;
         self.events
@@ -160,22 +123,183 @@ impl<T> MetricBindings<T> {
     }
 }
 
+/// An event cannot be registered with this metric destination.
+///
+/// The source retains the specific registration failure.
+#[ohno::error]
+#[from(MissingIdentity, MissingInstruments, DuplicateEvent)]
+pub struct MetricBindingError;
+
+/// A bound event did not supply a numeric slot with the declared representation.
+///
+/// This indicates an inconsistent hand-written event implementation.
+/// Processors must report the failure through their diagnostics or flush API.
+#[ohno::error]
+#[from(MissingMeasurement, MismatchedRepresentation)]
+pub struct MetricReadError;
+
+// One prepared destination and its declared measurement representation.
+#[derive(Debug)]
+struct MetricTarget<T> {
+    value_kind: Option<MetricValueKind>,
+    target: T,
+}
+
+// Ordered metric slots belonging to one registered Rust event identity.
+#[derive(Debug)]
+struct EventTargets<T> {
+    identity: TypeId,
+    metrics: Vec<MetricTarget<T>>,
+}
+
+#[ohno::error]
+#[display("cannot bind metrics on event `{event_name}`: a typed event identity is required")]
+struct MissingIdentity {
+    event_name: &'static str,
+}
+
+#[ohno::error]
+#[display("cannot bind metrics on event `{event_name}`: the event must declare at least one metric instrument")]
+struct MissingInstruments {
+    event_name: &'static str,
+}
+
+#[ohno::error]
+#[display("cannot bind metrics on event `{event_name}`: the event is already registered")]
+struct DuplicateEvent {
+    event_name: &'static str,
+}
+
+#[ohno::error]
+#[display("event `{event_name}` has invalid metric slot {slot}: no measurement supplied")]
+struct MissingMeasurement {
+    event_name: &'static str,
+    slot: usize,
+}
+
+#[ohno::error]
+#[display(
+    "event `{event_name}` has invalid metric slot {slot}: numeric representation differs from its declaration (expected {expected:?}, got {actual:?})"
+)]
+struct MismatchedRepresentation {
+    event_name: &'static str,
+    slot: usize,
+    expected: MetricValueKind,
+    actual: MetricValueKind,
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::borrow::Cow;
+    use std::cell::Cell;
+    use std::ops::ControlFlow;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+    use std::time::SystemTime;
+
     use ohno::{EnrichableExt as _, ErrorExt as _};
 
     use super::*;
+    use crate::event;
+    use crate::interop::DynEvent;
+    use crate::processing::FieldVisitorFn;
+
+    #[event("bound")]
+    #[counter]
+    struct Bound;
+
+    #[event("empty")]
+    #[info]
+    struct Empty;
+
+    struct Unidentified;
+
+    impl Event for Unidentified {
+        const DESCRIPTION: EventDescription = EventDescription::new("untyped", None, None, None, true, false);
+        const METRICS: &'static [MetricDescription] = Bound::METRICS;
+
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+
+    // Supplies missing or deliberately incompatible values to the real recording path.
+    struct ReadProbe(Option<MetricValue>);
+
+    impl DynEvent for ReadProbe {
+        fn name(&self) -> &'static str {
+            "bound"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+        fn description(&self) -> EventDescription {
+            Bound::DESCRIPTION
+        }
+        fn metric_value(&self, _: usize) -> Option<MetricValue> {
+            self.0
+        }
+    }
 
     #[test]
     fn metric_errors_support_ohno_enrichment_without_changing_the_diagnostic() {
         static_assertions::assert_impl_all!(MetricBindingError: Send, Sync, std::error::Error, ohno::ErrorExt, ohno::Enrichable);
         static_assertions::assert_impl_all!(MetricReadError: Send, Sync, std::error::Error, ohno::ErrorExt, ohno::Enrichable);
-        let binding = MetricBindingError::new("request", "duplicate").enrich("configuring counters");
-        assert_eq!(binding.message(), "cannot bind metrics on event `request`: duplicate");
+        static_assertions::assert_impl_all!(MetricBindings<()>: UnwindSafe, RefUnwindSafe);
+        static_assertions::assert_impl_all!(MetricBindings<Cell<u64>>: UnwindSafe);
+        static_assertions::assert_not_impl_any!(MetricBindings<Cell<u64>>: RefUnwindSafe);
+        // ohno retains arbitrary source errors and enrichment closures.
+        static_assertions::assert_not_impl_any!(MetricBindingError: UnwindSafe, RefUnwindSafe);
+        static_assertions::assert_not_impl_any!(MetricReadError: UnwindSafe, RefUnwindSafe);
+        let binding = MetricBindingError::from(DuplicateEvent::new("request")).enrich("configuring counters");
+        assert_eq!(
+            binding.message().lines().next().unwrap(),
+            "cannot bind metrics on event `request`: the event is already registered"
+        );
+        assert_eq!(binding.find_source::<DuplicateEvent>().unwrap().event_name, "request");
         assert!(binding.to_string().contains("configuring counters"));
-        let read = MetricReadError::new("request", 2_usize, "no measurement supplied").enrich("recording counters");
-        assert_eq!(read.message(), "event `request` has invalid metric slot 2: no measurement supplied");
+        let read = MetricReadError::from(MissingMeasurement::new("request", 2_usize)).enrich("recording counters");
+        assert_eq!(
+            read.message().lines().next().unwrap(),
+            "event `request` has invalid metric slot 2: no measurement supplied"
+        );
         assert!(read.to_string().contains("recording counters"));
+    }
+
+    #[test]
+    fn typed_causes_retain_validation_context() {
+        let mut bindings = MetricBindings::new();
+        let missing = bindings.bind_event::<Unidentified>(|_| ()).unwrap_err();
+        assert_eq!(missing.find_source::<MissingIdentity>().unwrap().event_name, "untyped");
+        let empty = bindings.bind_event::<Empty>(|_| ()).unwrap_err();
+        assert_eq!(empty.find_source::<MissingInstruments>().unwrap().event_name, "empty");
+        bindings.bind_event::<Bound>(|_| ()).unwrap();
+        let duplicate = bindings.bind_event::<Bound>(|_| ()).unwrap_err();
+        assert_eq!(duplicate.find_source::<DuplicateEvent>().unwrap().event_name, "bound");
+        let missing_value = ReadProbe(None);
+        let view = EventView::new_synthetic(&missing_value, SystemTime::UNIX_EPOCH);
+        let read = bindings.record(&view, |(), _| unreachable!()).unwrap_err();
+        let cause = read.find_source::<MissingMeasurement>().unwrap();
+        assert_eq!((cause.event_name, cause.slot), ("bound", 0));
+        let signed_value = ReadProbe(Some(MetricValue::I64(-1)));
+        let view = EventView::new_synthetic(&signed_value, SystemTime::UNIX_EPOCH);
+        let mismatch = bindings.record(&view, |(), _| unreachable!()).unwrap_err();
+        let cause = mismatch.find_source::<MismatchedRepresentation>().unwrap();
+        assert_eq!(
+            (cause.event_name, cause.slot, cause.expected, cause.actual),
+            ("bound", 0, MetricValueKind::U64, MetricValueKind::I64),
+        );
     }
 }

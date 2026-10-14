@@ -6,18 +6,30 @@
 #![expect(clippy::unwrap_used, reason = "test helpers use unwrap for informative failure backtraces")]
 #![expect(clippy::panic, reason = "test adapters trip if numeric delivery falls back to generic visitors")]
 
+use std::any::TypeId;
+use std::borrow::Cow;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
+use data_privacy::RedactionEngine;
+use observed::interop::{DynEvent, emit_dyn_event};
 use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValue, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
-use observed::{Event, FlushError, Sink, emit, event};
-use ohno::ErrorExt as _;
+use observed::{Event, FlushError, Sink, Value, emit, event};
+use ohno::ErrorExt;
+use tick::SimpleClock;
 
 #[global_allocator]
 #[cfg(not(miri))]
 static ALLOCATOR: alloc_tracker::Allocator<std::alloc::System> = alloc_tracker::Allocator::system();
+
+// Presentation assertions cover the primary diagnostic; typed causes are
+// checked in the binding module, independently of nested backtrace rendering.
+fn primary_message(error: &impl ErrorExt) -> String {
+    error.message().lines().next().unwrap().to_owned()
+}
 
 #[event("request.completed")]
 #[counter(name = "requests")]
@@ -71,6 +83,7 @@ struct Mixed {
     depth: u32,
 }
 
+/// Records prepared metric bindings into shared atomic accumulators.
 struct Processor {
     bindings: MetricBindings<Arc<AtomicU64>>,
 }
@@ -97,7 +110,7 @@ impl EventProcessor for Processor {
 }
 
 fn sink(bindings: MetricBindings<Arc<AtomicU64>>) -> Sink {
-    Sink::new("counters", vec![Arc::new(Processor { bindings })], tick::SimpleClock::new_frozen())
+    Sink::new("counters", vec![Arc::new(Processor { bindings })], SimpleClock::new_frozen())
 }
 
 #[test]
@@ -235,12 +248,13 @@ fn generic_and_borrowed_events_need_neither_clone_nor_any() {
     assert_eq!(total.load(Ordering::Relaxed), 18);
 }
 
+/// Supplies numeric slots while rejecting any fallback to generic field visits.
 struct NumericOnly {
     amount: u32,
 }
 
 impl Event for NumericOnly {
-    const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
+    const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(TypeId::of::<Self>()), None, None, true, false);
     const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("numeric", InstrumentKind::Counter)
         .value_kind(MetricValueKind::U64)
         .build()];
@@ -273,7 +287,7 @@ fn standard_arc_processor_delegates_interest_and_delivery() {
     assert!(EventProcessor::is_interested(&processor, &AnotherRequest::DESCRIPTION));
     assert!(!EventProcessor::is_interested(&processor, &LogOnly::DESCRIPTION));
     let adapter = NumericAdapter(&NumericOnly { amount: 99 });
-    let view = EventView::new_synthetic(&adapter, std::time::SystemTime::UNIX_EPOCH);
+    let view = EventView::new_synthetic(&adapter, SystemTime::UNIX_EPOCH);
     EventProcessor::process(&processor, &view);
     assert_eq!(total.load(Ordering::Relaxed), 99);
     EventProcessor::flush(&processor).unwrap();
@@ -291,7 +305,7 @@ fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored(
     }
     let mut bindings = MetricBindings::<()>::default();
     let adapter = NumericAdapter(&NumericOnly { amount: 19 });
-    let view = EventView::new_synthetic(&adapter, std::time::SystemTime::UNIX_EPOCH);
+    let view = EventView::new_synthetic(&adapter, SystemTime::UNIX_EPOCH);
     bindings
         .record(&view, |(), _| panic!("unbound measurement must not be delivered"))
         .unwrap();
@@ -301,10 +315,11 @@ fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored(
     assert_eq!(values, [MetricValue::U64(19)]);
 }
 
+/// Declares numeric metadata but leaves the slot reader at its missing-value default.
 struct MissingSlot;
 
 impl Event for MissingSlot {
-    const DESCRIPTION: EventDescription = EventDescription::new("missing", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
+    const DESCRIPTION: EventDescription = EventDescription::new("missing", Some(TypeId::of::<Self>()), None, None, true, false);
     const METRICS: &'static [MetricDescription] = NumericOnly::METRICS;
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -325,7 +340,7 @@ fn missing_numeric_slots_are_reported() {
                 .record(event, |(), _| panic!("missing slot must not be delivered"))
                 .unwrap_err();
             assert_eq!(
-                error.message(),
+                primary_message(&error),
                 "event `missing` has invalid metric slot 0: no measurement supplied"
             );
         }
@@ -335,26 +350,27 @@ fn missing_numeric_slots_are_reported() {
     }
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<MissingSlot>(|_| ()).unwrap();
-    let sink = Sink::new("inspect", vec![Arc::new(Inspect(bindings))], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("inspect", vec![Arc::new(Inspect(bindings))], SimpleClock::new_frozen());
     emit!(sink, MissingSlot);
 }
 
+/// Forwards the numeric-only fixture through the dynamic event boundary.
 struct NumericAdapter<'a>(&'a NumericOnly);
 
-impl observed::interop::DynEvent for NumericAdapter<'_> {
+impl DynEvent for NumericAdapter<'_> {
     fn name(&self) -> &'static str {
         "numeric"
     }
-    fn body(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn body(&self) -> Option<Cow<'static, str>> {
         None
     }
-    fn source_file(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn source_file(&self) -> Option<Cow<'static, str>> {
         None
     }
     fn source_line(&self) -> Option<u32> {
         None
     }
-    fn source_crate(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn source_crate(&self) -> Option<Cow<'static, str>> {
         None
     }
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -375,7 +391,7 @@ fn synthetic_views_and_dynamic_emission_forward_numeric_slots() {
     bindings.bind_event::<NumericOnly>(|_| Arc::clone(&total)).unwrap();
     let event = NumericOnly { amount: 31 };
     let dynamic = NumericAdapter(&event);
-    let view = EventView::new_synthetic(&dynamic, std::time::SystemTime::UNIX_EPOCH);
+    let view = EventView::new_synthetic(&dynamic, SystemTime::UNIX_EPOCH);
     bindings
         .record(&view, |target, value| {
             let MetricValue::U64(value) = value else {
@@ -384,30 +400,30 @@ fn synthetic_views_and_dynamic_emission_forward_numeric_slots() {
             target.fetch_add(value, Ordering::Relaxed);
         })
         .unwrap();
-    let disabled = EventView::new_synthetic(&DisabledAdapter, std::time::SystemTime::UNIX_EPOCH);
+    let disabled = EventView::new_synthetic(&DisabledAdapter, SystemTime::UNIX_EPOCH);
     bindings
         .record(&disabled, |_, _| panic!("disabled event must not be delivered"))
         .unwrap();
-    observed::interop::emit_dyn_event(&sink(bindings), &dynamic);
+    emit_dyn_event(&sink(bindings), &dynamic);
     assert_eq!(total.load(Ordering::Relaxed), 62);
 }
 
 struct DisabledAdapter;
 
-impl observed::interop::DynEvent for DisabledAdapter {
+impl DynEvent for DisabledAdapter {
     fn name(&self) -> &'static str {
         "disabled"
     }
-    fn body(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn body(&self) -> Option<Cow<'static, str>> {
         None
     }
-    fn source_file(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn source_file(&self) -> Option<Cow<'static, str>> {
         None
     }
     fn source_line(&self) -> Option<u32> {
         None
     }
-    fn source_crate(&self) -> Option<std::borrow::Cow<'static, str>> {
+    fn source_crate(&self) -> Option<Cow<'static, str>> {
         None
     }
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -426,7 +442,7 @@ fn mixed_event_kinds_are_bound_and_empty_events_are_rejected() {
         .bind_event::<LogOnly>(|_| panic!("empty event must be rejected before preparation"))
         .unwrap_err();
     assert_eq!(
-        (empty.message(), bindings.is_interested(&Mixed::DESCRIPTION)),
+        (primary_message(&empty), bindings.is_interested(&Mixed::DESCRIPTION)),
         (
             "cannot bind metrics on event `request.log`: the event must declare at least one metric instrument".into(),
             true,
@@ -444,7 +460,7 @@ fn registering_an_event_twice_fails_without_changing_its_existing_targets() {
         .unwrap_err();
     emit!(sink(bindings), AnotherRequest { bytes_sent: 123 });
     assert_eq!(
-        (error.message(), total.load(Ordering::Relaxed)),
+        (primary_message(&error), total.load(Ordering::Relaxed)),
         (
             "cannot bind metrics on event `another.request`: the event is already registered".into(),
             123
@@ -467,7 +483,7 @@ fn unidentified_events_are_rejected_during_binding() {
     let mut bindings = MetricBindings::<()>::new();
     assert!(!bindings.is_interested(&Unidentified::DESCRIPTION));
     assert_eq!(
-        bindings.bind_event::<Unidentified>(|_| ()).unwrap_err().message(),
+        primary_message(&bindings.bind_event::<Unidentified>(|_| ()).unwrap_err()),
         "cannot bind metrics on event `unidentified`: a typed event identity is required",
     );
 }
@@ -503,10 +519,10 @@ fn legacy_field_processors_and_bound_counters_receive_the_same_event() {
             description.contains_metrics()
         }
         fn process(&self, event: &EventView<'_>) {
-            let redactor = data_privacy::RedactionEngine::default();
+            let redactor = RedactionEngine::default();
             let _ = event.visit_fields(&mut |descriptor, get_value| {
                 if descriptor.field_name() == "bytes_sent" {
-                    let observed::Value::U64(value) = get_value(&redactor) else {
+                    let Value::U64(value) = get_value(&redactor) else {
                         panic!("legacy field getter must still supply its numeric value");
                     };
                     self.0.fetch_add(value, Ordering::Relaxed);
@@ -525,7 +541,7 @@ fn legacy_field_processors_and_bound_counters_receive_the_same_event() {
     let sink = Sink::new(
         "mixed",
         vec![Arc::new(Processor { bindings }), Arc::new(Legacy(Arc::clone(&legacy)))],
-        tick::SimpleClock::new_frozen(),
+        SimpleClock::new_frozen(),
     );
     emit!(sink, AnotherRequest { bytes_sent: 123 });
     assert_eq!((bound.load(Ordering::Relaxed), legacy.load(Ordering::Relaxed)), (123, 123));
@@ -612,7 +628,7 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
         duration: f32,
     }
 
-    struct Capture(MetricBindings<usize>, Arc<std::sync::Mutex<Vec<MetricValue>>>);
+    struct Capture(MetricBindings<usize>, Arc<Mutex<Vec<MetricValue>>>);
     impl EventProcessor for Capture {
         fn is_interested(&self, description: &EventDescription) -> bool {
             self.0.is_interested(description)
@@ -630,7 +646,7 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
             Ok(())
         }
     }
-    let values = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let values = Arc::new(Mutex::new(Vec::new()));
     let mut bindings = MetricBindings::new();
     let mut index = 0;
     bindings
@@ -643,7 +659,7 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
     let sink = Sink::new(
         "numeric",
         vec![Arc::new(Capture(bindings, Arc::clone(&values)))],
-        tick::SimpleClock::new_frozen(),
+        SimpleClock::new_frozen(),
     );
     emit!(
         sink,
@@ -689,8 +705,7 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
 fn inconsistent_numeric_representation_is_reported_before_delivery() {
     struct WrongType;
     impl Event for WrongType {
-        const DESCRIPTION: EventDescription =
-            EventDescription::new("wrong.type", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
+        const DESCRIPTION: EventDescription = EventDescription::new("wrong.type", Some(TypeId::of::<Self>()), None, None, true, false);
         const METRICS: &'static [MetricDescription] = NumericOnly::METRICS;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             panic!("numeric access must not visit general fields")
@@ -710,8 +725,8 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
                 .record(event, |(), _| panic!("wrong representation must not be delivered"))
                 .unwrap_err();
             assert_eq!(
-                error.message(),
-                "event `wrong.type` has invalid metric slot 0: numeric representation differs from its declaration"
+                primary_message(&error),
+                "event `wrong.type` has invalid metric slot 0: numeric representation differs from its declaration (expected U64, got I64)"
             );
         }
         fn flush(&self) -> Result<(), FlushError> {
@@ -720,6 +735,6 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
     }
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<WrongType>(|_| ()).unwrap();
-    let sink = Sink::new("wrong.type", vec![Arc::new(Inspect(bindings))], tick::SimpleClock::new_frozen());
+    let sink = Sink::new("wrong.type", vec![Arc::new(Inspect(bindings))], SimpleClock::new_frozen());
     emit!(sink, WrongType);
 }

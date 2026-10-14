@@ -78,8 +78,8 @@
 //! Destination processors use [`MetricBindings`](processing::MetricBindings)
 //! to associate complete events with prepared targets. Numeric recording selects event
 //! identities and generated slots without string matching, hashing, allocating,
-//! redacting, or enumerating generic fields. The existing sink's timestamp,
-//! context, and sampling behavior is unchanged.
+//! redacting, or enumerating generic fields. Events emitted through a sink follow
+//! that sink's timestamp, context, and sampling rules.
 //!
 //! # Enrichment
 //!
@@ -397,7 +397,8 @@ pub use observed_macros::Enrichment;
 /// [`MetricBindings`](processing::MetricBindings). Numeric extraction does
 /// not visit generic fields or use the instrument name at emission time.
 /// Backends reject events containing unsupported kinds or numeric types.
-/// Existing field routing, enrichment, timestamps, and sampling are unchanged.
+/// Events emitted through a sink follow that sink's field routing, enrichment,
+/// timestamp, and sampling rules.
 ///
 /// Value-type constraints are enforced at compile time:
 ///

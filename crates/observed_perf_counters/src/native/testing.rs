@@ -1,9 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::AssertUnwindSafe;
+use std::process::id;
+use std::ptr::null_mut;
+use std::thread;
+
+use ohno::ErrorExt as _;
+
 use super::*;
 
 #[derive(Default)]
+// Recorded lifecycle operations and an aligned instance buffer owned by the mock.
 struct State {
     calls: Vec<&'static str>,
     ids: Vec<u32>,
@@ -11,6 +19,7 @@ struct State {
 }
 
 #[derive(Default)]
+// Injected native lifecycle/reference model; never registers an operating-system provider.
 struct MockApi {
     failure: Option<&'static str>,
     delete_code: u32,
@@ -29,7 +38,10 @@ impl MockApi {
     }
 }
 
-impl Api for MockApi {
+// SAFETY: the mock owns fixed aligned storage through provider teardown. Calls
+// serialize access through its mutex, returned resources are not thread-affine,
+// and it never accesses registered cells after successful stop.
+unsafe impl Api for MockApi {
     fn start(&self, _: &GUID) -> Result<HANDLE, Error> {
         status("PerfStartProvider", self.code("start"))?;
         Ok(NonNull::<u8>::dangling().as_ptr().cast())
@@ -64,7 +76,7 @@ impl Api for MockApi {
         unsafe {
             instance.write(PERF_COUNTERSET_INSTANCE {
                 dwSize: u32::try_from(bytes).unwrap(),
-                InstanceId: std::process::id(),
+                InstanceId: id(),
                 ..PERF_COUNTERSET_INSTANCE::default()
             });
         }
@@ -212,10 +224,8 @@ fn native_counter_limit_accepts_exactly_the_bound_and_rejects_one_more() {
     )
     .err()
     .unwrap();
-    assert_eq!(
-        error.to_string(),
-        "invalid performance-counter configuration: too many native counters active in this executable image"
-    );
+    let cause = error.find_source::<PublishedCapacity>().unwrap();
+    assert_eq!((cause.count, cause.maximum), (MAX_PUBLISHED_COUNTERS + 1, MAX_PUBLISHED_COUNTERS));
     drop(last);
     remove_storage(&filler);
 }
@@ -325,7 +335,7 @@ fn concurrent_collectors_balance_admission_and_keep_reference_reads_race_free() 
     let fault_state = AtomicU32::new(ERROR_SUCCESS);
     let readers = AtomicU32::new(0);
     let iterations = if cfg!(miri) { 8 } else { 1000 };
-    std::thread::scope(|scope| {
+    thread::scope(|scope| {
         for _ in 0..4 {
             let registry = &registry;
             let fault_state = &fault_state;
@@ -360,7 +370,7 @@ fn concurrent_collectors_balance_admission_and_keep_reference_reads_race_free() 
 #[test]
 fn poisoned_registry_is_reported_without_entering_a_collection() {
     let registry = Mutex::new(Registry::default());
-    let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let _panic = catch_unwind(AssertUnwindSafe(|| {
         let _guard = registry.lock();
         panic!("inject poison");
     }));
@@ -377,7 +387,7 @@ fn callback_catches_panics_and_provider_flush_reports_the_collection_failure() {
     let _serial = TEST_NATIVE.lock();
     let provider = start_mock(&schema(), vec![AtomicU64::new(0)].into());
     // SAFETY: the callback ignores its buffer and this request has no payload.
-    assert_eq!(unsafe { control_callback(999, std::ptr::null_mut(), 0) }, ERROR_SUCCESS);
+    assert_eq!(unsafe { control_callback(999, null_mut(), 0) }, ERROR_SUCCESS);
     assert_eq!(callback_with(|| ERROR_SUCCESS), ERROR_SUCCESS);
     let old = COLLECTION_FAULT.load(Ordering::Acquire);
     let result = callback_with(|| panic!("injected callback failure"));
@@ -397,7 +407,7 @@ fn teardown_can_remove_its_cells_from_a_poisoned_registry() {
     let registry = Mutex::new(Registry {
         providers: vec![storage.clone()],
     });
-    let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let _panic = catch_unwind(AssertUnwindSafe(|| {
         let _guard = registry.lock();
         panic!("inject registry poison");
     }));
@@ -415,39 +425,33 @@ fn poisoned_registry_diagnostic_runs_after_unlocking_and_removing_cells() {
     let registry = Arc::new(Mutex::new(Registry {
         providers: vec![Arc::clone(&storage)],
     }));
-    let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let _panic = catch_unwind(AssertUnwindSafe(|| {
         let _guard = registry.lock();
         panic!("inject registry poison");
     }));
-    let captured_registry = Arc::clone(&registry);
     let calls = Arc::new(AtomicU32::new(0));
-    let captured_calls = Arc::clone(&calls);
-    let subscriber = crate::testing::OnEvent(move || {
-        match captured_registry.try_lock_result() {
-            Err(poisoned) => assert_eq!(poisoned.into_inner().providers.len(), 0),
-            Ok(_) => panic!("diagnostic must run after releasing the poisoned registry"),
+    let subscriber = crate::testing::OnEvent({
+        let registry = Arc::clone(&registry);
+        let calls = Arc::clone(&calls);
+        move || {
+            match registry.try_lock_result() {
+                Err(poisoned) => assert_eq!(poisoned.into_inner().providers.len(), 0),
+                Ok(_) => panic!("diagnostic must run after releasing the poisoned registry"),
+            }
+            let provider = start_mock(&schema(), vec![AtomicU64::new(0)].into());
+            drop(provider);
+            calls.fetch_add(1, Ordering::Relaxed);
         }
-        let provider = start_mock(&schema(), vec![AtomicU64::new(0)].into());
-        drop(provider);
-        captured_calls.fetch_add(1, Ordering::Relaxed);
     });
     tracing::subscriber::with_default(subscriber, || remove_storage_with(&registry, &storage));
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "this test verifies actual OS error propagation; the injected lifecycle suite runs under Miri"
-)]
-fn native_instance_creation_preserves_the_os_error_for_an_unknown_counter_set() {
-    let _serial = TEST_NATIVE.lock();
-    let schema = schema();
-    let provider = Provider::start(&schema, "worker", vec![AtomicU64::new(0)].into()).unwrap();
-    // SAFETY: provider handle is live and name is terminated. An unknown GUID
-    // is an ordinary Windows validation failure, not an invalid memory access.
-    let result = unsafe { SystemApi.create(provider.handle, &GUID::from_u128(u128::MAX), &[u16::from(b'x'), 0]) };
-    let error = result.unwrap_err();
+fn failed_instance_creation_preserves_the_status_captured_at_the_native_boundary() {
+    let error = api::created_instance(null_mut(), ERROR_INVALID_DATA).unwrap_err();
     assert!(!error.is_invalid_configuration());
-    assert!(error.windows_code().is_some_and(|code| code != ERROR_SUCCESS));
+    assert_eq!(error.windows_code(), Some(ERROR_INVALID_DATA));
+    let cause = error.find_source::<NativeFailure>().unwrap();
+    assert_eq!(cause.operation, "PerfCreateInstance");
 }

@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 use std::ffi::c_void;
-use std::ptr::NonNull;
+use std::process::id;
+use std::ptr::{NonNull, null_mut};
 
 use windows_sys::Win32::Foundation::{GetLastError, HANDLE};
 use windows_sys::Win32::System::Performance::{
@@ -11,13 +12,21 @@ use windows_sys::Win32::System::Performance::{
 };
 use windows_sys::core::GUID;
 
-use super::{control_callback, status};
 use crate::Error;
-use crate::error::ErrorKind;
+use crate::error::NativeFailure;
+use crate::native::{control_callback, status};
 
-// The provider owns the API implementation and its handle/instance lifetimes.
-// Injection makes native failures reproducible without corrupting OS handles.
-pub(super) trait Api: Send + Sync {
+/// Native resource ownership, with injection for deterministic lifecycle failures.
+///
+/// # Safety
+///
+/// Successful startup and instance creation transfer live, exclusively owned
+/// resources to the caller. Resources must support use and teardown from another
+/// thread. Registered addresses may be accessed only while retained by the caller;
+/// successful `stop` must end all access, including pending native reads/callbacks.
+/// Implementations must not unwind across native callbacks. These obligations do
+/// not establish synchronization between publication writes and consumer reads.
+pub(super) unsafe trait Api: Send + Sync {
     fn start(&self, provider: &GUID) -> Result<HANDLE, Error>;
     unsafe fn set_info(&self, handle: HANDLE, template: &mut [u64], bytes: u32) -> u32;
     unsafe fn create(&self, handle: HANDLE, counter_set: &GUID, name: &[u16]) -> Result<NonNull<PERF_COUNTERSET_INSTANCE>, Error>;
@@ -26,11 +35,15 @@ pub(super) trait Api: Send + Sync {
     unsafe fn stop(&self, handle: HANDLE) -> u32;
 }
 
+/// Perflib entry points used by production provider ownership.
 pub(super) struct SystemApi;
 
-impl Api for SystemApi {
+// SAFETY: successful Perflib creation returns caller-owned, non-thread-affine
+// resources. Stop unregisters the provider; caller retains all reference storage
+// until it succeeds. No borrowed input is retained except registered addresses.
+unsafe impl Api for SystemApi {
     fn start(&self, provider: &GUID) -> Result<HANDLE, Error> {
-        let mut handle = std::ptr::null_mut();
+        let mut handle = null_mut();
         // SAFETY: provider and output handle are valid. The static callback
         // outlives the provider and cannot unwind into Windows.
         let code = unsafe { PerfStartProvider(provider, Some(control_callback), &raw mut handle) };
@@ -47,17 +60,11 @@ impl Api for SystemApi {
     unsafe fn create(&self, handle: HANDLE, counter_set: &GUID, name: &[u16]) -> Result<NonNull<PERF_COUNTERSET_INSTANCE>, Error> {
         // SAFETY: caller supplies the live provider, counter-set GUID
         // and a terminated UTF-16 instance name.
-        let instance = unsafe { PerfCreateInstance(handle, counter_set, name.as_ptr(), std::process::id()) };
-        NonNull::new(instance).ok_or_else(|| {
-            // SAFETY: this immediately follows a failed PerfCreateInstance on
-            // this thread, without another Windows call.
-            let code = unsafe { GetLastError() };
-            ErrorKind::Windows {
-                operation: "PerfCreateInstance",
-                code,
-            }
-            .into()
-        })
+        let instance = unsafe { PerfCreateInstance(handle, counter_set, name.as_ptr(), id()) };
+        // SAFETY: read immediately on this thread, before any other Windows call.
+        // The value is relevant only when instance is null.
+        let code = unsafe { GetLastError() };
+        created_instance(instance, code)
     }
 
     unsafe fn set_reference(&self, handle: HANDLE, instance: NonNull<PERF_COUNTERSET_INSTANCE>, id: u32, address: *mut c_void) -> u32 {
@@ -76,4 +83,9 @@ impl Api for SystemApi {
         // every registered reference cell until this call succeeds.
         unsafe { PerfStopProvider(handle) }
     }
+}
+
+// Preserve the status captured at the FFI boundary when instance creation failed.
+pub(super) fn created_instance(instance: *mut PERF_COUNTERSET_INSTANCE, code: u32) -> Result<NonNull<PERF_COUNTERSET_INSTANCE>, Error> {
+    NonNull::new(instance).ok_or_else(|| NativeFailure::new("PerfCreateInstance", code).into())
 }

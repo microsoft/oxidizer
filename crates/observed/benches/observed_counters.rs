@@ -11,6 +11,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use observed::metadata::{EventDescription, MetricValue};
 use observed::processing::{EventProcessor, EventView, MetricBindings};
 use observed::{FlushError, Sink, emit, event};
+use tick::SimpleClock;
 
 #[event("request.completed")]
 #[counter(bytes_sent, name = "bytes_sent", unit = "By")]
@@ -19,6 +20,7 @@ struct RequestCompleted {
     bytes_sent: u32,
 }
 
+/// Benchmark-only bound destination updating the baseline atomic without native publishing.
 struct Processor {
     bindings: MetricBindings<Arc<AtomicU64>>,
 }
@@ -51,17 +53,19 @@ fn counters(c: &mut Criterion) {
     bindings
         .bind_event::<RequestCompleted>(|_| Arc::clone(&counter))
         .expect("the event declares one unsigned counter and a typed identity");
-    let sink = Sink::new("counters", vec![Arc::new(Processor { bindings })], tick::SimpleClock::new_system());
+    let sink = Sink::new("counters", vec![Arc::new(Processor { bindings })], SimpleClock::new_system());
+    // Both cases use the same arbitrary nonzero increment; its magnitude is not a workload model.
+    let increment = 4096_u32;
     let mut group = c.benchmark_group("observed_counters/record");
     group.bench_function("atomic", |b| {
-        b.iter(|| black_box(counter.fetch_add(u64::from(black_box(4096_u32)), Ordering::Relaxed)));
+        b.iter(|| black_box(counter.fetch_add(u64::from(black_box(increment)), Ordering::Relaxed)));
     });
     group.bench_function("emit", |b| {
         b.iter(|| {
             emit!(
                 black_box(&sink),
                 RequestCompleted {
-                    bytes_sent: black_box(4096)
+                    bytes_sent: black_box(increment)
                 }
             );
         });

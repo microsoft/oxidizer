@@ -43,7 +43,7 @@ struct QueueDepth {
     depth: u32,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), ohno::AppError> {
     let manifest = PerfCounterProcessor::builder()
         .category("Observed Windows consumer test <&\"'> 中文🦀")
         .instance("worker")

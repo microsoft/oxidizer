@@ -3,18 +3,34 @@
 
 //! The exact consumer test needs installer-provided schema; tests never install it.
 
-use observed::processing::EventProcessor;
+#![cfg(all(windows, target_pointer_width = "64", not(miri)))]
+
+use std::any::TypeId;
+use std::iter::once;
+use std::ops::ControlFlow;
+use std::process::id;
+use std::ptr::{copy_nonoverlapping, null, null_mut};
+use std::sync::Mutex;
+use std::thread;
+
+use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValueKind};
+use observed::processing::{EventProcessor, FieldVisitorFn};
 use observed::{Event, Sink, emit, event};
+use observed_perf_counters::PerfCounterProcessor;
 use performables::arc::Arc;
-use windows_sys::Win32::Foundation::{ERROR_NOT_ENOUGH_MEMORY, ERROR_SUCCESS, HANDLE};
+use tick::SimpleClock;
+use uuid::Uuid;
+use windows_sys::Win32::Foundation::{ERROR_NOT_ENOUGH_MEMORY, ERROR_SUCCESS, GetLastError, HANDLE};
 use windows_sys::Win32::System::Performance::{
     PERF_COUNTER_DATA, PERF_COUNTER_HEADER, PERF_COUNTER_IDENTIFIER, PERF_DATA_HEADER, PERF_INSTANCE_HEADER, PERF_MULTI_INSTANCES,
-    PERF_MULTIPLE_INSTANCES, PERF_SINGLE_COUNTER, PerfAddCounters, PerfCloseQueryHandle, PerfOpenQueryHandle, PerfQueryCounterData,
+    PERF_MULTIPLE_INSTANCES, PERF_SINGLE_COUNTER, PerfAddCounters, PerfCloseQueryHandle, PerfCreateInstance, PerfOpenQueryHandle,
+    PerfQueryCounterData, PerfStartProvider, PerfStopProvider,
 };
 use windows_sys::core::GUID;
 
-use crate::PerfCounterProcessor;
-use crate::schema::CounterSchema;
+testing_aids::init_tracing!();
+
+static NATIVE_TESTS: Mutex<()> = Mutex::new(());
 
 #[event("request.completed")]
 #[counter(name = "Requests")]
@@ -52,24 +68,36 @@ struct QueueDepth {
     depth: u32,
 }
 
+// Owns a real Perflib consumer query; unlike the lifecycle mock, it needs installed definitions.
 struct Query(HANDLE);
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "native test fixture requires its known generated schema and complete native buffers"
+)]
 impl Query {
-    fn open(schema: &CounterSchema, counter_name: &str, instance: &str) -> Self {
-        let mut handle = std::ptr::null_mut();
+    fn open(manifest: &str, counter_name: &str, instance: &str) -> Self {
+        let mut handle = null_mut();
         // SAFETY: null denotes this machine; handle is a valid output parameter.
-        let code = unsafe { PerfOpenQueryHandle(std::ptr::null(), &raw mut handle) };
+        let code = unsafe { PerfOpenQueryHandle(null(), &raw mut handle) };
         assert_eq!(code, ERROR_SUCCESS, "PerfOpenQueryHandle");
         let query = Self(handle);
-        let counter = schema.counters.iter().find(|counter| counter.name == counter_name).unwrap();
-        let name = instance.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        // This fixture reads only the known, ASCII-named counters in its generated manifest.
+        let definition = manifest
+            .lines()
+            .find(|line| line.starts_with("<counter ") && line.contains(&format!("name=\"{counter_name}\"")))
+            .unwrap();
+        let counter_id = attribute(definition, "id").parse::<u32>().unwrap();
+        let counter_set = manifest.lines().find(|line| line.starts_with("<counterSet ")).unwrap();
+        let counter_set_id = Uuid::parse_str(attribute(counter_set, "guid")).unwrap();
+        let name = instance.encode_utf16().chain(once(0)).collect::<Vec<_>>();
         let bytes = (size_of::<PERF_COUNTER_IDENTIFIER>() + name.len() * 2).next_multiple_of(8);
         let mut buffer = vec![0_u64; bytes / 8];
         let identifier = PERF_COUNTER_IDENTIFIER {
-            CounterSetGuid: GUID::from_u128(schema.counter_set_id.as_u128()),
+            CounterSetGuid: GUID::from_u128(counter_set_id.as_u128()),
             Size: u32::try_from(bytes).unwrap(),
-            CounterId: counter.id,
-            InstanceId: std::process::id(),
+            CounterId: counter_id,
+            InstanceId: id(),
             ..PERF_COUNTER_IDENTIFIER::default()
         };
         let base = buffer.as_mut_ptr();
@@ -79,7 +107,7 @@ impl Query {
         // in the allocated buffer, including its terminating UTF-16 zero.
         let name_address = unsafe { base.add(size_of::<PERF_COUNTER_IDENTIFIER>() / 8).cast::<u16>() };
         // SAFETY: these allocations do not overlap and the destination fits name.
-        unsafe { std::ptr::copy_nonoverlapping(name.as_ptr(), name_address, name.len()) };
+        unsafe { copy_nonoverlapping(name.as_ptr(), name_address, name.len()) };
         // SAFETY: identifier block and terminated name are initialized and valid;
         // query owns a live native query handle.
         let code = unsafe { PerfAddCounters(query.0, base.cast(), u32::try_from(bytes).unwrap()) };
@@ -91,56 +119,56 @@ impl Query {
     }
 
     fn value(&self) -> u64 {
-        let mut words = vec![0_u64; 512];
+        let mut buffer = vec![0_u64; 512];
         let mut actual = 0;
-        // SAFETY: words is initialized, eight-byte aligned writable storage;
+        // SAFETY: buffer is initialized, eight-byte aligned writable storage;
         // its full byte length is passed and actual is a valid output parameter.
         let mut code = unsafe {
             PerfQueryCounterData(
                 self.0,
-                words.as_mut_ptr().cast(),
-                u32::try_from(words.len() * 8).unwrap(),
+                buffer.as_mut_ptr().cast(),
+                u32::try_from(buffer.len() * 8).unwrap(),
                 &raw mut actual,
             )
         };
         if code == ERROR_NOT_ENOUGH_MEMORY {
-            words.resize(usize::try_from(actual).unwrap().div_ceil(8), 0);
+            buffer.resize(usize::try_from(actual).unwrap().div_ceil(8), 0);
             // SAFETY: the resized buffer is initialized and the new size fits.
             code = unsafe {
                 PerfQueryCounterData(
                     self.0,
-                    words.as_mut_ptr().cast(),
-                    u32::try_from(words.len() * 8).unwrap(),
+                    buffer.as_mut_ptr().cast(),
+                    u32::try_from(buffer.len() * 8).unwrap(),
                     &raw mut actual,
                 )
             };
         }
         assert_eq!(code, ERROR_SUCCESS, "PerfQueryCounterData");
-        let bytes = words
+        let buffer = buffer
             .into_iter()
             .flat_map(u64::to_le_bytes)
             .take(actual as usize)
             .collect::<Vec<_>>();
-        assert_eq!(dword(&bytes, 4), 1);
+        assert_eq!(dword(&buffer, 4), 1);
         let counter_header = size_of::<PERF_DATA_HEADER>();
-        assert_eq!(dword(&bytes, counter_header), ERROR_SUCCESS, "counter collection status");
-        let kind = i32::try_from(dword(&bytes, counter_header + 4)).unwrap();
+        assert_eq!(dword(&buffer, counter_header), ERROR_SUCCESS, "counter collection status");
+        let kind = i32::try_from(dword(&buffer, counter_header + 4)).unwrap();
         let mut data = counter_header + size_of::<PERF_COUNTER_HEADER>();
         match kind {
             PERF_SINGLE_COUNTER => {}
             PERF_MULTIPLE_INSTANCES => {
-                assert_eq!(dword(&bytes, data + 4), 1);
+                assert_eq!(dword(&buffer, data + 4), 1);
                 data += size_of::<PERF_MULTI_INSTANCES>();
-                assert_eq!(dword(&bytes, data + 4), std::process::id());
-                let instance_size = usize::try_from(dword(&bytes, data)).unwrap();
+                assert_eq!(dword(&buffer, data + 4), id());
+                let instance_size = usize::try_from(dword(&buffer, data)).unwrap();
                 assert!(instance_size >= size_of::<PERF_INSTANCE_HEADER>());
                 data += instance_size;
             }
             other => assert_eq!(other, PERF_SINGLE_COUNTER, "unexpected consumer block type"),
         }
-        assert_eq!(dword(&bytes, data), 8, "u64 counter size");
+        assert_eq!(dword(&buffer, data), 8, "u64 counter size");
         let value = data + size_of::<PERF_COUNTER_DATA>();
-        u64::from_le_bytes(bytes[value..value + 8].try_into().unwrap())
+        u64::from_le_bytes(buffer[value..value + 8].try_into().unwrap())
     }
 }
 
@@ -152,41 +180,50 @@ impl Drop for Query {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "native test fixture reads complete DWORD fields from a returned buffer"
+)]
 fn dword(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
+#[expect(clippy::unwrap_used, reason = "test fixture parses attributes in its known generated manifest")]
+fn attribute<'a>(line: &'a str, name: &str) -> &'a str {
+    line.split_once(&format!("{name}=\"")).unwrap().1.split_once('"').unwrap().0
+}
+
 #[test]
+// TODO: Run discovery and exact-read validation on a host with the generated
+// schema/resources installed; compiling the resource DLL alone does not cover it.
 #[ignore = "Requires installed schema/resources: examples/consumer_manifest.rs; uninstalled GUID discovery returns Windows 4200"]
 fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
-    let _native_tests = super::TEST_NATIVE.lock();
+    let _native_tests = NATIVE_TESTS.lock().unwrap();
     let category = "Observed Windows consumer test <&\"'> 中文🦀";
     let instance = "worker-中文🦀";
-    let processor = Arc::new(
-        PerfCounterProcessor::builder()
-            .category(category)
-            .instance(instance)
-            .bind_event::<RequestCompleted>()
-            .bind_event::<HugeIncrement>()
-            .bind_event::<Disabled>()
-            .bind_event::<ActiveRequests>()
-            .bind_event::<QueueDepth>()
-            .build()
-            .unwrap(),
-    );
-    let query = Query::open(&processor.schema, "Bytes Sent", instance);
-    let requests = Query::open(&processor.schema, "Requests", instance);
-    let huge = Query::open(&processor.schema, "Huge", instance);
-    let disabled = Query::open(&processor.schema, "Disabled", instance);
-    let active = Query::open(&processor.schema, "Active Requests", instance);
-    let depth = Query::open(&processor.schema, "Queue Depth", instance);
+    let builder = PerfCounterProcessor::builder()
+        .category(category)
+        .instance(instance)
+        .bind_event::<RequestCompleted>()
+        .bind_event::<HugeIncrement>()
+        .bind_event::<Disabled>()
+        .bind_event::<ActiveRequests>()
+        .bind_event::<QueueDepth>();
+    let manifest = builder.manifest("ObservedWindowsTestCounters.dll").unwrap();
+    let processor = Arc::new(builder.build().unwrap());
+    let query = Query::open(&manifest, "Bytes Sent", instance);
+    let requests = Query::open(&manifest, "Requests", instance);
+    let huge = Query::open(&manifest, "Huge", instance);
+    let disabled = Query::open(&manifest, "Disabled", instance);
+    let active = Query::open(&manifest, "Active Requests", instance);
+    let depth = Query::open(&manifest, "Queue Depth", instance);
     let sink = Sink::new(
         "app",
         vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-        tick::SimpleClock::new_frozen(),
+        SimpleClock::new_frozen(),
     );
     assert_eq!(query.value(), 0);
-    std::thread::scope(|scope| {
+    thread::scope(|scope| {
         for _ in 0..4 {
             let sink = &sink;
             scope.spawn(move || {
@@ -232,29 +269,21 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "Perflib FFI runs natively; malformed measurements are tested by the portable processor suite"
-)]
 fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     struct Malformed;
     impl Event for Malformed {
-        const DESCRIPTION: observed::metadata::EventDescription =
-            observed::metadata::EventDescription::new("malformed", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [observed::metadata::MetricDescription] =
-            &[
-                observed::metadata::MetricDescription::builder("Malformed", observed::metadata::InstrumentKind::Counter)
-                    .value_kind(observed::metadata::MetricValueKind::U64)
-                    .build(),
-            ];
-        fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
-            std::ops::ControlFlow::Continue(())
+        const DESCRIPTION: EventDescription = EventDescription::new("malformed", Some(TypeId::of::<Self>()), None, None, true, false);
+        const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("Malformed", InstrumentKind::Counter)
+            .value_kind(MetricValueKind::U64)
+            .build()];
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
         }
     }
-    let _native_tests = super::TEST_NATIVE.lock();
+    let _native_tests = NATIVE_TESTS.lock().unwrap();
     let processor = Arc::new(
         PerfCounterProcessor::builder()
-            .category(format!("Observed malformed {}", std::process::id()))
+            .category(format!("Observed malformed {}", id()))
             .instance("worker")
             .bind_event::<Malformed>()
             .build()
@@ -263,7 +292,7 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     let sink = Sink::new(
         "app",
         vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-        tick::SimpleClock::new_frozen(),
+        SimpleClock::new_frozen(),
     );
     emit!(sink, Malformed);
     assert!(
@@ -271,6 +300,50 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
             .flush()
             .unwrap_err()
             .to_string()
-            .contains("cannot read a bound observed counter")
+            .contains("event `malformed` has invalid metric slot 0: no measurement supplied")
     );
+}
+
+#[test]
+fn native_provider_can_recreate_a_unicode_instance_after_shutdown() {
+    let _native_tests = NATIVE_TESTS.lock().unwrap();
+    let builder = || {
+        PerfCounterProcessor::builder()
+            .category(format!("Observed native lifecycle {}", id()))
+            .instance("worker-中文🦀")
+            .bind_event::<RequestCompleted>()
+    };
+    let processor = builder().build().unwrap();
+    processor.flush().unwrap();
+    drop(processor);
+    builder().build().unwrap().flush().unwrap();
+}
+
+// Owns a real provider registration for native failure-path validation.
+struct Registration(HANDLE);
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        // SAFETY: this guard owns its live provider registration exclusively.
+        assert_eq!(unsafe { PerfStopProvider(self.0) }, ERROR_SUCCESS);
+    }
+}
+
+#[test]
+fn an_unknown_counter_set_returns_a_native_creation_error() {
+    let _native_tests = NATIVE_TESTS.lock().unwrap();
+    let provider = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("observed unknown set {}", id()).as_bytes());
+    let mut handle = null_mut();
+    // SAFETY: the GUID and output handle are valid, and no callback is retained.
+    let code = unsafe { PerfStartProvider(&GUID::from_u128(provider.as_u128()), None, &raw mut handle) };
+    assert_eq!(code, ERROR_SUCCESS);
+    let registration = Registration(handle);
+    let name = [u16::from(b'x'), 0];
+    // SAFETY: registration is live and the UTF-16 name is terminated. An
+    // unregistered set is an ordinary native validation error.
+    let instance = unsafe { PerfCreateInstance(registration.0, &GUID::from_u128(u128::MAX), name.as_ptr(), id()) };
+    // SAFETY: read on this thread immediately after the failed native call.
+    let code = unsafe { GetLastError() };
+    assert!(instance.is_null());
+    assert_ne!(code, ERROR_SUCCESS);
 }

@@ -204,7 +204,14 @@ impl MetricDescriptionBuilder {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::any::type_name;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
     use super::*;
+
+    static_assertions::assert_impl_all!(MetricValueKind: UnwindSafe, RefUnwindSafe);
+    static_assertions::assert_impl_all!(MetricValue: UnwindSafe, RefUnwindSafe);
+    static_assertions::assert_impl_all!(MetricDescriptionBuilder: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn runtime_description_preserves_the_selected_numeric_representation() {
@@ -248,7 +255,7 @@ mod tests {
                 legacy.value_kind()
             ),
         );
-        assert!(format!("{builder:?}").contains("MetricDescriptionBuilder"));
+        assert!(format!("{builder:?}").contains(type_name::<MetricDescriptionBuilder>().rsplit("::").next().unwrap()));
     }
 
     #[test]

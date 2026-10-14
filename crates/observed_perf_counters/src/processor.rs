@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::type_name;
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use observed::metadata::{EventDescription, InstrumentKind, MetricValue, MetricValueKind};
@@ -10,14 +12,13 @@ use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
 
 use crate::Error;
-use crate::error::ErrorKind;
+#[cfg(not(all(windows, target_pointer_width = "64")))]
+use crate::error::UnsupportedPlatform;
+use crate::error::configuration::{MeasurementMismatch, UnsupportedMetric};
+use crate::error::{Overflow, Poisoned, Underflow};
+#[cfg(all(windows, target_pointer_width = "64"))]
+use crate::native::Provider;
 use crate::schema::{CounterSchema, CounterSpec};
-
-#[derive(Debug)]
-struct MetricTarget {
-    index: usize,
-    kind: InstrumentKind,
-}
 
 /// Builder for typed counters and one Windows category/instance.
 ///
@@ -31,9 +32,9 @@ pub struct PerfCounterProcessorBuilder {
     error: Option<Error>,
 }
 
-impl std::fmt::Debug for PerfCounterProcessorBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PerfCounterProcessorBuilder")
+impl Debug for PerfCounterProcessorBuilder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct(type_name::<Self>().rsplit("::").next().unwrap_or_else(type_name::<Self>))
             .field("category", &self.category)
             .field("instance", &self.instance)
             .field("specs", &self.specs)
@@ -78,6 +79,7 @@ impl PerfCounterProcessorBuilder {
     /// An unsupported instrument,
     /// an event without metrics, or duplicate registration is a startup error.
     /// Names must be unique across the category, including case variants.
+    /// A category must contain between one and 256 instruments across all events.
     /// No redactor or general field visitor runs when recording values.
     #[must_use]
     pub fn bind_event<E: Event>(mut self) -> Self {
@@ -90,9 +92,10 @@ impl PerfCounterProcessorBuilder {
                 (InstrumentKind::Counter | InstrumentKind::Gauge, Some(MetricValueKind::U64))
                     | (InstrumentKind::UpDownCounter, Some(MetricValueKind::I64))
             ) {
-                self.error = Some(Error::configuration(format!(
-                    "metric `{}` requires an unsigned counter or gauge, or a signed up/down counter",
+                self.error = Some(Error::configuration(UnsupportedMetric::new(
                     metric.instrument_name(),
+                    metric.kind(),
+                    metric.value_kind(),
                 )));
                 return self;
             }
@@ -112,11 +115,12 @@ impl PerfCounterProcessorBuilder {
                 kind: metric.kind(),
             }
         }) {
-            self.error = Some(ErrorKind::Binding { source: Arc::new(source) }.into());
+            self.error = Some(source.into());
         }
         self
     }
 
+    // Reuse the first binding failure before performing shared deployment validation.
     fn schema(&self) -> Result<CounterSchema, Error> {
         if let Some(error) = &self.error {
             return Err(error.clone());
@@ -138,7 +142,7 @@ impl PerfCounterProcessorBuilder {
 
     /// Starts a native provider and registers stable backing storage once.
     ///
-    /// Does not install machine-wide schema, resources, or EDS configuration.
+    /// Does not install machine-wide schema, resources, or collection-service configuration.
     ///
     /// # Errors
     ///
@@ -149,7 +153,7 @@ impl PerfCounterProcessorBuilder {
         #[cfg(all(windows, target_pointer_width = "64"))]
         {
             let totals = (0..self.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
-            let native = crate::native::Provider::start(&schema, &self.instance, Arc::clone(&totals))?;
+            let native = Provider::start(&schema, &self.instance, Arc::clone(&totals))?;
             Ok(PerfCounterProcessor {
                 bindings: self.bindings,
                 schema,
@@ -161,7 +165,7 @@ impl PerfCounterProcessorBuilder {
         #[cfg(not(all(windows, target_pointer_width = "64")))]
         {
             drop(schema);
-            Err(ErrorKind::UnsupportedPlatform.into())
+            Err(UnsupportedPlatform::new().into())
         }
     }
 }
@@ -181,12 +185,12 @@ pub struct PerfCounterProcessor {
     totals: Arc<[AtomicU64]>,
     error: Mutex<Option<Error>>,
     #[cfg(all(windows, target_pointer_width = "64"))]
-    native: crate::native::Provider,
+    native: Provider,
 }
 
-impl std::fmt::Debug for PerfCounterProcessor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PerfCounterProcessor")
+impl Debug for PerfCounterProcessor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct(type_name::<Self>().rsplit("::").next().unwrap_or_else(type_name::<Self>))
             .field("schema", &self.schema)
             .finish_non_exhaustive()
     }
@@ -199,6 +203,7 @@ impl PerfCounterProcessor {
         PerfCounterProcessorBuilder::default()
     }
 
+    // Retain the first failure before diagnostics can reenter the processor.
     fn report(&self, error: &Error) {
         let poisoned = match self.error.lock_result() {
             Ok(mut pending) if pending.is_none() => {
@@ -218,6 +223,7 @@ impl PerfCounterProcessor {
         }
     }
 
+    // Apply one checked aggregation; rejected arithmetic leaves its prior total intact.
     fn record(&self, target: &MetricTarget, value: MetricValue) {
         let total = &self.totals[target.index];
         let failure = match (target.kind, value) {
@@ -234,7 +240,7 @@ impl PerfCounterProcessor {
                 .err()
                 .map(|_| delta.is_negative()),
             _ => {
-                self.report(&Error::configuration("measurement does not match the prepared integer metric"));
+                self.report(&Error::configuration(MeasurementMismatch::new(target.kind, value.kind())));
                 return;
             }
         };
@@ -244,13 +250,13 @@ impl PerfCounterProcessor {
                 .counters
                 .iter()
                 .find(|counter| counter.source_index == target.index)
-                .map_or(0, |counter| counter.id);
+                .map_or(0, |counter| counter.id.get());
             let error = if underflow {
-                ErrorKind::Underflow { counter_id }
+                Error::from(Underflow::new(counter_id))
             } else {
-                ErrorKind::Overflow { counter_id }
+                Error::from(Overflow::new(counter_id))
             };
-            self.report(&error.into());
+            self.report(&error);
         }
     }
 }
@@ -262,7 +268,7 @@ impl EventProcessor for PerfCounterProcessor {
 
     fn process(&self, event: &EventView<'_>) {
         if let Err(source) = self.bindings.record(event, |target, value| self.record(target, value)) {
-            self.report(&ErrorKind::Read { source: Arc::new(source) }.into());
+            self.report(&source.into());
         }
     }
 
@@ -270,7 +276,7 @@ impl EventProcessor for PerfCounterProcessor {
         if let Some(error) = self
             .error
             .lock_result()
-            .map_err(|_poisoned| FlushError::new("observed_perf_counters", Error::from(ErrorKind::Poisoned)))?
+            .map_err(|_poisoned| FlushError::new("observed_perf_counters", Error::from(Poisoned::new())))?
             .as_ref()
         {
             return Err(FlushError::new("observed_perf_counters", error.clone()));
@@ -283,12 +289,34 @@ impl EventProcessor for PerfCounterProcessor {
     }
 }
 
+// Prepared slot destination: its atomic total and the operation applied to it.
+#[derive(Debug)]
+struct MetricTarget {
+    index: usize,
+    kind: InstrumentKind,
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::any::TypeId;
+    use std::borrow::Cow;
+    use std::ops::ControlFlow;
+    use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe, catch_unwind};
+    use std::time::SystemTime;
+
+    use observed::interop::DynEvent;
+    use observed::metadata::MetricDescription;
+    use observed::processing::{FieldVisitorFn, MetricReadError};
     use observed::{Sink, emit, event};
+    use tick::SimpleClock;
 
     use super::*;
+
+    // Both types may retain arbitrary ohno sources; catching a panic requires
+    // the caller to decide whether the surrounding operation can be recovered.
+    static_assertions::assert_not_impl_any!(PerfCounterProcessor: UnwindSafe, RefUnwindSafe);
+    static_assertions::assert_not_impl_any!(PerfCounterProcessorBuilder: UnwindSafe, RefUnwindSafe);
 
     #[event("request.completed")]
     #[counter(name = "Requests")]
@@ -357,7 +385,7 @@ mod tests {
         Sink::new(
             "integers",
             vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(processor))],
-            tick::SimpleClock::new_frozen(),
+            SimpleClock::new_frozen(),
         )
     }
 
@@ -387,23 +415,19 @@ mod tests {
         );
     }
 
+    // Assemble local aggregation tests without acquiring real Windows providers.
     fn build_for_test(builder: PerfCounterProcessorBuilder) -> PerfCounterProcessor {
-        #[cfg(all(windows, target_pointer_width = "64", not(miri)))]
-        {
-            builder.build().unwrap()
-        }
-        #[cfg(any(not(all(windows, target_pointer_width = "64")), miri))]
         {
             let schema = builder.schema().unwrap();
             let totals: Arc<[AtomicU64]> = (0..builder.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
-            #[cfg(all(windows, target_pointer_width = "64", miri))]
+            #[cfg(all(windows, target_pointer_width = "64"))]
             let native = crate::native::testing::start_mock(&schema, Arc::clone(&totals));
             PerfCounterProcessor {
                 bindings: builder.bindings,
                 schema,
                 totals,
                 error: Mutex::new(None),
-                #[cfg(all(windows, target_pointer_width = "64", miri))]
+                #[cfg(all(windows, target_pointer_width = "64"))]
                 native,
             }
         }
@@ -431,7 +455,7 @@ mod tests {
         let original = processor.flush().unwrap_err();
         let original = std::error::Error::source(&original).unwrap().to_string();
         assert!(original.contains("measurement does not match the prepared integer metric"));
-        processor.report(&ErrorKind::Overflow { counter_id: 7 }.into());
+        processor.report(&Overflow::new(7_u32).into());
         assert_eq!(
             std::error::Error::source(&processor.flush().unwrap_err()).unwrap().to_string(),
             original,
@@ -439,7 +463,10 @@ mod tests {
         assert_eq!(named_values(&processor), [("Value".into(), 0)]);
         assert!(format!("{processor:?}").contains("Error retention"));
         assert_eq!(processor.schema.category, "Error retention");
-        assert!(format!("{:?}", PerfCounterProcessor::builder()).contains("PerfCounterProcessorBuilder"));
+        assert!(
+            format!("{:?}", PerfCounterProcessor::builder())
+                .contains(type_name::<PerfCounterProcessorBuilder>().rsplit("::").next().unwrap())
+        );
     }
 
     #[test]
@@ -452,11 +479,11 @@ mod tests {
                 .instance("worker")
                 .bind_event::<WideGauge>(),
         );
-        let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _panic = catch_unwind(AssertUnwindSafe(|| {
             let _guard = processor.error.lock();
             panic!("inject error-state poison");
         }));
-        processor.report(&ErrorKind::Overflow { counter_id: 9 }.into());
+        processor.report(&Overflow::new(9_u32).into());
         assert!(processor.flush().unwrap_err().to_string().contains("state lock was poisoned"));
     }
 
@@ -471,17 +498,19 @@ mod tests {
                 .bind_event::<WideGauge>(),
         ));
         let sink = test_sink(&processor);
-        let captured_processor = Arc::clone(&processor);
         let calls = Arc::new(AtomicU64::new(0));
-        let captured_calls = Arc::clone(&calls);
-        let subscriber = crate::testing::OnEvent(move || {
-            assert!(matches!(captured_processor.error.try_lock_result(), Ok(Some(_))));
-            assert!(sink.flush().unwrap_err().to_string().contains("metric 42 overflowed u64"));
-            captured_calls.fetch_add(1, Ordering::Relaxed);
+        let subscriber = crate::testing::OnEvent({
+            let processor = Arc::clone(&processor);
+            let calls = Arc::clone(&calls);
+            move || {
+                assert!(matches!(processor.error.try_lock_result(), Ok(Some(_))));
+                assert!(sink.flush().unwrap_err().to_string().contains("metric 42 overflowed u64"));
+                calls.fetch_add(1, Ordering::Relaxed);
+            }
         });
         tracing::subscriber::with_default(subscriber, || {
-            processor.report(&ErrorKind::Overflow { counter_id: 42 }.into());
-            processor.report(&ErrorKind::Underflow { counter_id: 99 }.into());
+            processor.report(&Overflow::new(42_u32).into());
+            processor.report(&Underflow::new(99_u32).into());
         });
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert!(processor.flush().unwrap_err().to_string().contains("metric 42 overflowed u64"));
@@ -497,9 +526,9 @@ mod tests {
                 .instance("worker")
                 .bind_event::<WideGauge>(),
         );
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let panic = catch_unwind(AssertUnwindSafe(|| {
             tracing::subscriber::with_default(crate::testing::OnEvent(|| panic!("injected subscriber panic")), || {
-                processor.report(&ErrorKind::Overflow { counter_id: 7 }.into());
+                processor.report(&Overflow::new(7_u32).into());
             });
         }));
         assert!(panic.is_err());
@@ -517,27 +546,23 @@ mod tests {
                 .instance("worker")
                 .bind_event::<WideGauge>(),
         ));
-        let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _panic = catch_unwind(AssertUnwindSafe(|| {
             let _guard = processor.error.lock();
             panic!("inject error-state poison");
         }));
-        let captured_processor = Arc::clone(&processor);
         let calls = Arc::new(AtomicU64::new(0));
-        let captured_calls = Arc::clone(&calls);
-        let subscriber = crate::testing::OnEvent(move || {
-            // A poison error owns the guard too; release it before reentering.
-            drop(captured_processor.error.try_lock_result().unwrap_err());
-            assert!(
-                captured_processor
-                    .flush()
-                    .unwrap_err()
-                    .to_string()
-                    .contains("state lock was poisoned")
-            );
-            captured_calls.fetch_add(1, Ordering::Relaxed);
+        let subscriber = crate::testing::OnEvent({
+            let processor = Arc::clone(&processor);
+            let calls = Arc::clone(&calls);
+            move || {
+                // A poison error owns the guard too; release it before reentering.
+                drop(processor.error.try_lock_result().unwrap_err());
+                assert!(processor.flush().unwrap_err().to_string().contains("state lock was poisoned"));
+                calls.fetch_add(1, Ordering::Relaxed);
+            }
         });
         tracing::subscriber::with_default(subscriber, || {
-            processor.report(&ErrorKind::Overflow { counter_id: 9 }.into());
+            processor.report(&Overflow::new(9_u32).into());
         });
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
@@ -545,38 +570,36 @@ mod tests {
     struct MissingSlot;
 
     impl Event for MissingSlot {
-        const DESCRIPTION: EventDescription =
-            EventDescription::new("missing.slot", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [observed::metadata::MetricDescription] =
-            &[observed::metadata::MetricDescription::builder("Missing", InstrumentKind::Counter)
-                .value_kind(MetricValueKind::U64)
-                .build()];
-        fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
-            std::ops::ControlFlow::Continue(())
+        const DESCRIPTION: EventDescription = EventDescription::new("missing.slot", Some(TypeId::of::<Self>()), None, None, true, false);
+        const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("Missing", InstrumentKind::Counter)
+            .value_kind(MetricValueKind::U64)
+            .build()];
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
         }
     }
 
-    impl observed::interop::DynEvent for MissingSlot {
+    impl DynEvent for MissingSlot {
         fn name(&self) -> &'static str {
             "missing.slot"
         }
-        fn body(&self) -> Option<std::borrow::Cow<'static, str>> {
+        fn body(&self) -> Option<Cow<'static, str>> {
             None
         }
-        fn source_file(&self) -> Option<std::borrow::Cow<'static, str>> {
+        fn source_file(&self) -> Option<Cow<'static, str>> {
             None
         }
         fn source_line(&self) -> Option<u32> {
             None
         }
-        fn source_crate(&self) -> Option<std::borrow::Cow<'static, str>> {
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
         }
         fn description(&self) -> EventDescription {
             Self::DESCRIPTION
         }
-        fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
-            std::ops::ControlFlow::Continue(())
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
         }
     }
 
@@ -590,13 +613,16 @@ mod tests {
                 .instance("worker")
                 .bind_event::<MissingSlot>(),
         );
-        processor.process(&EventView::new_synthetic(&MissingSlot, std::time::SystemTime::UNIX_EPOCH));
+        processor.process(&EventView::new_synthetic(&MissingSlot, SystemTime::UNIX_EPOCH));
         let error = processor.flush().unwrap_err();
         let backend = std::error::Error::source(&error).unwrap().downcast_ref::<Error>().unwrap();
         let source = std::error::Error::source(backend).unwrap();
-        assert!(source.is::<observed::processing::MetricReadError>());
+        assert!(source.is::<MetricReadError>());
         assert_eq!(
-            ohno::ErrorExt::message(source.downcast_ref::<observed::processing::MetricReadError>().unwrap()),
+            ohno::ErrorExt::message(source.downcast_ref::<MetricReadError>().unwrap())
+                .lines()
+                .next()
+                .unwrap(),
             "event `missing.slot` has invalid metric slot 0: no measurement supplied"
         );
     }
@@ -811,35 +837,34 @@ mod tests {
 
     #[test]
     #[cfg(all(windows, target_pointer_width = "64"))]
-    #[cfg_attr(miri, ignore = "Perflib FFI runs natively; snapshot storage is tested separately under Miri")]
-    fn concurrent_typed_emission_publishes_exact_native_values_and_rejects_overflow() {
+    fn concurrent_typed_emission_publishes_exact_mock_reference_values_and_rejects_overflow() {
         let _native_tests = crate::native::TEST_NATIVE.lock();
-        let processor = Arc::new(
+        let processor = Arc::new(build_for_test(
             PerfCounterProcessor::builder()
                 .category("Observed typed native test")
                 .instance("worker-中文🦀")
                 .bind_event::<RequestCompleted>()
-                .bind_event::<HugeIncrement>()
-                .build()
-                .unwrap(),
-        );
+                .bind_event::<HugeIncrement>(),
+        ));
         let sink = Sink::new(
             "app",
             vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-            tick::SimpleClock::new_frozen(),
+            SimpleClock::new_frozen(),
         );
+        // Miri retains concurrent emission and publication with less repeated work.
+        let iterations = if cfg!(miri) { 8_u64 } else { 1000 };
         std::thread::scope(|scope| {
             for _ in 0..4 {
                 let sink = &sink;
                 scope.spawn(move || {
-                    for _ in 0..1000 {
+                    for _ in 0..iterations {
                         emit!(sink, RequestCompleted { bytes_sent: 37 });
                     }
                 });
             }
             for _ in 0..20 {
                 let snapshot = crate::native::test_snapshot(&processor.native, &processor.schema);
-                assert!(snapshot.into_iter().all(|value| value <= 148_000));
+                assert!(snapshot.into_iter().all(|value| value <= 4 * iterations * 37));
             }
         });
         let expected = processor
@@ -848,8 +873,8 @@ mod tests {
             .iter()
             .map(|counter| match counter.name.as_str() {
                 "Huge" => 0,
-                "Requests" => 4000,
-                _ => 148_000,
+                "Requests" => 4 * iterations,
+                _ => 4 * iterations * 37,
             })
             .collect::<Vec<_>>();
         assert_eq!(crate::native::test_snapshot(&processor.native, &processor.schema), expected);
@@ -862,8 +887,8 @@ mod tests {
             .iter()
             .map(|counter| match counter.name.as_str() {
                 "Huge" => u64::MAX,
-                "Requests" => 4000,
-                _ => 148_000,
+                "Requests" => 4 * iterations,
+                _ => 4 * iterations * 37,
             })
             .collect::<Vec<_>>();
         assert_eq!(crate::native::test_snapshot(&processor.native, &processor.schema), expected);

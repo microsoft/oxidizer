@@ -9,6 +9,7 @@ use alloc_tracker::{Allocator, Session};
 use observed::{Sink, emit, event};
 use observed_perf_counters::PerfCounterProcessor;
 use performables::arc::Arc;
+use tick::SimpleClock;
 
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
@@ -39,7 +40,7 @@ fn valid_counter_updown_and_gauge_updates_allocate_nothing() {
     let sink = Sink::new(
         "allocations",
         vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))],
-        tick::SimpleClock::new_frozen(),
+        SimpleClock::new_frozen(),
     );
     let session = Session::new().no_stdout().no_file();
     let operation = session.operation("integer_emission");

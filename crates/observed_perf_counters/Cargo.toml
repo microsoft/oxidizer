@@ -24,6 +24,7 @@ allowed_external_types = [
     "observed::metadata::event::EventDescription",
     "observed::processing::event_view::EventView",
     "observed::processing::processor::EventProcessor",
+    "ohno::*",
 ]
 
 [package.metadata.docs.rs]
@@ -34,8 +35,8 @@ no-run = ["publish"]
 
 [dependencies]
 observed = { workspace = true }
+ohno = { workspace = true }
 performables = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 uuid = { workspace = true, features = ["std", "v5"] }
 
@@ -44,9 +45,10 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 ctor = { workspace = true }
-ohno = { path = "../ohno" }
-testing_aids = { workspace = true }
-tick = { workspace = true, features = ["test-util"] }
+ohno = { path = "../ohno", features = ["app-err"] }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids", default-features = false }
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
 
 [target.'cfg(all(windows, target_pointer_width = "64"))'.dev-dependencies]
 alloc_tracker = { workspace = true }

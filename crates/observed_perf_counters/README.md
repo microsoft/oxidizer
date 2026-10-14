@@ -21,12 +21,23 @@ registers the matching IDs and memory addresses, letting monitoring tools find
 a counter by name and ask Windows for its reading. Multiple application
 processes can publish the same counters, each through a named instance.
 
+## Native publication limitation
+
+The reference-cell protocol does not yet establish safe concurrent access
+when Windows proceeds after a collection-start callback times out. Native
+publication is not ready for deployment until that access contract is
+established or the storage design is replaced. See the
+[publication safety boundary][__link0].
+
 ## Usage
 
 ```rust
+use std::process::id;
+
 use observed::{Sink, emit, event};
 use observed_perf_counters::PerfCounterProcessor;
 use performables::arc::Arc;
+use tick::SimpleClock;
 
 #[event("request.completed")]
 #[counter(bytes_sent, name = "Bytes Sent", unit = "By")]
@@ -37,7 +48,7 @@ struct RequestCompleted {
 
 let builder = PerfCounterProcessor::builder()
     .category("MyService")
-    .instance(format!("worker-{}", std::process::id()))
+    .instance(format!("worker-{}", id()))
     .bind_event::<RequestCompleted>();
 
 // Deployment tooling: save these definitions as MyServiceCounters.man.
@@ -45,7 +56,7 @@ let xml = builder.manifest("MyServiceCounters.dll")?;
 
 // Application startup: create this process's counter instance.
 let processor = Arc::into_std_arc(Arc::new(builder.build()?));
-let sink = Sink::new("app", vec![processor], tick::SimpleClock::new_system());
+let sink = Sink::new("app", vec![processor], SimpleClock::new_system());
 emit!(sink, RequestCompleted { bytes_sent: 4096 });
 ```
 
@@ -91,28 +102,34 @@ numeric formats, and memory addresses for that process’s counter instance.
 `emit!` updates the readings without resolving counter names.
 Neither call installs the catalog entries.
 
-For `PerfSpy`, separately configure EDS to collect the category and instances.
+For `PerfSpy`, separately configure your deployment’s EDS collection service
+to collect the category and instances.
 This crate exposes local counters; it does not send readings to a server.
 
 ## Behavior
 
 Emission updates atomic `u64` storage without string lookup, allocation,
 redaction, or Windows API calls. Windows collection snapshots these values
-into registered reference cells. Existing `observed` sink timestamp and
-enrichment bookkeeping is unchanged; the backend does not extract enrichment.
+into registered reference cells. Events emitted through a sink follow that
+sink’s timestamp, context, enrichment, and sampling rules; the backend does
+not extract enrichment.
 
 Values reset when the processor restarts. Snapshots are per-metric, not
 transactional across an event. Brief collection contention keeps the previous
 snapshot or returns a retryable busy response. Invalid callback state freezes
 snapshots until restart and surfaces through `flush`; emission still records.
 
-Shared ownership and locks use `performables`; standard atomics remain for
-numeric updates. The conversion to a standard pointer above is only the
-existing `Sink::new` API boundary. Native state is local to one executable or
-library image; never unload an image with a live provider.
+The conversion to a standard `Arc` above matches the `Sink::new` API boundary.
+Native state is local to one executable or library image; never unload an
+image with a live provider.
 
-See the Microsoft [provider guide][__link0]
-and [resource installation reference][__link1].
+See the Microsoft [provider guide][__link1]
+and [resource installation reference][__link2].
+
+## Maintainer guides
+
+See the [backend design and publication limits][__link3]
+and [implementation guide][__link4].
 
 
 <hr/>
@@ -120,5 +137,8 @@ and [resource installation reference][__link1].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_perf_counters">source code</a>.
 </sub>
 
- [__link0]: https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0
- [__link1]: https://learn.microsoft.com/windows/win32/perfctrs/ctrpp
+ [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md#publication-safety-boundary
+ [__link1]: https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0
+ [__link2]: https://learn.microsoft.com/windows/win32/perfctrs/ctrpp
+ [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/implementation.md
