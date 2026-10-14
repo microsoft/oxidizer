@@ -10,7 +10,6 @@
 
 - A Sink calls its event sampler before `EventProcessor::is_interested`.
 - `EventProcessor::is_interested` runs at most once per event per Sink.
-- A sampler attached to a composite decides once per event for all leaves.
 
 ### Removed
 

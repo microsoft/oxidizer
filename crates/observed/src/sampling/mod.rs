@@ -4,10 +4,9 @@
 //! Event sampling for [`Sink`](crate::Sink)s.
 //!
 //! A Sink with an attached [`EventSampler`] asks it whether the event goes
-//! ahead before asking its processors; a sampler attached to a composite
-//! decides once for all of its leaves. The sampler receives an [`EventSamplingContext`] with
-//! the event description, and can ask through it whether any of the Sink's
-//! processors wants the event. Attach one with
+//! ahead before asking its processors. The sampler receives an
+//! [`EventSamplingContext`] with the event description, and can ask through it
+//! whether any of the Sink's processors wants the event. Attach one with
 //! [`Sink::with_event_sampler`](crate::Sink::with_event_sampler); a Sink without
 //! one lets its processors decide.
 //!
@@ -52,10 +51,8 @@ impl<'a> EventSamplingContext<'a> {
 
     /// Returns whether any of the Sink's processors wants the event.
     ///
-    /// For a composite, this covers the processors of every leaf the sampler
-    /// decides for. The Sink reuses these answers when it delivers the event,
-    /// so each processor is asked at most once per event, however often this
-    /// is called.
+    /// The Sink reuses these answers when it delivers the event, so each
+    /// processor is asked at most once per event, however often this is called.
     #[must_use]
     pub fn processors_interested(&self) -> bool {
         self.interested_processors
@@ -100,8 +97,7 @@ pub trait EventSampler: Send + Sync + 'static {
     /// processors.
     ///
     /// Called once for every event emitted through a Sink that has
-    /// processors, before that Sink's processors are asked; a sampler attached
-    /// to a composite is called once for all of its leaves.
+    /// processors, before that Sink's processors are asked.
     /// [`EventSamplingDecision::Continue`] delivers the event to the processors
     /// that want it, and [`EventSamplingDecision::Drop`] runs none of them.
     /// Each processor is asked at most once: a sampler can ask through

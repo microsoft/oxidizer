@@ -5,7 +5,6 @@
 
 use std::any::type_name;
 use std::cell::LazyCell;
-use std::slice;
 use std::sync::Arc;
 
 use performables::arc::{Arc as PerformableArc, PerProcess};
@@ -216,9 +215,8 @@ impl Sink {
     /// `MySampler` itself instead.
     ///
     /// For a composite, the new sampler replaces every sampler previously
-    /// attached to its leaves and decides once per event for all of them. A
-    /// [`Sink::noop`] value is returned unchanged, and a Sink whose leaves have
-    /// no processors never calls the sampler.
+    /// attached to its leaves, and each leaf with processors calls it once per
+    /// event. A [`Sink::noop`] value is returned unchanged.
     ///
     /// See [`EventSampler::sample`] for the invocation and decision contract.
     ///
@@ -406,10 +404,10 @@ impl Sink {
 
     fn dispatch_to_processors<'e>(&self, get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
         match &*self.inner {
-            SinkInner::Single(state) => dispatch(slice::from_ref(state), get_event, description),
+            SinkInner::Single(state) => state.dispatch(get_event, description),
             SinkInner::Composite { children } => {
-                for leaves in children.chunk_by(SingleSinkState::shares_sampler_with) {
-                    dispatch(leaves, get_event, description);
+                for child in children {
+                    child.dispatch(get_event, description);
                 }
             }
             SinkInner::Noop { .. } => {}
@@ -501,10 +499,6 @@ impl SingleSinkState {
         self
     }
 
-    fn shares_sampler_with(&self, other: &Self) -> bool {
-        matches!((&self.sampler, &other.sampler), (Some(sampler), Some(other_sampler)) if Arc::ptr_eq(sampler, other_sampler))
-    }
-
     fn view<'e>(&self, event: &'e dyn DynEvent) -> EventView<'e> {
         EventView::new(
             event,
@@ -514,44 +508,40 @@ impl SingleSinkState {
             self.clock.system_time(),
         )
     }
-}
 
-fn dispatch<'e>(leaves: &[SingleSinkState], get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
-    if leaves.iter().all(|leaf| leaf.processors.is_empty()) {
-        return;
-    }
+    fn dispatch<'e>(&self, get_event: &dyn Fn() -> &'e dyn DynEvent, description: &EventDescription) {
+        if self.processors.is_empty() {
+            return;
+        }
 
-    let Some(guard) = super::try_acquire_reentrancy_guard() else {
-        return;
-    };
+        let Some(guard) = super::try_acquire_reentrancy_guard() else {
+            return;
+        };
 
-    let get_interested_processors = || -> InterestedProcessors {
-        leaves
-            .iter()
-            .flat_map(|leaf| leaf.processors.iter())
-            .map(|processor| processor.is_interested(description))
-            .collect()
-    };
-    let context = EventSamplingContext::new(description, &get_interested_processors);
-    if let Some(sampler) = &leaves[0].sampler
-        && sampler.sample(&context) == EventSamplingDecision::Drop
-    {
-        return;
-    }
-    let interested_processors = context.into_interested_processors();
-    if !interested_processors.contains(&true) {
-        return;
-    }
+        let get_interested_processors = || -> InterestedProcessors {
+            self.processors
+                .iter()
+                .map(|processor| processor.is_interested(description))
+                .collect()
+        };
+        let context = EventSamplingContext::new(description, &get_interested_processors);
+        if let Some(sampler) = &self.sampler
+            && sampler.sample(&context) == EventSamplingDecision::Drop
+        {
+            return;
+        }
+        let interested_processors = context.into_interested_processors();
+        if !interested_processors.contains(&true) {
+            return;
+        }
 
-    drop(guard);
-    let event = get_event();
+        drop(guard);
+        let event = get_event();
 
-    let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot is free again once the event is built");
+        let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot is free again once the event is built");
 
-    let mut interested_processors = interested_processors.into_iter();
-    for leaf in leaves {
-        let view = LazyCell::new(|| leaf.view(event));
-        for (processor, wants) in leaf.processors.iter().zip(interested_processors.by_ref()) {
+        let view = self.view(event);
+        for (processor, wants) in self.processors.iter().zip(interested_processors) {
             if wants {
                 processor.process(&view);
             }
@@ -845,21 +835,6 @@ mod tests {
         }
     }
 
-    /// Continues every other event, starting with the first.
-    struct EveryOtherSampler {
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl EventSampler for EveryOtherSampler {
-        fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
-            if self.calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
-                EventSamplingDecision::Continue
-            } else {
-                EventSamplingDecision::Drop
-            }
-        }
-    }
-
     fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> Sink {
         Sink::new(
             id,
@@ -869,23 +844,6 @@ mod tests {
                 .collect(),
             SimpleClock::new_frozen(),
         )
-    }
-
-    #[test]
-    fn composite_sampler_decides_once_per_event_for_every_leaf() {
-        let first = CountingProcessor::new(true);
-        let second = CountingProcessor::new(true);
-        let calls = Arc::new(AtomicUsize::new(0));
-        let sink = Sink::composite([counting_leaf("first", &[&first]), counting_leaf("second", &[&second])])
-            .with_event_sampler(EveryOtherSampler { calls: Arc::clone(&calls) });
-
-        for _ in 0..4 {
-            crate::interop::emit_dyn_event(&sink, &DummyDyn);
-        }
-
-        assert_eq!(calls.load(Ordering::Relaxed), 4);
-        assert_eq!(first.processed(), 2);
-        assert_eq!(second.processed(), 2);
     }
 
     #[test]

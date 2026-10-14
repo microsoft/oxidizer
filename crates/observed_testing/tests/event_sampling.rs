@@ -293,44 +293,6 @@ fn leaf_sampler_in_composite_decides_only_for_its_leaf() {
 }
 
 #[test]
-fn composite_sampler_sees_interest_of_every_leaf() {
-    let seen: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorder = Arc::clone(&seen);
-    let (sampler, _calls) = probe_sampler(move |context| {
-        recorder.lock().unwrap().push(context.processors_interested());
-        EventSamplingDecision::Continue
-    });
-    let uninterested = MockProcessor::with_filter(|_| false);
-    let interested = MockProcessor::new();
-
-    let composite = Sink::composite([
-        Sink::new(
-            SinkId::new("uninterested"),
-            vec![Arc::new(uninterested.clone())],
-            tick::SimpleClock::new_frozen(),
-        ),
-        Sink::new(
-            SinkId::new("interested"),
-            vec![Arc::new(interested.clone())],
-            tick::SimpleClock::new_frozen(),
-        ),
-    ])
-    .with_event_sampler(sampler);
-
-    emit!(
-        composite,
-        UserAction {
-            user: PiiString("Alice".into()),
-            action_code: 3,
-        }
-    );
-
-    assert_eq!(*seen.lock().unwrap(), [true]);
-    assert!(uninterested.is_empty());
-    assert_eq!(interested.single_event(), user_action(3));
-}
-
-#[test]
 fn continued_event_reaches_only_interested_processors() {
     let interested = MockProcessor::new();
     let uninterested = MockProcessor::with_filter(|_| false);
@@ -584,7 +546,7 @@ fn boxed_sampler_decides_for_sink() {
 }
 
 #[test]
-fn composite_attachment_replaces_leaf_samplers_and_decides_once() {
+fn composite_attachment_replaces_leaf_samplers() {
     let (first, first_processor) = test_emitter(SinkId::new("first"));
     let (second, second_processor) = test_emitter(SinkId::new("second"));
     let (replaced, replaced_calls) = constant_sampler(EventSamplingDecision::Continue);
@@ -601,38 +563,9 @@ fn composite_attachment_replaces_leaf_samplers_and_decides_once() {
     );
 
     assert_eq!(replaced_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert!(first_processor.is_empty());
     assert!(second_processor.is_empty());
-}
-
-#[test]
-fn composite_sampler_keeps_same_events_for_every_leaf() {
-    let (first, first_processor) = test_emitter(SinkId::new("first"));
-    let (second, second_processor) = test_emitter(SinkId::new("second"));
-    let seen = AtomicUsize::new(0);
-    let (sampler, calls) = probe_sampler(move |_| {
-        if seen.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
-            EventSamplingDecision::Continue
-        } else {
-            EventSamplingDecision::Drop
-        }
-    });
-    let composite = Sink::composite([first, second]).with_event_sampler(sampler);
-
-    for action_code in 0..4 {
-        emit!(
-            composite,
-            UserAction {
-                user: PiiString("Alice".into()),
-                action_code,
-            }
-        );
-    }
-
-    assert_eq!(calls.load(Ordering::Relaxed), 4);
-    assert_eq!(first_processor.events(), [user_action(0), user_action(2)]);
-    assert_eq!(second_processor.events(), [user_action(0), user_action(2)]);
 }
 
 #[test]
@@ -652,7 +585,7 @@ fn nested_composite_keeps_its_sampler_for_its_own_leaves() {
         }
     );
 
-    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert!(first_processor.is_empty());
     assert!(second_processor.is_empty());
     assert_eq!(outside_processor.single_event(), user_action(2));

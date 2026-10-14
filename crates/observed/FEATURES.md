@@ -35,7 +35,7 @@
 ## Emission & Routing
 
 - **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's interested processors via `EventProcessor::process`
-- **Per-Sink event sampling** - `Sink::with_event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked; a sampler attached to a composite decides once per event for all of its leaves, and the last sampler attached wins; see `EventSampler::sample` for the invocation contract
+- **Per-Sink event sampling** - `Sink::with_event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked, and the last sampler attached wins; see `EventSampler::sample` for the invocation contract
 - **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped getters do not evaluate, convert, or redact their values, but field enumeration and visitor work still occur. Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
 - **Allocation-free static keys** - all field, enrichment, and interop keys are `&'static str`, so `Key`/`FieldDescriptor`/`LogFieldEntry`/`MetricFieldEntry` are `Copy` and snapshotting consumers (e.g. snapshotting/replay processors) retain keys with zero allocation. The `tracing` bridge forwards `tracing`'s `&'static` field/target/file names directly instead of cloning them.
 - **Interest-based lazy construction** - processors implement the required `is_interested(&EventDescription)`, asked at most once per emission for each Sink; if every processor returns `false`, the event closure is never called
