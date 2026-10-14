@@ -60,8 +60,9 @@ pub(crate) use task_ref::*;
 pub use task_set::*;
 pub(crate) use wake::*;
 
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub mod testing;
+mod testing;
 
 #[cfg(all(debug_assertions, test))]
 mod wake_diagnostic;

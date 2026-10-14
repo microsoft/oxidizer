@@ -159,7 +159,6 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::task::{Context, Poll, Wake, Waker};
 
-    use arty_executor::testing::new_guarded_executor;
     use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;
     use performables::arc::Arc as PArc;
@@ -188,7 +187,7 @@ mod tests {
             shutdown_signal,
         );
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         factory((), &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
         run_to_completion(&executor);
@@ -214,7 +213,7 @@ mod tests {
             sink,
             PArc::clone(&shutdown_signal),
         );
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         factory((), &executor.tasks());
 
         shutdown_signal.store(true, Ordering::Release);
@@ -266,7 +265,7 @@ mod tests {
             sink,
             shutdown_signal,
         );
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         factory((), &executor.tasks());
         run_to_completion(&executor);
         assert!(block_on(handle).unwrap_err().is_panic());

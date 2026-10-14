@@ -16,20 +16,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_execut
 keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
-[package.metadata.cargo_check_external_types]
-allowed_external_types = ["scopeguard::*"]
-
-[features]
-default = []
-private-test-util = []
-test-util = ["dep:scopeguard"]
-
 [dependencies]
 events_once = { workspace = true }
 nm = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
-scopeguard = { workspace = true, optional = true }
 tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
@@ -55,4 +46,3 @@ workspace = true
 [[bench]]
 name = "ae_basic_operations"
 harness = false
-required-features = ["private-test-util", "test-util"]
