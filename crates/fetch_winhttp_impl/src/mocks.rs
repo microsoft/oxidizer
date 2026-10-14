@@ -37,8 +37,8 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use future_assert::FutureTestExt;
 use plurality::Pool;
-use testing_aids::FutureTestExt;
 use windows::Win32::Networking::WinHttp::{
     ERROR_WINHTTP_INCORRECT_HANDLE_STATE, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
     WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
@@ -79,10 +79,7 @@ const STALL_POLL_BUDGET: usize = 1024;
 /// Panics if the future is still pending after [`STALL_POLL_BUDGET`] polls.
 #[track_caller]
 pub(crate) fn drive<F: Future>(future: F) -> F::Output {
-    future.unwrap_ready_within(
-        STALL_POLL_BUDGET,
-        "future never completed: a mock-backed completion was never routed to the stage awaiting it",
-    )
+    future.unwrap_ready_within(STALL_POLL_BUDGET)
 }
 
 /// Address used for the mock session handle.

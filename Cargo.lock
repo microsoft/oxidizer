@@ -308,6 +308,10 @@ dependencies = [
 [[package]]
 name = "arty_io_core"
 version = "0.2.0"
+dependencies = [
+ "static_assertions",
+ "thread_aware_core",
+]
 
 [[package]]
 name = "arty_macros"
@@ -983,6 +987,7 @@ name = "bytesbuf_io"
 version = "0.11.0"
 dependencies = [
  "bytesbuf",
+ "future_assert",
  "futures",
  "futures-core",
  "mutants",
@@ -1006,6 +1011,7 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
+ "future_assert",
  "futures",
  "layered",
  "parking_lot",
@@ -2081,6 +2087,7 @@ dependencies = [
  "bytesbuf_io",
  "events_once",
  "fetch",
+ "future_assert",
  "futures",
  "h3",
  "h3-quinn",
@@ -2103,7 +2110,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "static_assertions",
- "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
@@ -2242,6 +2248,10 @@ dependencies = [
  "syn 3.0.5",
  "testing_aids",
 ]
+
+[[package]]
+name = "future_assert"
+version = "0.1.0"
 
 [[package]]
 name = "futures"
@@ -3940,9 +3950,9 @@ name = "observed_testing"
 version = "0.0.0"
 dependencies = [
  "data_privacy",
+ "future_assert",
  "observed",
  "observed_utils",
- "testing_aids",
  "tick",
  "tokio",
 ]
