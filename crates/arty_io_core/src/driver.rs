@@ -15,8 +15,10 @@ use crate::{Cycle, DriverError};
 pub trait Driver: 'static {
     /// Returns a waker that makes a waiting [`execute_cycle`](Self::execute_cycle) return promptly.
     ///
-    /// A wake that happens just before `execute_cycle` starts waiting must remain recorded so the
-    /// wait still returns promptly. Waking ends the wait but does not process I/O completions.
+    /// Any wake that occurs before or during a wait applies to that wait. If no wait is active, it
+    /// remains latched for the next wait, regardless of how much time passes before that wait
+    /// starts. Waking requires the wait to stop promptly but does not constrain whether the driver
+    /// also processes ready I/O completions.
     ///
     /// The returned waker may be called from any thread and remains safe to invoke after the
     /// driver is dropped. It must return promptly.
@@ -46,12 +48,14 @@ pub trait Driver: 'static {
     /// not this method.
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError>;
 
-    /// Closes the context to new operations and waits for operations that already started.
+    /// Closes the context to new operations and releases the driver's resources.
     ///
     /// The runtime calls this method synchronously after it stops calling `execute_cycle` on the
-    /// async worker. The driver must make progress by itself or on its own threads. It must not
-    /// require another driver on that async worker to run. The driver chooses a finite time limit
-    /// and returns an error instead of waiting indefinitely.
+    /// async worker. Operations still in flight are no longer assumed to be valuable; the driver
+    /// may cancel or disrupt them instead of waiting for them to finish. Any cleanup that remains
+    /// must make progress by itself or on the driver's own threads and must not require another
+    /// driver on that async worker to run. The driver chooses a finite time limit and returns an
+    /// error instead of waiting indefinitely.
     ///
     /// The runtime attempts remaining drivers after an error. It may shut down secondaries before
     /// the primary.
