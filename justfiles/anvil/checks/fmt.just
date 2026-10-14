@@ -7,11 +7,13 @@
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Modified tier. cargo-fmt is a rustup component. We invoke it via the
-# pinned nightly (see versions.just) because rustfmt.toml uses
-# unstable_features = true (imports_granularity, group_imports,
-# format_code_in_doc_comments). Floating nightly would mean
-# format-drift breaking cloud workflows on rustup updates — the same trap we
-# explicitly avoid for udeps/miri/careful/external-types.
+# pinned nightly (see versions.just) to support the default catalog's
+# unstable rustfmt options (imports_granularity, group_imports,
+# format_code_in_doc_comments). The recipe retains that pin even when a
+# repository's formatting configuration enables only stable options.
+# Floating nightly would mean format-drift breaking cloud workflows on
+# rustup updates — the same trap we explicitly avoid for
+# udeps/miri/careful/external-types.
 #
 # Iterate workspace members rather than every local path dependency that
 # `cargo fmt --all` discovers. `--keep-going` reports formatting failures from

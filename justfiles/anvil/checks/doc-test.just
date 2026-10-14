@@ -12,6 +12,11 @@
 # doctests that only compile when those features are off. The
 # duplication is cheap because doctests are already a small fraction
 # of total compile/test time.
+#
+# Cargo errors when `cargo test --doc` selects only bin-only packages. Build
+# the subset with at least one Cargo target marked `doctest = true`. This uses
+# Cargo's capability bit rather than approximating from target kinds, so
+# explicit crate types such as rlib/cdylib and proc macros remain eligible.
 
 # Run documentation tests for affected workspace packages.
 [script("pwsh", "-NoProfile")]
@@ -21,10 +26,40 @@ anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-doc-test: no affected packages; skipping'; exit 0 }
-    $pkg = @(if ($include) { -split $include } else { '--workspace' })
-    & cargo {{_anvil_stable_toolchain_args}} test --doc @pkg --all-features --locked
+    $selection = @(if ($include) { -split $include } else { '--workspace' })
+    $capableText = (& "{{ just_executable() }}" _anvil-impact-doctest-packages)
+    $capabilityExit = $LASTEXITCODE
+    if ($capabilityExit -ne 0) { exit $capabilityExit }
+    $docPackages = [System.Collections.Generic.Dictionary[string, bool]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($spec in @(-split "$capableText")) { if ($spec) { $docPackages[$spec] = $true } }
+    $specs = if ($selection -contains '--workspace') {
+        $workspaceSpecs = [string[]]@($docPackages.Keys)
+        [Array]::Sort($workspaceSpecs, [System.StringComparer]::Ordinal)
+        $workspaceSpecs
+    } else {
+        @(
+            for ($i = 0; $i -lt $selection.Count; $i++) {
+                if ($selection[$i] -eq '--package' -and ($i + 1) -lt $selection.Count) {
+                    $spec = $selection[++$i]
+                    if ($docPackages.ContainsKey($spec)) { $spec }
+                }
+            }
+        )
+    }
+    if ($specs.Count -eq 0) {
+        Write-Host 'anvil-doc-test: no affected doctest-capable packages; skipping'
+        exit 0
+    }
+    $docSelection = [System.Collections.Generic.List[string]]::new()
+    foreach ($spec in $specs) {
+        $docSelection.Add('--package')
+        $docSelection.Add($spec)
+    }
+    & cargo {{_anvil_stable_toolchain_args}} test --doc @docSelection --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & cargo {{_anvil_stable_toolchain_args}} test --doc @pkg --locked
+    & cargo {{_anvil_stable_toolchain_args}} test --doc @docSelection --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-doc-test` recipe.
