@@ -52,6 +52,20 @@ continue to exercise the unsafe implementation or dependency path they cover.
 The native and `cargo careful` suites remain authoritative for the excluded
 stress breadth.
 
+SIMD differential matrices separate byte classification from lane placement
+under Miri: all byte values run at representative first/last and vector-boundary
+lanes across two blocks, while every lane retains byte-class and scanner-state
+boundaries. Block lengths, overlapping tails, backend selection, and state
+transitions remain covered. Repeated-fragment and case-folding checks likewise
+retain boundary/state cases rather than every pair. Native tests and
+`cargo careful` keep the exhaustive combinations. Test buffers are reused and
+assertion diagnostics are formatted only on failure to avoid interpreting
+allocation and formatting work unrelated to the scanner.
+Range-grammar sweeps retain two-specification inputs under Miri without
+repeating every digit/whitespace combination; direct grammar tests and the
+short-input sweep retain those classes. Ordering probes retain equal,
+ascending, and descending pairs around decimal-width boundaries.
+
 Safe default-constructor, preallocation, formatting, allocation-count, and
 hash-table rollback tests do not gain additional value merely by running under
 Miri. Prefer a reasoned test-level ignore for those cases while retaining a
