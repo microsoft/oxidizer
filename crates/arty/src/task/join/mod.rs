@@ -5,8 +5,7 @@
 //!
 //! Task execution owns the result transport; join handles await its outcome.
 
-mod error;
 mod remote;
 
-pub use error::JoinError;
+pub use arty_executor::JoinError;
 pub use remote::JoinHandle;

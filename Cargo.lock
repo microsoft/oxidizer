@@ -303,8 +303,6 @@ dependencies = [
  "static_assertions",
  "testing_aids",
  "tick",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

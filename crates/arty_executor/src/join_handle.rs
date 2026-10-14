@@ -10,7 +10,21 @@ use std::task;
 
 use events_once::{BoxedReceiver, BoxedSender, LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 
-use crate::{TaskPanic, TaskResult};
+use crate::TaskPanic;
+
+enum TaskResult<R> {
+    Completed(R),
+    Panicked(TaskPanic),
+}
+
+impl<R> Debug for TaskResult<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Completed(_) => f.write_str("Completed(..)"),
+            Self::Panicked(_) => f.write_str("Panicked(..)"),
+        }
+    }
+}
 
 /// A task failed to return its result.
 pub struct JoinError {

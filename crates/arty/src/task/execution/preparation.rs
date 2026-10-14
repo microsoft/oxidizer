@@ -7,8 +7,46 @@ use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskSet, di
 use observed::context::Transfer;
 
 use crate::task::Builtins;
-use crate::task::execution::storage::TaskFactory;
 use crate::task::join::JoinHandle;
+
+struct TaskFactory<F> {
+    inner: Option<F>,
+    enrichment: Option<Transfer>,
+}
+
+impl<F> TaskFactory<F> {
+    fn new(inner: F, enrichment: Transfer) -> Self {
+        Self {
+            inner: Some(inner),
+            enrichment: Some(enrichment),
+        }
+    }
+
+    fn into_parts(mut self) -> (F, Transfer) {
+        (
+            self.inner.take().expect("a queued factory is consumed exactly once"),
+            self.enrichment
+                .take()
+                .expect("a queued factory retains enrichment until invocation"),
+        )
+    }
+}
+
+impl<F> Drop for TaskFactory<F> {
+    fn drop(&mut self) {
+        let Some(factory) = self.inner.take() else {
+            return;
+        };
+        let _guard = self
+            .enrichment
+            .as_ref()
+            .expect("a queued factory retains enrichment until disposal")
+            .apply_current_thread();
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
+            discard_task_panic(panic);
+        }
+    }
+}
 
 /// A future factory for a remote future scheduled from a different thread. The future factory
 /// itself must be `Send` to deliver it to the thread where the task is to be scheduled but this
@@ -237,5 +275,25 @@ mod tests {
             panic!("discarded blocking work must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    #[test]
+    fn queued_factory_disposes_a_panicking_factory_without_unwinding() {
+        let dropped = AtomicBool::new(false);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            struct PanicOnDrop<'a>(&'a AtomicBool);
+
+            impl Drop for PanicOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                    panic!("factory drop");
+                }
+            }
+
+            let sink = Sink::noop();
+            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context()));
+        }));
+        result.unwrap();
+        assert!(dropped.load(Ordering::Acquire));
     }
 }

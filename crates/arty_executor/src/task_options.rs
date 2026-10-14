@@ -5,30 +5,11 @@ use data_privacy::classified;
 use observed::context::Transfer;
 use observed::{Sink, emit, event};
 
-use crate::TaskPanic;
-
 static SYSTEM_METADATA: data_privacy::DataClass = data_privacy::DataClass::new("arty", "SystemMetadata");
 
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone, Copy)]
 struct PlacementLabel(&'static str);
-
-pub(crate) enum TaskResult<R> {
-    /// The task completed successfully.
-    Completed(R),
-
-    /// The task panicked while being polled or disposed.
-    Panicked(TaskPanic),
-}
-
-impl<R> std::fmt::Debug for TaskResult<R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Completed(_) => f.write_str("Completed(..)"),
-            Self::Panicked(_) => f.write_str("Panicked(..)"),
-        }
-    }
-}
 
 /// Optional context for a task registered with [`TaskSet`](crate::TaskSet).
 ///
