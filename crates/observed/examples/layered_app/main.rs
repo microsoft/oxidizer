@@ -298,14 +298,12 @@ fn main() {
     let clock = tick::SimpleClock::new_system();
 
     // App sink - receives global enrichments (not isolated).
-    let app_emitter = Sink::new(
-        APP,
-        vec![Arc::new(SimpleLogProcessor {
+    let app_emitter = Sink::builder(APP, &clock)
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: app_logger.logger("app"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        &clock,
-    );
+        })])
+        .build();
 
     // DB sink - standalone, *isolated* sink with its own destination. A composite
     // fans one `emit!` through both the app's processor and the DB log. Each
@@ -314,26 +312,24 @@ fn main() {
     // ignores untargeted (global) entries broadcast through the composite and
     // only picks up entries addressed to `DB`.
     let db_logger = SdkLoggerProvider::builder().with_simple_exporter(DB_LOGS.clone()).build();
-    let db_standalone = Sink::new_isolated(
-        DB,
-        vec![Arc::new(SimpleLogProcessor {
+    let db_standalone = Sink::builder(DB, &clock)
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: db_logger.logger("db"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        &clock,
-    );
+        })])
+        .isolated_enrichment()
+        .build();
     let db_emitter = Sink::composite([app_emitter.clone(), db_standalone]);
 
     // TOKEN_ISSUER sink - same composite pattern.
     let token_logger = SdkLoggerProvider::builder().with_simple_exporter(TOKEN_LOGS.clone()).build();
-    let token_standalone = Sink::new_isolated(
-        TOKEN_ISSUER,
-        vec![Arc::new(SimpleLogProcessor {
+    let token_standalone = Sink::builder(TOKEN_ISSUER, &clock)
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: token_logger.logger("token_issuer"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        &clock,
-    );
+        })])
+        .isolated_enrichment()
+        .build();
     let token_emitter = Sink::composite([app_emitter.clone(), token_standalone]);
 
     // --- 2. Add enrichments and handle requests ---

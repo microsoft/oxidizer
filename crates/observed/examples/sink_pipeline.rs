@@ -107,14 +107,12 @@ fn main() {
 
     // --- Assemble and install the Sink ---
 
-    let sink = Sink::new(
-        "sink_pipeline",
-        vec![Arc::new(SimpleLogProcessor {
+    let sink = Sink::builder("sink_pipeline", tick::SimpleClock::new_system())
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: logger_provider.logger("app"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        tick::SimpleClock::new_system(),
-    );
+        })])
+        .build();
 
     // --- Emit events ---
 

@@ -162,7 +162,10 @@ fn targeted_enrichment_visible_to_specific_emitter() {
 #[test]
 fn isolated_enrichment_excludes_global_context() {
     let processor = observed_testing::MockProcessor::new();
-    let sink = Sink::new_isolated("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .isolated_enrichment()
+        .build();
 
     (|| {
         emit!(sink, ProbeEvent::new(1));

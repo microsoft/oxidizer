@@ -450,7 +450,7 @@ pub use observed_macros::event;
 #[doc(inline)]
 pub use sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 pub use severity::Severity;
-pub use sink::{Sink, SinkId};
+pub use sink::{Sink, SinkBuilder, SinkId};
 pub use text::Text;
 pub use value::Value;
 

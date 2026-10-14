@@ -15,7 +15,7 @@ use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
 use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
-use crate::{Event, FlushError, SinkFlushError, SinkId};
+use crate::{Event, FlushError, SinkBuilder, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
 /// - surfaces in `Debug` output and in error messages.
@@ -28,7 +28,7 @@ const COMPOSITE_ID: SinkId = SinkId::new("<composite>");
 
 /// Dispatches events to one or more [`EventProcessor`]s.
 ///
-/// Construct via [`Sink::new`]. Clone is cheap (`Arc` internals).
+/// Construct via [`Sink::builder`]. Clone is cheap (`Arc` internals).
 ///
 /// Sinks can be combined with [`Sink::composite`] so a single [`emit!`](crate::emit!)
 /// fans out through several underlying emitters. Each sink owns its own
@@ -71,45 +71,40 @@ impl std::fmt::Debug for Sink {
 }
 
 impl Sink {
-    /// Constructs a sink with the given [`SinkId`], processor list, and clock.
+    /// Starts building a [`Sink`].
     ///
-    /// `id` accepts a [`SinkId`] or a `&'static str`; it is the identity
-    /// token targeted by `enrich_for(ID, …)`.
+    /// `id` accepts a [`SinkId`] or a `&'static str`.
+    /// [`enrich_for`](crate::enrichment::EnrichFutureExt::enrich_for) addresses
+    /// entries to a sink by this id.
     ///
-    /// `clock` stamps the timestamp on every event this sink dispatches. It
+    /// `clock` stamps the timestamp on every event the sink dispatches. It
     /// accepts anything that is `AsRef<SimpleClock>` - both
     /// [`tick::SimpleClock`] and [`tick::Clock`]. In production pass the
     /// application's clock (e.g. `SimpleClock::new_system()`); in tests pass a
     /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
     /// timestamps.
     ///
-    /// The sink receives both untargeted and targeted enrichments.
-    /// For a sink that ignores untargeted entries (the library-isolation
-    /// pattern), use [`Sink::new_isolated`].
+    /// All other settings are optional; see [`SinkBuilder`].
     ///
-    /// This is the fundamental primitive: supply the [`EventProcessor`]s that
-    /// the sink fans each event out to.
+    /// # Examples
+    ///
+    /// ```
+    /// use observed::Sink;
+    ///
+    /// let sink = Sink::builder("service", tick::SimpleClock::new_system()).build();
+    /// ```
     #[must_use]
-    pub fn new(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
-        Self::build_single(id.into(), false, processors, clock)
+    pub fn builder(id: impl Into<SinkId>, clock: impl AsRef<SimpleClock>) -> SinkBuilder {
+        SinkBuilder::new(id.into(), clock.as_ref().clone())
     }
 
-    /// Like [`Sink::new`], but configures the sink to ignore untargeted
-    /// enrichments. Only entries explicitly targeted at this
-    /// sink's id (via `enrich_for(ID, …)`) are visible.
-    ///
-    /// Useful for library emitters that must not inherit application-level
-    /// context.
-    #[must_use]
-    pub fn new_isolated(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
-        Self::build_single(id.into(), true, processors, clock)
-    }
-
-    fn build_single(
+    /// Constructs a sink from the settings collected by [`SinkBuilder`].
+    pub(crate) fn new(
         id: SinkId,
-        isolated_enrichment: bool,
         processors: Vec<Arc<dyn EventProcessor>>,
-        clock: impl AsRef<SimpleClock>,
+        clock: SimpleClock,
+        isolated_enrichment: bool,
+        sampler: Option<Arc<dyn EventSampler>>,
     ) -> Self {
         Self {
             inner: PerformableArc::from_unaware(SinkInner::Single(SingleSinkState {
@@ -117,8 +112,8 @@ impl Sink {
                 processors: processors.into(),
                 isolated_enrichment,
                 enrichment: Slot::new(),
-                clock: clock.as_ref().clone(),
-                sampler: None,
+                clock,
+                sampler,
             })),
         }
     }
@@ -202,78 +197,6 @@ impl Sink {
     pub fn noop() -> Self {
         Self {
             inner: PerformableArc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
-        }
-    }
-
-    /// Attaches one [`EventSampler`] to this sink, replacing any sampler
-    /// already attached.
-    ///
-    /// Takes the sampler itself or a `Box<dyn EventSampler>`, for example a
-    /// sampler chosen at runtime. A boxed sampler must already have the type
-    /// `Box<dyn EventSampler>`; a `Box<MySampler>` is not accepted, so pass
-    /// `MySampler` itself instead.
-    ///
-    /// For a composite, the new sampler replaces every sampler previously
-    /// attached to its leaves. Only the new sampler runs. A [`Sink::noop`]
-    /// value is returned unchanged. A sink that is not interested in an event
-    /// never calls the sampler.
-    ///
-    /// See [`EventSampler::sample`] for the invocation and decision contract.
-    ///
-    /// # Sharing
-    ///
-    /// Clones made from the returned sink share its sampler configuration.
-    /// Existing clones keep their prior configuration and remain subject to
-    /// [`Sink::composite`]'s normal duplicate-sink restriction.
-    ///
-    /// # Examples
-    ///
-    /// A sampler chosen at runtime:
-    ///
-    /// ```
-    /// # use observed::{EventSamplingContext, EventSamplingDecision};
-    /// use observed::{EventSampler, Sink};
-    /// # struct DropAll;
-    /// # impl EventSampler for DropAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-    /// #         EventSamplingDecision::Drop
-    /// #     }
-    /// # }
-    /// # struct KeepAll;
-    /// # impl EventSampler for KeepAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-    /// #         EventSamplingDecision::Continue
-    /// #     }
-    /// # }
-    ///
-    /// let drop_all = false; // for example, read from configuration
-    /// let sampler: Box<dyn EventSampler> = if drop_all {
-    ///     Box::new(DropAll)
-    /// } else {
-    ///     Box::new(KeepAll)
-    /// };
-    /// let sink = Sink::new("service", Vec::new(), tick::SimpleClock::new_system())
-    ///     .with_event_sampler(sampler);
-    /// ```
-    #[must_use]
-    pub fn with_event_sampler(self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
-        let inner = match &*self.inner {
-            SinkInner::Single(state) => SinkInner::Single(state.clone().with_sampler(Arc::from(sampler.into()))),
-            SinkInner::Composite { children } => {
-                let sampler: Arc<dyn EventSampler> = Arc::from(sampler.into());
-                SinkInner::Composite {
-                    children: children
-                        .iter()
-                        .cloned()
-                        .map(|state| state.with_sampler(Arc::clone(&sampler)))
-                        .collect(),
-                }
-            }
-            SinkInner::Noop { .. } => return self,
-        };
-
-        Self {
-            inner: PerformableArc::from_unaware(inner),
         }
     }
 
@@ -526,11 +449,6 @@ struct SingleSinkState {
 }
 
 impl SingleSinkState {
-    fn with_sampler(mut self, sampler: Arc<dyn EventSampler>) -> Self {
-        self.sampler = Some(sampler);
-        self
-    }
-
     /// Returns `true` if any of this leaf's processors is interested in the event.
     fn is_interested(&self, description: &EventDescription) -> bool {
         self.processors.iter().any(|p| p.is_interested(description))
@@ -637,11 +555,9 @@ mod tests {
     }
 
     fn failing_sink(id: &'static str) -> Sink {
-        Sink::new(
-            id,
-            vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        )
+        Sink::builder(id, SimpleClock::new_frozen())
+            .processors(vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>])
+            .build()
     }
 
     #[test]
@@ -742,12 +658,10 @@ mod tests {
     #[test]
     fn always_off_sampler_always_drops() {
         let processor = Arc::new(AlwaysInterestedProcessor::default());
-        let sink = Sink::new(
-            "sampled",
-            vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        )
-        .with_event_sampler(AlwaysOffSampler);
+        let sink = Sink::builder("sampled", SimpleClock::new_frozen())
+            .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+            .event_sampler(AlwaysOffSampler)
+            .build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -761,14 +675,12 @@ mod tests {
     fn uninterested_processor_is_skipped_despite_interested_peer() {
         let interested = Arc::new(AlwaysInterestedProcessor::default());
         let uninterested = Arc::new(NeverInterestedProcessor::default());
-        let sink = Sink::new(
-            "mixed",
-            vec![
+        let sink = Sink::builder("mixed", SimpleClock::new_frozen())
+            .processors(vec![
                 Arc::clone(&uninterested) as Arc<dyn EventProcessor>,
                 Arc::clone(&interested) as Arc<dyn EventProcessor>,
-            ],
-            SimpleClock::new_frozen(),
-        );
+            ])
+            .build();
 
         let description = dummy_description();
         assert!(sink.is_interested_in(&description));
@@ -782,11 +694,9 @@ mod tests {
     /// a real query over the processors, not an unconditional yes.
     #[test]
     fn single_sink_is_not_interested_when_no_processor_is() {
-        let sink = Sink::new(
-            "uninterested",
-            vec![Arc::new(NeverInterestedProcessor::default()) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        );
+        let sink = Sink::builder("uninterested", SimpleClock::new_frozen())
+            .processors(vec![Arc::new(NeverInterestedProcessor::default()) as Arc<dyn EventProcessor>])
+            .build();
 
         assert!(!sink.is_interested_in(&dummy_description()));
     }

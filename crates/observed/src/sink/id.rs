@@ -85,8 +85,8 @@ mod tests {
     #[test]
     fn from_static_str_equals_new() {
         // An id built from a string literal must be equal to one built via
-        // `SinkId::new` with the same label, so a service constructed
-        // with `builder("app")` is still targetable by a static
+        // `SinkId::new` with the same label, so a sink built with
+        // `Sink::builder("app", …)` is still targetable by a static
         // `SinkId::new("app")` used in `enrich_for(ID, …)`.
         static APP: SinkId = SinkId::new("app");
         let from_str: SinkId = "app".into();

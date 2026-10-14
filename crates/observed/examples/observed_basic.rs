@@ -72,14 +72,12 @@ fn main() {
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
     // 2. Build a sink with a processor backed by the logger provider.
-    let sink = Sink::new(
-        "basic",
-        vec![Arc::new(SimpleLogProcessor {
+    let sink = Sink::builder("basic", tick::SimpleClock::new_system())
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: provider.logger("basic"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        tick::SimpleClock::new_system(),
-    );
+        })])
+        .build();
 
     // 3. Emit events using struct-literal syntax.
     emit!(sink, HttpRequest { status: 200, retries: 0 });

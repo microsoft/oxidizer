@@ -5,8 +5,8 @@
 //!
 //! An [`EventSampler`] decides whether an event reaches a Sink's processors.
 //! The sampler receives an [`EventSamplingContext`] with the event description,
-//! Sink identity, and timestamp. Attach one with
-//! [`Sink::with_event_sampler`](crate::Sink::with_event_sampler).
+//! Sink identity, and timestamp. Attach one while building a Sink with
+//! [`SinkBuilder::event_sampler`](crate::SinkBuilder::event_sampler).
 //!
 //! The context is borrowed and read-only. A sampler owns its own
 //! synchronization and must return its decision synchronously.
@@ -70,7 +70,7 @@ pub enum EventSamplingDecision {
 /// Decides whether an event reaches one leaf sink's processors.
 ///
 /// Attach an implementation with
-/// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). To share
+/// [`SinkBuilder::event_sampler`](crate::SinkBuilder::event_sampler). To share
 /// state between Sinks, keep it behind an [`Arc`](std::sync::Arc) in the
 /// sampler and attach a clone to each Sink. Use
 /// [`EventSamplingContext::sink_id`] to tell the Sinks apart.

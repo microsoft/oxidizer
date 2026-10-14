@@ -75,14 +75,12 @@ async fn main() {
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
-    let sink = Sink::new(
-        "tokio_multithread",
-        vec![Arc::new(SimpleLogProcessor {
+    let sink = Sink::builder("tokio_multithread", tick::SimpleClock::new_system())
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: provider.logger("tokio_mt"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        tick::SimpleClock::new_system(),
-    );
+        })])
+        .build();
 
     // 2. Spawn tasks inside an enrichment scope - each task wraps its future
     //    with `.enrich()` so the enrichment is restored on every poll.

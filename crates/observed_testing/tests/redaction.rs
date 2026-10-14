@@ -83,15 +83,13 @@ fn redaction_modes_on_classified_fields() {
     let erase_proc = MockProcessor::with_redaction_engine(engine_erase_all());
     let replace_proc = MockProcessor::with_redaction_engine(engine_replace_stars());
 
-    let sink = Sink::new(
-        "test",
-        vec![
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![
             Arc::new(passthrough_proc.clone()),
             Arc::new(erase_proc.clone()),
             Arc::new(replace_proc.clone()),
-        ],
-        tick::SimpleClock::new_frozen(),
-    );
+        ])
+        .build();
 
     emit!(
         sink,
@@ -129,7 +127,9 @@ fn redaction_modes_on_classified_fields() {
 #[test]
 fn per_class_redaction_applies_different_rules() {
     let processor = MockProcessor::with_redaction_engine(engine_per_class());
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -160,7 +160,9 @@ fn public_classified_type_with_passthrough_per_class() {
     }
 
     let processor = MockProcessor::with_redaction_engine(engine_per_class());
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -191,7 +193,9 @@ fn enrichment_string_values_are_redacted() {
     }
 
     let processor = MockProcessor::with_redaction_engine(engine_replace_stars());
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     (|| {
         emit!(sink, ProbeEvent::new(1));
@@ -220,7 +224,9 @@ fn enrichment_sensitive_values_are_redacted() {
     }
 
     let processor = MockProcessor::with_redaction_engine(engine_erase_all());
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     (|| {
         emit!(sink, ProbeEvent::new(1));
@@ -251,11 +257,9 @@ fn enrichment_redaction_uses_per_processor_engine() {
     let pass_proc = MockProcessor::with_redaction_engine(engine_passthrough());
     let erase_proc = MockProcessor::with_redaction_engine(engine_erase_all());
 
-    let sink = Sink::new(
-        "test",
-        vec![Arc::new(pass_proc.clone()), Arc::new(erase_proc.clone())],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(pass_proc.clone()), Arc::new(erase_proc.clone())])
+        .build();
 
     (|| {
         emit!(sink, ProbeEvent::new(1));
@@ -295,7 +299,9 @@ fn insert_mode_replaces_with_custom_string() {
         .build();
 
     let processor = MockProcessor::with_redaction_engine(engine);
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -323,7 +329,9 @@ fn passthrough_for_specific_class_erase_rest() {
         .build();
 
     let processor = MockProcessor::with_redaction_engine(engine);
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -376,7 +384,9 @@ struct BorrowedClassified {
 #[test]
 fn data_class_fields_are_redacted_without_being_cloned() {
     let processor = MockProcessor::with_redaction_engine(engine_replace_stars());
-    let sink = Sink::new("borrowed", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("borrowed", tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,

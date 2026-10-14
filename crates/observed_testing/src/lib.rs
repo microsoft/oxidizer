@@ -66,7 +66,9 @@ pub fn passthrough_redaction_engine() -> data_privacy::RedactionEngine {
 #[must_use]
 pub fn test_emitter(id: SinkId) -> (Sink, MockProcessor) {
     let processor = MockProcessor::new();
-    let sink = Sink::new(id, vec![Arc::new(processor.clone())], SimpleClock::new_frozen());
+    let sink = Sink::builder(id, SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
     (sink, processor)
 }
 

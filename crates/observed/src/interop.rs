@@ -172,11 +172,9 @@ mod tests {
         // The bridge entry point must actually reach the processors; dropping
         // the dispatch would silently lose every foreign event.
         let processor = Arc::new(RecordingProcessor::default());
-        let sink = Sink::new(
-            "bridge",
-            vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        );
+        let sink = Sink::builder("bridge", SimpleClock::new_frozen())
+            .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+            .build();
 
         emit_dyn_event(&sink, &Bridged);
 

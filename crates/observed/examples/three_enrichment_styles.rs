@@ -134,11 +134,9 @@ fn init_telemetry() -> (Sink, SdkLoggerProvider) {
         redaction_engine: redaction::passthrough_redaction_engine(),
     };
 
-    let sink = Sink::new(
-        "three_enrichment_styles",
-        vec![Arc::new(processor)],
-        tick::SimpleClock::new_system(),
-    );
+    let sink = Sink::builder("three_enrichment_styles", tick::SimpleClock::new_system())
+        .processors(vec![Arc::new(processor)])
+        .build();
 
     (sink, provider)
 }
