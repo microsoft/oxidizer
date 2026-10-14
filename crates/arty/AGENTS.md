@@ -16,6 +16,20 @@
   integration test unless the scenario is genuinely unreachable through the
   public API.
 
+## Panic handling
+
+- Follow the contract in `docs/PANICS.md`.
+- Catch panics from code Arty explicitly runs for the user: async task polling,
+  task factories, and blocking callbacks.
+- Add cleanup containment only when needed for memory safety or exact-once
+  release of runtime-owned task storage. Keep the catch as narrow as possible.
+- Do not add recovery guarantees for panicking destructors, custom wakers,
+  notification hooks, telemetry processors, poisoned state, or failed runtime
+  invariants merely to make a test pass.
+- Before adding `catch_unwind`, identify a realistic safe-Rust path, the sound
+  state that remains after the panic, and the useful behavior visible to the
+  caller.
+
 ## Generated documentation
 
 - Do not edit `crates/arty/README.md` by hand. Regenerate it with
