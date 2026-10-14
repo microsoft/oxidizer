@@ -14,6 +14,9 @@ notifications, telemetry processors, or other cleanup and notification hooks.
 These panics may unwind the worker thread or abort if another panic is already
 in progress. User-provided destructors, custom wakers, join notifications,
 telemetry processors, and other cleanup or notification hooks must not panic.
+This is a supported-behavior requirement, not an unsafe contract. If they do
+panic, Arty may abort the process, leak resources, or stop making progress, but
+must not cause undefined behavior.
 
 Arty catches cleanup panics only when needed to protect memory safety or release
 runtime-owned task storage exactly once. These catches must be narrow. A panic
@@ -21,8 +24,9 @@ that escapes while the runtime still owns live task storage stops the process
 rather than risking memory corruption.
 
 Failed runtime invariants, poisoned runtime state, and unsafe-contract
-violations are bugs, not task failures. Arty does not convert them into
-`JoinError`.
+violations are bugs, not recoverable task failures. Arty does not add dedicated
+recovery for them. If one panics while already inside a task or callback panic
+boundary, the outer boundary may still report that panic through `JoinError`.
 
 After a contained task panic, shutdown is best effort. Panic handling must not
 introduce a deadlock, wait for the current callback to finish itself, or

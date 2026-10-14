@@ -26,6 +26,9 @@
 - Do not add recovery guarantees for panicking destructors, custom wakers,
   notification hooks, telemetry processors, poisoned state, or failed runtime
   invariants merely to make a test pass.
+- Treat no-panic requirements as supported-behavior contracts, not unsafe
+  preconditions. Unsupported panics may abort, leak, or stop progress, but must
+  not cause undefined behavior.
 - Before adding `catch_unwind`, identify a realistic safe-Rust path, the sound
   state that remains after the panic, and the useful behavior visible to the
   caller.
