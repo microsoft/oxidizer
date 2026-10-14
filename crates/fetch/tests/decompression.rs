@@ -295,7 +295,7 @@ async fn output_limits_apply_at_the_exact_boundary_for_every_format_and_pipeline
 }
 
 #[tokio::test]
-async fn compression_output_defaults_are_preserved_even_when_stream_count_is_limited() {
+async fn http_output_default_is_preserved_even_when_stream_count_is_limited() {
     const LEN: usize = 64 * 1024 * 1024 + 1;
     let compressed = compress_zeroes(Format::Brotli, LEN);
     let options = DecompressionOptions::from(&[DecompressionFormat::Brotli]);
@@ -308,8 +308,8 @@ async fn compression_output_defaults_are_preserved_even_when_stream_count_is_lim
         });
 
         assert_eq!(
-            streamed_len(client.get(URL).fetch().await.unwrap()).await.unwrap(),
-            u64::try_from(LEN).unwrap()
+            streamed_len(client.get(URL).fetch().await.unwrap()).await.unwrap_err().label(),
+            "compression_limit_exceeded"
         );
     }
 }
@@ -335,7 +335,7 @@ async fn none_removes_a_previously_configured_output_limit() {
 }
 
 #[tokio::test]
-async fn automatic_decompression_defaults_to_1024_streams() {
+async fn automatic_decompression_inherits_the_http_stream_default() {
     for (token, compression_format, decompression_format) in [
         ("gzip", Format::Gzip, DecompressionFormat::Gzip),
         ("zstd", Format::Zstd, DecompressionFormat::Zstd),
