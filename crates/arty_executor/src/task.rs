@@ -200,8 +200,7 @@ where
         // SAFETY: The future was retired above, so clearing the payload cannot run user code.
         unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
 
-        let result_panic =
-            result_target.and_then(|result_target| catch_unwind(AssertUnwindSafe(|| drop(result_target))).err());
+        let result_panic = result_target.and_then(|result_target| catch_unwind(AssertUnwindSafe(|| drop(result_target))).err());
 
         for panic in [future_panic, result_panic].into_iter().flatten() {
             if remote {

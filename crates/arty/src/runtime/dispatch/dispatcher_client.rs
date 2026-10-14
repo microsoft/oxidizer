@@ -3,7 +3,6 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
 
 use performables::arc::Arc;
@@ -39,10 +38,6 @@ impl DispatcherClient {
 
     pub(crate) fn owns(&self, thread: &thread_aware::Thread) -> bool {
         self.core.owns(thread)
-    }
-
-    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
-        self.core.shutdown_signal()
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -150,25 +145,6 @@ mod tests {
         client.stop();
         assert!(client.is_shutting_down());
         assert!(clone.is_shutting_down());
-    }
-
-    #[test]
-    fn clients_return_the_dispatchers_shutdown_signal() {
-        let (command_tx, _commands) = channel::unbounded();
-        let worker = WorkerEndpoint {
-            command_tx,
-            waker: Waker::noop().clone(),
-            thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-        };
-        let core = Arc::new(DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
-            nonempty::NonEmpty::new(worker),
-            Sink::noop(),
-        ));
-        let client = DispatcherClient::new(Arc::clone(&core));
-
-        assert!(Arc::ptr_eq(&client.shutdown_signal(), &core.shutdown_signal()));
     }
 
     #[test]

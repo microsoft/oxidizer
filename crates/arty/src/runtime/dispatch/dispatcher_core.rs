@@ -165,10 +165,6 @@ impl<WFS> DispatcherCore<WFS> {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.shutdown_started)
-    }
-
     pub(in crate::runtime) fn is_shutting_down(&self) -> bool {
         self.shutdown_started.load(Ordering::Acquire)
     }

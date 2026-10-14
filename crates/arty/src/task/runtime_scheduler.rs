@@ -224,9 +224,6 @@ impl RuntimeScheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown();
-        }
         self.dispatcher.next_blocking_worker().spawn_blocking(body)
     }
 }

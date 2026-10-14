@@ -359,9 +359,6 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown();
-        }
         self.binding.blocking_worker.spawn_blocking(body)
     }
 

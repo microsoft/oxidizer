@@ -2,9 +2,6 @@
 // Licensed under the MIT License.
 
 use std::fmt;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-
-use arty_executor::discard_task_panic;
 
 use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
@@ -31,20 +28,6 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     ///
     /// It is fine to send this command multiple times - duplicates will be ignored.
     Shutdown,
-}
-
-impl<TS> Drop for AsyncWorkerCommand<TS> {
-    fn drop(&mut self) {
-        let Self::EnqueueTask { future_factory } = self else {
-            return;
-        };
-        let Some(future_factory) = future_factory.take() else {
-            return;
-        };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(future_factory))) {
-            discard_task_panic(panic);
-        }
-    }
 }
 
 impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {

@@ -6,7 +6,6 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
@@ -68,10 +67,6 @@ where
     // made to send them.
     command_rx: Option<channel::Receiver<AsyncWorkerCommand<TS>>>,
 
-    // Published by the dispatcher before it queues shutdown, so pending factories can be
-    // discarded without waiting for a FIFO shutdown command behind them.
-    shutdown_signal: Arc<AtomicBool>,
-
     // Thread state initialization may require tasks to be executed, so we store the thread state in
     // a once cell. Before it's filled, we can only process tasks that don't depend on thread state.
     // We set this to None when we start shutdown - no more tasks can be enqueued after that and
@@ -106,7 +101,6 @@ where
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
-        shutdown_signal: Arc<AtomicBool>,
         thread_state_constructed_tx: channel::Sender<()>,
     ) -> Self
     where
@@ -139,7 +133,6 @@ where
 
         Self {
             command_rx: Some(command_rx),
-            shutdown_signal,
             thread_state: Some(thread_state),
             executor: Some(executor),
             tasks,
@@ -223,10 +216,6 @@ where
                 Ok(mut command) => {
                     match &mut command {
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                            if self.shutdown_signal.load(Ordering::Acquire) {
-                                self.begin_shutdown();
-                                return false;
-                            }
                             future_factory.take().expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
                         }
                         AsyncWorkerCommand::Shutdown => {
@@ -281,7 +270,7 @@ where
 mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     #[cfg(not(miri))]
     use std::task::{Wake, Waker};
     use std::thread;
@@ -325,7 +314,6 @@ mod tests {
         timer_done: Arc<AtomicBool>,
         factory_invocations: Arc<AtomicUsize>,
         forbidden_factory_invocations: Arc<AtomicUsize>,
-        shutdown_signal: Arc<AtomicBool>,
         signal: Arc<WorkerSignal>,
         worker: AsyncWorker<()>,
         timer_ready: bool,
@@ -351,7 +339,6 @@ mod tests {
             let timer_done = Arc::new(AtomicBool::new(false));
             let factory_invocations = Arc::new(AtomicUsize::new(0));
             let forbidden_factory_invocations = Arc::new(AtomicUsize::new(0));
-            let shutdown_signal = Arc::new(AtomicBool::new(false));
             let signal = Arc::new(WorkerSignal::default());
             let task_observer = Arc::clone(&task_done);
             let timer_observer = Arc::clone(&timer_done);
@@ -372,7 +359,6 @@ mod tests {
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 control.clone().into(),
                 Arc::clone(&signal),
-                Arc::clone(&shutdown_signal),
                 ready_tx,
             );
             let mut scenario = Self {
@@ -384,7 +370,6 @@ mod tests {
                 timer_done,
                 factory_invocations,
                 forbidden_factory_invocations,
-                shutdown_signal,
                 signal,
                 worker,
                 timer_ready: false,
@@ -407,7 +392,7 @@ mod tests {
         }
 
         fn apply(&mut self, operation: u8) {
-            match operation % 7 {
+            match operation % 6 {
                 0 => self.queue_factory_batch(operation),
                 1 => {
                     if let Some(initialize) = self.initialize.take() {
@@ -421,13 +406,12 @@ mod tests {
                 }
                 3 => self.ready_timer(),
                 4 => self.step(),
-                5 => self.shutdown_signal.store(true, Ordering::Release),
                 _ => self.queue_shutdown(),
             }
         }
 
         fn queue_factory_batch(&mut self, operation: u8) {
-            let batch_size = match (operation / 7) % 4 {
+            let batch_size = match (operation / 6) % 4 {
                 0 => 1,
                 1 => COMMANDS_PER_CYCLE - 1,
                 2 => COMMANDS_PER_CYCLE,
@@ -436,14 +420,13 @@ mod tests {
             for _ in 0..batch_size {
                 let invocations = Arc::clone(&self.factory_invocations);
                 let forbidden = Arc::clone(&self.forbidden_factory_invocations);
-                let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let forbidden_after_queued_shutdown = self.queued_shutdown;
                 if self
                     .command_tx
                     .send(AsyncWorkerCommand::EnqueueTask {
                         future_factory: Some(Box::new(move |(), _| {
                             invocations.fetch_add(1, Ordering::Relaxed);
-                            if forbidden_after_queued_shutdown || shutdown_signal.load(Ordering::Acquire) {
+                            if forbidden_after_queued_shutdown {
                                 forbidden.fetch_add(1, Ordering::Relaxed);
                             }
                         })),
@@ -470,10 +453,7 @@ mod tests {
             }
             WorkerSignal::waker(&self.signal).wake_by_ref();
             let initialized = self.worker.thread_state.as_ref().is_some_and(|state| state.get().is_some());
-            let full_batch = initialized
-                && self.queued_factories >= COMMANDS_PER_CYCLE
-                && !self.shutdown_signal.load(Ordering::Acquire)
-                && !self.queued_shutdown;
+            let full_batch = initialized && self.queued_factories >= COMMANDS_PER_CYCLE && !self.queued_shutdown;
             let task_should_progress =
                 full_batch && self.ready_task.is_none() && !self.task_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
             let timer_should_progress =
@@ -487,7 +467,7 @@ mod tests {
             }
             if full_batch {
                 self.queued_factories -= COMMANDS_PER_CYCLE;
-            } else if initialized && !self.shutdown_signal.load(Ordering::Acquire) && !self.queued_shutdown {
+            } else if initialized && !self.queued_shutdown {
                 self.queued_factories = 0;
             }
             self.timer_advanced_by_step |= self.timer_ready;
@@ -572,7 +552,6 @@ mod tests {
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             control.clone().into(),
             Arc::new(WorkerSignal::default()),
-            Arc::new(AtomicBool::new(false)),
             ready_tx,
         );
         let executor = worker.executor.as_ref().unwrap();
@@ -606,7 +585,6 @@ mod tests {
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::clone(&signal),
-            Arc::new(AtomicBool::new(false)),
             ready_tx,
         );
         assert!(worker.execute_step().is_continue());
@@ -653,7 +631,6 @@ mod tests {
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            Arc::new(AtomicBool::new(false)),
             ready_tx,
         );
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
@@ -689,7 +666,6 @@ mod tests {
                     Arc::clone(&blocking_worker),
                     InactiveClock::default(),
                     signal,
-                    Arc::new(AtomicBool::new(false)),
                     channel::unbounded().0,
                 );
                 worker.run();
@@ -757,7 +733,6 @@ mod tests {
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
-                    Arc::new(AtomicBool::new(false)),
                     constructed_tx,
                 );
 
@@ -809,7 +784,6 @@ mod tests {
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 InactiveClock::default(),
                 signal,
-                Arc::new(AtomicBool::new(false)),
                 channel::unbounded().0,
             );
             worker.run();
@@ -838,12 +812,11 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_signal_prevents_queued_factories_from_starting() {
+    fn shutdown_command_cancels_registered_tasks_before_polling() {
         let (command_tx, command_rx) = channel::unbounded();
         let (ready_tx, ready_rx) = channel::unbounded();
-        let shutdown_signal = Arc::new(AtomicBool::new(false));
         let invoked = Arc::new(AtomicBool::new(false));
-        let invoked_by_factory = Arc::clone(&invoked);
+        let invoked_by_task = Arc::clone(&invoked);
 
         let worker = AsyncWorker::new(
             command_rx,
@@ -851,7 +824,6 @@ mod tests {
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            Arc::clone(&shutdown_signal),
             ready_tx,
         );
         let _ = worker.executor.as_ref().unwrap().execute_cycle();
@@ -859,12 +831,14 @@ mod tests {
 
         command_tx
             .send(AsyncWorkerCommand::EnqueueTask {
-                future_factory: Some(Box::new(move |(), _| {
-                    invoked_by_factory.store(true, Ordering::Relaxed);
+                future_factory: Some(Box::new(move |(), tasks| {
+                    drop(tasks.add(async move {
+                        invoked_by_task.store(true, Ordering::Relaxed);
+                    }));
                 })),
             })
             .unwrap();
-        shutdown_signal.store(true, Ordering::Release);
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
 
         worker.run();
 
@@ -886,7 +860,6 @@ mod tests {
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            Arc::new(AtomicBool::new(false)),
             channel::unbounded().0,
         );
 
@@ -914,7 +887,6 @@ mod tests {
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            Arc::new(AtomicBool::new(false)),
             channel::unbounded().0,
         );
 
@@ -935,7 +907,6 @@ mod tests {
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            Arc::new(AtomicBool::new(false)),
             ready_tx,
         );
         assert!(worker.execute_step().is_continue());
@@ -948,25 +919,5 @@ mod tests {
         assert!(worker.executor.is_none());
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
         drop(commands);
-    }
-
-    #[test]
-    fn queued_factory_drop_panics_are_contained() {
-        struct PanicOnDrop;
-
-        impl Drop for PanicOnDrop {
-            fn drop(&mut self) {
-                panic!("queued factory drop");
-            }
-        }
-
-        let panic_on_drop = PanicOnDrop;
-        let command = AsyncWorkerCommand::<()>::EnqueueTask {
-            future_factory: Some(Box::new(move |(), _: &TaskSet| {
-                let _panic_on_drop = panic_on_drop;
-            })),
-        };
-
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(command))).unwrap();
     }
 }
