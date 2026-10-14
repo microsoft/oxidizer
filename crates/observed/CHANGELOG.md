@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `Sink::with_event_sampler` takes `impl Into<Box<dyn EventSampler>>`
+  instead of `Arc<dyn EventSampler>`, so it accepts the sampler itself or a
+  `Box<dyn EventSampler>`, for example a sampler chosen at runtime. Pass the
+  sampler itself: `with_event_sampler(MySampler)` instead of
+  `with_event_sampler(Arc::new(MySampler))`. To share state between Sinks,
+  keep it behind an `Arc` in the sampler and attach a clone to each Sink.
+
 ## [0.26.0] - 2026-09-10
 
 ### Added

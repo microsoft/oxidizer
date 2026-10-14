@@ -61,10 +61,10 @@ impl EventProcessor for ProbeProcessor {
     }
 }
 
-/// Counts sampling decisions and drops deliveries even when processors want them.
-#[derive(Default)]
+/// Shares a sampling count across clones and drops deliveries despite interest.
+#[derive(Clone, Default)]
 struct DropSampler {
-    sampled: AtomicUsize,
+    sampled: Arc<AtomicUsize>,
 }
 
 #[mutants::skip]
@@ -187,8 +187,8 @@ fn interest_queries_do_not_read_leaf_clocks() {
 #[test]
 fn uninterested_emissions_do_not_construct_or_sample() {
     let processor = Arc::new(ProbeProcessor::new(false));
-    let sampler = Arc::new(DropSampler::default());
-    let sink = leaf(&processor).with_event_sampler(Arc::clone(&sampler) as Arc<dyn EventSampler>);
+    let sampler = DropSampler::default();
+    let sink = leaf(&processor).with_event_sampler(sampler.clone());
     let composite = Sink::composite([Sink::noop(), sink.clone()]);
     let constructed = Cell::new(0);
 
@@ -208,8 +208,8 @@ fn uninterested_emissions_do_not_construct_or_sample() {
 #[test]
 fn queries_do_not_sample_and_interest_does_not_guarantee_delivery() {
     let processor = Arc::new(ProbeProcessor::new(true));
-    let sampler = Arc::new(DropSampler::default());
-    let sink = leaf(&processor).with_event_sampler(Arc::clone(&sampler) as Arc<dyn EventSampler>);
+    let sampler = DropSampler::default();
+    let sink = leaf(&processor).with_event_sampler(sampler.clone());
     let composite = Sink::composite([Sink::noop(), sink.clone()]);
 
     assert!(sink.is_interested(&AcceptedEvent::DESCRIPTION));

@@ -70,9 +70,10 @@ pub enum EventSamplingDecision {
 /// Decides whether an event reaches one leaf sink's processors.
 ///
 /// Attach an implementation with
-/// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). The same
-/// sampler instance may be attached to multiple Sinks; use
-/// [`EventSamplingContext::sink_id`] to distinguish them.
+/// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). To share
+/// state between Sinks, keep it behind an [`Arc`](std::sync::Arc) in the
+/// sampler and attach a clone to each Sink. Use
+/// [`EventSamplingContext::sink_id`] to tell the Sinks apart.
 ///
 /// See the
 /// [`event_sampling` example](https://github.com/microsoft/oxidizer/blob/main/crates/observed/examples/event_sampling.rs)
@@ -88,4 +89,10 @@ pub trait EventSampler: Send + Sync + 'static {
     /// The call runs on the emitting thread. Emitting internal telemetry from
     /// here is not supported.
     fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision;
+}
+
+impl<T: EventSampler> From<T> for Box<dyn EventSampler> {
+    fn from(sampler: T) -> Self {
+        Box::new(sampler)
+    }
 }

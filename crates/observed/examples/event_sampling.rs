@@ -92,7 +92,7 @@ fn main() {
         Arc::new(PrintingProcessor { signal: Signal::Log }),
         Arc::new(PrintingProcessor { signal: Signal::Metric }),
     ];
-    let sink = Sink::new("service", processors, tick::SimpleClock::new_system()).with_event_sampler(Arc::new(DropHealthChecks));
+    let sink = Sink::new("service", processors, tick::SimpleClock::new_system()).with_event_sampler(DropHealthChecks);
 
     let route = String::from("/users");
     emit!(

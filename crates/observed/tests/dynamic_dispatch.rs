@@ -340,14 +340,14 @@ fn sampled_dynamic_events_recheck_every_recipient_after_initialization() {
                 )
             })
             .collect();
-        let sink = leaf(processors).with_event_sampler(Arc::new(Sampler({
+        let sink = leaf(processors).with_event_sampler(Sampler({
             let samples = Arc::clone(&samples);
             move |_: &EventSamplingContext<'_>| {
                 samples.fetch_add(1, Ordering::Relaxed);
                 initialized.set(()).unwrap();
                 decision
             }
-        })));
+        }));
 
         emit_dyn_event(&sink, &DynamicEvent::default());
 
@@ -372,20 +372,20 @@ fn uninterested_dynamic_leaves_do_not_sample() {
             delivered.fetch_add(1, Ordering::Relaxed);
         }
     })]);
-    let composite = Sink::composite([uninterested.clone(), interested, leaf(vec![])]).with_event_sampler(Arc::new(Sampler({
+    let composite = Sink::composite([uninterested.clone(), interested, leaf(vec![])]).with_event_sampler(Sampler({
         let samples = Arc::clone(&samples);
         move |_: &EventSamplingContext<'_>| {
             samples.fetch_add(1, Ordering::Relaxed);
             EventSamplingDecision::Continue
         }
-    })));
-    let single = uninterested.with_event_sampler(Arc::new(Sampler({
+    }));
+    let single = uninterested.with_event_sampler(Sampler({
         let samples = Arc::clone(&samples);
         move |_: &EventSamplingContext<'_>| {
             samples.fetch_add(1, Ordering::Relaxed);
             EventSamplingDecision::Continue
         }
-    })));
+    }));
 
     emit_dyn_event(&single, &DynamicEvent::default());
     assert_eq!(samples.load(Ordering::Relaxed), 0);
@@ -413,7 +413,7 @@ fn uninterested_dynamic_leaf_does_not_read_its_clock() {
 fn a_sampled_leaf_does_not_suppress_an_unsampled_sibling() {
     let delivered = Arc::new(AtomicUsize::new(0));
     let sampled = leaf(vec![processor(|_| true, |_| panic!("sampled-out processor was dispatched"))])
-        .with_event_sampler(Arc::new(Sampler(|_: &EventSamplingContext<'_>| EventSamplingDecision::Drop)));
+        .with_event_sampler(Sampler(|_: &EventSamplingContext<'_>| EventSamplingDecision::Drop));
     let unsampled = leaf(vec![processor(|_| true, {
         let delivered = Arc::clone(&delivered);
         move |_| {
@@ -457,7 +457,7 @@ fn initial_interest_initialization_can_emit_to_another_sink() {
                     },
                 )]);
                 let sink = if sampled {
-                    sink.with_event_sampler(Arc::new(Sampler(|_: &EventSamplingContext<'_>| EventSamplingDecision::Continue)))
+                    sink.with_event_sampler(Sampler(|_: &EventSamplingContext<'_>| EventSamplingDecision::Continue))
                 } else {
                     sink
                 };
@@ -573,14 +573,14 @@ fn recursion_guard_covers_processors_and_samplers_across_composite_leaves() {
         })]);
         let sink = Sink::composite([first, second]);
         let sink = if sampled {
-            sink.with_event_sampler(Arc::new(Sampler({
+            sink.with_event_sampler(Sampler({
                 let nested = nested.clone();
                 move |_: &EventSamplingContext<'_>| {
                     emit_dyn_event(&nested, &DynamicEvent::default());
                     emit!(&nested, TypedEvent);
                     EventSamplingDecision::Continue
                 }
-            })))
+            }))
         } else {
             sink
         };
