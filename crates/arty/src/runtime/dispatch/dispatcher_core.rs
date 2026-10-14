@@ -221,9 +221,7 @@ impl DispatcherCore {
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
-            future_factory: Some(future_factory),
-        });
+        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask { future_factory });
 
         endpoint.waker.wake_by_ref();
 

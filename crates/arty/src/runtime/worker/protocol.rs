@@ -11,13 +11,8 @@ pub(in crate::runtime) enum AsyncWorkerCommand {
     /// future it creates with the worker's task set, which lets the executor store the future
     /// inline instead of behind an extra box.
     ///
-    /// Note that these remotely enqueued tasks do not have an output type - it is the
-    /// responsibility of the task itself to deliver any outputs to some waiting thread. In
-    /// practice, this means there will be two layers of futures: an outer layer responsible for
-    /// delivering the output, and an inner layer with the actual user code to execute.
-    ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
-    EnqueueTask { future_factory: Option<BoxedRemoteFutureFactory> },
+    EnqueueTask { future_factory: BoxedRemoteFutureFactory },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do

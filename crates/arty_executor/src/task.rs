@@ -269,14 +269,16 @@ where
         panic: TaskPanic,
     ) -> task::Poll<()> {
         let payload = maybe_payload.as_mut().expect("a polled task retains its payload");
-        let Some(result_target) = payload.result_target.take() else {
-            on_unhandled_task_panic(panic);
-        };
-
-        if !result_target.is_remote() {
+        let result_is_remote = payload
+            .result_target
+            .as_ref()
+            .expect("a polled task retains its result target")
+            .is_remote();
+        if !result_is_remote {
+            // Keep the local sender on the fail-fast unwind path so its receiver disconnects.
+            let _result_target = payload.result_target.take().expect("a polled task retains its result target");
             on_unhandled_task_panic(panic);
         }
-        payload.result_target = Some(result_target);
 
         wake_signal.retire();
         self.finish_terminal(maybe_payload, TerminalOutcome::Panicked(panic));

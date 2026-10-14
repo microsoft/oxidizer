@@ -10,38 +10,27 @@ use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 struct TaskFactory<F> {
-    inner: Option<F>,
-    enrichment: Option<Transfer>,
+    pending: Option<(F, Transfer)>,
 }
 
 impl<F> TaskFactory<F> {
     fn new(inner: F, enrichment: Transfer) -> Self {
         Self {
-            inner: Some(inner),
-            enrichment: Some(enrichment),
+            pending: Some((inner, enrichment)),
         }
     }
 
     fn into_parts(mut self) -> (F, Transfer) {
-        (
-            self.inner.take().expect("a queued factory is consumed exactly once"),
-            self.enrichment
-                .take()
-                .expect("a queued factory retains enrichment until invocation"),
-        )
+        self.pending.take().expect("a queued factory is consumed exactly once")
     }
 }
 
 impl<F> Drop for TaskFactory<F> {
     fn drop(&mut self) {
-        let Some(factory) = self.inner.take() else {
+        let Some((factory, enrichment)) = self.pending.take() else {
             return;
         };
-        let _guard = self
-            .enrichment
-            .as_ref()
-            .expect("a queued factory retains enrichment until disposal")
-            .apply_current_thread();
+        let _guard = enrichment.apply_current_thread();
         discard_panicking_drop(factory);
     }
 }
@@ -93,15 +82,13 @@ where
 {
     let (result_tx, result_rx) = RemoteJoinHandle::channel();
     let task = BlockingTask {
-        body: Some(body),
-        result_tx: Some(result_tx),
+        pending: Some((body, result_tx)),
     };
     (move || task.run(), JoinHandle::new(result_rx))
 }
 
 struct BlockingTask<F, R: Send + 'static> {
-    body: Option<F>,
-    result_tx: Option<RemoteTaskSender<R>>,
+    pending: Option<(F, RemoteTaskSender<R>)>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -110,8 +97,7 @@ where
     R: Send + 'static,
 {
     fn run(mut self) {
-        let body = self.body.take().expect("blocking task body is consumed exactly once");
-        let result_tx = self.result_tx.take().expect("blocking task sender is consumed exactly once");
+        let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
         let delivery = match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => result_tx.completed(result),
             Err(panic) => result_tx.panicked(panic),
@@ -124,12 +110,11 @@ where
 
 impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
     fn drop(&mut self) {
-        if let Some(body) = self.body.take() {
-            discard_panicking_drop(body);
-        }
-        if let Some(sender) = self.result_tx.take() {
-            discard_panicking_drop(sender);
-        }
+        let Some((body, result_tx)) = self.pending.take() else {
+            return;
+        };
+        discard_panicking_drop(body);
+        discard_panicking_drop(result_tx);
     }
 }
 
