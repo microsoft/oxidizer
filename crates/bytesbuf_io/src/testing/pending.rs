@@ -253,9 +253,7 @@ mod tests {
         let mut stream = Pending::new();
         let buffer = BytesBuf::new();
 
-        stream
-            .read_at_most_into(100, buffer)
-            .unwrap_pending_for(1, "read_at_most_into should return Pending on first poll");
+        stream.read_at_most_into(100, buffer).unwrap_pending_for(1);
     }
 
     #[test]
@@ -263,18 +261,14 @@ mod tests {
         let mut stream = Pending::new();
         let buffer = BytesBuf::new();
 
-        stream
-            .read_more_into(buffer)
-            .unwrap_pending_for(1, "read_more_into should return Pending on first poll");
+        stream.read_more_into(buffer).unwrap_pending_for(1);
     }
 
     #[test]
     fn read_any_returns_pending_on_first_poll() {
         let mut stream = Pending::new();
 
-        stream
-            .read_any()
-            .unwrap_pending_for(1, "read_any should return Pending on first poll");
+        stream.read_any().unwrap_pending_for(1);
     }
 
     #[test]
@@ -282,8 +276,6 @@ mod tests {
         let mut stream = Pending::new();
         let data = BytesView::default();
 
-        stream
-            .write(data)
-            .unwrap_pending_for(1, "write should return Pending on first poll");
+        stream.write(data).unwrap_pending_for(1);
     }
 }

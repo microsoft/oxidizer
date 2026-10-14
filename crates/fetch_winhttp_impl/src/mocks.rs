@@ -79,10 +79,7 @@ const STALL_POLL_BUDGET: usize = 1024;
 /// Panics if the future is still pending after [`STALL_POLL_BUDGET`] polls.
 #[track_caller]
 pub(crate) fn drive<F: Future>(future: F) -> F::Output {
-    future.unwrap_ready_within(
-        STALL_POLL_BUDGET,
-        "future never completed: a mock-backed completion was never routed to the stage awaiting it",
-    )
+    future.unwrap_ready_within(STALL_POLL_BUDGET)
 }
 
 /// Address used for the mock session handle.
