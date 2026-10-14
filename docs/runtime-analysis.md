@@ -134,6 +134,11 @@ The following package-level exclusions are intentional:
   ownership, destructor, and chunk-lifecycle paths. Tests use smaller
   configurable oversized thresholds or bulk initialization when per-element
   repetition does not add another unsafe state transition.
+- `http_headers` forbids unsafe code. Its two `http::HeaderMap`
+  capacity-exhaustion tests fill the dependency's fixed 24,576-entry limit to
+  reach safe error mapping; under Miri each fill dominates the package's
+  interpreted wall time without reaching an unsafe path. They run natively and
+  under `cargo careful`; the remaining adapter tests stay under Miri.
 - `compressors` cannot run all backends under Miri; its manifest records the
   backend-specific rationale.
 
