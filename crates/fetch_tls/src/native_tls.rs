@@ -10,7 +10,7 @@ use native_tls::TlsConnector;
 
 use crate::TlsBackendBuilder;
 use crate::alpn::map_to_alpn;
-use crate::backend::BackendError;
+use crate::backend::{BackendError, server_name_override_key};
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
 /// Platform native TLS backend.
@@ -122,7 +122,9 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
             .expect("native TLS server name override endpoint must be a valid URI authority");
         let server_name = server_name.into();
         assert!(!server_name.is_empty(), "native TLS server name override cannot be empty");
-        self.backend.server_name_overrides.insert(endpoint.to_string(), server_name);
+        self.backend
+            .server_name_overrides
+            .insert(server_name_override_key(&endpoint), server_name);
         self
     }
 
@@ -268,8 +270,8 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
     #[test]
     fn server_name_override_stores_endpoint_mapping() {
         let builder = TlsOptions::builder_native_tls()
-            .server_name_override("localhost", "expected.example.test")
-            .server_name_override("localhost:8443", "endpoint.example.test");
+            .server_name_override("LOCALHOST", "expected.example.test")
+            .server_name_override("LOCALHOST:8443", "endpoint.example.test");
 
         assert_eq!(
             builder.backend.server_name_overrides.get("localhost").map(String::as_str),

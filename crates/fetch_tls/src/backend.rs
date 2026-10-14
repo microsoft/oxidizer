@@ -49,9 +49,22 @@ impl NativeTlsBackend {
     #[must_use]
     pub fn server_name_for(&self, endpoint: &Authority) -> Option<&str> {
         self.server_name_overrides
-            .get(endpoint.as_str())
-            .or_else(|| self.server_name_overrides.get(endpoint.host()))
+            .get(&server_name_override_key(endpoint))
+            .or_else(|| {
+                self.server_name_overrides
+                    .get(&endpoint.host().trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase())
+            })
             .map(String::as_str)
+    }
+}
+
+#[cfg(any(feature = "native-tls", test))]
+pub(crate) fn server_name_override_key(endpoint: &Authority) -> String {
+    let host = endpoint.host().trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    match endpoint.port_u16() {
+        Some(port) if host.contains(':') => format!("[{host}]:{port}"),
+        Some(port) => format!("{host}:{port}"),
+        None => host,
     }
 }
 
@@ -127,5 +140,42 @@ mod tests {
             Some("host.example.test")
         );
         assert_eq!(backend.server_name_for(&"example.com".parse().unwrap()), None);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    fn native_tls_backend_matches_host_case_insensitively() {
+        let connector = ::native_tls::TlsConnector::new().unwrap();
+        let backend = NativeTlsBackend::new(
+            connector,
+            HashMap::from([
+                ("example.com".to_owned(), "host.example.test".to_owned()),
+                ("example.com:8443".to_owned(), "endpoint.example.test".to_owned()),
+            ]),
+        );
+
+        assert_eq!(
+            backend.server_name_for(&"EXAMPLE.COM:8443".parse().unwrap()),
+            Some("endpoint.example.test")
+        );
+        assert_eq!(
+            backend.server_name_for(&"EXAMPLE.COM:9443".parse().unwrap()),
+            Some("host.example.test")
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    fn native_tls_backend_preserves_ipv6_brackets_in_exact_key() {
+        let connector = ::native_tls::TlsConnector::new().unwrap();
+        let backend = NativeTlsBackend::new(
+            connector,
+            HashMap::from([("[::1]:8443".to_owned(), "loopback.example.test".to_owned())]),
+        );
+
+        assert_eq!(
+            backend.server_name_for(&"[::1]:8443".parse().unwrap()),
+            Some("loopback.example.test")
+        );
     }
 }
