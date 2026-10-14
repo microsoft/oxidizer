@@ -18,6 +18,6 @@ assert_not_impl_any!(RwLockWriteGuard<'static, u64>: Send);
 )]
 fn type_system_contracts() {
     let tests = trybuild::TestCases::new();
-    tests.pass("tests/ui/pass/modes_and_affinity.rs");
+    tests.pass("tests/ui/pass/*.rs");
     tests.compile_fail("tests/ui/*.rs");
 }

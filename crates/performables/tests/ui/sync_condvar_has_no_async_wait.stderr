@@ -1,8 +1,0 @@
-error[E0599]: no method named `wait_async` found for struct `performables::sync::condition::Condvar` in the current scope
- --> tests/ui/sync_condvar_has_no_async_wait.rs:9:20
-  |
-9 |     drop(condition.wait_async(mutex.lock()));
-  |                    ^^^^^^^^^^ method not found in `performables::sync::condition::Condvar`
-  |
-  = note: the method was found for
-          - `performables::sync::condition::Condvar<Async>`

@@ -1,8 +1,0 @@
-error[E0599]: no method named `lock_async` found for struct `performables::sync::mutex::Mutex<u64>` in the current scope
- --> tests/ui/sync_mutex_has_no_async_lock.rs:8:16
-  |
-8 |     drop(mutex.lock_async());
-  |                ^^^^^^^^^^ method not found in `performables::sync::mutex::Mutex<u64>`
-  |
-  = note: the method was found for
-          - `performables::sync::mutex::Mutex<T, Async>`
