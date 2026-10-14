@@ -89,8 +89,9 @@
 //! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) from
 //! that callback is allowed, but the async work must not await another callback
 //! queued to the same saturated pool. That creates a circular dependency and
-//! deadlocks. Directly polling a same-pool blocking handle is rejected, but
-//! Arty does not infer transitive dependencies through async tasks.
+//! deadlocks. Directly waiting for another callback can deadlock for the same
+//! reason. Arty does not reject these waits or infer transitive dependencies
+//! through async tasks.
 //!
 //! # Observe completion before shutdown
 //!

@@ -17,6 +17,9 @@ use crate::runtime::blocking_worker::is_current_blocking_pool;
 /// panic or shutdown cancellation produces [`JoinError`] without unwinding the
 /// joining task.
 ///
+/// For blocking tasks, panic containment covers the callback body. It does not
+/// cover panics from capture or result destructors or from the receiver waker.
+///
 /// Dropping the handle does not cancel its task or rethrow a task panic.
 /// The runtime must remain running for pending async work to complete.
 /// If the task returns its own `Result<T, E>`, joining it produces

@@ -336,7 +336,12 @@ impl Scheduler {
     ///
     /// Use this for synchronous I/O or library calls that would otherwise prevent
     /// an async worker from polling tasks and advancing timers. The callback
-    /// runs on a separate pool thread; its panic is reported through the join.
+    /// runs on a separate pool thread. When unwinding is enabled, a panic from
+    /// the callback body is reported through the join.
+    ///
+    /// This containment guarantee does not extend to panics from destructors of
+    /// callback captures or results, or from a join receiver's waker. Values used
+    /// with blocking work and custom wakers must not panic during those operations.
     ///
     /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).

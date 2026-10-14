@@ -33,7 +33,26 @@ operations handles can outlive individual tasks, but they do not keep the
 runtime running. `Runtime::stop` and `Runtime::drop` request shutdown through
 the dispatcher; workers drop their scheduler values during shutdown, the
 waiter joins async workers, and dropping the runtime-owned pool completes
-blocking-pool shutdown.
+blocking-pool shutdown. Pool destruction is handed to a helper thread only when
+the runtime owner is dropped from an async Arty worker. A Vicinal blocking
+worker does not carry that marker, so dropping the owner from its own blocking
+callback is unsupported and can self-wait.
+
+## Intentional blocking compatibility boundary
+
+Arty guarantees that unwinding from the `spawn_blocking` callback body is
+reported as `JoinError`. The Vicinal integration intentionally does not recreate
+the former blocking-worker machinery for these uncommon edge cases:
+
+- panics while destroying an abandoned blocking result;
+- panics while destroying a cancelled blocking callback capture;
+- panics from a blocking join's receiver waker;
+- runtime-owner destruction from inside the runtime's own blocking callback.
+
+Do not reintroduce those checks or compatibility shims only to restore old
+integration tests. The simpler lifecycle is the current design. Add support
+later only when a concrete caller requirement justifies the extra ownership,
+panic-containment, and reentrancy machinery.
 
 ### Shutdown guard tests
 

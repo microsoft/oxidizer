@@ -53,13 +53,12 @@
 //! # Calling from a worker
 //!
 //! `Runtime::stop` requests shutdown but returns an error rather than waiting
-//! when called from an async Arty worker or one of the runtime's blocking
-//! callbacks. Dropping the owner on any async Arty worker also requests shutdown
-//! without waiting or panicking.
+//! when called from an async Arty worker. Dropping the owner on an async Arty
+//! worker also requests shutdown without waiting or panicking.
 //!
-//! Dropping the owner from its own blocking callback requests shutdown without
-//! waiting for that callback. Neither case guarantees that shutdown has completed
-//! when destruction returns.
+//! Do not call `Runtime::stop` or drop the owner from one of that runtime's
+//! blocking callbacks. Destroying the blocking pool may wait for the callback
+//! that is performing the destruction and deadlock.
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.

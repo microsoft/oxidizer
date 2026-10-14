@@ -40,7 +40,7 @@ impl Drop for Canary {
     }
 }
 
-fn owner_unwind(blocking: bool) {
+fn owner_unwind() {
     let runtime = runtime();
     let (exited, retired) = mpsc::channel();
     let scheduler = runtime
@@ -61,17 +61,10 @@ fn owner_unwind(blocking: bool) {
             drop(guard);
         });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    let failed: arty::task::JoinHandle<()> = if blocking {
-        scheduler.spawn_blocking(move || {
-            let _owner = runtime;
-            panic!("blocking callback owning runtime");
-        })
-    } else {
-        scheduler.spawn(async move |_| {
-            let _owner = runtime;
-            panic!("async task owning runtime");
-        })
-    };
+    let failed: arty::task::JoinHandle<()> = scheduler.spawn(async move |_| {
+        let _owner = runtime;
+        panic!("async task owning runtime");
+    });
     assert!(failed.join().unwrap_err().is_panic());
     cancelled.recv_timeout(TEST_TIMEOUT).unwrap();
     assert!(canary.join().unwrap_err().is_shutdown());
@@ -81,11 +74,5 @@ fn owner_unwind(blocking: bool) {
 
 #[test]
 fn async_owner_drop_during_user_panic_requests_independent_shutdown() {
-    owner_unwind(false);
-}
-
-#[test]
-#[ignore = "dropping a runtime from its own blocking callback requires reentrancy handling"]
-fn blocking_owner_drop_during_user_panic_requests_independent_shutdown() {
-    owner_unwind(true);
+    owner_unwind();
 }

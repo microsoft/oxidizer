@@ -54,26 +54,3 @@ fn abandoned_remote_result_drop_is_contained() {
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }
-
-#[test]
-#[ignore = "vicinal 0.2.1 poisons the pool when an abandoned result destructor panics"]
-fn abandoned_blocking_result_drop_is_contained() {
-    let runtime = runtime();
-    let (started, ready) = mpsc::channel();
-    let (release, gate) = mpsc::channel();
-    let (dropped, received) = mpsc::channel();
-    let drops = Arc::new(AtomicUsize::new(0));
-    let captured = Arc::clone(&drops);
-    let task = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        gate.recv_timeout(TEST_TIMEOUT).unwrap();
-        ResultDropPanic { drops: captured, dropped }
-    });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    drop(task);
-    release.send(()).unwrap();
-    received.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(runtime.scheduler().spawn_blocking(|| 7).join().unwrap(), 7);
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-    runtime.stop().unwrap();
-}

@@ -20,9 +20,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// # Drop
 ///
 /// Dropping the owner requests shutdown and normally waits for workers to stop. Pending
-/// async tasks and queued blocking callbacks are cancelled; blocking
-/// callbacks already running are allowed to finish. A blocking callback that
-/// never returns can therefore prevent shutdown from completing.
+/// async tasks are cancelled. Blocking callbacks admitted before shutdown is observed may
+/// still run, and callbacks already running are allowed to finish. A blocking callback
+/// that never returns can therefore prevent shutdown from completing.
 ///
 /// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
 /// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
@@ -52,6 +52,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 pub struct Runtime {
     scheduler: RuntimeScheduler,
     shutdown_on_drop: bool,
+    // The runtime is the sole pool owner. Shutdown drops it before waiting for async
+    // workers; an async worker hands the blocking wait to a helper thread.
+    blocking_pool: Option<vicinal::Pool>,
 }
 
 impl Runtime {
@@ -129,9 +132,10 @@ impl Runtime {
 
     /// Consumes this runtime, requests shutdown, and waits for its workers to stop.
     ///
-    /// Cancels pending async tasks and prevents queued blocking callbacks from
-    /// starting. Already-running blocking callbacks are allowed to finish.
-    /// Shutdown is still requested when the calling context cannot wait.
+    /// Cancels pending async tasks and rejects blocking submissions after the
+    /// shutdown flag is observed. Already-admitted blocking callbacks may still
+    /// start, and already-running callbacks are allowed to finish.
+    /// Shutdown is still requested when an async Arty worker cannot wait.
     /// `Ok(())` means shutdown has completed. A calling-context error does not
     /// mean the workers have stopped.
     ///
@@ -140,9 +144,11 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if called from an async Arty worker or one of
-    /// this runtime's blocking callbacks, because those contexts cannot wait for
-    /// shutdown. In those cases the owner is consumed without waiting.
+    /// Returns an [`Error`] if called from an async Arty worker, because that
+    /// context cannot wait for shutdown. The owner is consumed without waiting.
+    ///
+    /// Do not call this from one of the runtime's own blocking callbacks.
+    /// Destroying the blocking pool may wait for that callback and deadlock.
     ///
     /// Also returns an error if a worker panicked. All workers are joined before
     /// reporting a worker failure; task failures must be observed through their
@@ -167,24 +173,37 @@ impl Runtime {
     /// ```
     pub fn stop(mut self) -> Result<(), Error> {
         self.scheduler.dispatcher.stop();
+        self.shutdown_blocking_pool();
         self.shutdown_on_drop = false;
         self.wait()
+    }
+
+    fn shutdown_blocking_pool(&mut self) {
+        let Some(pool) = self.blocking_pool.take() else {
+            return;
+        };
+
+        if Scheduler::is_current_worker_thread() {
+            // Pool shutdown may wait for executing blocking callbacks. An async worker
+            // cannot perform that wait without delaying its own runtime shutdown.
+            drop(std::thread::spawn(move || drop(pool)));
+        } else {
+            drop(pool);
+        }
     }
 
     fn wait(&self) -> Result<(), Error> {
         if Scheduler::is_current_worker_thread() {
             return Err(Error::shutdown_wait_from_worker());
         }
-        if self.scheduler.dispatcher.is_current_blocking_task() {
-            return Err(Error::shutdown_wait_from_blocking_callback());
-        }
         self.scheduler.dispatcher.wait()
     }
 
-    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
+    pub(in crate::runtime) const fn with_dispatcher_and_pool(dispatcher: DispatcherClient, blocking_pool: vicinal::Pool) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
             shutdown_on_drop: true,
+            blocking_pool: Some(blocking_pool),
         }
     }
 }
@@ -196,15 +215,12 @@ impl Drop for Runtime {
         }
 
         self.scheduler.dispatcher.stop();
+        self.shutdown_blocking_pool();
         // `wait` rejects self-waits from async workers and blocking callbacks;
         // worker entry wrappers report any resulting failure.
         let _ = self.wait();
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod worker_wait_guards_tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -219,7 +235,6 @@ mod tests {
     use thread_aware::{ThreadBuilder, Unaware};
 
     use super::*;
-    use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
 
@@ -230,34 +245,15 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
         };
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
+            vicinal::Pool::new().scheduler(),
             Sink::noop(),
         )));
-        let runtime = Runtime::with_dispatcher(dispatcher);
+        let runtime = Runtime::with_dispatcher_and_pool(dispatcher, vicinal::Pool::new());
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
-    }
-
-    #[test]
-    fn blocking_callback_is_detected_before_waiting_for_shutdown() {
-        let runtime = Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let dispatcher = runtime.scheduler.dispatcher.clone();
-
-        assert!(
-            runtime
-                .scheduler()
-                .spawn_blocking(move || dispatcher.is_current_blocking_task())
-                .join()
-                .unwrap()
-        );
-
-        runtime.stop().unwrap();
     }
 
     #[test]

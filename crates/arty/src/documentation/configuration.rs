@@ -55,9 +55,8 @@
 //! create a cycle where a callback waits for async work that then awaits
 //! another callback from the same saturated worker group. Shared groups expose
 //! the entire runtime to that cycle; processor-local groups confine it to one
-//! submitting processor. Arty
-//! rejects direct polling of a same-pool blocking handle, but it does not track
-//! transitive dependencies through spawned async tasks.
+//! submitting processor. Arty does not reject direct waits or track transitive
+//! dependencies through spawned async tasks.
 //!
 //! # Entry-point attributes
 //!

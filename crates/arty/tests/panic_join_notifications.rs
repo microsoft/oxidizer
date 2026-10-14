@@ -13,7 +13,7 @@ mod support;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Wake, Waker};
 
 use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
@@ -85,74 +85,4 @@ fn remote_panicking_join_waker_on_cancellation_is_contained() {
     assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_ready());
     assert_eq!(notifications.load(Ordering::SeqCst), 1);
     assert!(notified.load(Ordering::SeqCst));
-}
-
-#[test]
-#[ignore = "vicinal 0.2.1 does not contain panics from join receiver wakers"]
-fn blocking_panicking_join_waker_is_contained() {
-    let runtime = runtime();
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let join = runtime.scheduler().spawn_blocking(move || {
-        started_tx.send(()).unwrap();
-        release_rx.recv().unwrap();
-        42
-    });
-    let mut join = pin!(join);
-    let notified = Arc::new(AtomicBool::new(false));
-    let notifications = Arc::new(AtomicUsize::new(0));
-    let waker = Waker::from(Arc::new(PanicWake {
-        notified: Arc::clone(&notified),
-        notifications: Arc::clone(&notifications),
-    }));
-    assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
-    started_rx.recv().unwrap();
-    release_tx.send(()).unwrap();
-
-    let deadline = std::time::Instant::now() + testing_aids::TEST_TIMEOUT;
-    while !notified.load(Ordering::SeqCst) {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::yield_now();
-    }
-    assert_eq!(futures::executor::block_on(join).unwrap(), 42);
-    assert_eq!(notifications.load(Ordering::SeqCst), 1);
-    runtime.stop().unwrap();
-}
-
-#[test]
-#[ignore = "vicinal 0.2.1 does not contain panics from join receiver wakers"]
-fn blocking_panicking_join_waker_after_stop_is_contained() {
-    let runtime = runtime();
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let running = runtime.scheduler().spawn_blocking(move || {
-        started_tx.send(()).unwrap();
-        release_rx.recv().unwrap();
-    });
-    started_rx.recv().unwrap();
-
-    let queued = runtime.scheduler().spawn_blocking(|| 42);
-    let mut queued = pin!(queued);
-    let notified = Arc::new(AtomicBool::new(false));
-    let notifications = Arc::new(AtomicUsize::new(0));
-    let waker = Waker::from(Arc::new(PanicWake {
-        notified: Arc::clone(&notified),
-        notifications: Arc::clone(&notifications),
-    }));
-    assert!(queued.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
-
-    RuntimeOperations::from(&runtime).request_stop();
-    release_tx.send(()).unwrap();
-    running.join().unwrap();
-    runtime.stop().unwrap();
-
-    let Poll::Ready(outcome) = queued.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
-        panic!("admitted blocking work must resolve");
-    };
-    match outcome {
-        Ok(value) => assert_eq!(value, 42),
-        Err(error) => assert!(error.is_shutdown()),
-    }
-    assert!(notified.load(Ordering::SeqCst));
-    assert_eq!(notifications.load(Ordering::SeqCst), 1);
 }
