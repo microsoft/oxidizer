@@ -9,4 +9,4 @@
 mod preparation;
 mod storage;
 
-pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_blocking, prepare_remote, prepare_remote_on_worker};
+pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_blocking, prepare_remote};

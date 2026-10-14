@@ -89,7 +89,6 @@ futures = { workspace = true, features = ["executor", "async-await"] }
 gungraun = { workspace = true, features = ["default"] }
 many_cpus = { workspace = true, features = ["test-util"] }
 metabench = { path = "../metabench" }
-mockall = { workspace = true }
 mutants = { workspace = true }
 nonempty = { workspace = true }
 observed = { path = "../observed", features = ["test-util"] }

@@ -263,7 +263,6 @@ dependencies = [
  "gungraun",
  "many_cpus",
  "metabench",
- "mockall",
  "mutants",
  "nonempty",
  "observed",

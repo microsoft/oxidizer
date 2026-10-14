@@ -3,7 +3,6 @@
 
 use std::fmt;
 
-use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
 
 pub(in crate::runtime) enum AsyncWorkerCommand {
@@ -18,9 +17,7 @@ pub(in crate::runtime) enum AsyncWorkerCommand {
     /// delivering the output, and an inner layer with the actual user code to execute.
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
-    EnqueueTask {
-        future_factory: Option<BoxedRemoteFutureFactory<Builtins>>,
-    },
+    EnqueueTask { future_factory: Option<BoxedRemoteFutureFactory> },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do

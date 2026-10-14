@@ -12,11 +12,6 @@ use performables::sync::mutex::{Mutex, MutexGuard};
 
 use crate::runtime::Error;
 
-#[cfg_attr(test, mockall::automock)]
-pub(in crate::runtime) trait WaitForShutdown {
-    fn wait(&self) -> Result<(), Error>;
-}
-
 /// Joins workers on one waiting caller; other callers wait for that join to finish.
 #[derive(Debug)]
 pub(in crate::runtime) struct ThreadWaiter {
@@ -63,6 +58,12 @@ impl ThreadWaiter {
         }
     }
 
+    pub(in crate::runtime) fn wait(&self) -> Result<(), Error> {
+        let (state, _) = &*self.shared;
+        let state_guard = state.lock();
+        self.wait_locked(state_guard)
+    }
+
     fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) -> Result<(), Error> {
         let (state, completed) = &*self.shared;
         let current_thread = thread::current().id();
@@ -99,14 +100,6 @@ impl ThreadWaiter {
                 State::Completed(failed_worker) => return completion_result(*failed_worker),
             }
         }
-    }
-}
-
-impl WaitForShutdown for ThreadWaiter {
-    fn wait(&self) -> Result<(), Error> {
-        let (state, _) = &*self.shared;
-        let state_guard = state.lock();
-        self.wait_locked(state_guard)
     }
 }
 

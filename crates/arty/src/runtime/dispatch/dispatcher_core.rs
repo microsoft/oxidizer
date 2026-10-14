@@ -15,7 +15,7 @@ use thread_aware::Thread;
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
-use crate::runtime::thread::waiter::WaitForShutdown;
+use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
@@ -51,8 +51,8 @@ impl From<WorkerIndex> for usize {
 ///
 /// Commands are received as function calls to the dispatcher and delivered via message channels.
 #[derive(Debug)]
-pub(in crate::runtime) struct DispatcherCore<WFS> {
-    wait_for_shutdown: WFS,
+pub(in crate::runtime) struct DispatcherCore {
+    wait_for_shutdown: ThreadWaiter,
 
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
     /// special-case logic in some situations that need special handling during shutdown.
@@ -73,14 +73,18 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     sink: observed::Sink,
 }
 
-impl<WFS> DispatcherCore<WFS> {
+impl DispatcherCore {
     #[cfg(test)]
-    pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
+    pub(in crate::runtime) fn new(
+        wait_for_shutdown: ThreadWaiter,
+        worker_endpoints: NonEmpty<WorkerEndpoint>,
+        sink: observed::Sink,
+    ) -> Self {
         Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
     }
 
     pub(in crate::runtime) fn new_with_shutdown(
-        wait_for_shutdown: WFS,
+        wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
@@ -225,12 +229,7 @@ impl<WFS> DispatcherCore<WFS> {
 
         join_handle
     }
-}
 
-impl<WFS> DispatcherCore<WFS>
-where
-    WFS: WaitForShutdown,
-{
     /// Waits for the runtime to shut down and all worker threads to exit.
     ///
     /// Safe to call multiple times.
@@ -255,7 +254,6 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::test_threads;
-    use crate::runtime::thread::waiter::MockWaitForShutdown;
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
@@ -276,7 +274,7 @@ mod tests {
         let (second_tx, _second_rx) = channel::unbounded();
 
         DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &first), endpoint(second_tx, &second)]).unwrap(),
             observed::Sink::noop(),
         );
@@ -287,10 +285,10 @@ mod tests {
         // We dispatch two tasks to the only worker.
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
@@ -313,10 +311,10 @@ mod tests {
 
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -334,10 +332,10 @@ mod tests {
     fn round_robin_repeats_without_resetting() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -357,7 +355,7 @@ mod tests {
         let (first_tx, first_rx) = channel::unbounded();
         let (second_tx, second_rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
         );
@@ -373,7 +371,7 @@ mod tests {
         let threads = test_threads(2);
         let (tx, _rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
         );
@@ -385,10 +383,10 @@ mod tests {
     fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -415,10 +413,10 @@ mod tests {
         // we ignore any further spawn requests (they simply return disconnected join handles).
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),

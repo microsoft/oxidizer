@@ -3,14 +3,13 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::TaskSet;
+use arty_executor::{RemoteJoinHandle, TaskOptions, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::prepare_remote_on_worker;
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -201,8 +200,12 @@ impl Scheduler {
             }
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
-            let join_handle = prepare_remote_on_worker(future_factory, current.builtins.clone(), parent_task_enrichment, &current.tasks);
-            Ok(join_handle)
+            let builtins = current.builtins.clone();
+            let (result_tx, result_rx) = RemoteJoinHandle::channel();
+            let inner = async move { future_factory(builtins).await };
+            let options = TaskOptions::observed(parent_task_enrichment);
+            drop(current.tasks.add_with_remote_result(inner, options, result_tx));
+            Ok(JoinHandle::new(result_rx))
         })
     }
 

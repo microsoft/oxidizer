@@ -21,21 +21,17 @@ use crate::task::join::JoinHandle;
 /// This keeps the concrete future type visible at the point of registration, so the executor can
 /// store the future inline in its task storage pool. Returning the future would require erasing its
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
-pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet) + Send + 'static>;
+pub(crate) type BoxedRemoteFutureFactory = Box<dyn FnOnce(Builtins, &TaskSet) + Send + 'static>;
 
-pub(crate) fn prepare_remote<C, FF, F, R>(
-    future_factory: FF,
-    parent_task_enrichment: Transfer,
-) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
+pub(crate) fn prepare_remote<FF, F, R>(future_factory: FF, parent_task_enrichment: Transfer) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
 where
-    C: 'static,
-    FF: FnOnce(C) -> F + Send + 'static,
+    FF: FnOnce(Builtins) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
     let (result_tx, result_rx) = RemoteJoinHandle::channel();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
-    let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
+    let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
         let inner = async move { future_factory(cx).await };
@@ -46,24 +42,6 @@ where
         drop(tasks.add_with_remote_result(inner, options, result_tx));
     });
     (future_factory, JoinHandle::new(result_rx))
-}
-
-pub(crate) fn prepare_remote_on_worker<FF, F, R>(
-    future_factory: FF,
-    builtins: Builtins,
-    parent_task_enrichment: Transfer,
-    tasks: &TaskSet,
-) -> JoinHandle<R>
-where
-    FF: FnOnce(Builtins) -> F + Send + 'static,
-    F: Future<Output = R> + 'static,
-    R: Send + 'static,
-{
-    let (result_tx, result_rx) = RemoteJoinHandle::channel();
-    let inner = async move { future_factory(builtins).await };
-    let options = TaskOptions::observed(parent_task_enrichment);
-    drop(tasks.add_with_remote_result(inner, options, result_tx));
-    JoinHandle::new(result_rx)
 }
 
 pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
@@ -137,6 +115,13 @@ mod tests {
     use observed::Sink;
 
     use super::*;
+    use crate::runtime::{Runtime, WorkersPolicy};
+
+    fn test_builtins() -> (Runtime, Builtins) {
+        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+        let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
+        (runtime, builtins)
+    }
 
     #[test]
     fn remote_factory_remains_deferred_until_poll() {
@@ -144,7 +129,7 @@ mod tests {
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
         let (factory, handle) = prepare_remote(
-            move |()| {
+            move |_| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
                 factory_invoked.store(true, Ordering::Relaxed);
                 async {
@@ -158,7 +143,8 @@ mod tests {
         );
 
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
-        factory((), &executor.tasks());
+        let (_runtime, builtins) = test_builtins();
+        factory(builtins, &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
         run_to_completion(&executor);
         let result = block_on(handle).unwrap();
@@ -201,9 +187,10 @@ mod tests {
         struct Payload(u32);
 
         let sink = Sink::noop();
-        let (factory, handle) = prepare_remote(|()| -> std::future::Ready<()> { panic_any(Payload(42)) }, sink.transfer_context());
+        let (factory, handle) = prepare_remote(|_| -> std::future::Ready<()> { panic_any(Payload(42)) }, sink.transfer_context());
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
-        factory((), &executor.tasks());
+        let (_runtime, builtins) = test_builtins();
+        factory(builtins, &executor.tasks());
         run_to_completion(&executor);
         assert!(block_on(handle).unwrap_err().is_panic());
     }
