@@ -559,12 +559,14 @@ pub(crate) trait TypeErasedTask {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::future::{Ready, pending};
     use std::pin::pin;
     use std::rc::Rc;
     #[cfg(not(debug_assertions))]
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Wake, Waker};
 
     use events_once::{Disconnected, LocalEventPool};
@@ -678,6 +680,43 @@ mod tests {
     #[test]
     fn cancelled_future_is_destroyed_at_its_pinned_address() {
         check_pinned_future_destruction(false);
+    }
+
+    struct DropCountingFuture(std::sync::Arc<AtomicUsize>);
+
+    impl Future for DropCountingFuture {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+            task::Poll::Pending
+        }
+    }
+
+    impl Drop for DropCountingFuture {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn future_storage_destroy_pinned_destroys_exactly_once() {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+        {
+            let mut storage = pin!(FutureStorage::new(DropCountingFuture(std::sync::Arc::clone(&drops))));
+
+            storage.as_mut().destroy_pinned().unwrap();
+            assert_eq!(drops.load(Ordering::Relaxed), 1);
+        }
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn future_storage_drop_destroys_live_future() {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+
+        drop(FutureStorage::new(DropCountingFuture(std::sync::Arc::clone(&drops))));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     struct PanicOnDropFuture(Ready<u64>);
@@ -867,6 +906,17 @@ mod tests {
         assert!(task.has_payload());
         let mut cx = task::Context::from_waker(Waker::noop());
         assert_eq!(Pin::new(&mut rx).poll(&mut cx), task::Poll::Ready(Err(Disconnected)));
+    }
+
+    #[test]
+    fn local_result_target_rejects_panic_reporting() {
+        let event_pool = LocalEventPool::<u64>::new();
+        let (sender, _receiver) = event_pool.rent();
+
+        assert_panic!(<PooledLocalSender<u64> as TaskResultTarget<u64>>::panicked(
+            sender,
+            Box::new("local task panic"),
+        ));
     }
 
     #[test]

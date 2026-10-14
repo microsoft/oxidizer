@@ -43,7 +43,7 @@ fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
 fn poll_count(event: &CapturedEvent) -> f64 {
     event
         .field_metrics()
-        .into_iter()
+        .iter()
         .find(|metric| metric.field_key() == "polls")
         .expect("task terminal events include a poll-count histogram")
         .value()
@@ -61,12 +61,13 @@ impl Future for CancellationPanicFuture {
             .take()
             .expect("the cancellation probe is polled once")
             .send(())
-            .unwrap();
+            .expect("the cancellation test keeps its receiver alive while polling");
         Poll::Pending
     }
 }
 
 impl Drop for CancellationPanicFuture {
+    #[expect(clippy::panic, reason = "this test injects a destructor panic to verify telemetry")]
     fn drop(&mut self) {
         panic!("intentional cancellation destructor panic for telemetry test");
     }
@@ -384,9 +385,7 @@ fn panicking_multi_poll_task_reports_aggregate_poll_count() {
             let mut remaining = 3;
             std::future::poll_fn(move |cx| -> Poll<()> {
                 remaining -= 1;
-                if remaining == 0 {
-                    panic!("intentional multi-poll panic for telemetry test");
-                }
+                assert!(remaining != 0, "intentional multi-poll panic for telemetry test");
                 cx.waker().wake_by_ref();
                 Poll::Pending
             })

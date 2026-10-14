@@ -67,7 +67,7 @@ impl fmt::Debug for AsyncWorkerCommand {
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::TaskPlacement;
@@ -82,6 +82,15 @@ mod tests {
         fn wake(self: Arc<Self>) {
             self.0.store(true, Ordering::Release);
             panic!("queued join cancellation notification");
+        }
+    }
+
+    struct PanicOnDrop(Arc<AtomicUsize>);
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            panic!("captured factory destructor panic");
         }
     }
 
@@ -101,5 +110,21 @@ mod tests {
         };
         assert!(error.is_shutdown());
         assert!(wake.0.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn queued_factory_disposal_contains_captured_destructor_panic() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let capture = PanicOnDrop(Arc::clone(&drops));
+        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+            let _ = &capture;
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(QueuedTaskFactory::new(factory));
+        }));
+
+        result.unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 }

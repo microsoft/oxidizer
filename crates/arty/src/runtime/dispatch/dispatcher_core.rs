@@ -210,6 +210,7 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         if self.is_shutting_down() {
+            drop(future_factory);
             return JoinHandle::shutdown();
         }
         let endpoint = self
@@ -254,7 +255,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
-    use crate::runtime::dispatch::test_threads;
+    use crate::runtime::dispatch::{DispatcherClient, test_threads};
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
@@ -378,6 +379,23 @@ mod tests {
         );
 
         assert!(dispatcher.worker_index(threads[1].id()).is_none());
+    }
+
+    #[test]
+    fn shutdown_signal_is_shared_with_dispatcher_client() {
+        let (tx, _rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let core = Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &threads[0])),
+            observed::Sink::noop(),
+        ));
+        let client = DispatcherClient::new(Arc::clone(&core));
+        let signal = client.shutdown_signal();
+
+        core.stop();
+
+        assert!(signal.load(Ordering::Acquire));
     }
 
     #[test]

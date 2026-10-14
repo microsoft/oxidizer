@@ -25,3 +25,33 @@ pub fn discard_task_panic_payload(mut panic: TaskPanicPayload) {
 fn abort_after_repeated_payload_panic(_panic: TaskPanicPayload) -> ! {
     std::process::abort();
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct PanicOnce(Arc<AtomicUsize>);
+
+    impl Drop for PanicOnce {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            panic!("panic payload destructor");
+        }
+    }
+
+    #[test]
+    fn captured_panic_with_panicking_destructor_is_discarded() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe({
+            let drops = Arc::clone(&drops);
+            move || discard_task_panic_payload(Box::new(PanicOnce(drops)))
+        }));
+
+        result.unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+}

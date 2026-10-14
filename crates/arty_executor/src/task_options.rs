@@ -86,3 +86,17 @@ impl TaskOptions {
         self.with_context(|| telemetry::report_panicked(sink, polls));
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observed_options_keep_context_and_placement() {
+        let options = TaskOptions::observed(Sink::noop().transfer_context(), TaskPlacement::SameThread);
+
+        assert!(options.context.is_some());
+        assert_eq!(options.placement, TaskPlacement::SameThread);
+    }
+}

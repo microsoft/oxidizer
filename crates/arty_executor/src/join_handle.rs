@@ -223,6 +223,7 @@ impl<R: Send + 'static> Drop for RemoteTaskSender<R> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -254,5 +255,17 @@ mod tests {
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
         assert_eq!(*error.into_panic().unwrap().downcast::<u64>().unwrap(), 42);
+    }
+
+    #[test]
+    fn join_errors_compare_by_failure_kind() {
+        let shutdown = JoinError::shutdown();
+        let another_shutdown = JoinError::shutdown();
+        let panic = JoinError::panicked(Box::new("first panic"));
+        let another_panic = JoinError::panicked(Box::new("different panic"));
+
+        assert_eq!(shutdown, another_shutdown);
+        assert_eq!(panic, another_panic);
+        assert_ne!(shutdown, panic);
     }
 }

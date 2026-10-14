@@ -4,7 +4,7 @@
 //! Public join-handle and executor-lifecycle contracts.
 
 use std::cell::{Cell, RefCell};
-use std::future::{pending, poll_fn};
+use std::future::{Ready, pending, poll_fn, ready};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -131,6 +131,31 @@ fn disconnected_task_set_returns_shutdown_error() {
 
     let mut handle = tasks.add(async { 42 }, TaskOptions::default());
 
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+struct IntoFutureProbe(Arc<AtomicBool>);
+
+impl IntoFuture for IntoFutureProbe {
+    type Output = ();
+    type IntoFuture = Ready<()>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        self.0.store(true, Ordering::Release);
+        ready(())
+    }
+}
+
+#[test]
+fn rejected_submission_does_not_convert_the_future() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    executor.begin_shutdown();
+    let converted = Arc::new(AtomicBool::new(false));
+
+    let mut handle = tasks.add(IntoFutureProbe(Arc::clone(&converted)), TaskOptions::default());
+
+    assert!(!converted.load(Ordering::Acquire));
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
 }
 
