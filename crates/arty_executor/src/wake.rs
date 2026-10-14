@@ -744,20 +744,23 @@ mod tests {
                 retire_done_tx.send(()).unwrap();
             });
             let deadline = Instant::now() + Duration::from_secs(5);
-            let retired_while_enqueue_blocked = loop {
-                if !state.active.load(atomic::Ordering::Acquire) {
-                    break true;
-                }
-                if retire_done_rx.try_recv().is_ok() || Instant::now() >= deadline {
-                    break false;
+            loop {
+                let active = state.active.load(atomic::Ordering::Acquire);
+                let retire_is_pending = retire_done_rx.try_recv().is_err();
+                let before_deadline = Instant::now() < deadline;
+                assert!(
+                    !active || (retire_is_pending && before_deadline),
+                    "retirement must deactivate the state before returning and within five seconds"
+                );
+                if !active {
+                    break;
                 }
                 thread::yield_now();
-            };
+            }
             resume_enqueue.wait();
 
             assert!(wake.join().unwrap());
             retire.join().unwrap();
-            assert!(retired_while_enqueue_blocked);
         });
 
         assert!(shared.awakened.lock().unwrap().is_empty());
