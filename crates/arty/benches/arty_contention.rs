@@ -228,16 +228,16 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 }
 
 #[benchmark(ARTY, "arty_contention/relocated_cache", "Arty")]
-#[bench::concurrency_w1(&mut ArtyCase::new(1), 10)]
-#[bench::concurrency_w8(&mut ArtyCase::new(8), 10)]
-fn arty_workload(case: &mut ArtyCase, concurrency: u64) -> Duration {
+#[bench::concurrency_w1(&ArtyCase::new(1), 10)]
+#[bench::concurrency_w8(&ArtyCase::new(8), 10)]
+fn arty_workload(case: &ArtyCase, concurrency: u64) -> Duration {
     case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 
 #[benchmark(TOKIO, "arty_contention/relocated_cache", "Tokio")]
-#[bench::concurrency_w1(&mut TokioCase::new(1), 10)]
-#[bench::concurrency_w8(&mut TokioCase::new(8), 10)]
-fn tokio_workload(case: &mut TokioCase, concurrency: u64) -> Duration {
+#[bench::concurrency_w1(&TokioCase::new(1), 10)]
+#[bench::concurrency_w8(&TokioCase::new(8), 10)]
+fn tokio_workload(case: &TokioCase, concurrency: u64) -> Duration {
     case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 

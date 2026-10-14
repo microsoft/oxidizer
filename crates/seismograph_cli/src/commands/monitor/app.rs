@@ -445,6 +445,7 @@ fn advance_selection(selected: usize, item_count: usize) -> usize {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct AllocationViewState {
+    pub(super) events: bool,
     pub(super) sort: AllocationSort,
     pub(super) descending: bool,
     pub(super) selected: usize,
@@ -455,6 +456,7 @@ pub(super) struct AllocationViewState {
 impl AllocationViewState {
     const fn new() -> Self {
         Self {
+            events: false,
             sort: AllocationSort::Allocations,
             descending: true,
             selected: 0,
@@ -515,6 +517,7 @@ pub(super) enum PrimitiveFocus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct HeapViewState {
+    pub(super) native: super::native_ui::Navigation,
     pub(super) tier: MemoryTier,
     pub(super) focus: HeapFocus,
     pub(super) bucket_selected: usize,
@@ -526,6 +529,15 @@ pub(super) struct HeapViewState {
 impl HeapViewState {
     const fn new() -> Self {
         Self {
+            native: super::native_ui::Navigation {
+                root: 0,
+                selected_owner: None,
+                subsystem: 0,
+                class: 0,
+                memory: 0,
+                scroll: 0,
+                depth: super::native_ui::Depth::Root,
+            },
             tier: MemoryTier::Small,
             focus: HeapFocus::Buckets,
             bucket_selected: 0,
@@ -536,9 +548,17 @@ impl HeapViewState {
     }
 
     fn reset(&mut self) {
+        self.native = super::native_ui::Navigation::default();
         self.focus = HeapFocus::Buckets;
         self.bucket_selected = 0;
         self.reset_hotspot();
+    }
+
+    fn refresh_native(&mut self, snapshot: Option<&seismograph_rallocator::native::Snapshot>) {
+        let mut native = self.native;
+        native.reconcile(snapshot);
+        self.reset();
+        self.native = native;
     }
 
     fn reset_hotspot(&mut self) {
@@ -1054,20 +1074,34 @@ impl App {
         }
     }
 
+    fn native_back(&mut self, code: KeyCode) -> bool {
+        self.filters.popup.is_none()
+            && self.recording_configuration_popup.is_none()
+            && matches!(
+                self.screen,
+                Screen::Connected {
+                    tab: MonitorTab::Heaps,
+                    ..
+                } | Screen::Offline {
+                    tab: MonitorTab::Heaps,
+                    ..
+                }
+            )
+            && matches!(code, KeyCode::Esc | KeyCode::Backspace)
+            && self.heap_view.native.key(code, None)
+    }
+
     #[cfg_attr(test, mutants::skip)] // Top-level key routing is terminal input glue covered by focused handlers.
     pub(super) fn handle_key(&mut self, code: KeyCode) -> bool {
-        if self.handle_help_key(code) {
+        if self.handle_help_key(code) || self.native_back(code) {
             return false;
         }
         if self.filters.popup.is_some() {
             self.handle_filter_key(code);
             return false;
         }
-        if matches!(code, KeyCode::Char('q' | 'Q')) {
-            return true;
-        }
         let offline = matches!(self.screen, Screen::Offline { .. });
-        if offline && code == KeyCode::Esc {
+        if matches!(code, KeyCode::Char('q' | 'Q')) || (offline && code == KeyCode::Esc) {
             return true;
         }
         if offline && matches!(code, KeyCode::Char('s' | 'c' | 'd' | 'C')) {
@@ -1110,8 +1144,9 @@ impl App {
                 _ => {}
             },
             Screen::Connected { tab, snapshot, .. } | Screen::Offline { tab, snapshot, .. } => {
+                let scroll_limit = self.panels.rows.native_scroll_limit.get();
                 let handled_by_tab = match *tab {
-                    MonitorTab::Heaps => handle_heap_key(code, &mut self.heap_view, snapshot.as_deref()),
+                    MonitorTab::Heaps => handle_heap_key(code, &mut self.heap_view, snapshot.as_deref(), scroll_limit),
                     MonitorTab::Allocations => handle_allocation_key(code, &mut self.allocation_view, snapshot.as_deref()),
                     MonitorTab::Primitives => handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()),
                     MonitorTab::Threads => handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()),
@@ -1365,8 +1400,8 @@ impl App {
                 if let Screen::Connected { descriptor, snapshot, .. } = &mut self.screen
                     && capture_instance_id == Some(descriptor.instance_id)
                 {
+                    self.heap_view.refresh_native(outcome.snapshot.native.as_deref());
                     *snapshot = Some(outcome.snapshot);
-                    self.heap_view.reset();
                     self.allocation_view.reset_position();
                     self.thread_view.reset();
                     self.runtime_view.reset();
@@ -1650,9 +1685,13 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
             view.stack_scroll = 0;
         }
         KeyCode::Down => {
-            let hotspot_count = snapshot
-                .and_then(|capture| capture.allocations.as_ref())
-                .map_or(0, |allocations| allocations.hotspots.len());
+            let hotspot_count = snapshot.and_then(|capture| capture.allocations.as_ref()).map_or(0, |allocations| {
+                if view.events {
+                    allocations.records.len()
+                } else {
+                    allocations.hotspots.len()
+                }
+            });
             view.selected = advance_selection(view.selected, hotspot_count);
             view.stack_scroll = 0;
         }
@@ -1674,6 +1713,10 @@ fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot
             view.stack_filter = view.stack_filter.toggle();
             view.stack_scroll = 0;
         }
+        KeyCode::Char('e') => {
+            view.events = !view.events;
+            view.reset_position();
+        }
         _ => return false,
     }
     true
@@ -1684,7 +1727,12 @@ fn tier_with_kind(tiers: &[MemoryTierData], kind: MemoryTier) -> Option<&MemoryT
 }
 
 #[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
-fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>, scroll_limit: usize) -> bool {
+    view.native.scroll = view.native.scroll.min(scroll_limit);
+    if let Some(native) = snapshot.and_then(|capture| capture.native.as_deref()) {
+        return view.native.key(code, Some(native));
+    }
+    let native_handled = view.native.key(code, None);
     let memory = snapshot.and_then(|snapshot| snapshot.memory.as_ref());
     let tier = memory.and_then(|memory| tier_with_kind(&memory.tiers, view.tier));
     let bucket = tier.and_then(|tier| tier.buckets.get(view.bucket_selected));
@@ -1733,7 +1781,7 @@ fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&Ca
             view.stack_filter = view.stack_filter.toggle();
             view.stack_scroll = 0;
         }
-        _ => return false,
+        _ => return native_handled,
     }
     true
 }
@@ -2176,6 +2224,7 @@ mod tests {
 
     fn empty_capture() -> Box<CapturedSnapshot> {
         Box::new(CapturedSnapshot {
+            native: None,
             memory: None,
             allocations: None,
             heap_error: None,
@@ -3079,6 +3128,7 @@ mod tests {
         assert_eq!(
             view,
             AllocationViewState {
+                events: false,
                 sort: AllocationSort::AllocatedBytes,
                 descending: true,
                 selected: 0,
@@ -3118,8 +3168,8 @@ mod tests {
     #[test]
     fn heap_keys_switch_tiers_and_focus_hotspots() {
         let mut view = HeapViewState::new();
-        handle_heap_key(KeyCode::Char(']'), &mut view, None);
-        handle_heap_key(KeyCode::Enter, &mut view, None);
+        handle_heap_key(KeyCode::Char(']'), &mut view, None, usize::MAX);
+        handle_heap_key(KeyCode::Enter, &mut view, None, usize::MAX);
 
         assert_eq!((view.tier, view.focus), (MemoryTier::Medium, HeapFocus::Hotspots));
     }
@@ -3141,10 +3191,10 @@ mod tests {
             KeyCode::Char('f'),
             KeyCode::Backspace,
         ] {
-            assert!(handle_heap_key(key, &mut view, None));
+            assert!(handle_heap_key(key, &mut view, None, usize::MAX));
         }
-        assert!(!handle_heap_key(KeyCode::Backspace, &mut view, None));
-        assert!(!handle_heap_key(KeyCode::Char('x'), &mut view, None));
+        assert!(!handle_heap_key(KeyCode::Backspace, &mut view, None, usize::MAX));
+        assert!(!handle_heap_key(KeyCode::Char('x'), &mut view, None, usize::MAX));
 
         let tiers = [
             MemoryTierData {
@@ -3417,6 +3467,45 @@ mod tests {
                 CacheViewState::new(),
                 "saved",
             )
+        );
+    }
+
+    #[test]
+    fn snapshot_refresh_retains_selected_native_endpoint_and_drilldown() {
+        use super::super::native_ui::Depth;
+        let mut app = connected_app(MonitorTab::Heaps);
+        app.capture_instance_id = connected_fields(&app.screen).map(|fields| fields.0);
+        let mut native = crate::native_view::fixture::snapshot();
+        for key in [
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+            KeyCode::Enter,
+            KeyCode::End,
+            KeyCode::Enter,
+        ] {
+            app.heap_view.native.key(key, Some(&native));
+        }
+        let selected = app.heap_view.native.selected_owner;
+        let new_owner = seismograph_rallocator::native::Owner {
+            id: 0x00ab_cdef,
+            ..native.owners[1]
+        };
+        native.owners.insert(0, new_owner);
+        let mut captured = empty_capture();
+        captured.native = Some(std::sync::Arc::new(native));
+        app.finish_snapshot_capture(Ok(CaptureOutcome {
+            snapshot: captured,
+            status: "refreshed".into(),
+        }));
+        assert_eq!(
+            (
+                app.heap_view.native.root,
+                app.heap_view.native.selected_owner,
+                app.heap_view.native.depth,
+                app.heap_view.native.class
+            ),
+            (3, selected, Depth::Class, 43)
         );
     }
 

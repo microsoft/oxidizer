@@ -21,7 +21,7 @@ use std::{env, fs};
 
 use serde::Deserialize;
 
-const SCHEMA_VERSION: u32 = 8;
+const SCHEMA_VERSION: u32 = 9;
 const DEFAULT_ARTIFACT: &str = "target/metabench/http_headers_per_header/report.json";
 const DEFAULT_REPORT: &str = "crates/http_headers/docs/PERF.md";
 
@@ -369,7 +369,7 @@ fn render(report: &Report) -> Result<String, String> {
     .map_err(|error| format!("cannot render report disclaimer: {error}"))?;
     writeln!(
         output,
-        "Each cell reports metabench's median wall-clock time, Callgrind instruction\n\
+        "Each cell reports Criterion's primary wall-clock estimate, Callgrind instruction\n\
          count, allocation count, and total allocated bytes for one typed decode and\n\
          read. Benchmarks consume the decoded value and force comparable semantic work\n\
          when `headers 0.4.1` defers parsing. Setup uses a prebuilt `HeaderMap` outside\n\
@@ -421,16 +421,16 @@ fn required_entry<'a>(
 }
 
 fn measurements(entry: &Entry) -> Result<Measurements, String> {
-    let time = metric(entry, "criterion", "median")?;
+    let time = metric(entry, "criterion", "time")?;
     if time.unit.as_deref() != Some("ns") {
         return Err(format!(
-            "`{}` criterion median has unit {}, expected ns",
+            "`{}` criterion primary estimate (`time`) has unit {}, expected ns",
             entry.identity,
             time.unit.as_deref().unwrap_or("<missing>")
         ));
     }
     Ok(Measurements {
-        time_ns: finite_nonnegative(entry, "criterion/median", float_value(time.value))?,
+        time_ns: finite_nonnegative(entry, "criterion/time", float_value(time.value))?,
         instructions: integer_metric(entry, "gungraun.callgrind", "Ir")?,
         allocations: integer_metric(entry, "alloc_tracker", "Allocations")?,
         allocated_bytes: integer_metric(entry, "alloc_tracker", "Allocated bytes")?,
@@ -502,4 +502,47 @@ fn grouped(value: u64) -> String {
 
 fn bytes(value: u64) -> String {
     format!("{} B", grouped(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Report, SCHEMA_VERSION, measurements};
+
+    #[test]
+    fn schema_nine_primary_estimate_preserves_allocation_metrics() {
+        let mut report: Report = serde_json::from_str(
+            r#"{
+                "schema_version": 9,
+                "entries": [{
+                    "identity": "example",
+                    "results": {
+                        "criterion": {"metrics": {"time": {"value": 12.5, "unit": "ns"}}},
+                        "gungraun.callgrind": {"metrics": {"Ir": {"value": 123}}},
+                        "alloc_tracker": {"metrics": {
+                            "Allocations": {"value": 2},
+                            "Allocated bytes": {"value": 64}
+                        }}
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(report.schema_version, SCHEMA_VERSION);
+        let entry = &mut report.entries[0];
+        let result = measurements(entry).unwrap();
+        assert_eq!(result.time_ns, 12.5);
+        assert_eq!(result.instructions, 123);
+        assert_eq!(result.allocations, 2);
+        assert_eq!(result.allocated_bytes, 64);
+
+        let metrics = &mut entry.results.get_mut("criterion").unwrap().metrics;
+        let time = metrics.remove("time").unwrap();
+        metrics.insert("median".to_string(), time);
+        assert!(
+            measurements(entry)
+                .err()
+                .unwrap()
+                .contains("criterion/time")
+        );
+    }
 }

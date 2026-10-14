@@ -10,7 +10,7 @@ use syn::{
     Signature, Token, parse_quote, parse2,
 };
 
-use crate::shared::{metabench_path, parse_ident_value, reject_if_too_complex, support_ident};
+use crate::shared::{metabench_path, native_ident, parse_ident_value, reject_if_too_complex, support_ident};
 
 struct BenchmarkArguments {
     identity: Ident,
@@ -311,25 +311,12 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
     let callable_attributes = attributes.callable;
     let conditional_attributes = attributes.conditional;
     let case_attributes = attributes.cases;
-    let allocation_tracking = function.sig.constness.is_none();
-    if allocation_tracking {
-        let body = function.block;
-        let allocation_measurement = format_ident!("_metabench_allocation_measurement", span = Span::mixed_site());
-        let perf_measurement = format_ident!("_metabench_perf_measurement", span = Span::mixed_site());
-        let vtune_measurement = format_ident!("_metabench_vtune_measurement", span = Span::mixed_site());
-        function.block = parse_quote!({
-            let #allocation_measurement = #metabench::__private::begin_allocation_measurement();
-            let #perf_measurement = #metabench::__private::begin_perf_measurement();
-            let #vtune_measurement = #metabench::__private::begin_vtune_measurement();
-            #body
-        });
-    }
     function.attrs.push(syn::parse_quote!(#[inline(never)]));
 
     let callable_name = &function.sig.ident;
     let logical_identity = identity.to_string();
-    let adapter_name = support_ident("benchmark", &logical_identity);
-    let native_group_name = support_ident("group", &logical_identity);
+    let adapter_name = native_ident("benchmark", &logical_identity);
+    let native_group_name = native_ident("group", &logical_identity);
     let (adapter_signature, call_arguments) = adapter_signature(&function.sig, &adapter_name)?;
     let generic_arguments = function.sig.generics.params.iter().filter_map(|parameter| match parameter {
         GenericParam::Type(parameter) => Some(&parameter.ident),
@@ -337,13 +324,16 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
     });
     let generic_arguments = generic_arguments.collect::<Vec<_>>();
     let turbofish = (!generic_arguments.is_empty()).then(|| quote!(::<#(#generic_arguments),*>));
-    let call = quote!(#callable_name #turbofish (#(#call_arguments),*));
+    // Gungraun nests each adapter in its benchmark and wrapper modules, beneath
+    // our support module. Resolve the original function outside all three.
+    let call = quote!(super::super::super::#callable_name #turbofish (#(#call_arguments),*));
     let native_attribute = if native.is_empty() {
         quote!(#[#metabench::__private::gungraun::library_benchmark])
     } else {
         quote!(#[#metabench::__private::gungraun::library_benchmark(#native)])
     };
     let adapter_module = support_ident("native", &logical_identity);
+    let probe_module = support_ident("probe", &logical_identity);
     let visibility = &function.vis;
 
     Ok(quote! {
@@ -357,7 +347,7 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
                 #benchmark_name,
                 stringify!(#native_group_name),
                 stringify!(#adapter_name),
-                #allocation_tracking,
+                true,
             );
 
         #(#conditional_attributes)*
@@ -375,6 +365,30 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
             #adapter_signature {
                 #call
             }
+        }
+
+            #(#conditional_attributes)*
+            #[expect(
+                clippy::allow_attributes,
+                clippy::allow_attributes_without_reason,
+                reason = "the Gungraun case macro emits lint-control attributes"
+            )]
+            mod #probe_module {
+                use super::*;
+                use #metabench::__private::gungraun;
+
+                #native_attribute
+                #(#case_attributes)*
+                #adapter_signature {
+                    let allocations = #metabench::__private::begin_allocation_measurement();
+                    let perf = #metabench::__private::begin_perf_measurement();
+                    let vtune = #metabench::__private::begin_vtune_measurement();
+                    let output = #call;
+                    ::core::mem::drop(vtune);
+                    ::core::mem::drop(perf);
+                    ::core::mem::drop(allocations);
+                    output
+                }
         }
     })
 }
@@ -398,9 +412,10 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
 /// Async, const-generic, and unsafe functions are rejected because the
 /// generated adapter cannot correctly invoke those adapter shapes or uphold
 /// an unsafe function's safety contract. Ordinary generic, const, and
-/// explicitly ABI-qualified functions are supported. Const functions run
-/// under Criterion and Gungraun but do not participate in runtime allocation,
-/// Linux perf, or `VTune` tracking.
+/// explicitly ABI-qualified functions are supported. Collection controls exist
+/// only in a separate private probe adapter, never in the preserved function.
+/// Adapter calls resolve directly to the preserved function even when its name
+/// matches a generated argument or collector-control local.
 pub fn benchmark(arguments: TokenStream2, item: TokenStream2) -> Result<TokenStream2> {
     reject_if_too_complex(&arguments)?;
     let arguments = parse2(arguments)?;
@@ -412,8 +427,8 @@ pub fn benchmark(arguments: TokenStream2, item: TokenStream2) -> Result<TokenStr
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use quote::quote;
-    use syn::ItemFn;
+    use quote::{ToTokens, quote};
+    use syn::{Expr, GenericArgument, Item, ItemFn, Stmt};
 
     use super::{BenchmarkArguments, adapter_signature, expand_benchmark, partition_attributes};
 
@@ -425,6 +440,275 @@ mod tests {
         let arguments = syn::parse2::<BenchmarkArguments>(arguments)?;
         let function = syn::parse2::<ItemFn>(function)?;
         expand_benchmark(arguments, function, &quote!(::metabench)).map(|tokens| compact(&tokens))
+    }
+
+    fn assert_same_syntax(actual: &impl ToTokens, expected: &impl ToTokens) {
+        assert_eq!(actual.to_token_stream().to_string(), expected.to_token_stream().to_string());
+    }
+
+    fn assert_preserved_workload(preserved: &ItemFn, input: &ItemFn) {
+        assert_same_syntax(&preserved.sig, &input.sig);
+        assert_same_syntax(&preserved.vis, &input.vis);
+        assert_same_syntax(&preserved.block, &input.block);
+        let expected: ItemFn = syn::parse_quote! {
+            /// Workload documentation.
+            #[cfg(feature = "enabled")]
+            #[cfg_attr(unix, cold, cfg_attr(feature = "nested", cfg(all())))]
+            #[inline(never)]
+            fn expected() {}
+        };
+        assert_eq!(preserved.attrs.len(), expected.attrs.len());
+        for (actual, expected) in preserved.attrs.iter().zip(&expected.attrs) {
+            assert_same_syntax(actual, expected);
+        }
+    }
+
+    fn assert_ordinary_adapter(adapter: &ItemFn, input: &ItemFn) {
+        assert!(matches!(adapter.vis, syn::Visibility::Inherited));
+        assert!(adapter.sig.constness.is_none());
+        assert!(adapter.sig.abi.is_none());
+        assert_same_syntax(&adapter.sig.generics, &input.sig.generics);
+        assert_same_syntax(&adapter.sig.output, &input.sig.output);
+        assert_eq!(adapter.sig.inputs.len(), input.sig.inputs.len());
+        for (index, (actual, original)) in adapter.sig.inputs.iter().zip(&input.sig.inputs).enumerate() {
+            let (syn::FnArg::Typed(actual), syn::FnArg::Typed(original)) = (actual, original) else {
+                panic!("expected typed adapter arguments");
+            };
+            assert_same_syntax(&actual.ty, &original.ty);
+            assert_eq!(actual.attrs.len(), original.attrs.len());
+            for (actual, expected) in actual.attrs.iter().zip(&original.attrs) {
+                assert_same_syntax(actual, expected);
+            }
+            let syn::Pat::Ident(pattern) = &*actual.pat else {
+                panic!("expected a forwarding identifier");
+            };
+            assert_eq!(pattern.ident, format!("__metabench_argument_{index}"));
+            assert!(pattern.by_ref.is_none() && pattern.mutability.is_none() && pattern.subpat.is_none());
+        }
+        let [Stmt::Expr(Expr::Call(call), None)] = adapter.block.stmts.as_slice() else {
+            panic!("ordinary adapter must contain exactly one returned workload call");
+        };
+        let Expr::Path(callee) = &*call.func else {
+            panic!("expected a direct workload call");
+        };
+        assert!(callee.qself.is_none());
+        assert!(callee.path.leading_colon.is_none());
+        assert_eq!(callee.path.segments.len(), 4);
+        for segment in callee.path.segments.iter().take(3) {
+            assert_eq!(segment.ident, "super");
+            assert!(matches!(segment.arguments, syn::PathArguments::None));
+        }
+        assert_eq!(callee.path.segments[3].ident, input.sig.ident);
+        let expected_types = input
+            .sig
+            .generics
+            .type_params()
+            .map(|parameter| parameter.ident.to_string())
+            .collect::<Vec<_>>();
+        match &callee.path.segments[3].arguments {
+            syn::PathArguments::None => assert_eq!(expected_types, [] as [String; 0]),
+            syn::PathArguments::AngleBracketed(arguments) => {
+                assert!(arguments.colon2_token.is_some());
+                let types = arguments
+                    .args
+                    .iter()
+                    .map(|argument| {
+                        let GenericArgument::Type(syn::Type::Path(ty)) = argument else {
+                            panic!("only type parameters should be explicitly forwarded");
+                        };
+                        ty.to_token_stream().to_string()
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(types, expected_types);
+            }
+            syn::PathArguments::Parenthesized(_) => panic!("expected a turbofish"),
+        }
+        assert_eq!(call.args.len(), input.sig.inputs.len());
+        for (index, argument) in call.args.iter().enumerate() {
+            let expected: Expr = syn::parse_str(&format!("__metabench_argument_{index}")).unwrap();
+            assert_same_syntax(argument, &expected);
+        }
+    }
+
+    #[test]
+    fn collector_and_argument_names_cannot_shadow_the_preserved_workload() {
+        for name in ["allocations", "perf", "vtune", "output", "__metabench_argument_0", "drop"] {
+            let name = syn::Ident::new(name, proc_macro2::Span::call_site());
+            let input: ItemFn = syn::parse_quote! {
+                fn #name(value: u64) -> u64 {
+                    const BODY_SENTINEL: u64 = 41;
+                    value + BODY_SENTINEL
+                }
+            };
+            let arguments = syn::parse2::<BenchmarkArguments>(quote!(IDENTITY, GROUP, "name")).unwrap();
+            let output = expand_benchmark(arguments, syn::parse2(input.to_token_stream()).unwrap(), &quote!(::metabench)).unwrap();
+            let output: syn::File = syn::parse2(output).unwrap();
+            let Item::Fn(preserved) = &output.items[0] else {
+                panic!("expected the preserved workload");
+            };
+            assert_same_syntax(&preserved.sig, &input.sig);
+            assert_same_syntax(&preserved.vis, &input.vis);
+            assert_same_syntax(&preserved.block, &input.block);
+            let expected_attribute: syn::Attribute = syn::parse_quote!(#[inline(never)]);
+            assert_eq!(preserved.attrs.len(), 1);
+            assert_same_syntax(&preserved.attrs[0], &expected_attribute);
+            let adapters = output
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let Item::Mod(module) = item else {
+                        return None;
+                    };
+                    module.content.as_ref().unwrap().1.iter().find_map(|item| {
+                        let Item::Fn(function) = item else {
+                            return None;
+                        };
+                        Some(function)
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(adapters.len(), 2);
+            assert_ordinary_adapter(adapters[0], &input);
+            let Stmt::Local(local) = &adapters[1].block.stmts[3] else {
+                panic!("expected the captured workload result");
+            };
+            let expected: Expr = syn::parse_quote!(super::super::super::#name(__metabench_argument_0));
+            assert_same_syntax(&local.init.as_ref().unwrap().expr, &expected);
+            for (statement, name) in adapters[1].block.stmts[4..7].iter().zip(["vtune", "perf", "allocations"]) {
+                let name = syn::Ident::new(name, proc_macro2::Span::call_site());
+                let expected: Stmt = syn::parse_quote!(::core::mem::drop(#name););
+                assert_same_syntax(statement, &expected);
+            }
+        }
+    }
+
+    #[test]
+    fn preserved_workload_and_ordinary_adapter_have_exact_structure() {
+        let functions = [
+            quote! {
+                fn workload() -> u64 {
+                    const BODY_SENTINEL: u64 = 41;
+                    BODY_SENTINEL + 1
+                }
+            },
+            quote! {
+                pub(crate) fn workload(#[allow(unused)] mut value: u64, _: bool) -> u64 {
+                    const BODY_SENTINEL: u64 = 41;
+                    value += BODY_SENTINEL;
+                    if value > 100 { return value - 1; }
+                    value + 1
+                }
+            },
+            quote! {
+                pub const fn workload(value: u64) -> u64 {
+                    const BODY_SENTINEL: u64 = 41;
+                    value + BODY_SENTINEL
+                }
+            },
+            quote! {
+                pub(super) extern "C" fn workload(value: u64) -> u64 {
+                    const BODY_SENTINEL: u64 = 41;
+                    value + BODY_SENTINEL
+                }
+            },
+            quote! {
+                fn workload<'a>(value: &'a str) -> &'a str {
+                    let BODY_SENTINEL = value;
+                    BODY_SENTINEL
+                }
+            },
+            quote! {
+                pub fn workload<'a, T: Copy, U>(value: &'a T, extra: U) -> (&'a T, U)
+                where T: Send, U: Clone {
+                    let BODY_SENTINEL = extra.clone();
+                    (value, BODY_SENTINEL)
+                }
+            },
+        ];
+        for function in functions {
+            let input: ItemFn = syn::parse2(quote! {
+                /// Workload documentation.
+                #[cfg(feature = "enabled")]
+                #[cfg_attr(unix, cold, bench::one(1), inline(always), cfg_attr(feature = "nested", cfg(all()), benches::many(iter = 1..=2)))]
+                #[inline(always)]
+                #[bench::ordinary(1)]
+                #function
+            })
+            .unwrap();
+            let arguments = syn::parse2::<BenchmarkArguments>(quote!(IDENTITY, GROUP, "name")).unwrap();
+            let retained_input = syn::parse2(input.to_token_stream()).unwrap();
+            let output = expand_benchmark(arguments, retained_input, &quote!(::metabench)).unwrap();
+            let output: syn::File = syn::parse2(output).unwrap();
+            let preserved = output
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Fn(function) if function.sig.ident == "workload" => Some(function),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(preserved.len(), 1);
+            assert_preserved_workload(preserved[0], &input);
+
+            let ordinary_modules = output
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Mod(module) if module.ident.to_string().starts_with("__metabench_native_") => Some(module),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(ordinary_modules.len(), 1);
+            let ordinary = ordinary_modules[0];
+            let expected_conditions: ItemFn = syn::parse_quote! {
+                #[cfg(feature = "enabled")]
+                #[cfg_attr(unix, cfg_attr(feature = "nested", cfg(all())))]
+                fn expected() {}
+            };
+            assert_eq!(ordinary.attrs.len(), expected_conditions.attrs.len() + 1);
+            for (actual, expected) in ordinary.attrs.iter().zip(&expected_conditions.attrs) {
+                assert_same_syntax(actual, expected);
+            }
+            let adapters = ordinary
+                .content
+                .as_ref()
+                .unwrap()
+                .1
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Fn(function) => Some(function),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(adapters.len(), 1);
+            assert_ordinary_adapter(adapters[0], &input);
+        }
+    }
+
+    #[test]
+    fn workload_body_has_no_runtime_collector_checks() {
+        let expanded = expand(
+            quote!(IDENTITY, GROUP, "name"),
+            quote!(
+                fn workload(value: u64) -> u64 {
+                    value + 1
+                }
+            ),
+        )
+        .unwrap();
+        let workload = expanded.split("constIDENTITY").next().unwrap();
+        assert!(!workload.contains("begin_allocation_measurement"));
+        assert!(!workload.contains("begin_perf_measurement"));
+        assert!(!workload.contains("begin_vtune_measurement"));
+        assert!(expanded.contains("#[inline(never)]"));
+        assert!(expanded.contains("value+1"));
+        let native = expanded.split("mod__metabench_probe_").next().unwrap();
+        assert!(!native.contains("begin_allocation_measurement"));
+        assert!(!native.contains("begin_perf_measurement"));
+        assert!(!native.contains("begin_vtune_measurement"));
+        assert_eq!(expanded.matches("begin_allocation_measurement").count(), 1);
+        assert_eq!(expanded.matches("begin_perf_measurement").count(), 1);
+        assert_eq!(expanded.matches("begin_vtune_measurement").count(), 1);
     }
 
     #[test]

@@ -49,7 +49,6 @@ allocator-api2 = { workspace = true, features = ["alloc", "std"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
-infinity_pool = { workspace = true }
 metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
