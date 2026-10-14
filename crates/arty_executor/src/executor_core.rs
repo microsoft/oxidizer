@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{mem, task};
 
-use events_once::PooledLocalSender;
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
 use plurality::MultiPool;
@@ -153,14 +152,14 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        {
-            let state = self.reentrancy_safe.borrow();
-            if state.shutting_down {
-                return state.join_events.disconnected();
-            }
+        if let Some(join_handle) = self.rejected_submission() {
+            return join_handle;
         }
         let future = future.into_future();
-        self.register_task(move |result_tx, sink| Task::new_with_options(future, result_tx, options, sink))
+        self.register_task(move |join_events, sink| {
+            let (result_tx, join_handle) = join_events.rent();
+            (Task::new_with_options(future, result_tx, options, sink), join_handle)
+        })
     }
 
     pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
@@ -168,17 +167,22 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,
     {
-        {
-            let state = self.reentrancy_safe.borrow();
-            if state.shutting_down {
-                return state.join_events.disconnected();
-            }
+        if let Some(join_handle) = self.rejected_submission() {
+            return join_handle;
         }
         let future = future.into_future();
-        self.register_task(move |result_tx, sink| Task::new_remote(future, result_tx, options, sink, remote_result_tx))
+        self.register_task(move |join_events, sink| {
+            let join_handle = join_events.disconnected();
+            (Task::new_remote(future, options, sink, remote_result_tx), join_handle)
+        })
     }
 
-    fn register_task<R, T>(&self, create: impl FnOnce(PooledLocalSender<R>, Sink) -> T) -> JoinHandle<R>
+    fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
+        let state = self.reentrancy_safe.borrow();
+        state.shutting_down.then(|| state.join_events.disconnected())
+    }
+
+    fn register_task<R, T>(&self, create: impl FnOnce(&JoinEventLake, Sink) -> (T, JoinHandle<R>)) -> JoinHandle<R>
     where
         R: 'static,
         T: TypeErasedTask + 'static,
@@ -187,9 +191,9 @@ impl ExecutorCore {
         if state.shutting_down {
             return state.join_events.disconnected();
         }
-        let (result_tx, join_handle) = state.join_events.rent::<R>();
+        let (task, join_handle) = create(&state.join_events, self.sink.clone());
 
-        let task_ref = TaskRef::new(state.task_storage.alloc_box(create(result_tx, self.sink.clone())));
+        let task_ref = TaskRef::new(state.task_storage.alloc_box(task));
 
         let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
 

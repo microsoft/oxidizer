@@ -113,14 +113,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn new_remote(
-        future: F,
-        result_tx: PooledLocalSender<R>,
-        options: TaskOptions,
-        sink: Sink,
-        remote_result_tx: RemoteTaskSender<R>,
-    ) -> Self {
-        drop(result_tx);
+    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteTaskSender<R>) -> Self {
         Self::new_with_target(future, ResultTarget::Remote(Box::new(remote_result_tx)), options, sink)
     }
 }
@@ -740,8 +733,6 @@ mod tests {
 
     #[test]
     fn observed_remote_panic_reports_aggregate_poll_count() {
-        let event_pool = LocalEventPool::<u64>::new();
-        let (tx, _rx) = event_pool.rent();
         let (result_tx, mut result_rx) = RemoteJoinHandle::<u64>::channel();
         let (sink, processor) = test_emitter(TEST_ID);
         let polls = Rc::new(Cell::new(0));
@@ -754,7 +745,6 @@ mod tests {
                     task::Poll::Pending
                 }
             }),
-            tx,
             TaskOptions::observed(sink.transfer_context()),
             sink,
             result_tx,

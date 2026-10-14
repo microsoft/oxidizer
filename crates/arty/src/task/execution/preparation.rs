@@ -42,9 +42,13 @@ impl<F> Drop for TaskFactory<F> {
             .as_ref()
             .expect("a queued factory retains enrichment until disposal")
             .apply_current_thread();
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
-            discard_task_panic(panic);
-        }
+        discard_panicking_drop(factory);
+    }
+}
+
+fn discard_panicking_drop<T>(value: T) {
+    if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(value))) {
+        discard_task_panic(panic);
     }
 }
 
@@ -108,32 +112,23 @@ where
     fn run(mut self) {
         let body = self.body.take().expect("blocking task body is consumed exactly once");
         let result_tx = self.result_tx.take().expect("blocking task sender is consumed exactly once");
-        match catch_unwind(AssertUnwindSafe(body)) {
-            Ok(result) => {
-                if let Err(panic) = result_tx.completed(result) {
-                    discard_task_panic(panic);
-                }
-            }
-            Err(panic) => {
-                if let Err(disposal) = result_tx.panicked(panic) {
-                    discard_task_panic(disposal);
-                }
-            }
+        let delivery = match catch_unwind(AssertUnwindSafe(body)) {
+            Ok(result) => result_tx.completed(result),
+            Err(panic) => result_tx.panicked(panic),
+        };
+        if let Err(panic) = delivery {
+            discard_task_panic(panic);
         }
     }
 }
 
 impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
     fn drop(&mut self) {
-        if let Some(body) = self.body.take()
-            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(body)))
-        {
-            discard_task_panic(panic);
+        if let Some(body) = self.body.take() {
+            discard_panicking_drop(body);
         }
-        if let Some(sender) = self.result_tx.take()
-            && let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(sender)))
-        {
-            discard_task_panic(panic);
+        if let Some(sender) = self.result_tx.take() {
+            discard_panicking_drop(sender);
         }
     }
 }

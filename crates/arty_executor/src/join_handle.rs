@@ -199,16 +199,20 @@ impl<R: Send + 'static> Debug for RemoteTaskSender<R> {
 }
 
 impl<R: Send + 'static> RemoteTaskSender<R> {
+    fn send(self, result: TaskResult<R>) -> Result<(), TaskPanic> {
+        catch_unwind(AssertUnwindSafe(|| self.tx.send(result)))
+    }
+
     /// Sends a successfully completed result.
     #[doc(hidden)]
     pub fn completed(self, result: R) -> Result<(), TaskPanic> {
-        catch_unwind(AssertUnwindSafe(|| self.tx.send(TaskResult::Completed(result))))
+        self.send(TaskResult::Completed(result))
     }
 
     /// Sends a captured task panic.
     #[doc(hidden)]
     pub fn panicked(self, panic: TaskPanic) -> Result<(), TaskPanic> {
-        catch_unwind(AssertUnwindSafe(|| self.tx.send(TaskResult::Panicked(panic))))
+        self.send(TaskResult::Panicked(panic))
     }
 }
 
