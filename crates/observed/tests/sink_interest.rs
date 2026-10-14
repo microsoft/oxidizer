@@ -9,11 +9,12 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed::{Event, EventSampler, EventSamplingContext, EventSamplingDecision, FlushError, Sink, emit, event};
-use tick::SimpleClock;
+use tick::{ClockControl, SimpleClock};
 
 /// Event used to compare interest queries with actual construction and delivery.
 #[event("interest.accepted")]
@@ -150,6 +151,36 @@ fn initialization_updates_interest_in_both_directions() {
         assert_eq!(composite.is_interested(&AcceptedEvent::DESCRIPTION), after);
         processor.assert_untouched();
         uninterested.assert_untouched();
+    }
+}
+
+#[test]
+fn interest_queries_do_not_read_leaf_clocks() {
+    for (first_interest, second_interest) in [(false, false), (false, true), (true, false), (true, true)] {
+        // Nonzero increments make any clock read observable without using real time.
+        let first_control = ClockControl::new().auto_advance(Duration::from_secs(1));
+        let second_control = ClockControl::new().auto_advance(Duration::from_secs(1));
+        let first = Sink::new(
+            "first",
+            vec![Arc::new(ProbeProcessor::new(first_interest))],
+            first_control.to_simple_clock(),
+        );
+        let second = Sink::new(
+            "second",
+            vec![Arc::new(ProbeProcessor::new(second_interest))],
+            second_control.to_simple_clock(),
+        );
+        let composite = Sink::composite([first.clone(), second.clone()]);
+
+        assert_eq!(first.is_interested(&AcceptedEvent::DESCRIPTION), first_interest);
+        assert_eq!(second.is_interested(&AcceptedEvent::DESCRIPTION), second_interest);
+        assert_eq!(
+            composite.is_interested(&AcceptedEvent::DESCRIPTION),
+            first_interest || second_interest
+        );
+
+        assert_eq!(first_control.to_simple_clock().system_time(), SystemTime::UNIX_EPOCH);
+        assert_eq!(second_control.to_simple_clock().system_time(), SystemTime::UNIX_EPOCH);
     }
 }
 

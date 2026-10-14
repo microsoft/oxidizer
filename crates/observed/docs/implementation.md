@@ -18,7 +18,7 @@ Earlier decisions are not revisited within this emission.
 
 ## Shared delivery
 
-Typed and sampled dynamic dispatch read the leaf clock and run any sampler before selecting recipients.
+After initial admission, typed and sampled dynamic dispatch read the leaf clock and run any sampler before fresh recipient checks.
 Dynamic dispatch without a sampler retains its first selected recipient and checks only the remaining processors.
 Both paths use `SingleSinkState::deliver` to capture enrichment and share one timestamp and view across the leaf.
 The recipient iterator stays lazy, so later interest checks observe preceding processor callbacks.
