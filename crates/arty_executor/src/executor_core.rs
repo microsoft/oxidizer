@@ -394,6 +394,12 @@ impl ExecutorCore {
                     // The task is still pending, so we move it to the inactive set.
                     // It will return to the active set once something jiggles its waker.
                     state_exclusive.inactive.insert(task_ref);
+                    // A wake may have fallen back to the embedded signal while this task was
+                    // already active and therefore absent from the probe scan. Re-arm the probe
+                    // after reclassification so the next cycle cannot suspend past that wake.
+                    if task.is_awakened() {
+                        self.wake.probe_embedded_wake_signals.store(true, atomic::Ordering::Release);
+                    }
                 }
             }
         }
@@ -648,6 +654,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::Pin;
     use std::rc::Rc;
+    use std::task::Poll;
 
     use static_assertions::assert_not_impl_any;
 
@@ -852,5 +859,47 @@ mod tests {
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(ExecutorCore: Send, Sync);
+    }
+
+    #[test]
+    fn embedded_wake_racing_active_poll_is_reprobed_after_reclassification() {
+        let core = ExecutorCore::new(task::Waker::noop().clone(), Sink::noop());
+        let captured = Rc::new(Cell::new(None));
+        let polls = Rc::new(Cell::new(0));
+        let handle = core.add_task(
+            std::future::poll_fn({
+                let captured = Rc::clone(&captured);
+                let polls = Rc::clone(&polls);
+                move |cx| {
+                    polls.set(polls.get() + 1);
+                    captured.set(Some(cx.waker().clone()));
+                    Poll::<()>::Pending
+                }
+            }),
+            TaskOptions::default(),
+        );
+        assert_eq!(core.execute_cycle(), CycleOutcome::Suspend);
+        let waker = captured.take().expect("the first poll captures a waker");
+        waker.wake_by_ref();
+
+        let mut state = core.exclusive.borrow_mut();
+        core.activate_awakened_tasks(&mut state);
+        {
+            let _queue_guard = core.wake.awakened.lock().unwrap();
+            waker.wake_by_ref();
+        }
+        core.activate_awakened_tasks(&mut state);
+        assert!(!core.wake.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed));
+
+        core.poll_active_tasks(&mut state);
+
+        assert!(core.wake.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed));
+        core.activate_awakened_tasks(&mut state);
+        core.poll_active_tasks(&mut state);
+        assert_eq!(polls.get(), 3);
+        drop(state);
+        drop(handle);
+        core.begin_shutdown();
+        assert_eq!(core.execute_cycle(), CycleOutcome::Shutdown);
     }
 }

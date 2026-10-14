@@ -16,6 +16,7 @@ mock! {
     pub TypeErasedTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()>;
         fn consume_awakened(&self) -> bool;
+        fn is_awakened(&self) -> bool;
         fn abort(self: Pin<&Self>);
         fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
         // Intentionally missing: inspect_waker_backtraces
@@ -31,6 +32,10 @@ impl TypeErasedTask for MockTypeErasedTask {
 
     fn consume_awakened(&self) -> bool {
         self.consume_awakened()
+    }
+
+    fn is_awakened(&self) -> bool {
+        self.is_awakened()
     }
 
     fn clear_queued_notification(&self) {}

@@ -158,6 +158,19 @@ where
         }
     }
 
+    fn is_awakened(&self) -> bool {
+        // SAFETY: The task owner reads initialized wake metadata only on its owning thread.
+        unsafe {
+            self.wake_signal
+                .get()
+                .as_ref()
+                .expect("UnsafeCell pointer cannot be null")
+                .as_ref()
+                .expect("task must be initialized before checking its wake state")
+                .is_awakened()
+        }
+    }
+
     fn clear_queued_notification(&self) {
         // SAFETY: The executor calls this only for a live initialized task while draining its
         // wake queue.
@@ -519,6 +532,9 @@ pub(crate) trait TypeErasedTask {
     ///
     /// Panics if the task has not been initialized.
     fn consume_awakened(&self) -> bool;
+
+    /// Returns whether a wake arrived without consuming it.
+    fn is_awakened(&self) -> bool;
 
     /// Records that the executor drained this task's queued wake notification.
     fn clear_queued_notification(&self);

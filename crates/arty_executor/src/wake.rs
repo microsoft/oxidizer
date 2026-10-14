@@ -219,6 +219,10 @@ impl WakeSignal {
         }
     }
 
+    pub(crate) fn is_awakened(&self) -> bool {
+        self.awakened.load(atomic::Ordering::Acquire) || self.state_if_initialized().is_some_and(WakerState::is_awakened)
+    }
+
     /// Returns whether task-owned signal storage is safe to drop.
     ///
     /// Before retirement this requires no owned wakers. Retirement releases the task's owner,
@@ -369,6 +373,10 @@ impl WakerState {
 
     fn consume_awakened(&self) -> bool {
         self.awakened.swap(false, atomic::Ordering::Relaxed)
+    }
+
+    fn is_awakened(&self) -> bool {
+        self.awakened.load(atomic::Ordering::Acquire)
     }
 
     #[cfg(test)]
