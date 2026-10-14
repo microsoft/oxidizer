@@ -20,7 +20,7 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    pub(in crate::runtime) const fn new(core: Arc<DispatcherCore>) -> Self {
+    pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
     }
 
