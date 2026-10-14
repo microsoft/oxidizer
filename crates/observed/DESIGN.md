@@ -205,7 +205,7 @@ A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the 
 - An **enrichment slot** plus an **enrichment isolation** flag.
 - An optional **event sampler**, which gates the entire event for that Sink before any processor runs.
 
-Sinks are plain values: construct one with `Sink::builder(id, clock)`, clone it cheaply, and pass it around. `emit!()` always takes a sink as its first argument and
+Sinks are plain values: construct one with `Sink::builder(id, clock).build()`, clone it cheaply, and pass it around. `emit!()` always takes a sink as its first argument and
 dispatches through that sink alone. To fan one `emit!()` out to several destinations, combine
 sinks with `Sink::composite`, which flattens to a list of leaves and dispatches through each in turn.
 
