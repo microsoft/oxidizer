@@ -76,11 +76,7 @@ pub(crate) struct DispatcherCore {
 
 impl DispatcherCore {
     #[cfg(test)]
-    pub(crate) fn new(
-        wait_for_shutdown: ThreadWaiter,
-        worker_endpoints: NonEmpty<WorkerEndpoint>,
-        sink: observed::Sink,
-    ) -> Self {
+    pub(crate) fn new(wait_for_shutdown: ThreadWaiter, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
         Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
     }
 
