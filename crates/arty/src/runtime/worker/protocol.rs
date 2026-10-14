@@ -6,7 +6,7 @@ use std::fmt;
 use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
 
-pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
+pub(in crate::runtime) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will
     /// be used to create the future that becomes the body of the task. The factory registers the
     /// future it creates with the worker's task set, which lets the executor store the future
@@ -19,7 +19,7 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
     EnqueueTask {
-        future_factory: Option<BoxedRemoteFutureFactory<TS>>,
+        future_factory: Option<BoxedRemoteFutureFactory<Builtins>>,
     },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
@@ -30,7 +30,7 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     Shutdown,
 }
 
-impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {
+impl fmt::Debug for AsyncWorkerCommand {
     #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

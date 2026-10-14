@@ -39,7 +39,6 @@ pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
-pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;

@@ -1,20 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
+use observed::Sink;
 use performables::arc::Arc;
 use performables::sync::channel;
-use tick::Clock;
+use thread_aware::Thread;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
@@ -57,22 +57,16 @@ const COMMANDS_PER_CYCLE: usize = 256;
 ///
 /// This type is single-threaded - it only exists on the designated worker thread.
 #[derive(Debug)]
-pub(in crate::runtime) struct AsyncWorker<TS = Builtins>
-where
-    TS: Clone + 'static,
-{
+pub(in crate::runtime) struct AsyncWorker {
     // Exclusively used by top level worker logic, never via reentrant task logic.
     // We drop this when we receive the shutdown signal, to ensure that any tasks that
     // happen to be enqueued after shutdown starts are discarded when an attempt is
     // made to send them.
-    command_rx: Option<channel::Receiver<AsyncWorkerCommand<TS>>>,
+    command_rx: Option<channel::Receiver<AsyncWorkerCommand>>,
 
-    // Thread state initialization may require tasks to be executed, so we store the thread state in
-    // a once cell. Before it's filled, we can only process tasks that don't depend on thread state.
-    // We set this to None when we start shutdown - no more tasks can be enqueued after that and
-    // dropping the thread state may be critical for the shutdown process to complete (the thread
-    // state may hold resources that need to be released).
-    thread_state: Option<Rc<OnceCell<TS>>>,
+    // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
+    // services can release resources needed by shutdown.
+    builtins: Option<Builtins>,
 
     // Becomes None during shutdown when the executor is dropped to cancel and release its tasks.
     executor: Option<Executor>,
@@ -91,22 +85,16 @@ where
     _single_threaded: PhantomData<*const ()>,
 }
 
-impl<TS> AsyncWorker<TS>
-where
-    TS: Clone + 'static,
-{
-    pub(in crate::runtime) fn new<TSFF, TSF>(
-        command_rx: channel::Receiver<AsyncWorkerCommand<TS>>,
-        thread_state_constructor: TSFF,
+impl AsyncWorker {
+    pub(in crate::runtime) fn new(
+        command_rx: channel::Receiver<AsyncWorkerCommand>,
+        dispatcher: DispatcherClient,
+        thread: Thread,
+        sink: Sink,
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
-        thread_state_constructed_tx: channel::Sender<()>,
-    ) -> Self
-    where
-        TSFF: FnOnce(TaskSet, Clock) -> TSF + 'static,
-        TSF: Future<Output = TS>,
-    {
+    ) -> Self {
         let (clock, clock_driver) = clock.activate();
 
         let executor = Executor::builder()
@@ -115,25 +103,12 @@ where
             .build();
         let tasks = executor.tasks();
 
-        let thread_state = Rc::new(OnceCell::new());
-
-        tasks.add({
-            let tasks = tasks.clone();
-            let thread_state = Rc::clone(&thread_state);
-
-            async move {
-                let ts = thread_state_constructor(tasks, clock).await;
-                thread_state
-                    .set(ts)
-                    .map_err(|__ts| ())
-                    .expect("thread state initialized multiple times");
-                _ = thread_state_constructed_tx.send(());
-            }
-        });
+        let builtins = Builtins::new(dispatcher, clock, thread, sink);
+        Scheduler::register_current(builtins.clone(), tasks.clone());
 
         Self {
             command_rx: Some(command_rx),
-            thread_state: Some(thread_state),
+            builtins: Some(builtins),
             executor: Some(executor),
             tasks,
             clock_driver,
@@ -148,7 +123,6 @@ where
     /// After this method returns, the thread will end.
     pub(in crate::runtime) fn run(mut self) {
         self.execute_phase();
-        Scheduler::clear_worker_thread();
     }
 
     #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
@@ -191,32 +165,22 @@ where
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
     fn process_commands(&mut self) -> bool {
-        let Some(thread_state) = self.thread_state.as_ref() else {
+        let Some(builtins) = self.builtins.as_ref() else {
             debug_assert!(self.command_rx.is_none());
 
-            // We are shutting down and have dropped the thread state.
+            // We are shutting down and have dropped worker-local services.
             // The command channel is also closed, so no more commands can be received.
             return false;
         };
 
-        let Some(thread_state) = thread_state.get() else {
-            // The initialization hasn't fully finished yet, we cannot process commands at this point. Because the initialization
-            // task doesn't get access to the dispatcher, we are sure it can finish without commands needing to be processed (unless
-            // the user blocks on a task spawned on the main scheduler, but that's clearly their issue and is documented).
-            return false;
-        };
-
-        let command_rx = self
-            .command_rx
-            .as_ref()
-            .expect("thread state and command channel are dropped together");
+        let command_rx = self.command_rx.as_ref().expect("builtins and command channel are dropped together");
 
         for _ in 0..COMMANDS_PER_CYCLE {
             match command_rx.try_recv() {
                 Ok(mut command) => {
                     match &mut command {
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                            future_factory.take().expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
+                            future_factory.take().expect("queued task factory is consumed exactly once")(builtins.clone(), &self.tasks);
                         }
                         AsyncWorkerCommand::Shutdown => {
                             self.begin_shutdown();
@@ -240,9 +204,9 @@ where
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
         Scheduler::clear_current();
-        // Drop the thread state, as it may hold references to resources that
+        // Drop worker-local services, as they may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).
-        self.thread_state = None;
+        self.builtins = None;
 
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
@@ -254,14 +218,12 @@ where
     }
 }
 
-impl<TS> Drop for AsyncWorker<TS>
-where
-    TS: Clone + 'static,
-{
+impl Drop for AsyncWorker {
     fn drop(&mut self) {
         if self.executor.is_some() {
             self.begin_shutdown();
         }
+        Scheduler::clear_worker_thread();
     }
 }
 
@@ -278,26 +240,44 @@ mod tests {
     #[cfg(not(miri))]
     use events_once::BoxedSender;
     use events_once::{Event, IntoValueError};
-    use observed::Sink;
+    use nonempty::NonEmpty;
     use testing_aids::async_test;
+    use thread_aware::ThreadBuilder;
     use tick::ClockControl;
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
-    #[derive(Clone, Debug)]
-    struct TestTaskContext;
+    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::thread::waiter::ThreadWaiter;
 
-    impl TestTaskContext {
-        #[cfg_attr(test, mutants::skip)]
-        fn new(_: TaskSet) -> Self {
-            Self
-        }
+    fn test_worker(
+        command_tx: channel::Sender<AsyncWorkerCommand>,
+        command_rx: channel::Receiver<AsyncWorkerCommand>,
+        blocking_worker: Arc<BlockingWorker>,
+        clock: InactiveClock,
+        signal: Arc<WorkerSignal>,
+    ) -> AsyncWorker {
+        let sink = Sink::noop();
+        let thread = ThreadBuilder::default().build(thread::current().id());
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: WorkerSignal::waker(&signal),
+            thread: thread.clone(),
+            blocking_worker: Arc::clone(&blocking_worker),
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            sink.clone(),
+        )));
+
+        AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_worker, clock, signal)
     }
 
-    fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand<()>>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand<()> {
+    fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {
         AsyncWorkerCommand::EnqueueTask {
-            future_factory: Some(Box::new(move |(), _| {
+            future_factory: Some(Box::new(move |_, _| {
                 processed.fetch_add(1, Ordering::Relaxed);
                 sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
             })),
@@ -306,8 +286,7 @@ mod tests {
 
     #[cfg(not(miri))]
     struct GeneratedWorkerScenario {
-        command_tx: channel::Sender<AsyncWorkerCommand<()>>,
-        initialize: Option<BoxedSender<()>>,
+        command_tx: channel::Sender<AsyncWorkerCommand>,
         ready_task: Option<BoxedSender<()>>,
         control: ClockControl,
         task_done: Arc<AtomicBool>,
@@ -315,7 +294,7 @@ mod tests {
         factory_invocations: Arc<AtomicUsize>,
         forbidden_factory_invocations: Arc<AtomicUsize>,
         signal: Arc<WorkerSignal>,
-        worker: AsyncWorker<()>,
+        worker: AsyncWorker,
         timer_ready: bool,
         timer_advanced_by_step: bool,
         queued_shutdown: bool,
@@ -331,8 +310,6 @@ mod tests {
 
         fn new() -> Self {
             let (command_tx, command_rx) = channel::unbounded();
-            let (ready_tx, _ready_rx) = channel::unbounded();
-            let (initialize, initialized) = Event::boxed();
             let (ready_task, task_ready) = Event::boxed();
             let control = ClockControl::new();
             let task_done = Arc::new(AtomicBool::new(false));
@@ -343,27 +320,24 @@ mod tests {
             let task_observer = Arc::clone(&task_done);
             let timer_observer = Arc::clone(&timer_done);
 
-            let worker = AsyncWorker::new(
+            let worker = test_worker(
+                command_tx.clone(),
                 command_rx,
-                async move |tasks, clock| {
-                    drop(tasks.add(async move {
-                        task_ready.await.unwrap();
-                        task_observer.store(true, Ordering::Relaxed);
-                    }));
-                    drop(tasks.add(async move {
-                        clock.delay(Duration::from_secs(1)).await;
-                        timer_observer.store(true, Ordering::Relaxed);
-                    }));
-                    initialized.await.unwrap();
-                },
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 control.clone().into(),
                 Arc::clone(&signal),
-                ready_tx,
             );
+            drop(worker.tasks.add(async move {
+                task_ready.await.unwrap();
+                task_observer.store(true, Ordering::Relaxed);
+            }));
+            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            drop(worker.tasks.add(async move {
+                clock.delay(Duration::from_secs(1)).await;
+                timer_observer.store(true, Ordering::Relaxed);
+            }));
             let mut scenario = Self {
                 command_tx,
-                initialize: Some(initialize),
                 ready_task: Some(ready_task),
                 control,
                 task_done,
@@ -379,8 +353,6 @@ mod tests {
                 sent_factories: 0,
                 progress_failure: None,
             };
-            scenario.setup_step("worker stopped while registering controlled work");
-            WorkerSignal::waker(&scenario.signal).wake_by_ref();
             scenario.setup_step("worker stopped while polling controlled work");
             scenario
         }
@@ -392,20 +364,15 @@ mod tests {
         }
 
         fn apply(&mut self, operation: u8) {
-            match operation % 6 {
+            match operation % 5 {
                 0 => self.queue_factory_batch(operation),
                 1 => {
-                    if let Some(initialize) = self.initialize.take() {
-                        initialize.send(());
-                    }
-                }
-                2 => {
                     if let Some(ready_task) = self.ready_task.take() {
                         ready_task.send(());
                     }
                 }
-                3 => self.ready_timer(),
-                4 => self.step(),
+                2 => self.ready_timer(),
+                3 => self.step(),
                 _ => self.queue_shutdown(),
             }
         }
@@ -424,7 +391,7 @@ mod tests {
                 if self
                     .command_tx
                     .send(AsyncWorkerCommand::EnqueueTask {
-                        future_factory: Some(Box::new(move |(), _| {
+                        future_factory: Some(Box::new(move |_, _| {
                             invocations.fetch_add(1, Ordering::Relaxed);
                             if forbidden_after_queued_shutdown {
                                 forbidden.fetch_add(1, Ordering::Relaxed);
@@ -452,8 +419,7 @@ mod tests {
                 return;
             }
             WorkerSignal::waker(&self.signal).wake_by_ref();
-            let initialized = self.worker.thread_state.as_ref().is_some_and(|state| state.get().is_some());
-            let full_batch = initialized && self.queued_factories >= COMMANDS_PER_CYCLE && !self.queued_shutdown;
+            let full_batch = self.queued_factories >= COMMANDS_PER_CYCLE && !self.queued_shutdown;
             let task_should_progress =
                 full_batch && self.ready_task.is_none() && !self.task_done.load(Ordering::Relaxed) && self.progress_failure.is_none();
             let timer_should_progress =
@@ -467,7 +433,7 @@ mod tests {
             }
             if full_batch {
                 self.queued_factories -= COMMANDS_PER_CYCLE;
-            } else if initialized && !self.queued_shutdown {
+            } else if !self.queued_shutdown {
                 self.queued_factories = 0;
             }
             self.timer_advanced_by_step |= self.timer_ready;
@@ -480,9 +446,6 @@ mod tests {
         }
 
         fn finish(mut self) {
-            if let Some(initialize) = self.initialize.take() {
-                initialize.send(());
-            }
             if let Some(ready_task) = self.ready_task.take() {
                 ready_task.send(());
             }
@@ -526,7 +489,6 @@ mod tests {
     #[test]
     fn a_never_empty_command_queue_allows_registered_tasks_and_timers_to_progress() {
         let (command_tx, command_rx) = channel::unbounded();
-        let (ready_tx, ready_rx) = channel::unbounded();
         let (proceed, progress) = Event::boxed();
         let control = ClockControl::new();
         let task_done = Arc::new(AtomicBool::new(false));
@@ -536,28 +498,24 @@ mod tests {
         let timer_observer = Arc::clone(&timer_done);
         let shutdown = command_tx.clone();
 
-        let worker = AsyncWorker::new(
+        let worker = test_worker(
+            command_tx.clone(),
             command_rx,
-            async move |tasks, clock| {
-                drop(tasks.add(async move {
-                    progress.await.unwrap();
-                    task_observer.store(true, Ordering::Relaxed);
-                }));
-                drop(tasks.add(async move {
-                    clock.delay(Duration::from_secs(1)).await;
-                    timer_observer.store(true, Ordering::Relaxed);
-                    shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
-                }));
-            },
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             control.clone().into(),
             Arc::new(WorkerSignal::default()),
-            ready_tx,
         );
-        let executor = worker.executor.as_ref().unwrap();
-        let _ = executor.execute_cycle();
-        ready_rx.recv().unwrap();
-        let _ = executor.execute_cycle();
+        drop(worker.tasks.add(async move {
+            progress.await.unwrap();
+            task_observer.store(true, Ordering::Relaxed);
+        }));
+        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        drop(worker.tasks.add(async move {
+            clock.delay(Duration::from_secs(1)).await;
+            timer_observer.store(true, Ordering::Relaxed);
+            shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
+        }));
+        _ = worker.executor.as_ref().unwrap().execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
 
@@ -576,19 +534,16 @@ mod tests {
     #[test]
     fn a_full_command_batch_skips_waiting_for_the_worker_signal() {
         let (command_tx, command_rx) = channel::unbounded();
-        let (ready_tx, ready_rx) = channel::unbounded();
         let signal = Arc::new(WorkerSignal::default());
 
-        let mut worker = AsyncWorker::new(
+        let mut worker = test_worker(
+            command_tx.clone(),
             command_rx,
-            async |_, _| (),
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::clone(&signal),
-            ready_tx,
         );
         assert!(worker.execute_step().is_continue());
-        ready_rx.recv().unwrap();
 
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -598,7 +553,7 @@ mod tests {
         for _ in 0..COMMANDS_PER_CYCLE {
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
-                    future_factory: Some(Box::new(|(), _| {})),
+                    future_factory: Some(Box::new(|_, _| {})),
                 })
                 .unwrap();
         }
@@ -623,20 +578,14 @@ mod tests {
         }
 
         let (command_tx, command_rx) = channel::unbounded();
-        let (ready_tx, ready_rx) = channel::unbounded();
-        let (clock_tx, clock_rx) = channel::unbounded();
-        let worker = AsyncWorker::new(
+        let worker = test_worker(
+            command_tx.clone(),
             command_rx,
-            async move |_, clock| clock_tx.send(clock).unwrap(),
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            ready_tx,
         );
-        let _ = worker.executor.as_ref().unwrap().execute_cycle();
-        ready_rx.recv().unwrap();
-        let _ = worker.executor.as_ref().unwrap().execute_cycle();
-        let clock = clock_rx.recv().unwrap();
+        let clock = worker.builtins.as_ref().unwrap().clock().clone();
         let mut timer = clock.delay(Duration::from_millis(1));
         let waker = Waker::from(Arc::into_std_arc(Arc::new(PanicWake)));
         assert!(Pin::new(&mut timer).poll(&mut std::task::Context::from_waker(&waker)).is_pending());
@@ -654,19 +603,19 @@ mod tests {
         async_test(async || {
             // Run worker, execute one remote task which awaits a nested task, then shut down.
             let (command_tx, command_rx) = channel::unbounded();
+            let worker_command_tx = command_tx.clone();
 
             let async_worker_thread = thread::spawn(move || {
                 let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
 
                 let signal = Arc::new(WorkerSignal::default());
 
-                let worker = AsyncWorker::new(
+                let worker = test_worker(
+                    worker_command_tx,
                     command_rx,
-                    async move |tasks, _| TestTaskContext::new(tasks),
                     Arc::clone(&blocking_worker),
                     InactiveClock::default(),
                     signal,
-                    channel::unbounded().0,
                 );
                 worker.run();
 
@@ -684,7 +633,7 @@ mod tests {
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Some(Box::new({
-                        move |_: TestTaskContext, tasks: &TaskSet| {
+                        move |_: Builtins, tasks: &TaskSet| {
                             drop(tasks.add(async move {
                                 inner_completed_tx.send(());
                             }));
@@ -710,31 +659,25 @@ mod tests {
     }
 
     #[test]
-    fn thread_state_constructor_creates_new_tasks() {
+    fn worker_setup_can_register_new_tasks() {
         async_test(async || {
-            // Executing async logic and creating new tasks from within this logic
-            // is perfectly legal during creation of the thread state.
-
             // To verify tasks get executed.
             let (initial_completed_tx, initial_completed_rx) = Event::boxed();
             let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
-            let (constructed_tx, constructed_rx) = channel::unbounded();
 
             let (command_tx, command_rx) = channel::unbounded();
+            let worker_command_tx = command_tx.clone();
             let worker_thread = thread::spawn(move || {
                 let signal = Arc::new(WorkerSignal::default());
 
-                let worker = AsyncWorker::new(
+                let worker = test_worker(
+                    worker_command_tx,
                     command_rx,
-                    async move |tasks, _| {
-                        drop(tasks.add(async move { initial_completed_tx.send(()) }));
-                        TestTaskContext::new(tasks)
-                    },
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
                     signal,
-                    constructed_tx,
                 );
+                drop(worker.tasks.add(async move { initial_completed_tx.send(()) }));
 
                 worker.run();
             });
@@ -742,7 +685,7 @@ mod tests {
             command_tx
                 .send(AsyncWorkerCommand::EnqueueTask {
                     future_factory: Some(Box::new({
-                        move |_: TestTaskContext, tasks: &TaskSet| {
+                        move |_: Builtins, tasks: &TaskSet| {
                             drop(tasks.add(async move {
                                 spawned_completed_tx.send(());
                             }));
@@ -751,7 +694,6 @@ mod tests {
                 })
                 .unwrap();
 
-            constructed_rx.recv().unwrap();
             spawned_completed_rx.await.unwrap();
             initial_completed_rx.into_value().unwrap();
 
@@ -774,17 +716,17 @@ mod tests {
         // make their remote join handles report shutdown.
 
         let (command_tx, command_rx) = channel::unbounded();
+        let worker_command_tx = command_tx.clone();
 
         let async_worker_thread = thread::spawn(move || {
             let signal = Arc::new(WorkerSignal::default());
 
-            let worker = AsyncWorker::new(
+            let worker = test_worker(
+                worker_command_tx,
                 command_rx,
-                async move |tasks, _| TestTaskContext::new(tasks),
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 InactiveClock::default(),
                 signal,
-                channel::unbounded().0,
             );
             worker.run();
         });
@@ -796,7 +738,7 @@ mod tests {
         // We ignore the result because the worker is shutting down and the channel might be closed already.
         let _ = command_tx.send(AsyncWorkerCommand::EnqueueTask {
             future_factory: Some(Box::new({
-                move |_: TestTaskContext, tasks: &TaskSet| {
+                move |_: Builtins, tasks: &TaskSet| {
                     drop(tasks.add(async move {
                         completed_tx.send(14);
                     }));
@@ -814,24 +756,20 @@ mod tests {
     #[test]
     fn shutdown_command_cancels_registered_tasks_before_polling() {
         let (command_tx, command_rx) = channel::unbounded();
-        let (ready_tx, ready_rx) = channel::unbounded();
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
 
-        let worker = AsyncWorker::new(
+        let worker = test_worker(
+            command_tx.clone(),
             command_rx,
-            async |_, _| (),
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            ready_tx,
         );
-        let _ = worker.executor.as_ref().unwrap().execute_cycle();
-        ready_rx.recv().unwrap();
 
         command_tx
             .send(AsyncWorkerCommand::EnqueueTask {
-                future_factory: Some(Box::new(move |(), tasks| {
+                future_factory: Some(Box::new(move |_, tasks| {
                     drop(tasks.add(async move {
                         invoked_by_task.store(true, Ordering::Relaxed);
                     }));
@@ -846,71 +784,34 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_before_initialization_discards_the_constructor() {
-        let initialized = Arc::new(AtomicBool::new(false));
-        let observed = Arc::clone(&initialized);
-        let (_commands, receiver) = channel::unbounded();
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        let mut worker = AsyncWorker::new(
-            receiver,
-            async move |tasks, _| {
-                observed.store(true, Ordering::Relaxed);
-                TestTaskContext::new(tasks)
-            },
-            Arc::clone(&blocking_worker),
-            InactiveClock::default(),
-            Arc::new(WorkerSignal::default()),
-            channel::unbounded().0,
-        );
-
-        worker.process_commands();
-        worker.begin_shutdown();
-        worker.process_commands();
-        worker.run();
-
-        assert!(!initialized.load(Ordering::Relaxed));
-        assert!(is_blocking_worker_shutting_down(&blocking_worker));
-    }
-
-    #[test]
     fn dropping_worker_without_run_cleans_up_safely() {
-        let initialized = Arc::new(AtomicBool::new(false));
-        let observed = Arc::clone(&initialized);
-        let (_commands, receiver) = channel::unbounded();
+        let (commands, receiver) = channel::unbounded();
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        let worker = AsyncWorker::new(
+        let worker = test_worker(
+            commands,
             receiver,
-            async move |tasks, _| {
-                observed.store(true, Ordering::Relaxed);
-                TestTaskContext::new(tasks)
-            },
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            channel::unbounded().0,
         );
 
         drop(worker);
 
-        assert!(!initialized.load(Ordering::Relaxed));
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
     }
 
     #[test]
     fn explicit_executor_shutdown_completes_worker_shutdown() {
         let (commands, receiver) = channel::unbounded();
-        let (ready_tx, ready_rx) = channel::unbounded();
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        let mut worker = AsyncWorker::new(
+        let mut worker = test_worker(
+            commands.clone(),
             receiver,
-            async |_, _| (),
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
-            ready_tx,
         );
         assert!(worker.execute_step().is_continue());
-        ready_rx.recv().unwrap();
         worker.executor.as_ref().unwrap().begin_shutdown();
 
         let outcome = worker.execute_step();
