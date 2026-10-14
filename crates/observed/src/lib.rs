@@ -181,6 +181,7 @@ pub(crate) mod sampling;
 pub(crate) mod severity;
 pub(crate) mod sink;
 pub(crate) mod text;
+pub mod typestates;
 pub(crate) mod value;
 
 // Re-export core types at the crate root for convenience.

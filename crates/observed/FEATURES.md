@@ -27,7 +27,7 @@
 
 ## Sink Lifecycle
 
-- **Builder construction** - `Sink::builder(ID).build()` constructs a sink. Optional settings: `processors(...)`, `clock(...)`, `isolated_enrichment()`, and `event_sampler(...)`. The clock stamps every event's timestamp; it accepts a `tick::SimpleClock`, or a `tick::Clock` by value or by reference, and defaults to `SimpleClock::new_system()`
+- **Builder construction** - `Sink::builder(ID).build()` constructs a sink. Optional settings: `processors(...)` (callable once), `clock(...)`, `isolated_enrichment()`, and `event_sampler(...)`. The clock stamps every event's timestamp; it accepts a `tick::SimpleClock`, or a `tick::Clock` by value or by reference, and defaults to `SimpleClock::new_system()`
 - **O(1) clone** - `Sink` cloning is cheap
 - **Composite sinks** - `Sink::composite([a, b, …])` returns a sink that dispatches every event through each child in turn; each leaf must appear exactly once, and a duplicate - listed twice or reached through overlapping nested composites - panics
 - **Noop sink** - `Sink::noop()` creates a sink with no processors for testing

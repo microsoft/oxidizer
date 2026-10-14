@@ -5,12 +5,14 @@
 
 use std::any::type_name;
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tick::SimpleClock;
 
 use crate::processing::EventProcessor;
 use crate::sampling::EventSampler;
+use crate::typestates::{NotSet, Set};
 use crate::{Sink, SinkId};
 
 /// Builds a [`Sink`].
@@ -50,17 +52,22 @@ use crate::{Sink, SinkId};
 ///     .build();
 /// ```
 ///
+/// # Type State
+///
+/// - `P`: Tracks whether [`processors`](Self::processors) has been called
+///
 /// [`enrich`]: crate::enrichment::EnrichFutureExt::enrich
 /// [`enrich_for`]: crate::enrichment::EnrichFutureExt::enrich_for
-pub struct SinkBuilder {
+pub struct SinkBuilder<P = NotSet> {
     id: SinkId,
     clock: SimpleClock,
     processors: Vec<Arc<dyn EventProcessor>>,
     isolated_enrichment: bool,
     sampler: Option<Arc<dyn EventSampler>>,
+    _state: PhantomData<P>,
 }
 
-impl SinkBuilder {
+impl SinkBuilder<NotSet> {
     pub(super) fn new(id: SinkId) -> Self {
         Self {
             id,
@@ -68,19 +75,27 @@ impl SinkBuilder {
             processors: Vec::new(),
             isolated_enrichment: false,
             sampler: None,
+            _state: PhantomData,
         }
     }
 
-    /// Sets the [`EventProcessor`]s the sink fans each event out to,
-    /// replacing any processors set earlier.
+    /// Sets the [`EventProcessor`]s the sink fans each event out to.
     ///
-    /// Without processors the sink drops every event.
+    /// Can be called only once. Without processors the sink drops every event.
     #[must_use]
-    pub fn processors(mut self, processors: Vec<Arc<dyn EventProcessor>>) -> Self {
-        self.processors = processors;
-        self
+    pub fn processors(self, processors: Vec<Arc<dyn EventProcessor>>) -> SinkBuilder<Set> {
+        SinkBuilder {
+            id: self.id,
+            clock: self.clock,
+            processors,
+            isolated_enrichment: self.isolated_enrichment,
+            sampler: self.sampler,
+            _state: PhantomData,
+        }
     }
+}
 
+impl<P> SinkBuilder<P> {
     /// Sets the clock that stamps the timestamp on every event the sink
     /// dispatches, replacing the default system clock.
     ///
@@ -164,7 +179,7 @@ impl SinkBuilder {
     }
 }
 
-impl fmt::Debug for SinkBuilder {
+impl<P> fmt::Debug for SinkBuilder<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("id", &self.id)
@@ -251,12 +266,19 @@ mod tests {
     }
 
     #[test]
-    fn later_processors_replace_earlier_ones() {
-        let sink = Sink::builder("replaced")
-            .processors(vec![Arc::new(NoopProcessor)])
-            .processors(Vec::new())
-            .build();
+    fn settings_before_processors_are_kept() {
+        let builder = Sink::builder("ordered")
+            .clock(SimpleClock::new_frozen())
+            .isolated_enrichment()
+            .event_sampler(KeepAll)
+            .processors(vec![Arc::new(NoopProcessor)]);
 
-        assert!(sink.is_noop());
+        let debug = format!("{builder:?}");
+
+        assert!(debug.contains("\"ordered\""), "{debug}");
+        assert!(debug.contains("SimpleClock(Controlled"), "{debug}");
+        assert!(debug.contains("processors: 1"), "{debug}");
+        assert!(debug.contains("isolated_enrichment: true"), "{debug}");
+        assert!(debug.contains("event_sampler: true"), "{debug}");
     }
 }
