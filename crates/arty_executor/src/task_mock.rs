@@ -6,7 +6,7 @@ use std::task;
 
 use mockall::mock;
 
-use crate::{TypeErasedTask, WakeSignal};
+use crate::{TaskCreatedReporter, TaskOptions, TypeErasedTask, WakeSignal};
 
 // Mockall is not able to express all methods on the trait (due to generics deficiency), so we mock
 // similar-enough methods that it does know how to mock and simply call these from a manual
@@ -28,7 +28,9 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.poll()
     }
 
-    fn report_created(&self) {}
+    fn created_reporter(&self) -> TaskCreatedReporter {
+        TaskOptions::default().created_reporter(observed::Sink::noop())
+    }
 
     fn consume_awakened(&self) -> bool {
         self.consume_awakened()

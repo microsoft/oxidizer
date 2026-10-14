@@ -27,6 +27,23 @@ pub struct TaskOptions {
     placement: TaskPlacement,
 }
 
+pub(crate) struct TaskCreatedReporter {
+    context: Option<Transfer>,
+    placement: TaskPlacement,
+    sink: Sink,
+}
+
+impl TaskCreatedReporter {
+    pub(crate) fn report(self) {
+        if let Some(context) = self.context {
+            let _guard = context.apply_current_thread();
+            telemetry::report_created(&self.sink, self.placement);
+        } else {
+            telemetry::report_created(&self.sink, self.placement);
+        }
+    }
+}
+
 impl TaskOptions {
     /// Creates options for a task with the specified worker-placement route.
     #[must_use]
@@ -53,8 +70,12 @@ impl TaskOptions {
         f()
     }
 
-    pub(crate) fn report_created(&self, sink: &Sink) {
-        self.with_context(|| telemetry::report_created(sink, self.placement));
+    pub(crate) fn created_reporter(&self, sink: Sink) -> TaskCreatedReporter {
+        TaskCreatedReporter {
+            context: self.context.clone(),
+            placement: self.placement,
+            sink,
+        }
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {

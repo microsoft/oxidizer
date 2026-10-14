@@ -18,7 +18,7 @@ use observed::Sink;
 
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{RemoteTaskSender, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
+use crate::{RemoteTaskSender, TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -138,8 +138,8 @@ where
         self.options.with_context(|| self.poll_in_context())
     }
 
-    fn report_created(&self) {
-        self.options.report_created(&self.sink);
+    fn created_reporter(&self) -> TaskCreatedReporter {
+        self.options.created_reporter(self.sink.clone())
     }
 
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
@@ -523,8 +523,8 @@ pub(crate) trait TypeErasedTask {
     /// Panics if the task has already been completed.
     fn poll(self: Pin<&Self>) -> task::Poll<()>;
 
-    /// Emits task-created telemetry after executor registration, if configured.
-    fn report_created(&self);
+    /// Captures independently owned data for task-created telemetry.
+    fn created_reporter(&self) -> TaskCreatedReporter;
 
     /// Swaps the task's "is awakened" flag to false and returns its previous value.
     ///
@@ -748,7 +748,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.report_created();
+        task.created_reporter().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -779,7 +779,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.report_created();
+        task.created_reporter().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -811,7 +811,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.report_created();
+        task.created_reporter().report();
 
         task.abort();
 
@@ -841,7 +841,7 @@ mod tests {
         let task = pin!(Task::new_remote(pending::<u64>(), TaskOptions::default(), sink, result_tx));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.report_created();
+        task.created_reporter().report();
 
         task.abort();
 

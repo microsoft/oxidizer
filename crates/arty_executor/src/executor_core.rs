@@ -187,7 +187,7 @@ impl ExecutorCore {
         R: 'static,
         T: TypeErasedTask + 'static,
     {
-        let (task_ref, join_handle) = {
+        let (reporter, join_handle) = {
             let mut state = self.reentrancy_safe.borrow_mut();
             if state.shutting_down {
                 return state.join_events.disconnected();
@@ -207,14 +207,14 @@ impl ExecutorCore {
             let task = unsafe { task_ref.as_task() };
 
             task.initialize(wake_signal);
+            let reporter = task.created_reporter();
             state.new_tasks.push_back(task_ref);
-            (task_ref, join_handle)
+            (reporter, join_handle)
         };
 
         // Telemetry processors are external code and may submit another task. The state borrow
         // must be released before this call.
-        // SAFETY: The task was inserted into executor-owned storage above and remains live.
-        unsafe { task_ref.as_task() }.report_created();
+        reporter.report();
         join_handle
     }
 

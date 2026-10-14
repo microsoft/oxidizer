@@ -19,9 +19,11 @@ use observed_testing::{TEST_ID, test_emitter};
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_SUBMISSION: RefCell<Option<(TaskSet, Rc<Cell<bool>>)>> = const { RefCell::new(None) };
+    static REENTRANT_TELEMETRY_EXECUTOR: RefCell<Option<Rc<Executor>>> = const { RefCell::new(None) };
 }
 
 struct ReentrantSubmissionProcessor;
+struct ReentrantCycleProcessor;
 
 impl EventProcessor for ReentrantSubmissionProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
@@ -38,6 +40,23 @@ impl EventProcessor for ReentrantSubmissionProcessor {
             },
             TaskOptions::default(),
         ));
+    }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
+}
+
+impl EventProcessor for ReentrantCycleProcessor {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() == "arty.rt.task.spawned"
+    }
+
+    fn process(&self, _event: &EventView<'_>) {
+        let Some(executor) = REENTRANT_TELEMETRY_EXECUTOR.take() else {
+            return;
+        };
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     }
 
     fn flush(&self) -> Result<(), observed::FlushError> {
@@ -154,6 +173,22 @@ fn default_options_emit_lifecycle_events_without_context_enrichment() {
     let events = processor.events();
     assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
     assert!(events.iter().any(|event| event.name() == "arty.rt.task.succeeded"));
+}
+
+#[test]
+fn task_created_processor_may_complete_and_release_the_new_task() {
+    let sink = Sink::new(
+        "arty-executor-reentrant-cycle",
+        vec![Arc::new(ReentrantCycleProcessor)],
+        tick::SimpleClock::new_frozen(),
+    );
+    let executor = Rc::new(Executor::builder().sink(sink).build());
+    REENTRANT_TELEMETRY_EXECUTOR.set(Some(Rc::clone(&executor)));
+
+    let mut handle = executor.tasks().add(async { 42 }, TaskOptions::default());
+
+    assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
+    assert!(!executor.has_tasks());
 }
 
 struct ReentrantIntoFuture {
