@@ -10,11 +10,11 @@ use std::task;
 
 use events_once::{BoxedReceiver, BoxedSender, LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 
-use crate::TaskPanic;
+use crate::TaskPanicPayload;
 
 enum TaskResult<R> {
     Completed(R),
-    Panicked(TaskPanic),
+    Panicked(TaskPanicPayload),
 }
 
 impl<R> Debug for TaskResult<R> {
@@ -28,7 +28,7 @@ impl<R> Debug for TaskResult<R> {
 
 /// A task failed to return its result.
 pub struct JoinError {
-    panic: Option<Mutex<TaskPanic>>,
+    panic: Option<Mutex<TaskPanicPayload>>,
 }
 
 impl PartialEq for JoinError {
@@ -45,7 +45,7 @@ impl JoinError {
         Self { panic: None }
     }
 
-    pub(crate) fn panicked(panic: TaskPanic) -> Self {
+    pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
         Self {
             panic: Some(Mutex::new(panic)),
         }
@@ -69,7 +69,7 @@ impl JoinError {
     ///
     /// Panics if this error represents executor shutdown rather than a task panic.
     #[must_use]
-    pub fn into_panic(self) -> TaskPanic {
+    pub fn into_panic(self) -> TaskPanicPayload {
         self.panic
             .expect("into_panic() requires a JoinError for which is_panic() is true")
             .into_inner()
@@ -199,19 +199,19 @@ impl<R: Send + 'static> Debug for RemoteTaskSender<R> {
 }
 
 impl<R: Send + 'static> RemoteTaskSender<R> {
-    fn send(self, result: TaskResult<R>) -> Result<(), TaskPanic> {
+    fn send(self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
         catch_unwind(AssertUnwindSafe(|| self.tx.send(result)))
     }
 
     /// Sends a successfully completed result.
     #[doc(hidden)]
-    pub fn completed(self, result: R) -> Result<(), TaskPanic> {
+    pub fn completed(self, result: R) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Completed(result))
     }
 
     /// Sends a captured task panic.
     #[doc(hidden)]
-    pub fn panicked(self, panic: TaskPanic) -> Result<(), TaskPanic> {
+    pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Panicked(panic))
     }
 }

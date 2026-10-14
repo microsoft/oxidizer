@@ -41,11 +41,11 @@ impl Args {
     }
 }
 
-fn runtime_path() -> TokenStream {
-    runtime_path_for(crate_name("arty").ok())
+fn arty_path() -> TokenStream {
+    arty_path_for(crate_name("arty").ok())
 }
 
-fn runtime_path_for(found: Option<FoundCrate>) -> TokenStream {
+fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
     match found {
         Some(FoundCrate::Name(name)) => {
             let name = name.replace('-', "_");
@@ -145,7 +145,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let runtime_path = runtime_path();
+    let runtime_path = arty_path();
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -239,18 +239,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_path_uses_a_renamed_dependency() {
+    fn arty_path_uses_a_renamed_dependency() {
         assert_eq!(
-            runtime_path_for(Some(FoundCrate::Name("renamed-arty".to_owned()))).to_string(),
+            arty_path_for(Some(FoundCrate::Name("renamed-arty".to_owned()))).to_string(),
             ":: renamed_arty"
         );
-        assert_eq!(runtime_path_for(Some(FoundCrate::Itself)).to_string(), ":: arty");
-        assert_eq!(runtime_path_for(None).to_string(), ":: arty");
+        assert_eq!(arty_path_for(Some(FoundCrate::Itself)).to_string(), ":: arty");
+        assert_eq!(arty_path_for(None).to_string(), ":: arty");
     }
 
     #[test]
-    fn runtime_path_supports_a_keyword_dependency_alias() {
-        assert_eq!(runtime_path_for(Some(FoundCrate::Name("type".to_owned()))).to_string(), ":: r#type");
+    fn arty_path_supports_a_keyword_dependency_alias() {
+        assert_eq!(arty_path_for(Some(FoundCrate::Name("type".to_owned()))).to_string(), ":: r#type");
     }
 
     #[test]

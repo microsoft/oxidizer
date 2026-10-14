@@ -140,6 +140,12 @@ impl AsyncWorker {
     fn execute_step(&mut self) -> ControlFlow<()> {
         let batch_exhausted = self.process_commands();
 
+        if self.shutdown_signal.load(Ordering::Acquire) {
+            self.begin_shutdown();
+            _ = self.clock_driver.advance_timers(Instant::now());
+            return ControlFlow::Break(());
+        }
+
         let Some(executor) = self.executor.as_ref() else {
             // Executor drop cancels tasks before final timer callbacks can observe their state.
             _ = self.clock_driver.advance_timers(Instant::now());
@@ -802,6 +808,39 @@ mod tests {
         worker.run();
 
         assert!(!invoked.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn shutdown_published_during_final_batch_registration_cancels_before_polling() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let invoked = Arc::new(AtomicUsize::new(0));
+        let worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+        );
+        let shutdown_signal = Arc::clone(&worker.shutdown_signal);
+
+        for index in 0..COMMANDS_PER_CYCLE {
+            let invoked = Arc::clone(&invoked);
+            let shutdown_signal = Arc::clone(&shutdown_signal);
+            command_tx
+                .send(enqueue(Box::new(move |_, tasks| {
+                    if index + 1 == COMMANDS_PER_CYCLE {
+                        shutdown_signal.store(true, Ordering::Release);
+                    }
+                    drop(tasks.add_test(async move {
+                        invoked.fetch_add(1, Ordering::Relaxed);
+                    }));
+                })))
+                .unwrap();
+        }
+
+        worker.run();
+
+        assert_eq!(invoked.load(Ordering::Relaxed), 0);
     }
 
     #[test]

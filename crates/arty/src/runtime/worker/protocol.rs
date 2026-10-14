@@ -4,7 +4,7 @@
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{TaskSet, discard_task_panic};
+use arty_executor::{TaskSet, discard_task_panic_payload};
 
 use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
@@ -30,7 +30,7 @@ impl Drop for QueuedTaskFactory {
             return;
         };
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
-            discard_task_panic(panic);
+            discard_task_panic_payload(panic);
         }
     }
 }

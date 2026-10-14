@@ -103,7 +103,7 @@ where
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;
-                Poll::Ready(result.map_err(JoinError::from))
+                Poll::Ready(result.map_err(JoinError::from_executor))
             }
             Poll::Pending => Poll::Pending,
         }

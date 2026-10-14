@@ -42,7 +42,7 @@ struct TaskCreated {
 
 #[event("arty.rt.task.succeeded")]
 #[counter(name = "arty.rt.task.succeeded")]
-#[histogram(polls, name = "arty.rt.task.succeeded.polls")]
+#[histogram(polls, name = "arty.rt.task.succeeded.polls", unit = "{poll}")]
 struct TaskSucceeded {
     #[unredacted]
     polls: u64,
@@ -51,7 +51,7 @@ struct TaskSucceeded {
 #[event("arty.rt.task.panicked")]
 #[error("task panicked")]
 #[counter(name = "arty.rt.task.panicked")]
-#[histogram(polls, name = "arty.rt.task.panicked.polls")]
+#[histogram(polls, name = "arty.rt.task.panicked.polls", unit = "{poll}")]
 struct TaskPanicked {
     #[unredacted]
     polls: u64,
@@ -76,6 +76,7 @@ mod tests {
         assert_eq!(events[0].dimensions()[0], ("placement".to_owned(), "same_thread".into()));
         assert_eq!(events[1].name(), "arty.rt.task.succeeded");
         assert_eq!(events[1].field_metrics()[0].field_key(), "polls");
+        assert_eq!(events[1].field_metrics()[0].metric().unit(), "{poll}");
         assert!((events[1].field_metrics()[0].value() - 3.0).abs() < f64::EPSILON);
     }
 }

@@ -110,8 +110,8 @@ impl JoinError {
     }
 }
 
-impl From<arty_executor::JoinError> for JoinError {
-    fn from(error: arty_executor::JoinError) -> Self {
+impl JoinError {
+    pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
         if error.is_panic() {
             Self::panicked(error.into_panic())
         } else {

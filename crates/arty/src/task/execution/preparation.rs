@@ -3,7 +3,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic};
+use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
 
 use crate::task::Builtins;
@@ -37,7 +37,7 @@ impl<F> Drop for TaskFactory<F> {
 
 fn discard_panicking_drop<T>(value: T) {
     if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(value))) {
-        discard_task_panic(panic);
+        discard_task_panic_payload(panic);
     }
 }
 
@@ -107,7 +107,7 @@ where
             Err(panic) => result_tx.panicked(panic),
         };
         if let Err(panic) = delivery {
-            discard_task_panic(panic);
+            discard_task_panic_payload(panic);
         }
     }
 }

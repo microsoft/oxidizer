@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates how a retained join handle reports executor shutdown.
+//! Demonstrates how a retained join handle reports cancellation after executor shutdown.
 
 use std::future::pending;
 use std::pin::Pin;

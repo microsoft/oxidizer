@@ -33,8 +33,10 @@
 //! retires that metadata before releasing task storage, so an escaped waker remains callable but
 //! becomes an inert no-op and cannot delay executor shutdown.
 //!
-//! Join handles similarly retain their result storage independently. They may outlive the executor
-//! and report shutdown cancellation or a captured task panic through [`JoinError`].
+//! Local join handles similarly retain their result storage independently. They may outlive the
+//! executor and report shutdown cancellation through [`JoinError`]. A panic in a plain executor
+//! task remains fail-fast. The doc-hidden remote integration used by Arty captures task panics and
+//! transports them through its remote join handle.
 
 mod builder;
 mod constants;

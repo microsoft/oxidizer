@@ -5,7 +5,7 @@ use std::error::Error as StdError;
 use std::fmt::{self, Display};
 use std::thread::{self, ThreadId};
 
-use arty_executor::discard_task_panic;
+use arty_executor::discard_task_panic_payload;
 use performables::arc::Arc;
 use performables::sync::condition::Condvar;
 use performables::sync::mutex::{Mutex, MutexGuard};
@@ -84,7 +84,7 @@ impl ThreadWaiter {
                             if failed_worker.is_none() {
                                 failed_worker = Some(worker_id);
                             }
-                            discard_task_panic(panic);
+                            discard_task_panic_payload(panic);
                         }
                     }
                     *state.lock() = State::Completed(failed_worker);

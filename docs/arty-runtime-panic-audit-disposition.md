@@ -26,8 +26,9 @@ No duplicate work item is required.
   cover success, task panic, cancellation, final-timer failure, cross-thread
   wake, and shutdown.
 - Macro-generated runtime paths resolve Cargo dependency aliases.
-- User-facing package and crate descriptions distinguish a multi-worker runtime
-  from thread-affine tasks.
+- User-facing runtime documentation distinguishes a multi-worker runtime from
+  thread-affine tasks. The package preface remains the author-requested
+  `Single-threaded, thread-aware application runtime.`
 
 ## Production and user-reachable findings
 

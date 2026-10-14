@@ -54,23 +54,14 @@ impl TaskOptions {
     }
 
     pub(crate) fn report_created(&self, sink: &Sink) {
-        if self.context.is_none() {
-            return;
-        }
         self.with_context(|| telemetry::report_created(sink, self.placement));
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
-        if self.context.is_none() {
-            return;
-        }
-        telemetry::report_succeeded(sink, polls);
+        self.with_context(|| telemetry::report_succeeded(sink, polls));
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
-        if self.context.is_none() {
-            return;
-        }
-        telemetry::report_panicked(sink, polls);
+        self.with_context(|| telemetry::report_panicked(sink, polls));
     }
 }

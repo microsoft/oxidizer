@@ -14,6 +14,7 @@ use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskOptions, 
 use observed::Sink;
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
+use observed_testing::{TEST_ID, test_emitter};
 
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
@@ -140,6 +141,19 @@ fn task_created_processor_may_submit_a_nested_task() {
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     assert!(nested_completed.get());
+}
+
+#[test]
+fn default_options_emit_lifecycle_events_without_context_enrichment() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let executor = Executor::builder().sink(sink).build();
+    let _handle = executor.tasks().add(async {}, TaskOptions::default());
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+    let events = processor.events();
+    assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
+    assert!(events.iter().any(|event| event.name() == "arty.rt.task.succeeded"));
 }
 
 struct ReentrantIntoFuture {
