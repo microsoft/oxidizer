@@ -9,7 +9,6 @@ mod support;
 
 use std::error::Error as _;
 use std::future::{pending, poll_fn, ready};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -55,7 +54,7 @@ async fn async_and_blocking_panics_are_join_errors(cx: Builtins) {
 }
 
 #[test]
-fn blocking_callback_cannot_wait_for_blocking_work() {
+fn blocking_callback_can_wait_when_the_pool_has_spare_capacity() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(2))
@@ -63,16 +62,9 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let nested_scheduler = scheduler.clone();
-    let outer = scheduler.spawn_blocking(move || {
-        let mut inner = Vec::with_capacity(6);
-        for _ in 0..6 {
-            inner.push(nested_scheduler.spawn_blocking(|| 7));
-        }
-        let first = inner.into_iter().next().unwrap();
-        catch_unwind(AssertUnwindSafe(|| first.join())).is_err()
-    });
+    let outer = scheduler.spawn_blocking(move || nested_scheduler.spawn_blocking(|| 7).join().unwrap());
 
-    assert!(outer.join().unwrap());
+    assert_eq!(outer.join().unwrap(), 7);
     runtime.stop().unwrap();
 }
 

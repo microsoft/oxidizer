@@ -99,6 +99,13 @@ impl BlockingPoolPolicy {
         self
     }
 
+    pub(crate) const fn mode_label(&self) -> &'static str {
+        match self.mode {
+            Mode::PerWorker => "per_worker",
+            Mode::Shared => "shared",
+        }
+    }
+
     /// Resolves this policy into the `vicinal::WorkerPolicy` for the runtime's single
     /// blocking pool. `None` keeps the default per-processor policy from Vicinal.
     pub(in crate::runtime) fn worker_policy(&self) -> Result<Option<vicinal::WorkerPolicy>, Error> {

@@ -224,7 +224,7 @@ impl RuntimeScheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.next_blocking_worker().spawn_blocking(body)
+        self.dispatcher.spawn_blocking(body)
     }
 }
 

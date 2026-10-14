@@ -27,10 +27,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
 /// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
 ///
-/// On any asynchronous Arty worker or one of this runtime's blocking callbacks,
-/// dropping the owner only requests shutdown and returns without waiting.
-/// The workers complete their cleanup independently; destruction in those
-/// contexts is not a shutdown-completion barrier.
+/// On an asynchronous Arty worker, dropping the owner only requests shutdown
+/// and returns without waiting. Dropping the owner from one of this runtime's
+/// blocking callbacks remains unsupported and can deadlock.
 ///
 /// Worker-bound schedulers and [`Builtins`](crate::task::Builtins) do not keep
 /// the runtime running after its owner is dropped.
@@ -216,8 +215,8 @@ impl Drop for Runtime {
 
         self.scheduler.dispatcher.stop();
         self.shutdown_blocking_pool();
-        // `wait` rejects self-waits from async workers and blocking callbacks;
-        // worker entry wrappers report any resulting failure.
+        // `wait` rejects self-waits from async workers. Blocking callback
+        // self-waits remain outside the supported shutdown model.
         let _ = self.wait();
     }
 }
@@ -249,7 +248,6 @@ mod tests {
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
-            vicinal::Pool::new().scheduler(),
             Sink::noop(),
         )));
         let runtime = Runtime::with_dispatcher_and_pool(dispatcher, vicinal::Pool::new());

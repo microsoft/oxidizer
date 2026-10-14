@@ -9,7 +9,6 @@ use arty_executor::remote::Pool as RemotePool;
 use performables::arc::Arc;
 
 use crate::runtime::Error;
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -29,14 +28,6 @@ impl DispatcherClient {
         self.core.worker_index(thread_id)
     }
 
-    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
-        self.core.blocking_worker(worker_index)
-    }
-
-    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
-        self.core.next_blocking_worker()
-    }
-
     pub(crate) fn owns(&self, thread: &thread_aware::Thread) -> bool {
         self.core.owns(thread)
     }
@@ -51,10 +42,6 @@ impl DispatcherClient {
 
     pub(crate) fn remote_results(&self) -> &RemotePool {
         self.core.remote_results()
-    }
-
-    pub(crate) fn is_current_blocking_task(&self) -> bool {
-        self.core.is_current_blocking_task()
     }
 
     /// Submits to a previously resolved worker without discarding destination affinity.
@@ -74,6 +61,14 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
+    where
+        B: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_blocking(body)
     }
 
     pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, make_factory: M) -> Vec<JoinHandle<R>>
@@ -117,7 +112,6 @@ mod tests {
     use thread_aware::ThreadAware;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::scheduler::Scheduler;
@@ -129,7 +123,6 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
         };
         let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
@@ -153,8 +146,6 @@ mod tests {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-
         let dispatcher = Arc::new(DispatcherCore::new(
             wfs,
             nonempty::NonEmpty::from_vec(vec![
@@ -162,13 +153,11 @@ mod tests {
                     command_tx: worker0_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
-                    blocking_worker: Arc::clone(&blocking_worker),
                 },
                 WorkerEndpoint {
                     command_tx: worker1_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
-                    blocking_worker: Arc::clone(&blocking_worker),
                 },
             ])
             .unwrap(),
@@ -190,50 +179,5 @@ mod tests {
         );
         // Worker 1 should have received the task.
         assert!(worker1_rx.try_recv().is_ok(), "task should be dispatched to the relocated worker");
-    }
-
-    #[test]
-    fn relocate_switches_blocking_worker() {
-        let threads = test_threads(2);
-
-        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        destination_worker.shutdown();
-
-        let dispatcher = Arc::new(DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
-            nonempty::NonEmpty::from_vec(vec![
-                WorkerEndpoint {
-                    command_tx: channel::unbounded().0,
-                    waker: Waker::noop().clone(),
-                    thread: threads[0].clone(),
-                    blocking_worker: Arc::clone(&source_worker),
-                },
-                WorkerEndpoint {
-                    command_tx: channel::unbounded().0,
-                    waker: Waker::noop().clone(),
-                    thread: threads[1].clone(),
-                    blocking_worker: Arc::clone(&destination_worker),
-                },
-            ])
-            .unwrap(),
-            Sink::noop(),
-        ));
-
-        let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
-
-        let before = (
-            Arc::ptr_eq(scheduler.blocking_worker(), &source_worker),
-            Arc::ptr_eq(scheduler.blocking_worker(), &destination_worker),
-        );
-
-        scheduler.relocate(Some(&threads[0]), &threads[1]);
-
-        let after = (
-            Arc::ptr_eq(scheduler.blocking_worker(), &source_worker),
-            Arc::ptr_eq(scheduler.blocking_worker(), &destination_worker),
-        );
-
-        assert_eq!((before, after), ((true, false), (false, true)));
     }
 }
