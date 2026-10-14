@@ -190,9 +190,7 @@ impl WakeSignal {
         if let Some(state) = unsafe { state.as_ref() } {
             state.retire();
         }
-        if self.queued.load(atomic::Ordering::Relaxed) {
-            remove_queued_notification(&self.shared.awakened, &self.queued, self.task_ref);
-        }
+        remove_queued_notification(&self.shared.awakened, &self.queued, self.task_ref);
     }
 
     pub(crate) fn clear_queued_notification(&self) {
@@ -414,16 +412,11 @@ fn enqueue_wake(
 }
 
 fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_ref: TaskRef) {
-    if queued
-        .compare_exchange(true, false, atomic::Ordering::AcqRel, atomic::Ordering::Acquire)
-        .is_err()
-    {
+    let mut queue = queue.lock().expect("wake queue is never held while invoking user code");
+    if !queued.swap(false, atomic::Ordering::AcqRel) {
         return;
     }
-    queue
-        .lock()
-        .expect("wake queue is never held while invoking user code")
-        .retain(|queued_task_ref| *queued_task_ref != task_ref);
+    queue.retain(|queued_task_ref| *queued_task_ref != task_ref);
 }
 
 struct WakerStateRef(NonNull<WakerState>);
@@ -608,6 +601,8 @@ fn resurrect_signal_ref(ptr: *const ()) -> &'static WakeSignal {
 #[cfg(test)]
 mod tests {
     use std::pin::pin;
+    use std::sync::Barrier;
+    use std::thread;
 
     use super::*;
     use crate::testing::TestWaker;
@@ -710,6 +705,49 @@ mod tests {
         waker.wake_by_ref();
         assert!(awakened_queue.lock().unwrap().is_empty());
         assert!(!probe_embedded_wake_signals.load(atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn retirement_waits_for_an_in_progress_enqueue() {
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+        let shared = Arc::new(WakeShared::new(
+            Arc::new(Mutex::new(VecDeque::with_capacity(1))),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+        ));
+        let state = WakerState::new(Arc::downgrade(&shared), fake_task_ref);
+        let active_checked = Barrier::new(2);
+        let resume_enqueue = Barrier::new(2);
+
+        thread::scope(|scope| {
+            let wake_shared = Arc::clone(&shared);
+            let wake_state = &state;
+            let wake_task_ref = fake_task_ref;
+            let active_checked = &active_checked;
+            let resume_enqueue = &resume_enqueue;
+            let wake = scope.spawn(move || {
+                enqueue_wake(&wake_shared.awakened, &wake_state.queued, wake_task_ref, Waker::noop(), || {
+                    let active = wake_state.active.load(atomic::Ordering::Acquire);
+                    active_checked.wait();
+                    resume_enqueue.wait();
+                    active
+                })
+            });
+
+            active_checked.wait();
+            let retire = scope.spawn(|| state.retire());
+            while state.active.load(atomic::Ordering::Acquire) {
+                thread::yield_now();
+            }
+            resume_enqueue.wait();
+
+            assert!(wake.join().unwrap());
+            retire.join().unwrap();
+        });
+
+        assert!(shared.awakened.lock().unwrap().is_empty());
+        assert!(!state.queued.load(atomic::Ordering::Acquire));
     }
 
     #[test]

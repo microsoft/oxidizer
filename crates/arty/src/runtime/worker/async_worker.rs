@@ -45,11 +45,9 @@ const COMMANDS_PER_CYCLE: usize = 256;
 ///    [`RuntimeBuilder`][crate::runtime::RuntimeBuilder]. Bootstrap and the worker coordinate
 ///    initialization until the worker is ready to start operating.
 /// 2. Running - the worker is processing tasks, advancing timers, and waiting for commands.
-/// 3. Shutting down - the worker has received a command to shut down and is in the process of doing
-///    so. It may need to remain in this state for a while until non-cancelable work completes and
-///    resources are released (e.g. it may need to wait for some timeouts to occur or even for other
-///    threads to drop their interest in resources owned by the worker). During shutdown, new work
-///    is not accepted and enqueued tasks are immediately discarded.
+/// 3. Shutting down - the worker has received a command to shut down. It rejects queued and new
+///    submissions, stops blocking work, drops the executor to cancel async tasks, and runs final
+///    timer callbacks.
 /// 4. Dead - the worker has completed its shutdown process and the thread has terminated.
 ///
 /// Once in the Running state, workers keep running until they receive a stop command (i.e. until
@@ -81,12 +79,11 @@ where
     // state may hold resources that need to be released).
     thread_state: Option<Rc<OnceCell<TS>>>,
 
-    // Becomes None during the graceful shutdown process. If this is not None in drop() then we
-    // panic because we failed to follow the proper shutdown process.
+    // Becomes None during shutdown when the executor is dropped to cancel and release its tasks.
     executor: Option<Executor>,
 
-    // Connected to the `executor`. Does not participate in state management (just starts
-    // to panic if an attempt to use it is made after executor shutdown starts).
+    // Connected to the `executor`. Submissions after shutdown resolve to an executor-shutdown
+    // JoinError rather than registering a task.
     tasks: TaskSet,
 
     // We keep a reference to the blocking worker so that we can send it a shutdown signal.
@@ -791,9 +788,8 @@ mod tests {
 
     #[test]
     fn task_after_shutdown_is_ignored() {
-        // The executor will panic if you try to schedule a task after shutdown. However, it is
-        // entirely possible that we have some "new task" commands in the async worker queue even
-        // after starting the shutdown process, due to the async nature of task scheduling.
+        // It is possible to have "new task" commands in the async worker queue after shutdown
+        // starts due to the asynchronous task-submission path.
         //
         // While we cannot honor these commands, we must still do something and ensure that all
         // resources are properly managed. What we do is simply drop the tasks on the floor and
