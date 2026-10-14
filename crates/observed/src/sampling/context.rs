@@ -1,0 +1,120 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Inputs an event sampler decides from.
+
+use std::any::type_name;
+use std::cell::OnceCell;
+use std::fmt::{self, Debug, Formatter};
+
+use crate::metadata::EventDescription;
+
+/// Read-only inputs for one [`EventSampler`](crate::EventSampler) decision.
+pub struct EventSamplingContext<'a> {
+    description: &'a EventDescription,
+    get_first_interested_processor: &'a dyn Fn() -> Option<usize>,
+    first_interested_processor: OnceCell<Option<usize>>,
+}
+
+impl<'a> EventSamplingContext<'a> {
+    pub(crate) const fn new(description: &'a EventDescription, get_first_interested_processor: &'a dyn Fn() -> Option<usize>) -> Self {
+        Self {
+            description,
+            get_first_interested_processor,
+            first_interested_processor: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn into_first_interested_processor(self) -> Option<usize> {
+        self.first_interested_processor
+            .into_inner()
+            .unwrap_or_else(self.get_first_interested_processor)
+    }
+
+    /// Returns the event's type-level description.
+    #[must_use]
+    pub const fn description(&self) -> &EventDescription {
+        self.description
+    }
+
+    /// Returns whether any of the Sink's processors wants the event.
+    ///
+    /// The Sink reuses these answers when it delivers the event, so each
+    /// processor is asked at most once per event, however often this is called.
+    #[must_use]
+    pub fn processors_interested(&self) -> bool {
+        self.first_interested_processor
+            .get_or_init(self.get_first_interested_processor)
+            .is_some()
+    }
+}
+
+impl Debug for EventSamplingContext<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>())
+            .field("description", self.description)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    fn description() -> EventDescription {
+        EventDescription::new("probe.event", None, None, None, false, false)
+    }
+
+    #[test]
+    fn processors_interested_asks_processors_once() {
+        let asked = Cell::new(0);
+        let get_first_interested_processor = || {
+            asked.set(asked.get() + 1);
+            Some(1)
+        };
+        let description = description();
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+
+        assert!(context.processors_interested());
+        assert!(context.processors_interested());
+        assert_eq!(context.into_first_interested_processor(), Some(1));
+        assert_eq!(asked.get(), 1);
+    }
+
+    #[test]
+    fn processors_interested_is_false_when_no_processor_wants_event() {
+        let get_first_interested_processor = || None;
+        let description = description();
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+
+        assert!(!context.processors_interested());
+    }
+
+    #[test]
+    fn into_first_interested_processor_asks_processors_when_sampler_did_not() {
+        let asked = Cell::new(0);
+        let get_first_interested_processor = || {
+            asked.set(asked.get() + 1);
+            Some(0)
+        };
+        let description = description();
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+
+        assert_eq!(context.into_first_interested_processor(), Some(0));
+        assert_eq!(asked.get(), 1);
+    }
+
+    #[test]
+    fn debug_shows_description() {
+        let description = description();
+        let context = EventSamplingContext::new(&description, &|| None);
+
+        let debug = format!("{context:?}");
+
+        assert!(debug.contains("EventSamplingContext"));
+        assert!(debug.contains("probe.event"));
+    }
+}
