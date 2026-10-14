@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValue, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
 use observed::{Event, FlushError, Sink, emit, event};
+use ohno::ErrorExt as _;
 
 #[global_allocator]
 #[cfg(not(miri))]
@@ -240,8 +241,9 @@ struct NumericOnly {
 
 impl Event for NumericOnly {
     const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
-    const METRICS: &'static [MetricDescription] =
-        &[MetricDescription::new("numeric", InstrumentKind::Counter, "", "").with_value_kind(MetricValueKind::U64)];
+    const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("numeric", InstrumentKind::Counter)
+        .value_kind(MetricValueKind::U64)
+        .build()];
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         panic!("numeric bindings must never visit generic fields")
@@ -323,7 +325,7 @@ fn missing_numeric_slots_are_reported() {
                 .record(event, |(), _| panic!("missing slot must not be delivered"))
                 .unwrap_err();
             assert_eq!(
-                error.to_string(),
+                error.message(),
                 "event `missing` has invalid metric slot 0: no measurement supplied"
             );
         }
@@ -424,7 +426,7 @@ fn mixed_event_kinds_are_bound_and_empty_events_are_rejected() {
         .bind_event::<LogOnly>(|_| panic!("empty event must be rejected before preparation"))
         .unwrap_err();
     assert_eq!(
-        (empty.to_string(), bindings.is_interested(&Mixed::DESCRIPTION)),
+        (empty.message(), bindings.is_interested(&Mixed::DESCRIPTION)),
         (
             "cannot bind metrics on event `request.log`: the event must declare at least one metric instrument".into(),
             true,
@@ -442,7 +444,7 @@ fn registering_an_event_twice_fails_without_changing_its_existing_targets() {
         .unwrap_err();
     emit!(sink(bindings), AnotherRequest { bytes_sent: 123 });
     assert_eq!(
-        (error.to_string(), total.load(Ordering::Relaxed)),
+        (error.message(), total.load(Ordering::Relaxed)),
         (
             "cannot bind metrics on event `another.request`: the event is already registered".into(),
             123
@@ -465,7 +467,7 @@ fn unidentified_events_are_rejected_during_binding() {
     let mut bindings = MetricBindings::<()>::new();
     assert!(!bindings.is_interested(&Unidentified::DESCRIPTION));
     assert_eq!(
-        bindings.bind_event::<Unidentified>(|_| ()).unwrap_err().to_string(),
+        bindings.bind_event::<Unidentified>(|_| ()).unwrap_err().message(),
         "cannot bind metrics on event `unidentified`: a typed event identity is required",
     );
 }
@@ -708,7 +710,7 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
                 .record(event, |(), _| panic!("wrong representation must not be delivered"))
                 .unwrap_err();
             assert_eq!(
-                error.to_string(),
+                error.message(),
                 "event `wrong.type` has invalid metric slot 0: numeric representation differs from its declaration"
             );
         }

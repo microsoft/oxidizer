@@ -1058,9 +1058,10 @@ fn generate_metric_items(def: &EventDef) -> TokenStream {
         let description = metric.description.as_deref().unwrap_or("");
         let unit = metric.unit.as_deref().unwrap_or("");
         metrics.push(quote! {
-            ::observed::metadata::MetricDescription::new(
-                #name, ::observed::metadata::InstrumentKind::Counter, #description, #unit,
-            ).with_value_kind(::observed::metadata::MetricValueKind::U64),
+            ::observed::metadata::MetricDescription::builder(
+                #name, ::observed::metadata::InstrumentKind::Counter,
+            ).description(#description).unit(#unit)
+                .value_kind(::observed::metadata::MetricValueKind::U64).build(),
         });
         arms.push(quote! { 0 => ::core::option::Option::Some(::observed::metadata::MetricValue::U64(1_u64)), });
     }
@@ -1083,9 +1084,10 @@ fn generate_metric_items(def: &EventDef) -> TokenStream {
             None => unreachable!("instrument value types are validated before code generation"),
         };
         metrics.push(quote! {
-            ::observed::metadata::MetricDescription::new(
-                #name, ::observed::metadata::InstrumentKind::#kind, #description, #unit,
-            ).with_value_kind(::observed::metadata::MetricValueKind::#representation),
+            ::observed::metadata::MetricDescription::builder(
+                #name, ::observed::metadata::InstrumentKind::#kind,
+            ).description(#description).unit(#unit)
+                .value_kind(::observed::metadata::MetricValueKind::#representation).build(),
         });
         let value = match strip_type_wrappers(ty) {
             syn::Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "usize") => {

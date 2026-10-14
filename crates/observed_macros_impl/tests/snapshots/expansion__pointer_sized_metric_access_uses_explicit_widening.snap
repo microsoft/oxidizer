@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"pointer.metrics\"\"#,\nr#\"\n        #[counter(bytes)]\n        #[updown_counter(delta)]\n        struct PointerMetrics {\n            #[unredacted]\n            bytes: usize,\n            #[unredacted]\n            delta: isize,\n        }\n        \"#,)"
+expression: "expand_event(r#\"\"pointer.metrics\"\"#,\nr\"\n        #[counter(bytes)]\n        #[updown_counter(delta)]\n        struct PointerMetrics {\n            #[unredacted]\n            bytes: usize,\n            #[unredacted]\n            delta: isize,\n        }\n        \",)"
 ---
 struct PointerMetrics {
     bytes: usize,
@@ -59,20 +59,22 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "pointer.metrics",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
-            ::observed::metadata::MetricDescription::new(
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "pointer.metrics",
                     ::observed::metadata::InstrumentKind::UpDownCounter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::I64),
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::I64)
+                .build(),
         ];
         fn metric_value(
             &self,

@@ -4,8 +4,6 @@
 //! Prepared destinations for numeric metric measurements.
 
 use std::any::TypeId;
-use std::error::Error;
-use std::fmt;
 
 use super::EventView;
 use crate::Event;
@@ -13,42 +11,24 @@ use crate::metadata::{EventDescription, MetricDescription, MetricValue, MetricVa
 
 /// An event has no type identity, no metrics, or is
 /// already registered with this destination.
-#[derive(Debug)]
+#[ohno::error]
+#[display("cannot bind metrics on event `{event_name}`: {reason}")]
 pub struct MetricBindingError {
     event_name: &'static str,
     reason: &'static str,
 }
 
-impl fmt::Display for MetricBindingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "cannot bind metrics on event `{}`: {}", self.event_name, self.reason)
-    }
-}
-
-impl Error for MetricBindingError {}
-
 /// A bound event did not supply a numeric slot with the declared representation.
 ///
 /// This indicates an inconsistent hand-written event implementation.
 /// Processors must report the failure through their diagnostics or flush API.
-#[derive(Debug)]
+#[ohno::error]
+#[display("event `{event_name}` has invalid metric slot {slot}: {reason}")]
 pub struct MetricReadError {
     event_name: &'static str,
     slot: usize,
     reason: &'static str,
 }
-
-impl fmt::Display for MetricReadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "event `{}` has invalid metric slot {}: {}",
-            self.event_name, self.slot, self.reason
-        )
-    }
-}
-
-impl Error for MetricReadError {}
 
 #[derive(Debug)]
 struct MetricTarget<T> {
@@ -104,25 +84,21 @@ impl<T> MetricBindings<T> {
     /// changed when validation fails.
     pub fn bind_event<E: Event>(&mut self, mut prepare: impl FnMut(&MetricDescription) -> T) -> Result<(), MetricBindingError> {
         let description = E::DESCRIPTION;
-        let identity = description.type_id().ok_or_else(|| MetricBindingError {
-            event_name: description.name(),
-            reason: "a typed event identity is required",
-        })?;
+        let identity = description
+            .type_id()
+            .ok_or_else(|| MetricBindingError::new(description.name(), "a typed event identity is required"))?;
         if E::METRICS.is_empty() {
-            return Err(MetricBindingError {
-                event_name: description.name(),
-                reason: "the event must declare at least one metric instrument",
-            });
+            return Err(MetricBindingError::new(
+                description.name(),
+                "the event must declare at least one metric instrument",
+            ));
         }
         // Sorted vectors avoid hashing and first-use cache mutation at emit time.
         let index = self
             .events
             .binary_search_by_key(&identity, |event| event.identity)
             .err()
-            .ok_or_else(|| MetricBindingError {
-                event_name: description.name(),
-                reason: "the event is already registered",
-            })?;
+            .ok_or_else(|| MetricBindingError::new(description.name(), "the event is already registered"))?;
         let metrics = E::METRICS
             .iter()
             .map(|metric| MetricTarget {
@@ -160,17 +136,15 @@ impl<T> MetricBindings<T> {
             return Ok(());
         };
         for (slot, metric) in targets.metrics.iter().enumerate() {
-            let value = event.metric_value(slot).ok_or_else(|| MetricReadError {
-                event_name: description.name(),
-                slot,
-                reason: "no measurement supplied",
-            })?;
+            let value = event
+                .metric_value(slot)
+                .ok_or_else(|| MetricReadError::new(description.name(), slot, "no measurement supplied"))?;
             if metric.value_kind.is_some_and(|kind| kind != value.kind()) {
-                return Err(MetricReadError {
-                    event_name: description.name(),
+                return Err(MetricReadError::new(
+                    description.name(),
                     slot,
-                    reason: "numeric representation differs from its declaration",
-                });
+                    "numeric representation differs from its declaration",
+                ));
             }
             record(&metric.target, value);
         }
@@ -183,5 +157,25 @@ impl<T> MetricBindings<T> {
             .binary_search_by_key(&identity, |event| event.identity)
             .ok()
             .map(|index| &self.events[index])
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use ohno::{EnrichableExt as _, ErrorExt as _};
+
+    use super::*;
+
+    #[test]
+    fn metric_errors_support_ohno_enrichment_without_changing_the_diagnostic() {
+        static_assertions::assert_impl_all!(MetricBindingError: Send, Sync, std::error::Error, ohno::ErrorExt, ohno::Enrichable);
+        static_assertions::assert_impl_all!(MetricReadError: Send, Sync, std::error::Error, ohno::ErrorExt, ohno::Enrichable);
+        let binding = MetricBindingError::new("request", "duplicate").enrich("configuring counters");
+        assert_eq!(binding.message(), "cannot bind metrics on event `request`: duplicate");
+        assert!(binding.to_string().contains("configuring counters"));
+        let read = MetricReadError::new("request", 2_usize, "no measurement supplied").enrich("recording counters");
+        assert_eq!(read.message(), "event `request` has invalid metric slot 2: no measurement supplied");
+        assert!(read.to_string().contains("recording counters"));
     }
 }

@@ -243,8 +243,9 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
             observed::metadata::EventDescription::new("malformed", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
         const METRICS: &'static [observed::metadata::MetricDescription] =
             &[
-                observed::metadata::MetricDescription::new("Malformed", observed::metadata::InstrumentKind::Counter, "", "")
-                    .with_value_kind(observed::metadata::MetricValueKind::U64),
+                observed::metadata::MetricDescription::builder("Malformed", observed::metadata::InstrumentKind::Counter)
+                    .value_kind(observed::metadata::MetricValueKind::U64)
+                    .build(),
             ];
         fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
             std::ops::ControlFlow::Continue(())

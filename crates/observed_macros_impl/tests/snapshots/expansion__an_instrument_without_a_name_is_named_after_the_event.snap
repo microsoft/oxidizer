@@ -47,20 +47,22 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "heartbeat",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
-            ::observed::metadata::MetricDescription::new(
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "heartbeat",
                     ::observed::metadata::InstrumentKind::Gauge,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::F64),
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::F64)
+                .build(),
         ];
         fn metric_value(
             &self,

@@ -41,6 +41,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 ctor = { workspace = true }
+ohno = { path = "../ohno" }
 testing_aids = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
 

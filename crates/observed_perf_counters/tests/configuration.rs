@@ -9,6 +9,7 @@ use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, Me
 use observed::processing::FieldVisitorFn;
 use observed::{Event, event};
 use observed_perf_counters::PerfCounterProcessor;
+use ohno::ErrorExt as _;
 
 #[event("request.completed")]
 #[counter(name = "Requests", desc = "completed requests")]
@@ -22,8 +23,9 @@ struct UntypedEvent;
 
 impl Event for UntypedEvent {
     const DESCRIPTION: EventDescription = EventDescription::new("untyped", None, None, None, false, false);
-    const METRICS: &'static [MetricDescription] =
-        &[MetricDescription::new("count", InstrumentKind::Counter, "", "").with_value_kind(MetricValueKind::U64)];
+    const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("count", InstrumentKind::Counter)
+        .value_kind(MetricValueKind::U64)
+        .build()];
     fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
         std::ops::ControlFlow::Continue(())
     }
@@ -115,7 +117,12 @@ fn events_without_metrics_are_rejected() {
         .manifest("MyServiceCounters.dll")
         .unwrap_err();
     assert_eq!(
-        error.source().unwrap().to_string(),
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<observed::processing::MetricBindingError>()
+            .unwrap()
+            .message(),
         "cannot bind metrics on event `log.only`: the event must declare at least one metric instrument"
     );
 }
@@ -130,7 +137,12 @@ fn duplicate_event_registration_is_rejected_instead_of_counting_twice() {
         .manifest("MyServiceCounters.dll")
         .unwrap_err();
     assert_eq!(
-        error.source().unwrap().to_string(),
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<observed::processing::MetricBindingError>()
+            .unwrap()
+            .message(),
         "cannot bind metrics on event `request.completed`: the event is already registered"
     );
 }
@@ -146,7 +158,12 @@ fn later_bindings_cannot_overwrite_the_first_configuration_error() {
         .manifest("resources.dll")
         .unwrap_err();
     assert_eq!(
-        error.source().unwrap().to_string(),
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<observed::processing::MetricBindingError>()
+            .unwrap()
+            .message(),
         "cannot bind metrics on event `log.only`: the event must declare at least one metric instrument",
     );
 }

@@ -3942,6 +3942,7 @@ dependencies = [
  "alloc_tracker",
  "ctor",
  "observed",
+ "ohno",
  "performables",
  "testing_aids",
  "thiserror",

@@ -50,20 +50,22 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "bytes_sent",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
-            ::observed::metadata::MetricDescription::new(
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "request",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
         ];
         fn metric_value(
             &self,

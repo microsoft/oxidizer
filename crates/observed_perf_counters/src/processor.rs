@@ -428,10 +428,14 @@ mod tests {
             },
             MetricValue::I64(-1),
         );
-        let original = processor.flush().unwrap_err().to_string();
+        let original = processor.flush().unwrap_err();
+        let original = std::error::Error::source(&original).unwrap().to_string();
         assert!(original.contains("measurement does not match the prepared integer metric"));
         processor.report(&ErrorKind::Overflow { counter_id: 7 }.into());
-        assert_eq!(processor.flush().unwrap_err().to_string(), original);
+        assert_eq!(
+            std::error::Error::source(&processor.flush().unwrap_err()).unwrap().to_string(),
+            original,
+        );
         assert_eq!(named_values(&processor), [("Value".into(), 0)]);
         assert!(format!("{processor:?}").contains("Error retention"));
         assert_eq!(processor.schema.category, "Error retention");
@@ -544,10 +548,9 @@ mod tests {
         const DESCRIPTION: EventDescription =
             EventDescription::new("missing.slot", Some(std::any::TypeId::of::<Self>()), None, None, true, false);
         const METRICS: &'static [observed::metadata::MetricDescription] =
-            &[
-                observed::metadata::MetricDescription::new("Missing", InstrumentKind::Counter, "", "")
-                    .with_value_kind(MetricValueKind::U64),
-            ];
+            &[observed::metadata::MetricDescription::builder("Missing", InstrumentKind::Counter)
+                .value_kind(MetricValueKind::U64)
+                .build()];
         fn visit_fields(&self, _: &mut observed::processing::FieldVisitorFn<'_>) -> std::ops::ControlFlow<()> {
             std::ops::ControlFlow::Continue(())
         }
@@ -593,7 +596,7 @@ mod tests {
         let source = std::error::Error::source(backend).unwrap();
         assert!(source.is::<observed::processing::MetricReadError>());
         assert_eq!(
-            source.to_string(),
+            ohno::ErrorExt::message(source.downcast_ref::<observed::processing::MetricReadError>().unwrap()),
             "event `missing.slot` has invalid metric slot 0: no measurement supplied"
         );
     }

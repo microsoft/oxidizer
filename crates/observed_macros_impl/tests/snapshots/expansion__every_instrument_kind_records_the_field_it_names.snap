@@ -117,34 +117,38 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "operation.hits",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "completed operations",
-                    "1",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
-            ::observed::metadata::MetricDescription::new(
+                .description("completed operations")
+                .unit("1")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "operation",
                     ::observed::metadata::InstrumentKind::UpDownCounter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::I64),
-            ::observed::metadata::MetricDescription::new(
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::I64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "operation",
                     ::observed::metadata::InstrumentKind::Gauge,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::F64),
-            ::observed::metadata::MetricDescription::new(
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::F64)
+                .build(),
+            ::observed::metadata::MetricDescription::builder(
                     "operation",
                     ::observed::metadata::InstrumentKind::Histogram,
-                    "",
-                    "ms",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::F64),
+                .description("")
+                .unit("ms")
+                .value_kind(::observed::metadata::MetricValueKind::F64)
+                .build(),
         ];
         fn metric_value(
             &self,

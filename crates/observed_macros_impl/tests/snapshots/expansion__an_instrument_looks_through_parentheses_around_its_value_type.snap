@@ -40,13 +40,14 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "wrapped",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+                .description("")
+                .unit("")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
         ];
         fn metric_value(
             &self,

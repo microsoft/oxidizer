@@ -29,13 +29,14 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
         const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::new(
+            ::observed::metadata::MetricDescription::builder(
                     "heartbeat.total",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "heartbeats",
-                    "1",
                 )
-                .with_value_kind(::observed::metadata::MetricValueKind::U64),
+                .description("heartbeats")
+                .unit("1")
+                .value_kind(::observed::metadata::MetricValueKind::U64)
+                .build(),
         ];
         fn metric_value(
             &self,
