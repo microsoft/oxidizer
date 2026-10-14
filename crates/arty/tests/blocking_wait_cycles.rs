@@ -1,17 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Direct same-pool blocking joins must be rejected instead of starving their pool.
+//! Nested blocking joins complete when the pool has spare worker capacity.
 
 #![cfg(feature = "rt")]
 #![cfg(not(miri))]
 
-mod panic_support;
-
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
 
-use panic_support::runtime;
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
 testing_aids::init_tracing!();
@@ -35,17 +32,21 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
 }
 
 #[test]
-fn blocking_join_future_rejects_its_current_pool() {
+fn blocking_join_future_completes_on_its_current_pool() {
     completes_without_deadlock(|| {
-        let runtime = runtime();
+        let runtime = Runtime::builder()
+            .workers(WorkersPolicy::exactly(1))
+            .blocking_pool(BlockingPoolPolicy::shared().max(2))
+            .build()
+            .unwrap();
         let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
         let nested = scheduler.clone();
         let task = scheduler.spawn_blocking(move || {
             let inner = nested.spawn_blocking(|| 42);
-            catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(inner))).is_err()
+            futures::executor::block_on(inner).unwrap()
         });
 
-        assert!(futures::executor::block_on(task).unwrap());
+        assert_eq!(futures::executor::block_on(task).unwrap(), 42);
         runtime.stop().unwrap();
     });
 }

@@ -56,9 +56,9 @@ See the
 ## Blocking work and I/O
 
 `spawn_blocking` runs a synchronous callback away from async workers. Captures
-and results must be `Send`. Workers share one blocking pool by default; the
-per-worker policy separates their blocking workloads into one pool per worker,
-potentially using more threads.
+and results must be `Send`. One runtime-owned Vicinal pool executes all
+blocking work. The legacy `per_worker` policy maps limits to processor-local
+worker groups. The `shared` policy uses one fixed system-wide worker group.
 
 Arty provides timers, but not async network or file I/O drivers. An async I/O
 library still needs its own runtime support. See [I/O](IO.md).
@@ -75,9 +75,9 @@ errors. Neither waits when called from an async Arty worker or the runtime's own
 blocking callback; `stop` returns an error in those contexts.
 
 Shutdown rejects new submissions and cancels unfinished async tasks on their
-worker. Rejected factories and queued blocking callbacks do not run.
-Already-running callbacks finish before shutdown completes; one that never
-returns can prevent it.
+worker. Rejected factories do not run. Blocking callbacks admitted before the
+shutdown flag is observed may still start. Already-running callbacks finish
+before shutdown completes; one that never returns can prevent it.
 
 Await required work before requesting shutdown or returning from an
 `#[arty::main]` or `#[arty::test]` body. See the

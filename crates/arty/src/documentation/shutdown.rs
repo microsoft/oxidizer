@@ -25,7 +25,8 @@
 //! Once shutdown begins, new submissions return an immediately ready
 //! [`JoinError`](crate::task::JoinError) with `is_shutdown() == true` without
 //! invoking their factories. Pending async tasks are cancelled on their worker,
-//! and queued blocking callbacks do not start.
+//! but blocking callbacks admitted before the shutdown flag was observed may
+//! still start.
 //!
 //! Already-running blocking callbacks finish before shutdown completes; one
 //! that never returns can prevent it. Await work you need before stopping the

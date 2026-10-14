@@ -85,14 +85,13 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets whether async workers share their blocking-task pool.
+    /// Sets the locality and worker count for blocking tasks.
     ///
-    /// The default shares one pool across async workers. Use
-    /// [`BlockingPoolPolicy::shared`] for one runtime-wide pool, or
-    /// [`BlockingPoolPolicy::per_worker`] to give each worker its own pool.
-    /// Chain [`BlockingPoolPolicy::max`] to set the thread limit.
-    /// A zero shared-pool limit is rejected by [`build`](Self::build), not by
-    /// this setter.
+    /// The runtime always owns one pool. Use [`BlockingPoolPolicy::per_worker`]
+    /// for processor-local worker groups or [`BlockingPoolPolicy::shared`] for
+    /// system-wide sharing. Chain [`BlockingPoolPolicy::max`] to set the
+    /// fixed worker count for that locality. A zero limit is rejected by
+    /// [`build`](Self::build), not by this setter.
     ///
     /// # Examples
     ///

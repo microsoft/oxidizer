@@ -47,10 +47,6 @@ impl Error {
         Self::new(RuntimeValidation::ShutdownWaitFromWorker)
     }
 
-    pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
-        Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
-    }
-
     #[cfg(any(test, feature = "macros"))]
     pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
         self.source
@@ -93,7 +89,6 @@ pub(crate) enum RuntimeValidation {
     InvalidBlockingPoolLimit,
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
-    ShutdownWaitFromBlockingCallback,
 }
 
 impl Display for RuntimeValidation {
@@ -103,7 +98,6 @@ impl Display for RuntimeValidation {
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
-            Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
         })
     }
 }
@@ -171,11 +165,6 @@ mod tests {
                 Error::shutdown_wait_from_worker(),
                 RuntimeValidation::ShutdownWaitFromWorker,
                 "an async Arty worker cannot wait for runtime shutdown",
-            ),
-            (
-                Error::shutdown_wait_from_blocking_callback(),
-                RuntimeValidation::ShutdownWaitFromBlockingCallback,
-                "a runtime blocking callback cannot wait for its own shutdown",
             ),
         ];
 
