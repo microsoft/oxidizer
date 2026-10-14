@@ -17,30 +17,28 @@ use std::any::type_name;
 use std::cell::OnceCell;
 use std::fmt::{self, Debug, Formatter};
 
-use smallvec::SmallVec;
-
 use crate::metadata::EventDescription;
-
-pub(crate) type InterestedProcessors = SmallVec<[bool; 8]>;
 
 /// Read-only inputs for one [`EventSampler`] decision.
 pub struct EventSamplingContext<'a> {
     description: &'a EventDescription,
-    get_interested_processors: &'a dyn Fn() -> InterestedProcessors,
-    interested_processors: OnceCell<InterestedProcessors>,
+    get_first_interested_processor: &'a dyn Fn() -> Option<usize>,
+    first_interested_processor: OnceCell<Option<usize>>,
 }
 
 impl<'a> EventSamplingContext<'a> {
-    pub(crate) const fn new(description: &'a EventDescription, get_interested_processors: &'a dyn Fn() -> InterestedProcessors) -> Self {
+    pub(crate) const fn new(description: &'a EventDescription, get_first_interested_processor: &'a dyn Fn() -> Option<usize>) -> Self {
         Self {
             description,
-            get_interested_processors,
-            interested_processors: OnceCell::new(),
+            get_first_interested_processor,
+            first_interested_processor: OnceCell::new(),
         }
     }
 
-    pub(crate) fn into_interested_processors(mut self) -> InterestedProcessors {
-        self.interested_processors.take().unwrap_or_else(self.get_interested_processors)
+    pub(crate) fn into_first_interested_processor(self) -> Option<usize> {
+        self.first_interested_processor
+            .into_inner()
+            .unwrap_or_else(self.get_first_interested_processor)
     }
 
     /// Returns the event's type-level description.
@@ -55,9 +53,9 @@ impl<'a> EventSamplingContext<'a> {
     /// processor is asked at most once per event, however often this is called.
     #[must_use]
     pub fn processors_interested(&self) -> bool {
-        self.interested_processors
-            .get_or_init(self.get_interested_processors)
-            .contains(&true)
+        self.first_interested_processor
+            .get_or_init(self.get_first_interested_processor)
+            .is_some()
     }
 }
 
@@ -130,46 +128,46 @@ mod tests {
     #[test]
     fn processors_interested_asks_processors_once() {
         let asked = Cell::new(0);
-        let get_interested_processors = || {
+        let get_first_interested_processor = || {
             asked.set(asked.get() + 1);
-            InterestedProcessors::from_slice(&[false, true])
+            Some(1)
         };
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_interested_processors);
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
 
         assert!(context.processors_interested());
         assert!(context.processors_interested());
-        assert_eq!(context.into_interested_processors().as_slice(), &[false, true]);
+        assert_eq!(context.into_first_interested_processor(), Some(1));
         assert_eq!(asked.get(), 1);
     }
 
     #[test]
     fn processors_interested_is_false_when_no_processor_wants_event() {
-        let get_interested_processors = || InterestedProcessors::from_slice(&[false, false]);
+        let get_first_interested_processor = || None;
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_interested_processors);
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
 
         assert!(!context.processors_interested());
     }
 
     #[test]
-    fn into_interested_processors_asks_processors_when_sampler_did_not() {
+    fn into_first_interested_processor_asks_processors_when_sampler_did_not() {
         let asked = Cell::new(0);
-        let get_interested_processors = || {
+        let get_first_interested_processor = || {
             asked.set(asked.get() + 1);
-            InterestedProcessors::from_slice(&[true])
+            Some(0)
         };
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_interested_processors);
+        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
 
-        assert_eq!(context.into_interested_processors().as_slice(), &[true]);
+        assert_eq!(context.into_first_interested_processor(), Some(0));
         assert_eq!(asked.get(), 1);
     }
 
     #[test]
     fn debug_shows_description() {
         let description = description();
-        let context = EventSamplingContext::new(&description, &InterestedProcessors::new);
+        let context = EventSamplingContext::new(&description, &|| None);
 
         let debug = format!("{context:?}");
 

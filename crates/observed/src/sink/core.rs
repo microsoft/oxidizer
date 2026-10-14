@@ -15,7 +15,7 @@ use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
-use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision, InterestedProcessors};
+use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 use crate::{Event, FlushError, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
@@ -518,22 +518,16 @@ impl SingleSinkState {
             return;
         };
 
-        let get_interested_processors = || -> InterestedProcessors {
-            self.processors
-                .iter()
-                .map(|processor| processor.is_interested(description))
-                .collect()
-        };
-        let context = EventSamplingContext::new(description, &get_interested_processors);
+        let get_first_interested_processor = || self.processors.iter().position(|processor| processor.is_interested(description));
+        let context = EventSamplingContext::new(description, &get_first_interested_processor);
         if let Some(sampler) = &self.sampler
             && sampler.sample(&context) == EventSamplingDecision::Drop
         {
             return;
         }
-        let interested_processors = context.into_interested_processors();
-        if !interested_processors.contains(&true) {
+        let Some(first_interested_processor) = context.into_first_interested_processor() else {
             return;
-        }
+        };
 
         drop(guard);
         let event = get_event();
@@ -541,8 +535,9 @@ impl SingleSinkState {
         let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot is free again once the event is built");
 
         let view = self.view(event);
-        for (processor, wants) in self.processors.iter().zip(interested_processors) {
-            if wants {
+        self.processors[first_interested_processor].process(&view);
+        for processor in &self.processors[first_interested_processor + 1..] {
+            if processor.is_interested(description) {
                 processor.process(&view);
             }
         }
@@ -898,16 +893,15 @@ mod tests {
 
     #[test]
     fn continue_without_asking_asks_each_processor_once() {
-        let interested = CountingProcessor::new(true);
-        let uninterested = CountingProcessor::new(false);
+        let processors = [false, true, false, true].map(CountingProcessor::new);
         let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
-        let sink = counting_leaf("mixed", &[&uninterested, &interested]).with_event_sampler(sampler);
+        let sink = counting_leaf("mixed", &processors.each_ref()).with_event_sampler(sampler);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        assert_eq!((interested.asked(), uninterested.asked()), (1, 1));
-        assert_eq!((interested.processed(), uninterested.processed()), (1, 0));
+        assert_eq!(processors.each_ref().map(|processor| processor.asked()), [1, 1, 1, 1]);
+        assert_eq!(processors.each_ref().map(|processor| processor.processed()), [0, 1, 0, 1]);
     }
 
     #[test]
@@ -922,14 +916,13 @@ mod tests {
             }
         }
 
-        let interested = CountingProcessor::new(true);
-        let uninterested = CountingProcessor::new(false);
-        let sink = counting_leaf("mixed", &[&uninterested, &interested]).with_event_sampler(AskTwiceSampler);
+        let processors = [false, true, false, true].map(CountingProcessor::new);
+        let sink = counting_leaf("mixed", &processors.each_ref()).with_event_sampler(AskTwiceSampler);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
-        assert_eq!((interested.asked(), uninterested.asked()), (1, 1));
-        assert_eq!((interested.processed(), uninterested.processed()), (1, 0));
+        assert_eq!(processors.each_ref().map(|processor| processor.asked()), [1, 1, 1, 1]);
+        assert_eq!(processors.each_ref().map(|processor| processor.processed()), [0, 1, 0, 1]);
     }
 
     #[test]
