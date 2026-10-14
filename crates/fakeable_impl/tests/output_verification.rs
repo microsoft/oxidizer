@@ -447,7 +447,7 @@ fn fakeable_on_impl_with_mockall_rejects_mutable_receiver() {
 }
 
 #[test]
-fn fakeable_on_impl_with_mockall_rejects_restricted_visibility() {
+fn fakeable_on_impl_with_mockall_supports_crate_visibility() {
     let input = quote! {
         impl MyService {
             pub(crate) fn value(&self) -> i32 {
@@ -456,9 +456,100 @@ fn fakeable_on_impl_with_mockall_rejects_restricted_visibility() {
         }
     };
 
+    let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input);
+
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_on_impl_with_mockall_rejects_relative_visibility() {
+    let input = quote! {
+        impl MyService {
+            pub(super) fn value(&self) -> i32 {
+                42
+            }
+        }
+    };
+
     let result = fakeable_impl::fakeable_impl(quote! { generate_mockall_fake = true }, input).to_string();
 
-    assert!(result.contains("does not support restricted method visibility"));
+    assert!(result.contains("supports only pub and pub(crate) method visibility"));
+}
+
+#[test]
+fn fakeable_test_only_struct_has_no_feature_gate() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { fake_impl = fakes::FakeMyService, fakes_feature = false },
+        quote! { pub(crate) struct MyService; },
+    );
+
+    assert!(!result.to_string().contains("feature"));
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_test_only_impl_has_no_feature_gate() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { fakes_feature = false },
+        quote! {
+            impl MyService {
+                pub(crate) fn new() -> Self { Self {} }
+                pub(crate) fn value(&self) -> u32 { 42 }
+                pub(crate) fn copy(&self) -> Self { Self {} }
+            }
+        },
+    );
+
+    assert!(!result.to_string().contains("feature"));
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_test_only_mockall_has_no_feature_gate() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true, fakes_feature = false },
+        quote! {
+            impl MyService {
+                pub(crate) fn value(&self) -> u32 { 42 }
+            }
+        },
+    );
+
+    assert!(!result.to_string().contains("feature"));
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_test_only_current_module_mockall_has_no_feature_gate() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true, mockall_fake_module = ".", fakes_feature = false },
+        quote! {
+            impl MyService {
+                pub(crate) fn value(&self) -> u32 { 42 }
+            }
+        },
+    );
+
+    assert!(!result.to_string().contains("feature"));
+    assert_expansion!(&result);
+}
+
+#[test]
+fn fakeable_test_only_mockall_errors_have_no_feature_gate() {
+    let result = fakeable_impl::fakeable_impl(
+        quote! { generate_mockall_fake = true, fakes_feature = false },
+        quote! {
+            impl MyService {
+                #[cfg(any())]
+                pub(crate) fn unsupported(&mut self) {}
+            }
+        },
+    );
+    let output = result.to_string();
+
+    assert!(output.contains("does not support mutable receiver methods"));
+    assert!(!output.contains("feature"));
+    assert_expansion!(&result);
 }
 
 #[test]

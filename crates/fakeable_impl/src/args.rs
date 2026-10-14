@@ -5,13 +5,13 @@
 
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, LitBool, LitStr, Path, Result, Token};
+use syn::{Ident, Lit, LitBool, LitStr, Path, Result, Token};
 
 /// Arguments for the `#[fakeable(...)]` attribute macro.
 #[derive(Debug, Clone)]
 pub(super) struct FakeableArgs {
-    /// The feature/cfg attribute name for enabling fake implementations.
-    pub(super) fakes_feature: String,
+    /// Consumer feature enabling fakes, or `None` for unit tests only.
+    pub(super) fakes_feature: Option<String>,
     /// The path to the fake implementation type (for structs only).
     pub(super) fake_impl: Option<Path>,
     /// The name of the constructor method for creating fake instances (for structs only).
@@ -38,7 +38,14 @@ impl Parse for FakeableArgs {
                     if fakes_feature.is_some() {
                         return Err(syn::Error::new_spanned(&value, "fakes_feature specified multiple times"));
                     }
-                    fakes_feature = Some(value.value());
+                    let feature = match value {
+                        Lit::Str(value) => Some(value.value()),
+                        Lit::Bool(value) if !value.value => None,
+                        value => {
+                            return Err(syn::Error::new_spanned(value, "fakes_feature must be a feature name or false"));
+                        }
+                    };
+                    fakes_feature = Some(feature);
                 }
                 FakeableArg::FakeImpl(path) => {
                     if fake_impl.is_some() {
@@ -69,7 +76,7 @@ impl Parse for FakeableArgs {
 
         // Default to "test-util" if not specified, per M-TEST-UTIL:
         // https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html#M-TEST-UTIL
-        let fakes_feature = fakes_feature.unwrap_or_else(|| "test-util".to_string());
+        let fakes_feature = fakes_feature.unwrap_or_else(|| Some("test-util".to_string()));
 
         Ok(Self {
             fakes_feature,
@@ -83,7 +90,7 @@ impl Parse for FakeableArgs {
 
 #[derive(Debug, Clone)]
 enum FakeableArg {
-    FakesFeature(LitStr),
+    FakesFeature(Lit),
     FakeImpl(Path),
     FakeConstructor(LitStr),
     GenerateMockallFake(LitBool),
@@ -97,7 +104,7 @@ impl Parse for FakeableArg {
 
         match name.to_string().as_str() {
             "fakes_feature" | "fakes_attribute" => {
-                let value: LitStr = input.parse()?;
+                let value: Lit = input.parse()?;
                 Ok(Self::FakesFeature(value))
             }
             "fake_impl" => {

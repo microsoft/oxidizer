@@ -15,9 +15,13 @@ mod args;
 
 use args::FakeableArgs;
 
-/// Helper function to generate the fakes feature cfg attribute
-fn fakes_cfg_attr(fakes_attribute: &str) -> proc_macro2::TokenStream {
-    quote! { #[cfg(any(feature = #fakes_attribute, test))] }
+/// Gates fakes on unit tests and, optionally, a consumer feature.
+fn fakes_cfg_attr(fakes_feature: Option<&str>) -> proc_macro2::TokenStream {
+    if let Some(feature) = fakes_feature {
+        quote! { #[cfg(any(feature = #feature, test))] }
+    } else {
+        quote! { #[cfg(test)] }
+    }
 }
 
 fn method_gating_attrs(method: &syn::ImplItemFn) -> Vec<&syn::Attribute> {
@@ -180,7 +184,7 @@ fn process_struct(args: &FakeableArgs, item_struct: &ItemStruct) -> proc_macro2:
     let fake_constructor_ident = quote::format_ident!("{}", fake_constructor_name);
 
     // Parse the fakes attribute
-    let fakes_attribute = &args.fakes_feature;
+    let fakes_attribute = args.fakes_feature.as_deref();
     let fakes_cfg = fakes_cfg_attr(fakes_attribute);
 
     // Extract derive attributes to apply to internal types
@@ -327,7 +331,7 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     // Generate internal type names without prefix, to be placed in dedicated module
     let enum_name = syn::Ident::new("Enum", proc_macro2::Span::call_site());
     let helper_module_name = quote::format_ident!("__fakeable__{struct_name}");
-    let fakes_attribute = &args.fakes_feature;
+    let fakes_attribute = args.fakes_feature.as_deref();
 
     let mut real_impl = item_impl.clone();
     *real_impl.self_ty = parse_quote!(#helper_module_name::#struct_segment);
@@ -379,6 +383,7 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
     };
 
     quote! {
+        #[allow(clippy::unused_self, reason = "Instance receivers select the real or fake implementation")]
         #real_impl
 
         #wrapper_impl
@@ -486,7 +491,7 @@ fn generate_wrapper_impl(
     real_struct_segment: &syn::PathSegment,
     enum_name: &proc_macro2::Ident,
     helper_module_name: &proc_macro2::Ident,
-    fakes_attribute: &str,
+    fakes_attribute: Option<&str>,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
     let trait_path = original_impl.trait_.as_ref().map(|(path, _)| path);
 
@@ -577,7 +582,7 @@ fn generate_wrapper_impl(
 )]
 fn generate_delegation_method(
     original_method: &syn::ImplItemFn,
-    fakes_attribute: &str,
+    fakes_attribute: Option<&str>,
     enum_name: &proc_macro2::Ident,
     real_struct_segment: &syn::PathSegment,
     helper_module_name: &proc_macro2::Ident,
@@ -1397,10 +1402,12 @@ fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Resu
         ));
     }
 
-    if matches!(method.vis, syn::Visibility::Restricted(_)) {
+    if let syn::Visibility::Restricted(visibility) = &method.vis
+        && !visibility.path.is_ident("crate")
+    {
         return Err(syn::Error::new_spanned(
             &method.vis,
-            "generate_mockall_fake does not support restricted method visibility; use `pub` or a manual fake implementation",
+            "generate_mockall_fake supports only pub and pub(crate) method visibility; use a manual fake implementation for other scopes",
         ));
     }
 
@@ -1468,7 +1475,7 @@ fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Resu
 fn generate_mockall_fake(
     item_impl: &ItemImpl,
     fake_name: &str,
-    fakes_attribute: &str,
+    fakes_attribute: Option<&str>,
     fake_module: &str,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
     // Use the provided name directly - mockall will add "Mock" prefix automatically
@@ -1511,9 +1518,10 @@ fn generate_mockall_fake(
                     .attrs
                     .iter()
                     .filter(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+                let visibility = &method.vis;
                 mock_methods.push(quote! {
                     #(#cfg_attrs)*
-                    pub #method_signature;
+                    #visibility #method_signature;
                 });
             }
         }
@@ -1813,6 +1821,16 @@ mod tests {
                 quote!(fakes_feature = "a", fakes_feature = "b"),
                 "fakes_feature specified multiple times",
             ),
+            (
+                quote!(fakes_feature = false, fakes_feature = "a"),
+                "fakes_feature specified multiple times",
+            ),
+            (
+                quote!(fakes_feature = "a", fakes_attribute = false),
+                "fakes_feature specified multiple times",
+            ),
+            (quote!(fakes_feature = true), "fakes_feature must be a feature name or false"),
+            (quote!(fakes_feature = 42), "fakes_feature must be a feature name or false"),
             (quote!(fake_impl = First, fake_impl = Second), "fake_impl specified multiple times"),
             (
                 quote!(fake_constructor = "a", fake_constructor = "b"),
