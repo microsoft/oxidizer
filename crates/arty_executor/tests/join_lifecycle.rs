@@ -137,6 +137,7 @@ fn disconnected_task_set_returns_shutdown_error() {
 struct PanickingRemoteJoinWake(AtomicBool);
 
 impl Wake for PanickingRemoteJoinWake {
+    #[expect(clippy::panic, reason = "this test injects a wake panic to verify containment")]
     fn wake(self: Arc<Self>) {
         self.0.store(true, Ordering::Release);
         panic!("remote join disconnect notification");

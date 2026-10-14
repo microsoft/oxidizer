@@ -67,7 +67,7 @@ impl JoinError {
     #[must_use]
     pub fn into_panic(self) -> Option<TaskPanicPayload> {
         self.panic
-            .map(|panic| panic.into_inner().expect("the private panic payload mutex cannot be poisoned"))
+            .map(|panic| panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
     }
 }
 
