@@ -601,8 +601,9 @@ fn resurrect_signal_ref(ptr: *const ()) -> &'static WakeSignal {
 #[cfg(test)]
 mod tests {
     use std::pin::pin;
-    use std::sync::Barrier;
+    use std::sync::{Barrier, mpsc};
     use std::thread;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::testing::TestWaker;
@@ -723,9 +724,11 @@ mod tests {
         thread::scope(|scope| {
             let wake_shared = Arc::clone(&shared);
             let wake_state = &state;
+            let retire_state = &state;
             let wake_task_ref = fake_task_ref;
             let active_checked = &active_checked;
             let resume_enqueue = &resume_enqueue;
+            let (retire_done_tx, retire_done_rx) = mpsc::channel();
             let wake = scope.spawn(move || {
                 enqueue_wake(&wake_shared.awakened, &wake_state.queued, wake_task_ref, Waker::noop(), || {
                     let active = wake_state.active.load(atomic::Ordering::Acquire);
@@ -736,14 +739,25 @@ mod tests {
             });
 
             active_checked.wait();
-            let retire = scope.spawn(|| state.retire());
-            while state.active.load(atomic::Ordering::Acquire) {
+            let retire = scope.spawn(move || {
+                retire_state.retire();
+                retire_done_tx.send(()).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let retired_while_enqueue_blocked = loop {
+                if !state.active.load(atomic::Ordering::Acquire) {
+                    break true;
+                }
+                if retire_done_rx.try_recv().is_ok() || Instant::now() >= deadline {
+                    break false;
+                }
                 thread::yield_now();
-            }
+            };
             resume_enqueue.wait();
 
             assert!(wake.join().unwrap());
             retire.join().unwrap();
+            assert!(retired_while_enqueue_blocked);
         });
 
         assert!(shared.awakened.lock().unwrap().is_empty());
@@ -887,17 +901,24 @@ mod tests {
         // We expect that the test leaves us in this state and rely on assertions to verify it.
         let waker = unsafe { signal.waker() };
 
-        assert!(!signal.consume_awakened());
-        assert!(!parent_waker.awakened.load(atomic::Ordering::Relaxed));
+        let initially_awakened = signal.consume_awakened();
+        let parent_initially_awakened = parent_waker.awakened.load(atomic::Ordering::Relaxed);
 
         waker.wake_by_ref();
-        assert!(probe_embedded_wake_signals.load(atomic::Ordering::Relaxed));
-        assert!(signal.consume_awakened());
-        assert!(parent_waker.awakened.load(atomic::Ordering::Relaxed));
+        let embedded_probe_awakened = probe_embedded_wake_signals.load(atomic::Ordering::Relaxed);
+        let awakened = signal.consume_awakened();
+        let parent_awakened = parent_waker.awakened.load(atomic::Ordering::Relaxed);
 
         // Verify that it is now consumed.
-        assert!(!signal.consume_awakened());
+        let awakened_after_consumption = signal.consume_awakened();
         drop(awakened_set_lock_guard);
+
+        assert!(!initially_awakened);
+        assert!(!parent_initially_awakened);
+        assert!(embedded_probe_awakened);
+        assert!(awakened);
+        assert!(parent_awakened);
+        assert!(!awakened_after_consumption);
     }
 
     #[test]
