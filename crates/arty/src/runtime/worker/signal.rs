@@ -11,7 +11,7 @@ use performables::sync::mutex::Mutex;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
-pub(in crate::runtime) struct WorkerSignal {
+pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
 }
@@ -40,7 +40,7 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
-    pub(in crate::runtime) fn wait(&self, timeout: Duration) {
+    pub(crate) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
         wait_until_deadline(
@@ -67,7 +67,7 @@ impl WorkerSignal {
         *notified = false;
     }
 
-    pub(in crate::runtime) fn waker(signal: &Arc<Self>) -> Waker {
+    pub(crate) fn waker(signal: &Arc<Self>) -> Waker {
         // Wake requires a standard Arc; both handles share the same allocation.
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
@@ -75,7 +75,7 @@ impl WorkerSignal {
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
-    pub(in crate::runtime) fn is_notified(&self) -> bool {
+    pub(crate) fn is_notified(&self) -> bool {
         *self.notified.lock()
     }
 

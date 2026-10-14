@@ -58,7 +58,7 @@ const COMMANDS_PER_CYCLE: usize = 256;
 ///
 /// This type is single-threaded - it only exists on the designated worker thread.
 #[derive(Debug)]
-pub(in crate::runtime) struct AsyncWorker {
+pub(crate) struct AsyncWorker {
     // Exclusively used by top level worker logic, never via reentrant task logic.
     // We drop this when we receive the shutdown signal, to ensure that any tasks that
     // happen to be enqueued after shutdown starts are discarded when an attempt is
@@ -91,7 +91,7 @@ pub(in crate::runtime) struct AsyncWorker {
 }
 
 impl AsyncWorker {
-    pub(in crate::runtime) fn new(
+    pub(crate) fn new(
         command_rx: channel::Receiver<AsyncWorkerCommand>,
         dispatcher: DispatcherClient,
         thread: Thread,
@@ -128,7 +128,7 @@ impl AsyncWorker {
     /// Worker thread entry point, invoked by bootstrap after startup coordination completes.
     /// The configuration-facing `RuntimeBuilder` delegates construction to bootstrap.
     /// After this method returns, the thread will end.
-    pub(in crate::runtime) fn run(mut self) {
+    pub(crate) fn run(mut self) {
         self.execute_phase();
     }
 

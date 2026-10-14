@@ -23,11 +23,11 @@ use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
 
 #[derive(Debug)]
-pub(in crate::runtime) struct WorkerEndpoint {
-    pub(in crate::runtime) command_tx: channel::Sender<AsyncWorkerCommand>,
-    pub(in crate::runtime) waker: Waker,
-    pub(in crate::runtime) thread: Thread,
-    pub(in crate::runtime) blocking_worker: Arc<BlockingWorker>,
+pub(crate) struct WorkerEndpoint {
+    pub(crate) command_tx: channel::Sender<AsyncWorkerCommand>,
+    pub(crate) waker: Waker,
+    pub(crate) thread: Thread,
+    pub(crate) blocking_worker: Arc<BlockingWorker>,
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -76,7 +76,7 @@ pub(crate) struct DispatcherCore {
 
 impl DispatcherCore {
     #[cfg(test)]
-    pub(in crate::runtime) fn new(
+    pub(crate) fn new(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
@@ -84,7 +84,7 @@ impl DispatcherCore {
         Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
     }
 
-    pub(in crate::runtime) fn new_with_shutdown(
+    pub(crate) fn new_with_shutdown(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
@@ -118,7 +118,7 @@ impl DispatcherCore {
 
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
-    pub(in crate::runtime) fn stop(&self) {
+    pub(crate) fn stop(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
@@ -141,7 +141,7 @@ impl DispatcherCore {
         WorkerIndex(self.next_async_worker_index.fetch_add(1, Ordering::Relaxed) % self.worker_endpoints.len())
     }
 
-    pub(in crate::runtime) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -150,11 +150,11 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
-    pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
+    pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.worker_indices.get(&thread_id).copied()
     }
 
-    pub(in crate::runtime) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
+    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
     where
         M: FnMut() -> FF,
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -166,29 +166,29 @@ impl DispatcherCore {
             .collect()
     }
 
-    pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {
+    pub(crate) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(in crate::runtime) fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         self.shutdown_started.load(Ordering::Acquire)
     }
 
-    pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.shutdown_started)
     }
 
-    pub(in crate::runtime) fn is_current_blocking_task(&self) -> bool {
+    pub(crate) fn is_current_blocking_task(&self) -> bool {
         self.worker_endpoints
             .iter()
             .any(|endpoint| endpoint.blocking_worker.is_current_task())
     }
 
-    pub(in crate::runtime) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
         self.blocking_worker(self.next_worker_index())
     }
 
-    pub(in crate::runtime) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
+    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
         Arc::clone(
             &self
                 .worker_endpoints
@@ -198,7 +198,7 @@ impl DispatcherCore {
         )
     }
 
-    pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -238,7 +238,7 @@ impl DispatcherCore {
     /// Waits for the runtime to shut down and all worker threads to exit.
     ///
     /// Safe to call multiple times.
-    pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
+    pub(crate) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
         if !self.stopped_reported.swap(true, Ordering::Relaxed) {
             emit!(&self.sink, RuntimeStopped);

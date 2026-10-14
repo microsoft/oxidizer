@@ -9,16 +9,16 @@ use arty_executor::{TaskSet, discard_task_panic_payload};
 use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
 
-pub(in crate::runtime) struct QueuedTaskFactory {
+pub(crate) struct QueuedTaskFactory {
     inner: Option<BoxedRemoteFutureFactory>,
 }
 
 impl QueuedTaskFactory {
-    pub(in crate::runtime) fn new(inner: BoxedRemoteFutureFactory) -> Self {
+    pub(crate) fn new(inner: BoxedRemoteFutureFactory) -> Self {
         Self { inner: Some(inner) }
     }
 
-    pub(in crate::runtime) fn register(mut self, builtins: Builtins, tasks: &TaskSet) {
+    pub(crate) fn register(mut self, builtins: Builtins, tasks: &TaskSet) {
         let factory = self.inner.take().expect("a queued task factory is consumed exactly once");
         factory(builtins, tasks);
     }
@@ -35,7 +35,7 @@ impl Drop for QueuedTaskFactory {
     }
 }
 
-pub(in crate::runtime) enum AsyncWorkerCommand {
+pub(crate) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will
     /// be used to create the future that becomes the body of the task. The factory registers the
     /// future it creates with the worker's task set, which lets the executor store the future

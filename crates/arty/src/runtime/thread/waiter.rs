@@ -14,7 +14,7 @@ use crate::runtime::Error;
 
 /// Joins workers on one waiting caller; other callers wait for that join to finish.
 #[derive(Debug)]
-pub(in crate::runtime) struct ThreadWaiter {
+pub(crate) struct ThreadWaiter {
     shared: Arc<(Mutex<State>, Condvar)>,
 }
 
@@ -52,13 +52,13 @@ fn completion_result(failed_worker: Option<ThreadId>) -> Result<(), Error> {
 }
 
 impl ThreadWaiter {
-    pub(in crate::runtime) fn new(threads: Vec<thread::JoinHandle<()>>) -> Self {
+    pub(crate) fn new(threads: Vec<thread::JoinHandle<()>>) -> Self {
         Self {
             shared: Arc::new((Mutex::new(State::Ready(threads)), Condvar::new())),
         }
     }
 
-    pub(in crate::runtime) fn wait(&self) -> Result<(), Error> {
+    pub(crate) fn wait(&self) -> Result<(), Error> {
         let (state, _) = &*self.shared;
         let state_guard = state.lock();
         self.wait_locked(state_guard)

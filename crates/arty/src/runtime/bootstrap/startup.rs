@@ -29,7 +29,7 @@ use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 
-pub(in crate::runtime) fn build(
+pub(crate) fn build(
     processor_config: RuntimeConfig,
     clock: &InactiveClock,
     sink: Sink,

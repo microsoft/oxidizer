@@ -57,7 +57,7 @@ impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(in crate::task) fn new(inner: RemoteJoinHandle<R>) -> Self {
+    pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
         Self {
             inner,
             blocking_pool: None,

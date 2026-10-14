@@ -55,11 +55,11 @@ pub(crate) struct BlockingWorker {
 
 impl BlockingWorker {
     #[cfg(test)]
-    pub(in crate::runtime) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
+    pub(crate) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
         Self::new_with_shutdown(pool, sink, Arc::new(AtomicBool::new(false)))
     }
 
-    pub(in crate::runtime) fn new_with_shutdown(pool: BlockingPool, sink: Sink, runtime_shutdown: Arc<AtomicBool>) -> Arc<Self> {
+    pub(crate) fn new_with_shutdown(pool: BlockingPool, sink: Sink, runtime_shutdown: Arc<AtomicBool>) -> Arc<Self> {
         Arc::new(Self {
             pool,
             is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -68,7 +68,7 @@ impl BlockingWorker {
         })
     }
 
-    pub(in crate::runtime) fn sink(&self) -> &Sink {
+    pub(crate) fn sink(&self) -> &Sink {
         &self.sink
     }
 
@@ -122,17 +122,17 @@ impl BlockingWorker {
     }
 
     /// Rejects new work and cancels queued work; already-running blocking calls finish.
-    pub(in crate::runtime) fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) {
         self.is_shutting_down.store(true, Ordering::Release);
     }
 
-    pub(in crate::runtime) fn is_current_task(&self) -> bool {
+    pub(crate) fn is_current_task(&self) -> bool {
         CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, &self.pool.identity)))
     }
 
     /// Waits for the currently running blocking tasks to complete.
     #[cfg_attr(test, mutants::skip)] // Impractical to test without overly-expensive timeout logic.
-    pub(in crate::runtime) fn join(&self) {
+    pub(crate) fn join(&self) {
         self.pool.join();
     }
 }
@@ -142,7 +142,7 @@ pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
 }
 
 #[derive(Debug, Clone)]
-pub(in crate::runtime) struct BlockingPool {
+pub(crate) struct BlockingPool {
     pool: Arc<Mutex<Option<ThreadPool>>>,
     identity: Arc<()>,
     saturation_reported: Arc<AtomicBool>,
@@ -153,7 +153,7 @@ pub(in crate::runtime) struct BlockingPool {
 impl BlockingPool {
     #[cfg(test)]
     #[cfg_attr(test, mutants::skip)]
-    pub(in crate::runtime) fn shares_pool_with(&self, other: &Self) -> bool {
+    pub(crate) fn shares_pool_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.pool, &other.pool)
     }
 
@@ -168,11 +168,11 @@ impl BlockingPool {
     const MAX_THREAD_COUNT_DEFAULT: NonZeroUsize = NonZeroUsize::new(64).expect("the default blocking thread limit is nonzero");
 
     #[cfg(test)]
-    pub(in crate::runtime) fn new(max_thread_count: Option<NonZeroUsize>) -> Self {
+    pub(crate) fn new(max_thread_count: Option<NonZeroUsize>) -> Self {
         Self::new_with_mode(max_thread_count, "shared")
     }
 
-    pub(in crate::runtime) fn new_with_mode(max_thread_count: Option<NonZeroUsize>, mode: &'static str) -> Self {
+    pub(crate) fn new_with_mode(max_thread_count: Option<NonZeroUsize>, mode: &'static str) -> Self {
         // Start with one thread and let the pool grow as needed.
         let thread_pool = ThreadPool::with_name("arty-blocking".to_string(), Self::INITIAL_THREAD_COUNT);
 
@@ -185,7 +185,7 @@ impl BlockingPool {
         }
     }
 
-    pub(in crate::runtime) fn execute<F>(&self, f: F) -> bool
+    pub(crate) fn execute<F>(&self, f: F) -> bool
     where
         F: FnOnce() + Send + 'static,
     {
@@ -226,7 +226,7 @@ impl BlockingPool {
         true
     }
 
-    pub(in crate::runtime) fn max_thread_count(&self) -> usize {
+    pub(crate) fn max_thread_count(&self) -> usize {
         self.max_thread_count.get()
     }
 
@@ -312,7 +312,7 @@ pub(super) mod blocking_worker_tests {
     }
 
     #[cfg_attr(test, mutants::skip)]
-    pub(in crate::runtime) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
+    pub(crate) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
         worker.is_shutting_down.load(Ordering::Acquire)
     }
 
