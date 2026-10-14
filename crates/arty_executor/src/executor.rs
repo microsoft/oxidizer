@@ -52,6 +52,13 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// Dropping the executor without this sequence is also safe and synchronously cancels remaining
 /// tasks. Retained join handles and task wakers own independent pooled metadata, so they may
 /// outlive the executor and report shutdown or become inert respectively.
+///
+/// # Process termination
+///
+/// `arty_executor` does not recover panics from task futures or their destructors. It catches such
+/// panics at the executor boundary and terminates the process. This also applies when executor
+/// cancellation runs during an existing unwind: a task destructor panic terminates rather than
+/// leaking task storage.
 #[derive(Debug)]
 pub struct Executor {
     core: Rc<ExecutorCore>,
