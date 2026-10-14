@@ -3,6 +3,9 @@
 
 //! Platform native TLS backend configuration and builder integration.
 
+use std::collections::HashMap;
+
+use http::uri::Authority;
 use native_tls::TlsConnector;
 
 use crate::TlsBackendBuilder;
@@ -11,24 +14,31 @@ use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
 /// Platform native TLS backend.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
-pub struct NativeTlsOptions;
+pub struct NativeTlsOptions {
+    server_name_overrides: HashMap<String, String>,
+}
 
 impl std::fmt::Debug for NativeTlsOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NativeTlsOptions").finish()
+        f.debug_struct("NativeTlsOptions")
+            .field("server_name_override_count", &self.server_name_overrides.len())
+            .finish()
     }
 }
 
 impl NativeTlsOptions {
     pub(crate) fn new() -> Self {
-        Self
+        Self::default()
     }
 
     /// Materializes this configuration into a [`native_tls::TlsConnector`].
-    #[expect(clippy::unused_self, reason = "method takes self for symmetry with RustlsOptions::build")]
-    pub(crate) fn build(self, defaults: &TlsBackendBuilder, shared: &SharedOptions) -> Result<TlsConnector, BackendError> {
+    pub(crate) fn build(
+        self,
+        defaults: &TlsBackendBuilder,
+        shared: &SharedOptions,
+    ) -> Result<(TlsConnector, HashMap<String, String>), BackendError> {
         let mut builder = native_tls::TlsConnector::builder();
         builder
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
@@ -43,7 +53,8 @@ impl NativeTlsOptions {
                 .map_err(BackendError::caused_by)?;
         }
 
-        builder.build().map_err(BackendError::caused_by)
+        let connector = builder.build().map_err(BackendError::caused_by)?;
+        Ok((connector, self.server_name_overrides))
     }
 }
 
@@ -78,6 +89,43 @@ impl From<TlsConnector> for TlsOptions {
 }
 
 impl TlsOptionsBuilder<NativeTlsOptions> {
+    /// Overrides the server name used for native TLS certificate validation
+    /// and `SNI` when connecting to `endpoint`.
+    ///
+    /// The HTTP request, connection destination, `Host` header, and connection
+    /// pool key continue to use the real endpoint. Only the name passed to
+    /// [`native_tls::TlsConnector::connect`] is replaced.
+    ///
+    /// The endpoint is matched against the request URI authority. An endpoint
+    /// with a port (for example, `localhost:8443`) applies only to that exact
+    /// authority. A host-only endpoint (for example, `localhost`) applies to
+    /// every port unless an exact authority override is also configured.
+    ///
+    /// ```
+    /// # use fetch_tls::TlsOptions;
+    /// let tls = TlsOptions::builder_native_tls()
+    ///     .server_name_override("localhost:8443", "tvs.example.test")
+    ///     .build();
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if `endpoint` is not a valid URI authority or if `server_name`
+    /// is empty.
+    pub fn server_name_override<E>(mut self, endpoint: E, server_name: impl Into<String>) -> Self
+    where
+        E: TryInto<Authority>,
+        E::Error: std::fmt::Debug,
+    {
+        let endpoint = endpoint
+            .try_into()
+            .expect("native TLS server name override endpoint must be a valid URI authority");
+        let server_name = server_name.into();
+        assert!(!server_name.is_empty(), "native TLS server name override cannot be empty");
+        self.backend.server_name_overrides.insert(endpoint.to_string(), server_name);
+        self
+    }
+
     /// Builds the final [`TlsOptions`] with the native TLS backend.
     pub fn build(self) -> TlsOptions {
         TlsOptions {
@@ -97,6 +145,7 @@ mod tests {
     fn builder_native_tls_starts_empty() {
         let builder = TlsOptions::builder_native_tls();
         assert!(builder.shared.client_identity.is_none());
+        assert!(builder.backend.server_name_overrides.is_empty());
     }
 
     #[test]
@@ -133,9 +182,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn build_produces_tls_connector() {
-        NativeTlsOptions::new()
+        let (connector, overrides) = NativeTlsOptions::new()
             .build(&crate::TlsBackendBuilder::new(), &SharedOptions::default())
             .unwrap();
+        let _ = connector;
+        assert!(overrides.is_empty());
     }
 
     // Self-signed RSA-2048 certificate and matching `PKCS#8` private key,
@@ -211,5 +262,34 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
     fn debug_renders_presence_only() {
         let s = format!("{:?}", NativeTlsOptions::new());
         assert!(s.contains("NativeTlsOptions"));
+        assert!(s.contains("server_name_override_count: 0"));
+    }
+
+    #[test]
+    fn server_name_override_stores_endpoint_mapping() {
+        let builder = TlsOptions::builder_native_tls()
+            .server_name_override("localhost", "expected.example.test")
+            .server_name_override("localhost:8443", "endpoint.example.test");
+
+        assert_eq!(
+            builder.backend.server_name_overrides.get("localhost").map(String::as_str),
+            Some("expected.example.test")
+        );
+        assert_eq!(
+            builder.backend.server_name_overrides.get("localhost:8443").map(String::as_str),
+            Some("endpoint.example.test")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "native TLS server name override cannot be empty")]
+    fn server_name_override_rejects_empty_server_name() {
+        let _ = TlsOptions::builder_native_tls().server_name_override("localhost", "");
+    }
+
+    #[test]
+    #[should_panic(expected = "native TLS server name override endpoint must be a valid URI authority")]
+    fn server_name_override_rejects_invalid_endpoint() {
+        let _ = TlsOptions::builder_native_tls().server_name_override("not a valid authority", "expected.example.test");
     }
 }

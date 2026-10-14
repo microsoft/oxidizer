@@ -3,10 +3,57 @@
 
 //! Fully constructed TLS backends ready for use by an HTTP client.
 
+#[cfg(any(feature = "native-tls", test))]
+use std::collections::HashMap;
+#[cfg(any(feature = "native-tls", test))]
+use std::sync::Arc;
+
+#[cfg(any(feature = "native-tls", test))]
+use http::uri::Authority;
+
 /// Error returned when materializing a [`TlsBackend`] from
 /// [`TlsOptions`](super::TlsOptions) fails.
 #[ohno::error]
 pub struct BackendError;
+
+/// A platform native TLS backend.
+///
+/// The backend carries the platform connector together with any
+/// endpoint-specific server name overrides used during handshakes.
+#[cfg(any(feature = "native-tls", test))]
+#[derive(Debug, Clone)]
+pub struct NativeTlsBackend {
+    connector: ::native_tls::TlsConnector,
+    server_name_overrides: Arc<HashMap<String, String>>,
+}
+
+#[cfg(any(feature = "native-tls", test))]
+impl NativeTlsBackend {
+    pub(crate) fn new(connector: ::native_tls::TlsConnector, server_name_overrides: HashMap<String, String>) -> Self {
+        Self {
+            connector,
+            server_name_overrides: Arc::new(server_name_overrides),
+        }
+    }
+
+    /// Returns the underlying platform TLS connector.
+    #[must_use]
+    pub fn connector(&self) -> &::native_tls::TlsConnector {
+        &self.connector
+    }
+
+    /// Returns the configured TLS server name for an endpoint.
+    ///
+    /// An exact authority match, including the port when present, takes
+    /// precedence over a host-only override.
+    #[must_use]
+    pub fn server_name_for(&self, endpoint: &Authority) -> Option<&str> {
+        self.server_name_overrides
+            .get(endpoint.as_str())
+            .or_else(|| self.server_name_overrides.get(endpoint.host()))
+            .map(String::as_str)
+    }
+}
 
 /// A fully constructed TLS backend ready for use by an HTTP client.
 ///
@@ -30,7 +77,7 @@ pub enum TlsBackend {
     /// Platform native TLS backend (`SChannel` on Windows, Security Framework
     /// on `macOS`, `OpenSSL` on Linux).
     #[cfg(any(feature = "native-tls", test))]
-    NativeTls(::native_tls::TlsConnector),
+    NativeTls(NativeTlsBackend),
 }
 
 #[cfg(any(feature = "rustls", test))]
@@ -50,6 +97,35 @@ impl From<std::sync::Arc<::rustls::ClientConfig>> for TlsBackend {
 #[cfg(any(feature = "native-tls", test))]
 impl From<::native_tls::TlsConnector> for TlsBackend {
     fn from(connector: ::native_tls::TlsConnector) -> Self {
-        Self::NativeTls(connector)
+        Self::NativeTls(NativeTlsBackend::new(connector, HashMap::new()))
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    fn native_tls_backend_prefers_exact_authority_over_host() {
+        let connector = ::native_tls::TlsConnector::new().unwrap();
+        let backend = NativeTlsBackend::new(
+            connector,
+            HashMap::from([
+                ("localhost".to_owned(), "host.example.test".to_owned()),
+                ("localhost:8443".to_owned(), "endpoint.example.test".to_owned()),
+            ]),
+        );
+
+        assert_eq!(
+            backend.server_name_for(&"localhost:8443".parse().unwrap()),
+            Some("endpoint.example.test")
+        );
+        assert_eq!(
+            backend.server_name_for(&"localhost:9443".parse().unwrap()),
+            Some("host.example.test")
+        );
+        assert_eq!(backend.server_name_for(&"example.com".parse().unwrap()), None);
     }
 }

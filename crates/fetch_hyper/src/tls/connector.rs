@@ -7,10 +7,18 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 #[cfg(any(feature = "rustls", test))]
 use std::sync::Arc;
+#[cfg(any(feature = "native-tls", test))]
+use std::task::{Context, Poll};
 
 use fetch_options::RequestFilter;
 use fetch_tls::TlsBackend;
+#[cfg(any(feature = "native-tls", test))]
+use http::Uri;
 use http::Version;
+#[cfg(any(feature = "native-tls", test))]
+use hyper_tls::MaybeHttpsStream;
+#[cfg(any(feature = "native-tls", test))]
+use hyper_util::rt::TokioIo;
 use templated_uri::BaseUri;
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use tower::Service as _;
@@ -29,7 +37,7 @@ where
     Rustls(hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>, PhantomData<fn() -> S>),
 
     #[cfg(any(feature = "native-tls", test))]
-    NativeTls(hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>, PhantomData<fn() -> S>),
+    NativeTls(NativeTlsConnector<C, S>),
 
     #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
     None(PhantomData<fn(C, S)>),
@@ -45,7 +53,7 @@ where
             #[cfg(any(feature = "rustls", test))]
             Self::Rustls(c, _) => Self::Rustls(c.clone(), PhantomData),
             #[cfg(any(feature = "native-tls", test))]
-            Self::NativeTls(c, _) => Self::NativeTls(c.clone(), PhantomData),
+            Self::NativeTls(c) => Self::NativeTls(c.clone()),
             #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
             Self::None(_) => Self::None(PhantomData),
         }
@@ -72,7 +80,7 @@ where
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
-            TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, &request_filter), PhantomData),
+            TlsBackend::NativeTls(native) => Self::NativeTls(NativeTlsConnector::new(native, connector, &request_filter)),
 
             // When `fetch_hyper` is built without any TLS feature but feature
             // unification (e.g. during `cargo test --doc` across the workspace)
@@ -132,22 +140,96 @@ where
 }
 
 #[cfg(any(feature = "native-tls", test))]
-fn build_native_tls_connector<C, S>(
-    native: native_tls::TlsConnector,
-    connector: C,
-    request_filter: &RequestFilter,
-) -> hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+#[cfg(any(feature = "native-tls", test))]
+pub(crate) struct NativeTlsConnector<C, S>
 where
     C: Connect<S>,
     S: HyperIo,
 {
-    let tokio_connector = tokio_native_tls::TlsConnector::from(native);
-    let inner = HyperConnectorAdapter::new(connector);
-    let mut https = hyper_tls::HttpsConnector::from((inner, tokio_connector));
+    force_https: bool,
+    http: HyperConnectorAdapter<C, S>,
+    tls: tokio_native_tls::TlsConnector,
+    backend: fetch_tls::NativeTlsBackend,
+}
 
-    https.https_only(matches!(request_filter, RequestFilter::Https));
+#[cfg(any(feature = "native-tls", test))]
+impl<C, S> NativeTlsConnector<C, S>
+where
+    C: Connect<S>,
+    S: HyperIo,
+{
+    fn new(backend: fetch_tls::NativeTlsBackend, connector: C, request_filter: &RequestFilter) -> Self {
+        Self {
+            force_https: matches!(request_filter, RequestFilter::Https),
+            http: HyperConnectorAdapter::new(connector),
+            tls: tokio_native_tls::TlsConnector::from(backend.connector().clone()),
+            backend,
+        }
+    }
+}
 
-    https
+#[cfg(any(feature = "native-tls", test))]
+impl<C, S> Clone for NativeTlsConnector<C, S>
+where
+    C: Connect<S>,
+    S: HyperIo,
+{
+    fn clone(&self) -> Self {
+        Self {
+            force_https: self.force_https,
+            http: self.http.clone(),
+            tls: self.tls.clone(),
+            backend: self.backend.clone(),
+        }
+    }
+}
+
+#[cfg(any(feature = "native-tls", test))]
+impl<C, S> tower::Service<Uri> for NativeTlsConnector<C, S>
+where
+    C: Connect<S>,
+    S: HyperIo + Unpin,
+{
+    type Response = MaybeHttpsStream<S>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.http.poll_ready(cx).map(|result| result.map_err(Into::into))
+    }
+
+    fn call(&mut self, req: Uri) -> Self::Future {
+        let is_https = req.scheme_str() == Some("https");
+        if !is_https && self.force_https {
+            return Box::pin(async { Err::<MaybeHttpsStream<S>, BoxError>("https required but URI was not https".into()) });
+        }
+
+        let server_name = native_tls_server_name(&self.backend, &req);
+        let connecting = self.http.call(req);
+        let tls = self.tls.clone();
+
+        Box::pin(async move {
+            let stream = connecting.await.map_err(|error| Box::new(error) as BoxError)?;
+            if is_https {
+                let stream = tls.connect(&server_name, TokioIo::new(stream)).await?;
+                Ok(MaybeHttpsStream::Https(TokioIo::new(stream)))
+            } else {
+                Ok(MaybeHttpsStream::Http(stream))
+            }
+        })
+    }
+}
+
+#[cfg(any(feature = "native-tls", test))]
+fn native_tls_server_name(backend: &fetch_tls::NativeTlsBackend, destination: &Uri) -> String {
+    let host = destination.host().unwrap_or("").trim_matches(|c| c == '[' || c == ']');
+    destination
+        .authority()
+        .and_then(|authority| backend.server_name_for(authority))
+        .unwrap_or(host)
+        .to_owned()
 }
 
 impl<C, S> layered::Service<BaseUri> for TlsConnector<C, S>
@@ -173,7 +255,7 @@ where
                     .map_err(handle_tls_error)
             }
             #[cfg(any(feature = "native-tls", test))]
-            Self::NativeTls(c, _) => {
+            Self::NativeTls(c) => {
                 let mut c = c.clone();
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
@@ -209,7 +291,22 @@ mod tests {
     use crate::testing::{FakeConnector, FakeStream, TestError};
 
     fn native_tls_backend() -> TlsBackend {
-        TlsBackend::NativeTls(native_tls::TlsConnector::new().unwrap())
+        native_tls::TlsConnector::new().unwrap().into()
+    }
+
+    fn native_tls_backend_config_with_override() -> fetch_tls::NativeTlsBackend {
+        let options = fetch_tls::TlsOptions::builder_native_tls()
+            .server_name_override("example.com", "expected.example.test")
+            .build();
+        let backend = fetch_tls::TlsBackendBuilder::new().build_backend(options).unwrap();
+        let TlsBackend::NativeTls(backend) = backend else {
+            panic!("expected native TLS backend");
+        };
+        backend
+    }
+
+    fn native_tls_backend_with_override() -> TlsBackend {
+        TlsBackend::NativeTls(native_tls_backend_config_with_override())
     }
 
     fn rustls_backend() -> TlsBackend {
@@ -234,7 +331,7 @@ mod tests {
     fn new_with_native_tls_backend_creates_native_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
-        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
+        assert!(matches!(c, TlsConnector::NativeTls(_)));
     }
 
     #[test]
@@ -246,7 +343,38 @@ mod tests {
             RequestFilter::HttpAndHttps,
             &[Version::HTTP_11],
         );
-        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
+        assert!(matches!(c, TlsConnector::NativeTls(_)));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn new_with_native_tls_server_name_override_creates_native_variant() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            native_tls_backend_with_override(),
+            fake_connector(),
+            RequestFilter::Https,
+            &[Version::HTTP_11],
+        );
+        assert!(matches!(c, TlsConnector::NativeTls(_)));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn native_tls_server_name_uses_override_without_changing_destination() {
+        let destination = Uri::from_static("https://example.com:8443/");
+        let server_name = native_tls_server_name(&native_tls_backend_config_with_override(), &destination);
+
+        assert_eq!(server_name, "expected.example.test");
+        assert_eq!(destination.authority().unwrap().as_str(), "example.com:8443");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn native_tls_server_name_falls_back_to_destination_host() {
+        let destination = Uri::from_static("https://other.example.com:8443/");
+        let server_name = native_tls_server_name(&native_tls_backend_config_with_override(), &destination);
+
+        assert_eq!(server_name, "other.example.com");
     }
 
     #[test]
@@ -297,8 +425,22 @@ mod tests {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
         let c2 = c.clone();
-        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
-        assert!(matches!(c2, TlsConnector::NativeTls(_, _)));
+        assert!(matches!(c, TlsConnector::NativeTls(_)));
+        assert!(matches!(c2, TlsConnector::NativeTls(_)));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn clone_native_tls_variant_with_override() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            native_tls_backend_with_override(),
+            fake_connector(),
+            RequestFilter::Https,
+            &[Version::HTTP_11],
+        );
+        let c2 = c.clone();
+        assert!(matches!(c, TlsConnector::NativeTls(_)));
+        assert!(matches!(c2, TlsConnector::NativeTls(_)));
     }
 
     #[cfg_attr(miri, ignore)]
@@ -307,6 +449,19 @@ mod tests {
         // For plain http://, native-tls passes through without performing a handshake.
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             native_tls_backend(),
+            fake_connector(),
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11],
+        );
+        let result = c.execute(templated_uri::BaseUri::from_static("http://example.com")).await;
+        result.unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn execute_native_tls_override_with_plain_http_returns_stream() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            native_tls_backend_with_override(),
             fake_connector(),
             RequestFilter::HttpAndHttps,
             &[Version::HTTP_11],
