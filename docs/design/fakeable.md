@@ -44,10 +44,11 @@ be translated across the wrapper boundary. Bare `Self` in method generic bounds
 or where predicates is rejected for the same reason.
 
 Generated real impls allow `clippy::unused_self` because a stateless operation
-may still need an instance receiver for fake dispatch. The generated allowance
+may still need an instance receiver for fake dispatch. The allowance covers the
+whole real impl, including private helpers that are not delegated. The generated allowance
 precedes the original impl attributes, so explicit lint settings and expectations
 on that impl or its methods still take precedence. With `cfg_attr(test, ...)`,
-this suppression does not apply to the unexpanded implementation in normal builds.
+this suppression does not apply to the implementation in normal builds.
 
 Trait delegation uses fully qualified calls on the hidden real type so an
 inherent method with the same name cannot intercept a trait method call.
@@ -113,7 +114,9 @@ Public and `pub(crate)` methods retain their visibility in the generated mock,
 so internal adapters can use argument matching, ordered calls, call counts, and
 scripted results without a handwritten fake. Other restricted visibility scopes
 and mutable-receiver methods are rejected. The configured fake-availability gate
-also applies to the generated mock and its diagnostics. Generic impl blocks are also
+also applies to the generated mock and deferred diagnostics for cfg-gated methods.
+Unsupported methods without cfg attributes produce immediate errors, even when
+fakes are disabled. Generic impl blocks are also
 rejected because the generated Mockall type cannot preserve their generic
 parameters and bounds. Trait impl blocks are rejected because their inherited
 method visibility would otherwise produce an incomplete mock API. Async methods

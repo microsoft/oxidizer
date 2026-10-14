@@ -252,10 +252,11 @@ use proc_macro::TokenStream;
 /// # Lints
 ///
 /// Generated real impls allow `clippy::unused_self`: an otherwise stateless
-/// operation may need a receiver to select its fake implementation. Explicit lint
-/// attributes on the original impl or its methods take precedence.
+/// operation may need a receiver to select its fake implementation. The allowance
+/// covers the whole real impl, including private helpers that are not delegated.
+/// Explicit lint attributes on the original impl or its methods take precedence.
 /// This allowance applies only when the macro expands. With `cfg_attr(test, ...)`,
-/// normal builds still lint the original, unexpanded implementation.
+/// normal builds still lint the implementation without macro expansion.
 ///
 /// # Limitations
 ///
@@ -266,6 +267,7 @@ use proc_macro::TokenStream;
 /// - Mockall generation preserves method `cfg`/`cfg_attr` attributes and rejects nested elided
 ///   references beneath implicit higher-ranked function-pointer or trait-object binders.
 ///   Diagnostics for unsupported cfg-gated methods carry the same gating attributes.
+///   Unsupported methods without cfg attributes produce errors even when fake storage is disabled.
 /// - Generated Mockall signatures require async method futures to be `Send`; use a manual fake for
 ///   async methods whose futures are not `Send`.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.
