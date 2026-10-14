@@ -58,7 +58,13 @@ See the
 `spawn_blocking` runs a synchronous callback away from async workers. Captures
 and results must be `Send`. One runtime-owned Vicinal pool executes all
 blocking work. The legacy `per_worker` policy maps limits to processor-local
-worker groups. The `shared` policy uses one fixed system-wide worker group.
+worker groups. The `shared` policy uses one system-wide worker group with a
+default upper bound of 10,000 workers.
+
+Tokio's blocking pool defaults to 512 threads. Arty does not copy that value
+because Vicinal lazily starts processor-affine workers and uses different
+locality and queueing rules. Arty's 10,000-worker value is a defensive
+configuration ceiling, not a recommended steady-state thread count.
 
 When unwinding is enabled, a panic from the callback body is returned through
 its `JoinHandle` as `JoinError`. Arty does not add compatibility wrappers around

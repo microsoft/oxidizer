@@ -39,6 +39,10 @@ impl Error {
         Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
     }
 
+    pub(crate) fn blocking_pool_limit_too_large() -> Self {
+        Self::new(RuntimeValidation::BlockingPoolLimitTooLarge)
+    }
+
     pub(crate) fn block_on_from_worker() -> Self {
         Self::new(RuntimeValidation::BlockOnFromWorker)
     }
@@ -87,6 +91,7 @@ impl StdError for InsufficientProcessors {}
 pub(crate) enum RuntimeValidation {
     InvalidWorkerCount,
     InvalidBlockingPoolLimit,
+    BlockingPoolLimitTooLarge,
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
 }
@@ -96,6 +101,7 @@ impl Display for RuntimeValidation {
         f.write_str(match self {
             Self::InvalidWorkerCount => "worker count must be greater than zero",
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
+            Self::BlockingPoolLimitTooLarge => "blocking pool max_workers must not exceed 10000",
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
         })
@@ -155,6 +161,11 @@ mod tests {
                 Error::invalid_blocking_pool_limit(),
                 RuntimeValidation::InvalidBlockingPoolLimit,
                 "blocking pool max_workers must be greater than zero",
+            ),
+            (
+                Error::blocking_pool_limit_too_large(),
+                RuntimeValidation::BlockingPoolLimitTooLarge,
+                "blocking pool max_workers must not exceed 10000",
             ),
             (
                 Error::block_on_from_worker(),

@@ -35,7 +35,7 @@
 //! }
 //! ```
 //!
-//! This requests at most two async workers and a shared pool of up to four
+//! This requests at most two async workers and a fixed shared group of four
 //! blocking threads. The pool limit does not limit the whole process.
 //!
 //! Async worker stacks default to 2 MiB. Use
@@ -47,9 +47,10 @@
 //! Blocking work runs off the async workers in one runtime-owned pool.
 //! [`BlockingPoolPolicy::per_worker`](crate::runtime::BlockingPoolPolicy::per_worker)
 //! maps an explicit limit to each submitting processor.
-//! [`shared`](crate::runtime::BlockingPoolPolicy::shared) maps an explicit
-//! limit to one system-wide worker group. Choose based on your workload rather than
-//! assuming one policy is faster.
+//! [`shared`](crate::runtime::BlockingPoolPolicy::shared) uses one system-wide
+//! worker group with a default upper bound of 10,000 workers. An explicit
+//! [`max`](crate::runtime::BlockingPoolPolicy::max) can select a lower limit.
+//! Choose based on your workload rather than assuming one policy is faster.
 //!
 //! Each blocking callback occupies one pool thread until it returns. Do not
 //! create a cycle where a callback waits for async work that then awaits
