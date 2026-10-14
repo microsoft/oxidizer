@@ -1,0 +1,47 @@
+error[E0277]: `Cell<u64>` cannot be shared between threads safely
+  --> tests/ui/affinity_requires_thread_safe_values.rs:12:28
+   |
+12 |     require_thread_aware::<Arc<Cell<u64>, PerThread>>();
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^ `Cell<u64>` cannot be shared between threads safely
+   |
+   = help: the trait `std::marker::Sync` is not implemented for `Cell<u64>`
+   = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead
+help: the trait `ThreadAware` is implemented for `performables::arc::Arc<T, S>`
+  --> src/arc/mod.rs
+   |
+   | / impl<T, S> ThreadAware for Arc<T, S>
+   | | where
+   | |     T: Send + Sync + ?Sized,
+   | |     S: Strategy<T> + private::AffinityStrategy,
+   | |     S::State: Send,
+   | |___________________^
+   = note: required for `performables::arc::Arc<Cell<u64>, PerThread>` to implement `ThreadAware`
+note: required by a bound in `require_thread_aware`
+  --> tests/ui/affinity_requires_thread_safe_values.rs:9:28
+   |
+ 9 | fn require_thread_aware<T: ThreadAware>() {}
+   |                            ^^^^^^^^^^^ required by this bound in `require_thread_aware`
+
+error[E0277]: `Cell<u64>` cannot be shared between threads safely
+  --> tests/ui/affinity_requires_thread_safe_values.rs:13:28
+   |
+13 |     require_thread_aware::<Arc<Cell<u64>, PerNuma>>();
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^ `Cell<u64>` cannot be shared between threads safely
+   |
+   = help: the trait `std::marker::Sync` is not implemented for `Cell<u64>`
+   = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead
+help: the trait `ThreadAware` is implemented for `performables::arc::Arc<T, S>`
+  --> src/arc/mod.rs
+   |
+   | / impl<T, S> ThreadAware for Arc<T, S>
+   | | where
+   | |     T: Send + Sync + ?Sized,
+   | |     S: Strategy<T> + private::AffinityStrategy,
+   | |     S::State: Send,
+   | |___________________^
+   = note: required for `performables::arc::Arc<Cell<u64>, PerNuma>` to implement `ThreadAware`
+note: required by a bound in `require_thread_aware`
+  --> tests/ui/affinity_requires_thread_safe_values.rs:9:28
+   |
+ 9 | fn require_thread_aware<T: ThreadAware>() {}
+   |                            ^^^^^^^^^^^ required by this bound in `require_thread_aware`

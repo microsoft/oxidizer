@@ -24,9 +24,10 @@
 //!   instrumentation at each call site.
 //! - **Thread-aware ownership.** `Arc` with [`PerThread`](arc::PerThread) or
 //!   [`PerNuma`](arc::PerNuma) implements
-//!   [`ThreadAware`](thread_aware_core::ThreadAware). A thread-aware runtime can
-//!   relocate the pointer to a value local to the destination thread or NUMA
-//!   node, rather than sharing one process-wide value as `std::sync::Arc` does.
+//!   [`ThreadAware`](thread_aware_core::ThreadAware) when its pointee is
+//!   `Send + Sync`. A thread-aware runtime can relocate the pointer to a value
+//!   local to the destination thread or NUMA node, rather than sharing one
+//!   process-wide value as `std::sync::Arc` does.
 //!
 //! See [`arc`] and [`sync`] for the available types and their full APIs.
 

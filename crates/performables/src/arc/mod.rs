@@ -169,8 +169,9 @@ impl MakeMutTarget for str {
 ///
 /// `Arc<T, PerProcess>` has the same representation size as
 /// `std::sync::Arc<T>`. Per-thread and per-NUMA strategies keep their factory and
-/// affinity storage in strategy-owned state shared by all clones. Only
-/// [`PerThread`] and [`PerNuma`] implement [`ThreadAware`] for this pointer.
+/// affinity storage in strategy-owned state shared by all clones.
+/// With [`PerThread`] or [`PerNuma`], this pointer implements [`ThreadAware`]
+/// when `T: Send + Sync`.
 /// [`PerProcess`] shares one allocation and does not implement [`ThreadAware`],
 /// even when its pointee does.
 ///

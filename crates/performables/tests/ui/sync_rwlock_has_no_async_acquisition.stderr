@@ -1,0 +1,17 @@
+error[E0599]: no method named `read_async` found for struct `performables::sync::lock::RwLock<u64>` in the current scope
+ --> tests/ui/sync_rwlock_has_no_async_acquisition.rs:8:15
+  |
+8 |     drop(lock.read_async());
+  |               ^^^^^^^^^^ method not found in `performables::sync::lock::RwLock<u64>`
+  |
+  = note: the method was found for
+          - `performables::sync::lock::RwLock<T, Async>`
+
+error[E0599]: no method named `write_async` found for struct `performables::sync::lock::RwLock<u64>` in the current scope
+ --> tests/ui/sync_rwlock_has_no_async_acquisition.rs:9:15
+  |
+9 |     drop(lock.write_async());
+  |               ^^^^^^^^^^^ method not found in `performables::sync::lock::RwLock<u64>`
+  |
+  = note: the method was found for
+          - `performables::sync::lock::RwLock<T, Async>`

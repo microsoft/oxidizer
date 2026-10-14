@@ -1,0 +1,8 @@
+error[E0599]: no method named `wait_async` found for struct `performables::sync::barrier::Barrier` in the current scope
+ --> tests/ui/sync_barrier_has_no_async_wait.rs:8:18
+  |
+8 |     drop(barrier.wait_async());
+  |                  ^^^^^^^^^^ method not found in `performables::sync::barrier::Barrier`
+  |
+  = note: the method was found for
+          - `performables::sync::barrier::Barrier<Async>`

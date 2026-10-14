@@ -33,9 +33,10 @@ The crate offers:
   instrumentation at each call site.
 * **Thread-aware ownership.** `Arc` with [`PerThread`][__link1] or
   [`PerNuma`][__link2] implements
-  [`ThreadAware`][__link3]. A thread-aware runtime can
-  relocate the pointer to a value local to the destination thread or NUMA
-  node, rather than sharing one process-wide value as `std::sync::Arc` does.
+  [`ThreadAware`][__link3] when its pointee is
+  `Send + Sync`. A thread-aware runtime can relocate the pointer to a value
+  local to the destination thread or NUMA node, rather than sharing one
+  process-wide value as `std::sync::Arc` does.
 
 See [`arc`][__link4] and [`sync`][__link5] for the available types and their full APIs.
 
@@ -45,7 +46,7 @@ See [`arc`][__link4] and [`sync`][__link5] for the available types and their ful
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbMn2g1giFKI8bYw8wVhQntlsbRf2mMtdF5rEbLvRQs_tAWBxhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEWLxBG1R_bUbennpOCnOulkbhCiln7flkhsbllVBCnf-UodhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
  [__link1]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread
  [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerNuma
