@@ -10,7 +10,7 @@ use std::task;
 
 use events_once::{BoxedReceiver, BoxedSender, LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 
-use crate::TaskPanicPayload;
+use crate::{TaskPanicPayload, discard_task_panic_payload};
 
 enum TaskResult<R> {
     Completed(R),
@@ -164,7 +164,7 @@ impl<R: Send + 'static> RemoteJoinHandle<R> {
     #[must_use]
     pub fn channel() -> (RemoteTaskSender<R>, Self) {
         let (tx, rx) = events_once::Event::boxed();
-        (RemoteTaskSender { tx }, Self { rx })
+        (RemoteTaskSender { tx: Some(tx) }, Self { rx })
     }
 }
 
@@ -183,18 +183,19 @@ impl<R: Send + 'static> Future for RemoteJoinHandle<R> {
 /// The sending endpoint for a [`RemoteJoinHandle`].
 #[doc(hidden)]
 pub struct RemoteTaskSender<R: Send + 'static> {
-    tx: BoxedSender<TaskResult<R>>,
+    tx: Option<BoxedSender<TaskResult<R>>>,
 }
 
 impl<R: Send + 'static> Debug for RemoteTaskSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RemoteTaskSender").field("tx", &self.tx).finish()
+        f.debug_struct("RemoteTaskSender").finish_non_exhaustive()
     }
 }
 
 impl<R: Send + 'static> RemoteTaskSender<R> {
-    fn send(self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
-        catch_unwind(AssertUnwindSafe(|| self.tx.send(result)))
+    fn send(mut self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
+        let tx = self.tx.take().expect("a remote task sender publishes at most one result");
+        catch_unwind(AssertUnwindSafe(|| tx.send(result)))
     }
 
     /// Sends a successfully completed result.
@@ -207,6 +208,17 @@ impl<R: Send + 'static> RemoteTaskSender<R> {
     #[doc(hidden)]
     pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Panicked(panic))
+    }
+}
+
+impl<R: Send + 'static> Drop for RemoteTaskSender<R> {
+    fn drop(&mut self) {
+        let Some(tx) = self.tx.take() else {
+            return;
+        };
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(tx))) {
+            discard_task_panic_payload(panic);
+        }
     }
 }
 

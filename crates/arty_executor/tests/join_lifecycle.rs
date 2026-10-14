@@ -8,9 +8,10 @@ use std::future::{pending, poll_fn};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, RemoteJoinHandle, TaskOptions, TaskPlacement, TaskSet};
 use observed::Sink;
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
@@ -131,6 +132,35 @@ fn disconnected_task_set_returns_shutdown_error() {
     let mut handle = tasks.add(async { 42 }, TaskOptions::default());
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+struct PanickingRemoteJoinWake(AtomicBool);
+
+impl Wake for PanickingRemoteJoinWake {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::Release);
+        panic!("remote join disconnect notification");
+    }
+}
+
+#[test]
+fn disconnected_remote_submission_contains_panicking_join_notification() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let (result_tx, mut remote_join) = RemoteJoinHandle::<usize>::channel();
+    let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
+    let waker = Waker::from(Arc::clone(&wake));
+    assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());
+    drop(executor);
+
+    let mut local_join = tasks.add_with_remote_result(async { 42 }, TaskOptions::default(), result_tx);
+
+    assert!(wake.0.load(Ordering::Acquire));
+    assert!(matches!(poll_once(&mut local_join), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(
+        Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(error)) if error.is_shutdown()
+    ));
 }
 
 #[test]
