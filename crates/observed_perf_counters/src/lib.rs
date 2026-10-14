@@ -93,8 +93,9 @@
 //! enrichment bookkeeping is unchanged; the backend does not extract enrichment.
 //!
 //! Values reset when the processor restarts. Snapshots are per-metric, not
-//! transactional across an event. Collection callback failures freeze published
-//! snapshots until restart and surface through `flush`; emission still records.
+//! transactional across an event. Brief collection contention keeps the previous
+//! snapshot or returns a retryable busy response. Invalid callback state freezes
+//! snapshots until restart and surfaces through `flush`; emission still records.
 //!
 //! Shared ownership and locks use `performables`; standard atomics remain for
 //! numeric updates. The conversion to a standard pointer above is only the
@@ -111,6 +112,9 @@ mod error;
 mod native;
 mod processor;
 mod schema;
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod testing;
 
 pub use error::Error;
 pub use processor::{PerfCounterProcessor, PerfCounterProcessorBuilder};

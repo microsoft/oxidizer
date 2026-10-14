@@ -13,9 +13,10 @@
 //!
 //! PERFLIBREQUEST has no user context or provider identity. Consequently one
 //! image-local registry gates all providers using this callback. Callbacks do
-//! not wait for locks, allocate snapshots, emit `observed` events, or call user code. Any callback
-//! failure permanently freezes snapshots; flush reports it. Keeping a frozen
-//! value is preferable to allowing a write during a potentially active read.
+//! not wait for locks, allocate snapshots, emit `observed` events, or call user code.
+//! Registry contention keeps the previous snapshot; an overlapping snapshot writer
+//! returns a retryable `ERROR_BUSY`. Invalid collection state permanently freezes
+//! snapshots; flush reports it rather than risking a write during an active read.
 
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
@@ -49,6 +50,8 @@ pub(crate) mod testing;
 // A bounded, non-blocking callback must finish within Perflib's one-second
 // deadline. Limit total snapshot work across all active providers in this image.
 const MAX_PUBLISHED_COUNTERS: usize = 4096;
+// The high bit excludes readers while the first collector refreshes the cells.
+const SNAPSHOT_IN_PROGRESS: u32 = 1 << 31;
 // winperf.h's PERF_COUNTER_LARGE_RAWCOUNT is PERF_SIZE_LARGE | PERF_TYPE_NUMBER |
 // PERF_NUMBER_DECIMAL | PERF_DISPLAY_NO_SUFFIX; the last two omitted flags are 0.
 const COUNTER_TYPE: u32 = 0x0001_0100;
@@ -58,8 +61,8 @@ struct CounterStorage {
     published: Box<[UnsafeCell<u64>]>,
 }
 
-// SAFETY: published cells are only written under REGISTRY with readers == 0,
-// before a successful collection-start callback returns. They remain unchanged
+// SAFETY: published cells are only written under REGISTRY with the reader gate
+// held exclusively, before a successful collection-start callback returns. They remain unchanged
 // through the last collection-end callback. Emission never touches them. All
 // pointers remain valid until the provider has been stopped; the registry owns
 // a strong reference even if cleanup fails.
@@ -68,16 +71,13 @@ unsafe impl Sync for CounterStorage {}
 #[derive(Default)]
 struct Registry {
     providers: Vec<Arc<CounterStorage>>,
-    readers: u32,
 }
 
 // These globals cannot be replaced with per-provider state: the Windows
 // callback ABI does not carry a context. Nothing here is shared across DLLs.
-static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
-    providers: Vec::new(),
-    readers: 0,
-});
+static REGISTRY: Mutex<Registry> = Mutex::new(Registry { providers: Vec::new() });
 static COLLECTION_FAULT: AtomicU32 = AtomicU32::new(ERROR_SUCCESS);
+static COLLECTION_READERS: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(test)]
 pub(crate) static TEST_NATIVE: Mutex<()> = Mutex::new(());
@@ -95,10 +95,10 @@ fn fault(state: &AtomicU32, code: u32) -> u32 {
 }
 
 fn collect(request: u32) -> u32 {
-    collect_with(&REGISTRY, &COLLECTION_FAULT, request)
+    collect_with(&REGISTRY, &COLLECTION_FAULT, &COLLECTION_READERS, request)
 }
 
-fn collect_with(registry: &Mutex<Registry>, state: &AtomicU32, request: u32) -> u32 {
+fn collect_with(registry: &Mutex<Registry>, state: &AtomicU32, readers: &AtomicU32, request: u32) -> u32 {
     if request != PERF_COLLECT_START && request != PERF_COLLECT_END {
         return ERROR_SUCCESS;
     }
@@ -106,41 +106,60 @@ fn collect_with(registry: &Mutex<Registry>, state: &AtomicU32, request: u32) -> 
     if existing != ERROR_SUCCESS {
         return existing;
     }
-    let mut registry = match registry.try_lock_result() {
-        Ok(Some(registry)) => registry,
-        Ok(None) => return fault(state, ERROR_BUSY),
+    if request == PERF_COLLECT_END {
+        return match readers.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            (count > 0 && count < SNAPSHOT_IN_PROGRESS).then(|| count - 1)
+        }) {
+            Ok(_) => ERROR_SUCCESS,
+            Err(_) => fault(state, ERROR_INVALID_DATA),
+        };
+    }
+    let count = match readers.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+        if count == SNAPSHOT_IN_PROGRESS || count == SNAPSHOT_IN_PROGRESS - 1 {
+            None
+        } else {
+            Some(if count == 0 { SNAPSHOT_IN_PROGRESS } else { count + 1 })
+        }
+    }) {
+        Ok(count) => count,
+        Err(SNAPSHOT_IN_PROGRESS) => {
+            // Perflib reports a failed START to the consumer. No reader was
+            // admitted, so this request must not decrement another one's END.
+            return ERROR_BUSY;
+        }
         Err(_) => return fault(state, ERROR_INVALID_DATA),
     };
-    collect_locked(&mut registry, state, request)
+    if count != 0 {
+        return ERROR_SUCCESS;
+    }
+    // The writer bit prevents a new collector from reading partially copied
+    // cells. END never needs the registry lock, including during teardown.
+    let result = snapshot(registry, state);
+    readers.store(1, Ordering::Release);
+    result
 }
 
-fn collect_locked(registry: &mut Registry, state: &AtomicU32, request: u32) -> u32 {
+fn snapshot(registry: &Mutex<Registry>, state: &AtomicU32) -> u32 {
+    let registry = match registry.try_lock_result() {
+        Ok(Some(registry)) => registry,
+        // A previous snapshot remains safe to read. Still admit this reader
+        // so an overlapping collector cannot refresh until its matching END.
+        Ok(None) => return ERROR_SUCCESS,
+        Err(_) => return fault(state, ERROR_INVALID_DATA),
+    };
     let existing = state.load(Ordering::Acquire);
     if existing != ERROR_SUCCESS {
         return existing;
     }
-    if request == PERF_COLLECT_END {
-        let Some(readers) = registry.readers.checked_sub(1) else {
-            return fault(state, ERROR_INVALID_DATA);
-        };
-        registry.readers = readers;
-        return ERROR_SUCCESS;
-    }
-    let Some(readers) = registry.readers.checked_add(1) else {
-        return fault(state, ERROR_INVALID_DATA);
-    };
-    if registry.readers == 0 {
-        for provider in &registry.providers {
-            for (total, published) in provider.totals.iter().zip(&provider.published) {
-                let value = total.load(Ordering::Relaxed);
-                // SAFETY: the registry lock excludes other snapshot writers.
-                // No collection is active (readers == 0), and this consumer
-                // cannot read until its collection-start callback returns.
-                unsafe { published.get().write(value) };
-            }
+    for provider in &registry.providers {
+        for (total, published) in provider.totals.iter().zip(&provider.published) {
+            let value = total.load(Ordering::Relaxed);
+            // SAFETY: the caller holds the writer bit with no admitted readers,
+            // and REGISTRY retains each cell through this copy. Windows cannot
+            // read until the successful collection-start callback returns.
+            unsafe { published.get().write(value) };
         }
     }
-    registry.readers = readers;
     ERROR_SUCCESS
 }
 
@@ -268,14 +287,15 @@ fn remove_storage(storage: &Arc<CounterStorage>) {
 }
 
 fn remove_storage_with(registry: &Mutex<Registry>, storage: &Arc<CounterStorage>) {
-    let mut registry = match registry.lock_result() {
-        Ok(registry) => registry,
-        Err(poisoned) => {
-            tracing::error!("observed_perf_counters.registry.poisoned");
-            poisoned.into_inner()
-        }
+    let (mut registry, poisoned) = match registry.lock_result() {
+        Ok(registry) => (registry, false),
+        Err(poisoned) => (poisoned.into_inner(), true),
     };
     registry.providers.retain(|candidate| !Arc::ptr_eq(candidate, storage));
+    drop(registry);
+    if poisoned {
+        tracing::error!("observed_perf_counters.registry.poisoned");
+    }
 }
 
 fn status(operation: &'static str, code: u32) -> Result<(), Error> {

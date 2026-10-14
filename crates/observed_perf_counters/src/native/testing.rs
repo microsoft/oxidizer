@@ -224,28 +224,137 @@ fn native_counter_limit_accepts_exactly_the_bound_and_rejects_one_more() {
 fn callback_faults_are_sticky_and_prevent_further_snapshot_writes() {
     let registry = Mutex::new(Registry::default());
     let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, 999), ERROR_SUCCESS);
-    let guard = registry.lock();
-    assert_eq!(collect_with(&registry, &fault_state, PERF_COLLECT_START), ERROR_BUSY);
-    drop(guard);
-    assert_eq!(collect_with(&registry, &fault_state, PERF_COLLECT_START), ERROR_BUSY);
+    let readers = AtomicU32::new(0);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, 999), ERROR_SUCCESS);
+    assert_eq!(
+        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END),
+        ERROR_INVALID_DATA
+    );
+    assert_eq!(
+        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START),
+        ERROR_INVALID_DATA
+    );
     assert_eq!(fault(&fault_state, ERROR_INVALID_DATA), ERROR_INVALID_DATA);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_BUSY);
-    assert_eq!(registry.lock().readers, 0);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
+    assert_eq!(readers.load(Ordering::Acquire), 0);
 
     let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, PERF_COLLECT_END), ERROR_INVALID_DATA);
+    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS - 1);
+    assert_eq!(
+        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START),
+        ERROR_INVALID_DATA
+    );
     assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
-    let mut registry = Registry {
-        readers: u32::MAX,
-        providers: Vec::new(),
-    };
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    assert_eq!(collect_locked(&mut registry, &fault_state, PERF_COLLECT_START), ERROR_INVALID_DATA);
-    assert_eq!(registry.readers, u32::MAX);
+    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS - 1);
     let fault_state = AtomicU32::new(ERROR_BUSY);
-    assert_eq!(collect_locked(&mut registry, &fault_state, PERF_COLLECT_START), ERROR_BUSY);
-    assert_eq!(registry.readers, u32::MAX);
+    assert_eq!(snapshot(&registry, &fault_state), ERROR_BUSY);
+}
+
+#[test]
+fn registry_contention_preserves_readers_and_the_next_collection_refreshes() {
+    let storage = Arc::new(CounterStorage {
+        totals: vec![AtomicU64::new(37)].into(),
+        published: vec![UnsafeCell::new(0)].into(),
+    });
+    let registry = Mutex::new(Registry {
+        providers: vec![Arc::clone(&storage)],
+    });
+    let fault_state = AtomicU32::new(ERROR_SUCCESS);
+    let readers = AtomicU32::new(0);
+    let guard = registry.lock();
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 1);
+    drop(guard);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 2);
+    // SAFETY: both admitted collectors freeze the reference cells.
+    assert_eq!(unsafe { storage.published[0].get().read() }, 0);
+    let guard = registry.lock();
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 1);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 0);
+    drop(guard);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
+    // SAFETY: the admitted collector freezes the refreshed reference cells.
+    assert_eq!(unsafe { storage.published[0].get().read() }, 37);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn overlapping_snapshot_writer_returns_busy_without_poisoning_future_collections() {
+    let registry = Mutex::new(Registry::default());
+    let fault_state = AtomicU32::new(ERROR_SUCCESS);
+    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_BUSY);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS);
+    // Finish the first writer's admission, then its collection.
+    readers.store(1, Ordering::Release);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
+    assert_eq!(readers.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn unmatched_collection_end_cannot_release_an_active_snapshot_writer() {
+    let registry = Mutex::new(Registry::default());
+    let fault_state = AtomicU32::new(ERROR_SUCCESS);
+    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS);
+    assert_eq!(
+        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END),
+        ERROR_INVALID_DATA,
+    );
+    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
+}
+
+#[test]
+fn concurrent_collectors_balance_admission_and_keep_reference_reads_race_free() {
+    let storage = Arc::new(CounterStorage {
+        totals: vec![AtomicU64::new(0)].into(),
+        published: vec![UnsafeCell::new(0)].into(),
+    });
+    let registry = Mutex::new(Registry {
+        providers: vec![Arc::clone(&storage)],
+    });
+    let fault_state = AtomicU32::new(ERROR_SUCCESS);
+    let readers = AtomicU32::new(0);
+    let iterations = if cfg!(miri) { 8 } else { 1000 };
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            let registry = &registry;
+            let fault_state = &fault_state;
+            let readers = &readers;
+            let storage = &storage;
+            scope.spawn(move || {
+                for _ in 0..iterations {
+                    storage.totals[0].fetch_add(1, Ordering::Relaxed);
+                    match collect_with(registry, fault_state, readers, PERF_COLLECT_START) {
+                        ERROR_SUCCESS => {
+                            // SAFETY: this successful START owns one reader
+                            // until END; no snapshot writer can enter meanwhile.
+                            let value = unsafe { storage.published[0].get().read() };
+                            assert!(value <= 4 * iterations);
+                            assert_eq!(collect_with(registry, fault_state, readers, PERF_COLLECT_END), ERROR_SUCCESS);
+                        }
+                        ERROR_BUSY => {}
+                        other => panic!("collection failed with {other}"),
+                    }
+                }
+            });
+        }
+    });
+    assert_eq!(readers.load(Ordering::Acquire), 0);
+    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
+    // SAFETY: the final collector freezes the refreshed reference value.
+    assert_eq!(unsafe { storage.published[0].get().read() }, 4 * iterations);
+    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
 }
 
 #[test]
@@ -256,7 +365,10 @@ fn poisoned_registry_is_reported_without_entering_a_collection() {
         panic!("inject poison");
     }));
     let state = AtomicU32::new(ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &state, PERF_COLLECT_START), ERROR_INVALID_DATA);
+    assert_eq!(
+        collect_with(&registry, &state, &AtomicU32::new(0), PERF_COLLECT_START),
+        ERROR_INVALID_DATA
+    );
     assert_eq!(state.load(Ordering::Acquire), ERROR_INVALID_DATA);
 }
 
@@ -284,7 +396,6 @@ fn teardown_can_remove_its_cells_from_a_poisoned_registry() {
     });
     let registry = Mutex::new(Registry {
         providers: vec![storage.clone()],
-        readers: 0,
     });
     let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _guard = registry.lock();
@@ -292,6 +403,36 @@ fn teardown_can_remove_its_cells_from_a_poisoned_registry() {
     }));
     remove_storage_with(&registry, &storage);
     assert_eq!(registry.lock_result().err().unwrap().into_inner().providers.len(), 0);
+}
+
+#[test]
+fn poisoned_registry_diagnostic_runs_after_unlocking_and_removing_cells() {
+    let _serial = TEST_NATIVE.lock();
+    let storage = Arc::new(CounterStorage {
+        totals: Vec::<AtomicU64>::new().into(),
+        published: Vec::new().into(),
+    });
+    let registry = Arc::new(Mutex::new(Registry {
+        providers: vec![Arc::clone(&storage)],
+    }));
+    let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = registry.lock();
+        panic!("inject registry poison");
+    }));
+    let captured_registry = Arc::clone(&registry);
+    let calls = Arc::new(AtomicU32::new(0));
+    let captured_calls = Arc::clone(&calls);
+    let subscriber = crate::testing::OnEvent(move || {
+        match captured_registry.try_lock_result() {
+            Err(poisoned) => assert_eq!(poisoned.into_inner().providers.len(), 0),
+            Ok(_) => panic!("diagnostic must run after releasing the poisoned registry"),
+        }
+        let provider = start_mock(&schema(), vec![AtomicU64::new(0)].into());
+        drop(provider);
+        captured_calls.fetch_add(1, Ordering::Relaxed);
+    });
+    tracing::subscriber::with_default(subscriber, || remove_storage_with(&registry, &storage));
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

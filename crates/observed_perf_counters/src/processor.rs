@@ -199,14 +199,22 @@ impl PerfCounterProcessor {
         PerfCounterProcessorBuilder::default()
     }
 
-    fn report(&self, error: Error) {
-        match self.error.lock_result() {
+    fn report(&self, error: &Error) {
+        let poisoned = match self.error.lock_result() {
             Ok(mut pending) if pending.is_none() => {
-                tracing::error!(error = %error, "observed_perf_counters.processing.failed");
-                *pending = Some(error);
+                *pending = Some(error.clone());
+                false
             }
-            Ok(_) => {}
-            Err(_) => tracing::error!(error = %error, "observed_perf_counters.processing.poisoned"),
+            Ok(_) => return,
+            Err(poisoned) => {
+                drop(poisoned);
+                true
+            }
+        };
+        if poisoned {
+            tracing::error!(error = %error, "observed_perf_counters.processing.poisoned");
+        } else {
+            tracing::error!(error = %error, "observed_perf_counters.processing.failed");
         }
     }
 
@@ -226,7 +234,7 @@ impl PerfCounterProcessor {
                 .err()
                 .map(|_| delta.is_negative()),
             _ => {
-                self.report(Error::configuration("measurement does not match the prepared integer metric"));
+                self.report(&Error::configuration("measurement does not match the prepared integer metric"));
                 return;
             }
         };
@@ -242,7 +250,7 @@ impl PerfCounterProcessor {
             } else {
                 ErrorKind::Overflow { counter_id }
             };
-            self.report(error.into());
+            self.report(&error.into());
         }
     }
 }
@@ -254,7 +262,7 @@ impl EventProcessor for PerfCounterProcessor {
 
     fn process(&self, event: &EventView<'_>) {
         if let Err(source) = self.bindings.record(event, |target, value| self.record(target, value)) {
-            self.report(ErrorKind::Read { source: Arc::new(source) }.into());
+            self.report(&ErrorKind::Read { source: Arc::new(source) }.into());
         }
     }
 
@@ -422,7 +430,7 @@ mod tests {
         );
         let original = processor.flush().unwrap_err().to_string();
         assert!(original.contains("measurement does not match the prepared integer metric"));
-        processor.report(ErrorKind::Overflow { counter_id: 7 }.into());
+        processor.report(&ErrorKind::Overflow { counter_id: 7 }.into());
         assert_eq!(processor.flush().unwrap_err().to_string(), original);
         assert_eq!(named_values(&processor), [("Value".into(), 0)]);
         assert!(format!("{processor:?}").contains("Error retention"));
@@ -444,8 +452,90 @@ mod tests {
             let _guard = processor.error.lock();
             panic!("inject error-state poison");
         }));
-        processor.report(ErrorKind::Overflow { counter_id: 9 }.into());
+        processor.report(&ErrorKind::Overflow { counter_id: 9 }.into());
         assert!(processor.flush().unwrap_err().to_string().contains("state lock was poisoned"));
+    }
+
+    #[test]
+    fn processing_diagnostic_can_flush_the_sink_and_observe_the_saved_error() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = Arc::new(build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Reentrant diagnostic")
+                .instance("worker")
+                .bind_event::<WideGauge>(),
+        ));
+        let sink = test_sink(&processor);
+        let captured_processor = Arc::clone(&processor);
+        let calls = Arc::new(AtomicU64::new(0));
+        let captured_calls = Arc::clone(&calls);
+        let subscriber = crate::testing::OnEvent(move || {
+            assert!(matches!(captured_processor.error.try_lock_result(), Ok(Some(_))));
+            assert!(sink.flush().unwrap_err().to_string().contains("metric 42 overflowed u64"));
+            captured_calls.fetch_add(1, Ordering::Relaxed);
+        });
+        tracing::subscriber::with_default(subscriber, || {
+            processor.report(&ErrorKind::Overflow { counter_id: 42 }.into());
+            processor.report(&ErrorKind::Underflow { counter_id: 99 }.into());
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(processor.flush().unwrap_err().to_string().contains("metric 42 overflowed u64"));
+    }
+
+    #[test]
+    fn subscriber_panic_does_not_erase_the_first_error_or_poison_its_lock() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Panicking diagnostic")
+                .instance("worker")
+                .bind_event::<WideGauge>(),
+        );
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tracing::subscriber::with_default(crate::testing::OnEvent(|| panic!("injected subscriber panic")), || {
+                processor.report(&ErrorKind::Overflow { counter_id: 7 }.into());
+            });
+        }));
+        assert!(panic.is_err());
+        drop(processor.error.lock_result().unwrap());
+        assert!(processor.flush().unwrap_err().to_string().contains("metric 7 overflowed u64"));
+    }
+
+    #[test]
+    fn poisoned_processing_diagnostic_can_reenter_flush_without_holding_the_guard() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = Arc::new(build_for_test(
+            PerfCounterProcessor::builder()
+                .category("Reentrant poisoned diagnostic")
+                .instance("worker")
+                .bind_event::<WideGauge>(),
+        ));
+        let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = processor.error.lock();
+            panic!("inject error-state poison");
+        }));
+        let captured_processor = Arc::clone(&processor);
+        let calls = Arc::new(AtomicU64::new(0));
+        let captured_calls = Arc::clone(&calls);
+        let subscriber = crate::testing::OnEvent(move || {
+            // A poison error owns the guard too; release it before reentering.
+            drop(captured_processor.error.try_lock_result().unwrap_err());
+            assert!(
+                captured_processor
+                    .flush()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("state lock was poisoned")
+            );
+            captured_calls.fetch_add(1, Ordering::Relaxed);
+        });
+        tracing::subscriber::with_default(subscriber, || {
+            processor.report(&ErrorKind::Overflow { counter_id: 9 }.into());
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
     struct MissingSlot;
