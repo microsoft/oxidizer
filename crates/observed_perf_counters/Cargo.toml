@@ -29,6 +29,9 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.anvil.examples]
+no-run = ["publish"]
+
 [dependencies]
 observed = { workspace = true }
 performables = { workspace = true }
