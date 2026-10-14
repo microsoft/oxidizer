@@ -293,7 +293,9 @@ where
     /// Safe to call multiple times.
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
-        self.runtime_telemetry.stopped();
+        if !outcome.as_ref().is_err_and(Error::is_self_join) {
+            self.runtime_telemetry.stopped();
+        }
         outcome
     }
 }
@@ -314,7 +316,7 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::test_threads;
-    use crate::runtime::thread::waiter::MockWaitForShutdown;
+    use crate::runtime::thread::waiter::{MockWaitForShutdown, SelfJoin};
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
@@ -493,6 +495,24 @@ mod tests {
         assert_eq!(
             processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
             1
+        );
+    }
+
+    #[test]
+    fn rejected_self_join_does_not_emit_observed_runtime_stopped() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let mut wait_for_shutdown = MockWaitForShutdown::new();
+        wait_for_shutdown
+            .expect_wait()
+            .returning(|| Err(Error::new(SelfJoin::new(std::thread::current().id()))));
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(wait_for_shutdown, NonEmpty::new(endpoint(worker_tx, &threads[0])), sink);
+
+        assert!(dispatcher.join().unwrap_err().is_self_join());
+        assert_eq!(
+            processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
+            0
         );
     }
 

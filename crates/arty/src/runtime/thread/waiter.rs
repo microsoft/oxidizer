@@ -42,7 +42,13 @@ impl Display for WorkerPanicked {
 impl StdError for WorkerPanicked {}
 
 #[derive(Debug)]
-struct SelfJoin(ThreadId);
+pub(in crate::runtime) struct SelfJoin(ThreadId);
+
+impl SelfJoin {
+    pub(in crate::runtime) const fn new(thread_id: ThreadId) -> Self {
+        Self(thread_id)
+    }
+}
 
 impl Display for SelfJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -70,7 +76,7 @@ impl ThreadWaiter {
             match &mut *state_guard {
                 State::Ready(threads) => {
                     if threads.iter().any(|worker| worker.thread().id() == current_thread) {
-                        return Err(Error::new(SelfJoin(current_thread)));
+                        return Err(Error::new(SelfJoin::new(current_thread)));
                     }
                     let threads = std::mem::take(threads);
                     *state_guard = State::Joining(threads.iter().map(|worker| worker.thread().id()).collect());
@@ -92,7 +98,7 @@ impl ThreadWaiter {
                 }
                 State::Joining(worker_ids) => {
                     if worker_ids.contains(&current_thread) {
-                        return Err(Error::new(SelfJoin(current_thread)));
+                        return Err(Error::new(SelfJoin::new(current_thread)));
                     }
                     state_guard = completed.wait(state_guard);
                 }

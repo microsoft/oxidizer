@@ -4,6 +4,8 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
+use crate::runtime::thread::waiter::SelfJoin;
+
 /// An error constructing or operating a runtime.
 ///
 /// You may receive this error when building a runtime with an invalid worker
@@ -49,6 +51,10 @@ impl Error {
 
     pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
         Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
+    }
+
+    pub(crate) fn is_self_join(&self) -> bool {
+        self.source.downcast_ref::<SelfJoin>().is_some()
     }
 
     #[cfg(any(test, feature = "macros"))]
