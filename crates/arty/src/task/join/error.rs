@@ -18,6 +18,27 @@ use performables::sync::mutex::Mutex;
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
 /// Receiving a panic error does not resume unwinding or repair application state.
 /// With `panic = "abort"`, a task panic aborts the process instead.
+///
+/// # Examples
+///
+/// A submission after shutdown reports a task error without invoking its factory:
+///
+/// ```
+/// use arty::runtime::{Runtime, RuntimeOperations};
+///
+/// let runtime = Runtime::new()?;
+/// let error = runtime.scheduler().block_on(async |cx| {
+///     RuntimeOperations::from(&cx).request_stop();
+///     cx.scheduler()
+///         .spawn(async |_| 42)
+///         .await
+///         .expect_err("submission follows shutdown")
+/// })?;
+/// assert!(error.is_shutdown());
+/// assert!(!error.is_panic());
+/// runtime.stop()?;
+/// # Ok::<(), arty::runtime::Error>(())
+/// ```
 pub struct JoinError {
     // The payload can be Send without being Sync. It is only consumed, never borrowed.
     panic: Option<Mutex<Box<dyn Any + Send + 'static>>>,
