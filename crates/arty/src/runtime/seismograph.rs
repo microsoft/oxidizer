@@ -8,7 +8,7 @@ use std::sync::{LazyLock, Mutex};
 
 use foldhash::{HashMap, HashMapExt};
 use nonempty::NonEmpty;
-use observed::{Sink, emit};
+use observed::Sink;
 use performables::arc::Arc;
 use seismograph::recorder::SuppressionGuard;
 use seismograph::recorder::event::{EventClass, EventTimestamp};
@@ -18,10 +18,11 @@ use seismograph_runtime::task::{LiveTask, PendingTask};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
 use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration, allocate_type_descriptor_id, register_runtime};
 
-use crate::runtime::telemetry::events::RuntimeStopped;
 use crate::task::execution::instrumentation::{PendingInstrumentation, TaskInstrumentation};
 
 static TYPE_DESCRIPTORS: LazyLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = LazyLock::new(|| Mutex::<_>::new(HashMap::new()));
+#[cfg(test)]
+pub(crate) static RECORDER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 const TYPE_DESCRIPTOR_CACHE_SIZE: usize = 4;
 
@@ -301,9 +302,7 @@ impl RuntimeLifecycle {
 
     fn stopped(&self) {
         self.registration.stopped();
-        if !self.observed_stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
-        }
+        crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
     }
 }
 
@@ -393,18 +392,14 @@ impl RuntimeTelemetry {
             .filter(|active| active.runtime_id == self.runtime_handle.id())
             .map(|active| active.task_id);
         TaskTelemetryPlacement {
-            pending: Some(worker.prepare_live_task(
-                descriptor.type_descriptor.unwrap_or_else(allocate_type_descriptor_id),
-                parent,
-                descriptor.future_size_bytes,
-            )),
+            pending: Some(worker.prepare_live_task((descriptor.type_descriptor)(), parent, descriptor.future_size_bytes)),
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct TaskDescriptor {
-    type_descriptor: Option<TypeDescriptorId>,
+    type_descriptor: fn() -> TypeDescriptorId,
     future_size_bytes: usize,
 }
 
@@ -415,14 +410,14 @@ impl TaskDescriptor {
 
     pub(crate) fn of<T: 'static>() -> Self {
         Self {
-            type_descriptor: Some(type_descriptor_id::<T>()),
+            type_descriptor: type_descriptor_id::<T>,
             future_size_bytes: size_of::<T>(),
         }
     }
 
     pub(crate) fn of_scoped<T>() -> Self {
         Self {
-            type_descriptor: None,
+            type_descriptor: allocate_type_descriptor_id,
             future_size_bytes: size_of::<T>(),
         }
     }
@@ -590,12 +585,183 @@ fn type_descriptor_id<T: 'static>() -> TypeDescriptorId {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use observed_testing::{TEST_ID, test_emitter};
     use seismograph_runtime::allocate_type_descriptor_id;
     use seismograph_runtime::snapshot::{RuntimeState, source};
 
     use super::{TYPE_DESCRIPTOR_CACHE_MISSES, TaskDescriptor, type_descriptor_id};
+
+    struct Recording {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            seismograph::recorder(seismograph::recorder::Configuration::default());
+        }
+    }
+
+    fn recording() -> Recording {
+        let lock = super::RECORDER_TEST_LOCK.lock().unwrap();
+        seismograph::recorder(seismograph::recorder::Configuration {
+            runtime_tasks: seismograph::recorder::RecordingPolicy::all(false),
+            event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(256).unwrap(),
+            ..seismograph::recorder::Configuration::default()
+        });
+        Recording { _lock: lock }
+    }
+
+    #[test]
+    fn task_descriptions_map_native_states_and_preserve_lazy_identity_and_size() {
+        let identity = std::cell::Cell::new(None);
+        for (native, state) in [
+            (
+                arty_executor::TaskState::Ready,
+                seismograph_runtime::snapshot::TaskActivityState::Ready,
+            ),
+            (
+                arty_executor::TaskState::Waiting,
+                seismograph_runtime::snapshot::TaskActivityState::Waiting,
+            ),
+            (
+                arty_executor::TaskState::Running,
+                seismograph_runtime::snapshot::TaskActivityState::Unknown,
+            ),
+        ] {
+            let super::TaskDescription::Snapshot(task) = super::describe_task::<u64>(&identity, native) else {
+                panic!("queue inspection produces task metadata");
+            };
+            assert_eq!(
+                (task.id, task.future_size_bytes, task.activity.unwrap().state),
+                (identity.get().unwrap(), Some(8), state)
+            );
+        }
+    }
+
+    #[test]
+    fn worker_measurements_reset_on_window_changes_release_when_unrequested_and_retire_completed_tasks() {
+        use arty_executor::PollObserver as _;
+        use seismograph_runtime::live::{Measurements, SubscriptionOptions, subscribe};
+
+        let _recording = recording();
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, observed::Sink::noop());
+        let observer = super::WorkerObservation::new(runtime.worker_handles[0].clone());
+        let id = seismograph_runtime::allocate_task_id();
+        assert!(observer.enabled());
+        observer.poll_started(&());
+        observer.poll_finished(false);
+        for expected in 1..=2 {
+            observer.poll_started(&super::TaskDescription::Identity(id));
+            observer.poll_finished(false);
+            let measured = observer.measured.borrow();
+            assert_eq!(measured.as_ref().unwrap()[&id].metrics.poll_count, expected);
+        }
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        assert!(!observer.enabled());
+        assert!(observer.measured.borrow().is_none());
+        let options = SubscriptionOptions {
+            measurements: Measurements::PollTiming,
+            ..SubscriptionOptions::default()
+        };
+        let first = subscribe(runtime.id(), options, |_| {}).unwrap();
+        assert!(observer.enabled());
+        observer.poll_started(&super::TaskDescription::Identity(id));
+        observer.poll_finished(false);
+        assert!(observer.enabled());
+        assert_eq!(observer.measured.borrow().as_ref().unwrap()[&id].metrics.poll_count, 1);
+        drop(first);
+        let second = subscribe(runtime.id(), options, |_| {}).unwrap();
+        observer.poll_started(&super::TaskDescription::Identity(id));
+        observer.poll_finished(false);
+        assert_eq!(observer.measured.borrow().as_ref().unwrap()[&id].metrics.poll_count, 1);
+        observer.poll_started(&super::TaskDescription::Identity(id));
+        drop(second);
+        let third = subscribe(runtime.id(), options, |_| {}).unwrap();
+        observer.poll_finished(false);
+        assert_eq!(observer.measured.borrow().as_ref().unwrap()[&id].metrics.poll_count, 1);
+        observer.poll_started(&super::TaskDescription::Identity(id));
+        observer.poll_finished(true);
+        assert!(!observer.measured.borrow().as_ref().unwrap().contains_key(&id));
+        drop(third);
+        let state_only = subscribe(runtime.id(), SubscriptionOptions::default(), |_| {}).unwrap();
+        assert!(observer.enabled());
+        observer.poll_started(&super::TaskDescription::Identity(id));
+        observer.poll_finished(false);
+        assert!(observer.active.borrow().is_none());
+        assert!(observer.measured.borrow().is_none());
+        drop(state_only);
+        drop(workers);
+    }
+
+    #[test]
+    fn requested_task_instrumentation_preserves_snapshot_identity_and_immediate_cancellation() {
+        use super::TaskInstrumentation as _;
+
+        let _recording = recording();
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, observed::Sink::noop());
+        let placement = runtime.register_task::<u64>(0);
+        placement.enqueued();
+        let mut telemetry = placement.materialized();
+        let id = telemetry.identity().unwrap();
+        for native in [
+            arty_executor::TaskState::Ready,
+            arty_executor::TaskState::Waiting,
+            arty_executor::TaskState::Running,
+        ] {
+            assert_eq!(super::TaskInstrumentation::snapshot(&telemetry, native).unwrap().id, id);
+        }
+        super::TaskInstrumentation::canceled(&mut telemetry);
+        assert!(telemetry.task.is_none());
+        assert_eq!(runtime.runtime_handle.counters().snapshot().canceled_tasks, 1);
+        drop(telemetry);
+        let telemetry = runtime.register_task::<u64>(0).materialized();
+        drop(telemetry);
+        assert_eq!(runtime.runtime_handle.counters().snapshot().canceled_tasks, 2);
+        let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+        let canceled = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                (event.kind == seismograph::recorder::event::EventKind::TaskCanceled)
+                    .then(|| event.runtime())
+                    .flatten()
+                    .filter(|event| event.runtime_id == runtime.id())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(canceled.len(), 2);
+        assert!(canceled.iter().all(|event| event.worker_id == Some(runtime.worker_handles[0].id())));
+        drop(workers);
+    }
+
+    #[test]
+    fn stopping_recording_before_materialization_or_outcome_does_not_invent_cancellations() {
+        let _recording = recording();
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, observed::Sink::noop());
+        let materialize = runtime.register_task::<u8>(0);
+        let panic = runtime.register_task::<u8>(0);
+        let discarded = runtime.register_task::<u8>(0);
+        let mut complete = runtime.register_task::<u8>(0).materialized();
+        let mut canceled = runtime.register_task::<u8>(0).materialized();
+        let mut panicked = runtime.register_task::<u8>(0).materialized();
+        let before = runtime.runtime_handle.counters().snapshot();
+        seismograph::recorder(seismograph::recorder::Configuration::default());
+        let telemetry = materialize.materialized();
+        assert!(telemetry.worker.is_none() && telemetry.task.is_none());
+        panic.panicked();
+        super::TaskTelemetryPlacement { pending: None }.panicked();
+        drop(discarded);
+        complete.completed();
+        complete.completed();
+        canceled.canceled();
+        panicked.panicked();
+        panicked.panicked();
+        assert_eq!(runtime.runtime_handle.counters().snapshot(), before);
+        drop(workers);
+    }
 
     #[test]
     fn type_descriptor_cache_is_stable_and_type_specific() {
@@ -633,10 +799,8 @@ mod tests {
         let first = TaskDescriptor::of_scoped::<u8>();
         let second = TaskDescriptor::of_scoped::<u8>();
         let other = TaskDescriptor::of_scoped::<u16>();
-        assert_eq!(
-            (first.type_descriptor, second.type_descriptor, other.type_descriptor),
-            (None, None, None)
-        );
+        assert_ne!((first.type_descriptor)(), (second.type_descriptor)());
+        assert_ne!((second.type_descriptor)(), (other.type_descriptor)());
         assert_eq!(
             (first.future_size_bytes, second.future_size_bytes, other.future_size_bytes),
             (size_of::<u8>(), size_of::<u8>(), size_of::<u16>())
@@ -706,6 +870,7 @@ mod tests {
     fn a_failed_poll_description_is_reported_and_discards_partial_observation_state() {
         use arty_executor::PollObserver as _;
 
+        let _recording = recording();
         let (sink, _processor) = test_emitter(TEST_ID);
         let (runtime, workers) = super::RuntimeTelemetry::register(0..1, sink);
         let observer = super::WorkerObservation::new(runtime.worker_handles[0].clone());
@@ -716,6 +881,21 @@ mod tests {
         assert!(observer.active.borrow().is_none());
         assert!(observer.take_failure());
         assert!(!observer.take_failure());
+        drop(workers);
+    }
+
+    #[test]
+    fn invalid_private_description_kinds_are_detected_as_invariant_violations() {
+        use arty_executor::PollObserver as _;
+        let (runtime, workers) = super::RuntimeTelemetry::register(0..1, observed::Sink::noop());
+        let observer = super::WorkerObservation::new(runtime.worker_handles[0].clone());
+        let id = seismograph_runtime::allocate_task_id();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            observer.describe(&super::TaskDescription::Identity(id))
+        }))
+        .unwrap_err();
+        let description = super::describe_task::<u8>(&std::cell::Cell::new(Some(id)), arty_executor::TaskState::Waiting);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.poll_started(&description))).unwrap_err();
         drop(workers);
     }
 }

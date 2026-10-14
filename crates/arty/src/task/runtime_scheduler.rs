@@ -195,11 +195,15 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.spawn(async move |cx| {
+        let factory = async move |cx: Builtins| {
             let mut data = data;
             data.relocate(None, cx.thread());
             future_factory(cx, data).await
-        })
+        };
+        #[cfg(any(test, feature = "seismograph"))]
+        return self.dispatcher.spawn_with_descriptor(TaskDescriptor::of::<F>(), factory);
+        #[cfg(not(any(test, feature = "seismograph")))]
+        self.dispatcher.spawn(factory)
     }
 
     /// Submits a synchronous callback to a blocking-task pool.

@@ -520,3 +520,252 @@ fn record_enqueue(runtime: &RuntimeHandle, id: TaskId, worker: WorkerId) {
         BacktraceCapture::Never,
     );
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+    use seismograph::snapshot::SnapshotOptions;
+
+    use super::*;
+    use crate::live::{Measurements as RequestedMeasurements, SubscriptionOptions, subscribe};
+    use crate::snapshot::{TaskActivityState, TaskMetricsScope};
+    use crate::worker::{WorkerMetadata, WorkerRole};
+    use crate::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
+
+    struct Reset;
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            seismograph::recorder(Configuration::default());
+        }
+    }
+
+    fn record_tasks() -> Reset {
+        seismograph::recorder(Configuration {
+            runtime_tasks: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(256).unwrap(),
+            ..Configuration::default()
+        });
+        Reset
+    }
+
+    fn events_for(runtime: RuntimeId) -> Vec<seismograph::recorder::event::Event> {
+        let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        seismograph::snapshot::decode(bytes.as_bytes())
+            .unwrap()
+            .events
+            .events
+            .into_iter()
+            .filter(|event| event.runtime().is_some_and(|event| event.runtime_id == runtime))
+            .collect()
+    }
+
+    #[test]
+    fn inline_lifecycle_preserves_metadata_events_and_exactly_one_terminal_outcome() {
+        let _test = crate::tests::test_lock();
+        for outcome in [TaskOutcome::Completed, TaskOutcome::Canceled, TaskOutcome::Panicked] {
+            let _reset = record_tasks();
+            let runtime = register_runtime(RuntimeMetadata::new("inline-outcome", 1));
+            let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let descriptor = allocate_type_descriptor_id();
+            let parent = allocate_task_id();
+            let mut task = runtime.handle().register_live_task(descriptor, Some(parent), 17);
+            let id = task.id();
+            task.enqueued(worker.id());
+            task.materialized(worker.id());
+            let description = task.snapshot(TaskActivityState::Waiting, Some(worker.id()));
+            assert_eq!(
+                (
+                    task.runtime_id(),
+                    description.id,
+                    description.parent,
+                    description.type_descriptor,
+                    description.future_size_bytes
+                ),
+                (runtime.id(), id, Some(parent), descriptor, Some(17))
+            );
+            let (kind, completed, canceled, panicked) = match outcome {
+                TaskOutcome::Completed => {
+                    task.completed(Some(worker.id()));
+                    (EventKind::TaskCompleted, 1, 0, 0)
+                }
+                TaskOutcome::Canceled => {
+                    task.canceled(Some(worker.id()));
+                    (EventKind::TaskCanceled, 0, 1, 0)
+                }
+                TaskOutcome::Panicked => {
+                    task.panicked(Some(worker.id()));
+                    (EventKind::TaskPanicked, 0, 0, 1)
+                }
+            };
+            task.completed(Some(worker.id()));
+            drop(task);
+            let counters = runtime.counters().snapshot();
+            assert_eq!(
+                (
+                    counters.spawned_tasks,
+                    counters.live_tasks,
+                    counters.completed_tasks,
+                    counters.canceled_tasks,
+                    counters.panicked_tasks
+                ),
+                (1, 0, completed, canceled, panicked)
+            );
+            let events = events_for(runtime.id());
+            for expected in [
+                EventKind::TaskSpawned,
+                EventKind::TaskEnqueued,
+                EventKind::TaskReady,
+                EventKind::TaskMaterialized,
+                kind,
+            ] {
+                assert_eq!(events.iter().filter(|event| event.kind == expected).count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn dropping_or_stopping_inline_observation_does_not_confuse_cancellation_with_disconnection() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("inline-drop", 0));
+        drop(runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 0));
+        assert_eq!(runtime.counters().snapshot().canceled_tasks, 1);
+        let task = runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 1);
+        let before = runtime.counters().snapshot();
+        task.stop_observing();
+        assert_eq!(runtime.counters().snapshot(), before);
+    }
+
+    #[test]
+    fn pending_tokens_transfer_identity_and_report_cancel_or_panic_only_once() {
+        let _test = crate::tests::test_lock();
+        let _reset = record_tasks();
+        let runtime = register_runtime(RuntimeMetadata::new("pending-transitions", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let descriptor = allocate_type_descriptor_id();
+        let parent = allocate_task_id();
+        let pending = worker.handle().prepare_live_task(descriptor, Some(parent), 19);
+        let id = pending.id.unwrap();
+        pending.enqueued();
+        let (mut task, owner) = pending.materialized();
+        assert_eq!((task.id(), owner.id()), (id, worker.id()));
+        assert_eq!(
+            task.snapshot(TaskActivityState::Ready, Some(owner.id())).future_size_bytes,
+            Some(19)
+        );
+        task.completed(Some(owner.id()));
+        drop(task);
+        assert_eq!(runtime.counters().snapshot().canceled_tasks, 0);
+        drop(worker.handle().prepare_live_task(descriptor, None, 0));
+        worker.handle().prepare_live_task(descriptor, None, 1).panicked();
+        let pending = worker.handle().prepare_live_task(descriptor, None, 2);
+        let before = runtime.counters().snapshot();
+        pending.stop_observing();
+        assert_eq!(runtime.counters().snapshot(), before);
+        let counters = runtime.counters().snapshot();
+        assert_eq!(
+            (
+                counters.completed_tasks,
+                counters.canceled_tasks,
+                counters.panicked_tasks,
+                counters.live_tasks
+            ),
+            (1, 1, 1, 1)
+        );
+        let events = events_for(runtime.id());
+        for kind in [EventKind::TaskEnqueued, EventKind::TaskReady, EventKind::TaskMaterialized] {
+            assert_eq!(events.iter().filter(|event| event.kind == kind).count(), 1);
+        }
+    }
+
+    #[test]
+    fn inline_recording_measurements_accumulate_and_restart_in_a_new_recording_session() {
+        let _test = crate::tests::test_lock();
+        let _reset = record_tasks();
+        let runtime = register_runtime(RuntimeMetadata::new("recording-windows", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let owner = worker.handle();
+        let mut task = runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 7);
+        for expected in 1..=2 {
+            let poll = task.poll_started(&owner);
+            std::thread::sleep(Duration::from_millis(1));
+            task.poll_finished(&owner, poll);
+            let snapshot = task.snapshot(TaskActivityState::Waiting, Some(owner.id()));
+            assert_eq!(snapshot.metrics.poll_count, expected);
+            assert!(snapshot.metrics.poll_duration_nanos > 1);
+            assert!(snapshot.metrics.max_poll_duration_nanos > 1);
+            assert!(matches!(snapshot.metrics_scope, TaskMetricsScope::PollsSince(_)));
+            let _suppression = seismograph::recorder::SuppressionGuard::enter();
+            assert_eq!(
+                task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics,
+                snapshot.metrics
+            );
+        }
+        seismograph::recorder(Configuration::default());
+        assert_eq!(
+            task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics_scope,
+            TaskMetricsScope::Uncollected
+        );
+        let poll = task.poll_started(&owner);
+        task.poll_finished(&owner, poll);
+        let _new_session = record_tasks();
+        let poll = task.poll_started(&owner);
+        task.poll_finished(&owner, poll);
+        assert_eq!(task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics.poll_count, 1);
+    }
+
+    #[test]
+    fn requested_live_timing_resets_windows_and_does_not_accept_a_poll_from_an_old_generation() {
+        let _test = crate::tests::test_lock();
+        seismograph::recorder(Configuration::default());
+        let runtime = register_runtime(RuntimeMetadata::new("live-windows", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let owner = worker.handle();
+        let mut task = runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 3);
+        let options = SubscriptionOptions {
+            measurements: RequestedMeasurements::PollTiming,
+            ..SubscriptionOptions::default()
+        };
+        let first = subscribe(runtime.id(), options, |_| {}).unwrap();
+        let first_generation = owner.live_timing_generation();
+        assert!(first_generation > 0);
+        let poll = task.poll_started(&owner);
+        std::thread::sleep(Duration::from_millis(1));
+        task.poll_finished(&owner, poll);
+        assert_eq!(task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics.poll_count, 1);
+        let old_poll = task.poll_started(&owner);
+        drop(first);
+        let second = subscribe(runtime.id(), options, |_| {}).unwrap();
+        assert!(owner.live_timing_generation() > first_generation);
+        task.poll_finished(&owner, old_poll);
+        assert_eq!(
+            task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics_scope,
+            TaskMetricsScope::Uncollected
+        );
+        let poll = task.poll_started(&owner);
+        task.poll_finished(&owner, poll);
+        assert_eq!(task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics.poll_count, 1);
+        drop(second);
+        let poll = task.poll_started(&owner);
+        task.poll_finished(&owner, poll);
+        assert_eq!(
+            task.snapshot(TaskActivityState::Waiting, Some(owner.id())).metrics_scope,
+            TaskMetricsScope::Uncollected
+        );
+    }
+
+    #[test]
+    fn finishing_a_requested_worker_poll_returns_the_actual_recorded_duration() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("measured-result", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let poll = worker.handle().task_poll_started(allocate_task_id());
+        std::thread::sleep(Duration::from_millis(1));
+        let elapsed = worker.handle().task_poll_finished_measured(poll);
+        assert!(elapsed > 1);
+        assert_eq!(elapsed, runtime.counters().snapshot().poll_duration_nanos);
+    }
+}

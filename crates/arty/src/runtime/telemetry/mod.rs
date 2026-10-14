@@ -5,6 +5,12 @@
 
 pub(crate) mod events;
 
+pub(crate) fn report_stopped(sink: &observed::Sink, reported: &std::sync::atomic::AtomicBool) {
+    if !reported.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        observed::emit!(sink, events::RuntimeStopped);
+    }
+}
+
 /// The data class assigned to runtime telemetry fields.
 ///
 /// Configure a sink's redaction policy for the `arty/SystemMetadata` class to

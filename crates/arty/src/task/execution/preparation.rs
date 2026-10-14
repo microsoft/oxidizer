@@ -279,6 +279,43 @@ mod tests {
     use super::*;
     use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetryPlacement};
 
+    #[test]
+    fn ordinary_remote_factories_preserve_body_size_when_no_override_was_requested() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let tasks = executor.tasks();
+        let future = async {
+            let bytes = [1_u8; 129];
+            std::future::pending::<()>().await;
+            std::hint::black_box(bytes);
+        };
+        let expected = size_of_val(&future) as u64;
+        assert!(expected > 1);
+        let sink = Sink::noop();
+        let (factory, handle) = prepare_remote(
+            move |()| future,
+            sink.transfer_context(),
+            sink,
+            PArc::new(AtomicBool::new(false)),
+            (),
+        )
+        .into_enqueued_parts();
+        factory((), &tasks);
+        let mut size = None;
+        tasks
+            .inspect(
+                std::num::NonZeroUsize::new(1).unwrap(),
+                |description: &crate::runtime::seismograph::TaskDescription| {
+                    let crate::runtime::seismograph::TaskDescription::Snapshot(task) = description else {
+                        panic!("inspection returns a snapshot rather than a poll token");
+                    };
+                    size = task.future_size_bytes;
+                },
+            )
+            .unwrap();
+        assert_eq!(size, Some(expected));
+        drop(handle);
+    }
+
     fn telemetry() -> (RuntimeTelemetry, TaskTelemetryPlacement) {
         let (runtime, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
         let task = runtime.register_task::<()>(0);

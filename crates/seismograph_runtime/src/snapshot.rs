@@ -606,11 +606,12 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
     writer.u64(task.parent.map_or(0, TaskId::get))?;
     writer.u64(task.type_descriptor.get())?;
     writer.u32(u32::try_from(task.spawn_backtrace.len()).map_err(|_| ())?)?;
-    writer.u32(match task.metrics_scope {
+    let metrics_tag = match task.metrics_scope {
         TaskMetricsScope::Lifetime => 0,
         TaskMetricsScope::Uncollected => 1,
         TaskMetricsScope::PollsSince(_) => 2,
-    })?;
+    };
+    writer.u32(metrics_tag)?;
     writer.u64(task.spawned_at.ticks())?;
     writer.u64(task.last_worker_id.map_or(0, WorkerId::get))?;
     writer.u64(task.metrics.poll_count)?;
@@ -629,10 +630,11 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
         Some(size) => size.checked_add(1).ok_or(())?,
     };
     writer.u64(encoded_size)?;
-    writer.u64(match task.metrics_scope {
+    let metrics_since = match task.metrics_scope {
         TaskMetricsScope::PollsSince(at) => at.ticks(),
         TaskMetricsScope::Lifetime | TaskMetricsScope::Uncollected => 0,
-    })?;
+    };
+    writer.u64(metrics_since)?;
     for address in &task.spawn_backtrace {
         writer.u64(address.get())?;
     }
@@ -1059,6 +1061,17 @@ mod tests {
     }
 
     #[test]
+    fn every_truncated_encoder_buffer_is_rejected_without_overwriting_its_boundary() {
+        let snapshot = fixture();
+        let needed = encoded_len(&snapshot).unwrap();
+        for length in 0..needed {
+            let mut storage = vec![0xff; needed + 1];
+            assert_eq!(encode(&snapshot, &mut storage[..length]), Err(()));
+            assert_eq!(storage[length], 0xff);
+        }
+    }
+
+    #[test]
     fn zero_tick_observation_windows_are_valid_and_distinct_from_uncollected_data() {
         for scope in [
             TaskMetricsScope::Lifetime,
@@ -1103,6 +1116,23 @@ mod tests {
         let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
         bytes.drain(task_start + 176..task_start + TASK_FIXED_LEN);
         assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn older_schemas_reject_live_availability_tags_in_each_record_kind() {
+        let snapshot = fixture();
+        let mut legacy = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut legacy).unwrap();
+        legacy[10..12].copy_from_slice(&6_u16.to_le_bytes());
+        let worker_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len();
+        let task_start = worker_start + WORKER_FIXED_LEN;
+        legacy.drain(task_start + 176..task_start + TASK_FIXED_LEN);
+        assert_eq!(decode(&legacy).unwrap(), snapshot);
+        for offset in [HEADER_LEN + 10, HEADER_LEN + 44, worker_start + 10, task_start + 28] {
+            let mut invalid = legacy.clone();
+            invalid[offset] = 1;
+            decode(&invalid).unwrap_err();
+        }
     }
 
     #[test]

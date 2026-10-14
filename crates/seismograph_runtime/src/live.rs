@@ -348,7 +348,21 @@ pub(crate) struct Timing {
 pub fn subscribe(
     runtime_id: RuntimeId,
     options: SubscriptionOptions,
+    callback: impl FnMut(TaskBatch) + Send + 'static,
+) -> Result<Subscription, Error> {
+    subscribe_with(runtime_id, options, callback, |delivery| {
+        thread::Builder::new()
+            .name("seismograph-runtime-live".into())
+            .spawn(delivery)
+            .map(|_thread| ())
+    })
+}
+
+fn subscribe_with(
+    runtime_id: RuntimeId,
+    options: SubscriptionOptions,
     mut callback: impl FnMut(TaskBatch) + Send + 'static,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
 ) -> Result<Subscription, Error> {
     let _suppression = seismograph::recorder::SuppressionGuard::enter();
     options.query.validate()?;
@@ -370,12 +384,12 @@ pub fn subscribe(
     *lock(&cancellation.timing) = timing;
     *lock(&cancellation.observation) = Some(ObservationLease::new(Arc::clone(&runtime)));
     let stopped = Arc::clone(&cancellation);
-    thread::Builder::new()
-        .name("seismograph-runtime-live".into())
-        .spawn(move || run_subscription(&RuntimeHandle { control: runtime }, &stopped, options, &mut callback))
-        .map_err(|source| Error {
-            kind: ErrorKind::ThreadSpawn(source),
-        })?;
+    spawn(Box::new(move || {
+        run_subscription(&RuntimeHandle { control: runtime }, &stopped, options, &mut callback);
+    }))
+    .map_err(|source| Error {
+        kind: ErrorKind::ThreadSpawn(source),
+    })?;
     Ok(Subscription { cancellation })
 }
 
@@ -727,5 +741,237 @@ mod tests {
                 .kind,
             ErrorKind::RuntimeUnavailable(_)
         ));
+    }
+
+    #[test]
+    fn every_collection_status_has_an_exact_wire_round_trip() {
+        for status in [
+            TaskCollection::Retained,
+            TaskCollection::Complete,
+            TaskCollection::Truncated,
+            TaskCollection::Busy,
+            TaskCollection::TimedOut,
+            TaskCollection::Stopped,
+            TaskCollection::Failed,
+        ] {
+            assert_eq!(TaskCollection::from_wire(status as u8), Some(status));
+        }
+        assert_eq!(TaskCollection::from_wire(7), None);
+        assert_eq!(TaskCollection::from_wire(u8::MAX), None);
+    }
+
+    #[test]
+    fn limits_accept_the_exact_supported_boundaries_and_reject_values_beyond_them() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("limit-boundaries", 0));
+        let maximal_query = QueryOptions {
+            limit_per_worker: NonZeroUsize::new(MAX_TASKS_PER_WORKER).unwrap(),
+            timeout: Duration::from_secs(5),
+        };
+        maximal_query.validate().unwrap();
+        for refresh_interval in [MIN_REFRESH_INTERVAL, Duration::from_mins(1)] {
+            let subscription = subscribe_with(
+                runtime.id(),
+                SubscriptionOptions {
+                    query: maximal_query,
+                    refresh_interval,
+                    ..SubscriptionOptions::default()
+                },
+                |_| {},
+                |_delivery| Ok(()),
+            )
+            .unwrap();
+            drop(subscription);
+        }
+        for timeout in [Duration::ZERO, Duration::from_secs(6)] {
+            let error = QueryOptions {
+                timeout,
+                ..QueryOptions::default()
+            }
+            .validate()
+            .unwrap_err();
+            assert!(error.to_string().contains("timeout"));
+            assert!(std::error::Error::source(&error).is_none());
+        }
+        for refresh_interval in [
+            MIN_REFRESH_INTERVAL.checked_sub(Duration::from_nanos(1)).unwrap(),
+            Duration::from_secs(61),
+        ] {
+            let error = subscribe_with(
+                runtime.id(),
+                SubscriptionOptions {
+                    refresh_interval,
+                    ..SubscriptionOptions::default()
+                },
+                |_| {},
+                |_delivery| Ok(()),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("refresh intervals"));
+        }
+        let missing = RuntimeId::from_raw(u64::MAX).unwrap();
+        let error = subscribe_with(missing, SubscriptionOptions::default(), |_| {}, |_delivery| Ok(())).unwrap_err();
+        assert!(error.to_string().contains("not registered"));
+        assert!(std::error::Error::source(&error).is_none());
+    }
+
+    #[test]
+    fn delivery_thread_failure_preserves_its_source_and_releases_all_demand() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("thread-failure", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let error = subscribe_with(
+            runtime.id(),
+            SubscriptionOptions {
+                measurements: Measurements::PollTiming,
+                ..SubscriptionOptions::default()
+            },
+            |_| {},
+            |_delivery| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "delivery denied")),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("delivery denied"));
+        assert_eq!(std::error::Error::source(&error).unwrap().to_string(), "delivery denied");
+        assert_eq!(worker.handle().live_timing_generation(), 0);
+        assert!(!worker.handle().live_observation_enabled());
+    }
+
+    #[test]
+    fn observation_leases_and_subscription_drop_release_demand_and_cancel_delivery() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("observation-leases", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let owner = worker.handle();
+        assert!(!owner.live_observation_enabled());
+        let first = ObservationLease::new(Arc::clone(&runtime.handle.control));
+        let second = ObservationLease::new(Arc::clone(&runtime.handle.control));
+        assert!(owner.live_observation_enabled());
+        drop(first);
+        assert!(owner.live_observation_enabled());
+        drop(second);
+        assert!(!owner.live_observation_enabled());
+        let cancellation = Arc::new(Cancellation::default());
+        *lock(&cancellation.observation) = Some(ObservationLease::new(Arc::clone(&runtime.handle.control)));
+        *lock(&cancellation.timing) = Some(TimingLease::new(Arc::clone(&runtime.handle.control)));
+        let subscription = Subscription {
+            cancellation: Arc::clone(&cancellation),
+        };
+        assert!(owner.live_observation_enabled());
+        assert!(owner.live_timing_generation() > 0);
+        drop(subscription);
+        assert!(cancellation.stopped.load(Ordering::Acquire));
+        assert!(!owner.live_observation_enabled());
+        assert_eq!(owner.live_timing_generation(), 0);
+    }
+
+    #[test]
+    fn exactly_limit_tasks_are_complete_and_debug_output_preserves_the_request_identity() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("exact-limit", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let task = runtime.handle().register_live_task(allocate_type_descriptor_id(), None, 0);
+        let description = task.snapshot(crate::snapshot::TaskActivityState::Waiting, Some(worker.id()));
+        worker
+            .handle()
+            .register_task_provider(move |request| {
+                assert!(format!("{request:?}").contains("TaskRequest"));
+                assert_eq!(request.limit().get(), 1);
+                request.respond(vec![description.clone()], TaskCollection::Complete);
+            })
+            .unwrap();
+        let batches = collect(
+            &runtime.handle(),
+            QueryOptions {
+                limit_per_worker: NonZeroUsize::new(1).unwrap(),
+                ..QueryOptions::default()
+            },
+            &AtomicBool::new(false),
+        );
+        assert_eq!((batches[0].collection, batches[0].tasks.len()), (TaskCollection::Complete, 1));
+        let provider = lock(&runtime.handle.control.workers)[0]
+            .task_provider
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        assert_eq!(format!("{provider:?}"), "TaskProvider");
+    }
+
+    #[test]
+    fn refresh_is_paced_and_dropping_the_subscription_stops_future_callbacks() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("paced-delivery", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        worker
+            .handle()
+            .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete))
+            .unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let subscription = subscribe(
+            runtime.id(),
+            SubscriptionOptions {
+                refresh_interval: Duration::from_millis(100),
+                ..SubscriptionOptions::default()
+            },
+            move |batch| {
+                sender.send(batch).unwrap();
+            },
+        )
+        .unwrap();
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_millis(10)).unwrap_err(),
+            mpsc::RecvTimeoutError::Timeout
+        );
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(subscription);
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(2)).unwrap_err(),
+            mpsc::RecvTimeoutError::Disconnected
+        );
+    }
+
+    #[test]
+    fn cancellation_between_collected_batches_does_not_deliver_the_next_worker() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("between-batches", 2));
+        let first = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let second = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        for worker in [&first, &second] {
+            worker
+                .handle()
+                .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete))
+                .unwrap();
+        }
+        let canceled = Cancellation::default();
+        let mut calls = 0;
+        run_subscription(&runtime.handle(), &canceled, SubscriptionOptions::default(), &mut |_batch| {
+            calls += 1;
+            canceled.stopped.store(true, Ordering::Release);
+        });
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_full_internal_response_channel_is_a_detected_constructor_invariant_violation() {
+        let _test = crate::tests::test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("channel-invariant", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, _receiver) = mpsc::sync_channel(0);
+        let request = TaskRequest {
+            worker: Arc::clone(&lock(&runtime.handle.control.workers)[0]),
+            sender,
+            canceled: Arc::new(AtomicBool::new(false)),
+            limit: NonZeroUsize::new(1).unwrap(),
+        };
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            request.respond(Vec::new(), TaskCollection::Complete);
+        }))
+        .unwrap_err();
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"internal error: entered unreachable code: one response per worker must fit the task-query channel")
+        );
+        drop(worker);
     }
 }

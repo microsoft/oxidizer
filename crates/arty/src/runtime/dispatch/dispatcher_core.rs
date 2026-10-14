@@ -18,8 +18,6 @@ use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::identity::RuntimeId;
 #[cfg(any(test, feature = "seismograph"))]
 use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskTelemetryPlacement, recording_requested};
-#[cfg(not(any(test, feature = "seismograph")))]
-use crate::runtime::telemetry::events::RuntimeStopped;
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -372,9 +370,7 @@ where
         #[cfg(any(test, feature = "seismograph"))]
         self.runtime_telemetry.stopped();
         #[cfg(not(any(test, feature = "seismograph")))]
-        if !self.observed_stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
-        }
+        crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
         outcome
     }
 }
@@ -620,6 +616,7 @@ mod tests {
             }
         }
 
+        let _recording = crate::runtime::seismograph::RECORDER_TEST_LOCK.lock().unwrap();
         let _reset = RecorderReset;
         seismograph::recorder(Configuration {
             runtime_tasks: RecordingPolicy::all(false),

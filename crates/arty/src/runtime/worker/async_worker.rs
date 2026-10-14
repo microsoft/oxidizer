@@ -18,6 +18,31 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::runtime::blocking_worker::BlockingWorker;
 #[cfg(any(test, feature = "seismograph"))]
 use crate::runtime::seismograph::{TaskDescription, WorkerObservation};
+
+#[cfg(any(test, feature = "seismograph"))]
+fn inspected_collection<T>(
+    status: Result<arty_executor::InspectionStatus, arty_executor::InspectionError>,
+    descriptions: &mut Vec<T>,
+    observation_failed: bool,
+) -> seismograph_runtime::live::TaskCollection {
+    use arty_executor::{InspectionError, InspectionStatus};
+    use seismograph_runtime::live::TaskCollection;
+
+    if observation_failed {
+        descriptions.clear();
+        return TaskCollection::Failed;
+    }
+    match status {
+        Ok(InspectionStatus::Complete) => TaskCollection::Complete,
+        Ok(InspectionStatus::Truncated) => TaskCollection::Truncated,
+        Err(InspectionError::Busy) => TaskCollection::Busy,
+        Err(InspectionError::Disconnected) => TaskCollection::Stopped,
+        Err(InspectionError::Panicked) => {
+            descriptions.clear();
+            TaskCollection::Failed
+        }
+    }
+}
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
@@ -256,26 +281,13 @@ where
                             }
                             let _suppression = seismograph::recorder::SuppressionGuard::enter();
                             let mut descriptions = Vec::new();
-                            let collection = match self.tasks.inspect(request.limit(), |task: &TaskDescription| {
+                            let status = self.tasks.inspect(request.limit(), |task: &TaskDescription| {
                                 if let Some(observer) = &self.observation {
                                     descriptions.push(observer.describe(task));
                                 }
-                            }) {
-                                Ok(arty_executor::InspectionStatus::Complete) => seismograph_runtime::live::TaskCollection::Complete,
-                                Ok(arty_executor::InspectionStatus::Truncated) => seismograph_runtime::live::TaskCollection::Truncated,
-                                Err(arty_executor::InspectionError::Busy) => seismograph_runtime::live::TaskCollection::Busy,
-                                Err(arty_executor::InspectionError::Disconnected) => seismograph_runtime::live::TaskCollection::Stopped,
-                                Err(arty_executor::InspectionError::Panicked) => {
-                                    descriptions.clear();
-                                    seismograph_runtime::live::TaskCollection::Failed
-                                }
-                            };
-                            let collection = if self.observation.as_ref().is_some_and(|observer| observer.take_failure()) {
-                                descriptions.clear();
-                                seismograph_runtime::live::TaskCollection::Failed
-                            } else {
-                                collection
-                            };
+                            });
+                            let failed = self.observation.as_ref().is_some_and(|observer| observer.take_failure());
+                            let collection = inspected_collection(status, &mut descriptions, failed);
                             request.respond(descriptions, collection);
                         }
                         AsyncWorkerCommand::EnqueueTask { future_factory } => {
@@ -361,6 +373,31 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
+
+    #[test]
+    fn inspection_results_preserve_availability_and_discard_panicked_descriptions() {
+        use arty_executor::{InspectionError, InspectionStatus};
+        use seismograph_runtime::live::TaskCollection;
+
+        for (status, expected) in [
+            (Ok(InspectionStatus::Complete), TaskCollection::Complete),
+            (Ok(InspectionStatus::Truncated), TaskCollection::Truncated),
+            (Err(InspectionError::Busy), TaskCollection::Busy),
+            (Err(InspectionError::Disconnected), TaskCollection::Stopped),
+            (Err(InspectionError::Panicked), TaskCollection::Failed),
+        ] {
+            let mut descriptions = vec![1_u8];
+            assert_eq!(inspected_collection(status, &mut descriptions, false), expected);
+            assert_eq!(descriptions.is_empty(), expected == TaskCollection::Failed);
+        }
+        let mut descriptions = vec![1_u8];
+        assert_eq!(
+            inspected_collection(Ok(InspectionStatus::Complete), &mut descriptions, true),
+            TaskCollection::Failed
+        );
+        assert!(descriptions.is_empty());
+    }
+
     #[derive(Clone, Debug)]
     struct TestTaskContext;
 

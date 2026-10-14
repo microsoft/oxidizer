@@ -26,21 +26,17 @@ use crate::{
 };
 
 trait ObservePoll: Copy {
-    fn started(self, task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError>;
-    fn finished(self, completed: bool);
-    fn failed(self, error: InspectionError);
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()>;
 }
 
 impl ObservePoll for () {
-    fn started(self, _task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError> {
-        Ok(false)
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()> {
+        task.poll()
     }
-    fn finished(self, _completed: bool) {}
-    fn failed(self, _error: InspectionError) {}
 }
 
 impl ObservePoll for &dyn PollObserver {
-    fn started(self, task: Pin<&dyn TypeErasedTask>) -> Result<bool, InspectionError> {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()> {
         let mut observed = false;
         let mut in_callback = false;
         let description = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -51,18 +47,20 @@ impl ObservePoll for &dyn PollObserver {
                 observed = true;
             });
         }));
-        match description {
-            Ok(()) => Ok(observed),
+        let has_description = match description {
+            Ok(()) => observed,
             // Runtime-owned observer callbacks retain their must-not-panic contract.
             Err(panic) if in_callback => std::panic::resume_unwind(panic),
-            Err(_panic) => Err(InspectionError::Panicked),
+            Err(_panic) => {
+                self.inspection_failed(InspectionError::Panicked);
+                false
+            }
+        };
+        let outcome = task.poll();
+        if has_description {
+            self.poll_finished(outcome.is_ready());
         }
-    }
-    fn finished(self, completed: bool) {
-        self.poll_finished(completed);
-    }
-    fn failed(self, error: InspectionError) {
-        self.inspection_failed(error);
+        outcome
     }
 }
 
@@ -520,17 +518,7 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
-            let has_description = match observer.started(task) {
-                Ok(has_description) => has_description,
-                Err(error) => {
-                    observer.failed(error);
-                    false
-                }
-            };
-            let outcome = task.poll();
-            if has_description {
-                observer.finished(outcome.is_ready());
-            }
+            let outcome = observer.poll(task);
             match outcome {
                 task::Poll::Ready(()) => {
                     // The task has completed, so we can move it to the completed list.
@@ -917,6 +905,7 @@ thread_local! {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -957,6 +946,45 @@ mod tests {
     struct DirtyDropTask {
         _signal: SetSignalOnDrop,
         inert: bool,
+    }
+
+    #[test]
+    fn tasks_without_custom_inspection_or_wake_observation_use_the_declared_defaults() {
+        let task = DirtyDropTask {
+            _signal: SetSignalOnDrop(Rc::new(Cell::new(false))),
+            inert: false,
+        };
+        let mut callbacks = 0;
+        task.inspect(TaskState::Waiting, &mut |_description| callbacks += 1);
+        assert_eq!(callbacks, 0);
+        assert!(!task.is_awakened());
+    }
+
+    #[derive(Debug)]
+    struct BrokenObserver;
+
+    impl PollObserver for BrokenObserver {
+        fn enabled(&self) -> bool {
+            true
+        }
+        fn poll_started(&self, _description: &dyn std::any::Any) {
+            panic!("observer bug");
+        }
+        fn poll_finished(&self, _completed: bool) {}
+        fn inspection_failed(&self, _error: InspectionError) {
+            panic!("an observer bug must not be translated into an inspector error");
+        }
+    }
+
+    #[test]
+    fn observer_bugs_are_not_reclassified_as_description_failures() {
+        let mut task = crate::MockTypeErasedTask::new();
+        task.expect_inspect().times(1).returning(|state, visitor| visitor(&state));
+        let pinned = Pin::new(&task);
+        let task: Pin<&dyn TypeErasedTask> = pinned;
+        let observer: &dyn PollObserver = &BrokenObserver;
+        let panic = std::panic::catch_unwind(AssertUnwindSafe(|| ObservePoll::poll(observer, task))).unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"observer bug"));
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

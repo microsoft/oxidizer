@@ -36,7 +36,12 @@ all-features = true
 [features]
 default = ["rt", "macros"]
 macros = ["rt", "dep:arty_macros"]
-seismograph = ["rt", "dep:seismograph", "dep:seismograph_runtime", "performables/seismograph"]
+seismograph = [
+    "rt",
+    "dep:seismograph",
+    "dep:seismograph_runtime",
+    "performables/seismograph",
+]
 rt = [
     "time",
     "dep:arty_executor",

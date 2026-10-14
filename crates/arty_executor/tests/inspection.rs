@@ -240,3 +240,48 @@ fn a_poll_description_panic_is_reported_without_preventing_task_execution() {
     );
     drop((failed, healthy));
 }
+
+#[test]
+fn inspection_error_text_identifies_busy_disconnected_and_panicked_states() {
+    assert_eq!(
+        [InspectionError::Busy, InspectionError::Disconnected, InspectionError::Panicked].map(|error| error.to_string()),
+        [
+            "the executor is busy; inspect between execution cycles",
+            "the inspected executor has been dropped",
+            "the task description or inspection visitor panicked",
+        ]
+        .map(String::from)
+    );
+}
+
+#[test]
+fn inspection_sees_embedded_wakes_when_the_notification_queue_is_full() {
+    let executor = new_guarded_executor(Waker::noop().clone());
+    let tasks = executor.tasks();
+    // These are the configured queue capacities plus one, retaining the same fallback under Miri.
+    let count = if cfg!(miri) { 5 } else { 1025 };
+    let wakers = Rc::new(RefCell::new(Vec::new()));
+    let handles = (0..count)
+        .map(|_| {
+            let wakers = Rc::clone(&wakers);
+            tasks.add_with_inspection(
+                poll_fn(move |context| {
+                    wakers.borrow_mut().push(context.waker().clone());
+                    Poll::<()>::Pending
+                }),
+                |_, state| Some(state),
+            )
+        })
+        .collect::<Vec<_>>();
+    let _ = executor.execute_cycle();
+    for waker in &*wakers.borrow() {
+        waker.wake_by_ref();
+    }
+    let mut states = Vec::new();
+    tasks
+        .inspect(NonZeroUsize::new(count).unwrap(), |state: &TaskState| states.push(*state))
+        .unwrap();
+    assert_eq!(states, vec![TaskState::Ready; count]);
+    wakers.borrow_mut().clear();
+    drop(handles);
+}

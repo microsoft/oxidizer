@@ -30,6 +30,21 @@ use thread_aware::Unaware;
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+fn subscription_options() -> SubscriptionOptions {
+    // Miri checks queue ownership, not the native 50 ms response budget.
+    SubscriptionOptions {
+        query: QueryOptions {
+            timeout: if cfg!(miri) {
+                Duration::from_secs(5)
+            } else {
+                QueryOptions::default().timeout
+            },
+            ..QueryOptions::default()
+        },
+        ..SubscriptionOptions::default()
+    }
+}
+
 #[expect(clippy::unwrap_used, reason = "this helper only constructs test runtimes")]
 fn runtime() -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap()
@@ -53,20 +68,24 @@ fn receive(receiver: &mpsc::Receiver<TaskBatch>, predicate: impl Fn(&TaskBatch) 
 
 #[test]
 fn live_tasks_are_visible_without_recording_or_historical_timing() {
+    type BodyInput = Unaware<(events_once::BoxedReceiver<()>, mpsc::Sender<()>)>;
+
+    async fn body(_cx: arty::task::Builtins, Unaware((wait, started)): BodyInput) {
+        started.send(()).unwrap();
+        wait.await.unwrap();
+    }
+    fn body_size<F>(_: fn(arty::task::Builtins, BodyInput) -> F) -> u64 {
+        size_of::<F>() as u64
+    }
     let _lock = TEST_LOCK.lock().unwrap();
     seismograph::recorder(Configuration::default());
     let runtime = runtime();
     let (release, wait) = Event::<()>::boxed();
     let (started, ready) = mpsc::channel();
-    let task = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((wait, started)), |_, Unaware((wait, started))| async move {
-            started.send(()).unwrap();
-            wait.await.unwrap();
-        });
+    let task = runtime.scheduler().spawn_anywhere(Unaware((wait, started)), body);
     ready.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
     let (sender, receiver) = mpsc::channel();
-    let subscription = subscribe(id(&runtime), SubscriptionOptions::default(), move |batch| {
+    let subscription = subscribe(id(&runtime), subscription_options(), move |batch| {
         let _ = sender.send(batch);
     })
     .unwrap();
@@ -74,6 +93,7 @@ fn live_tasks_are_visible_without_recording_or_historical_timing() {
         batch.collection == TaskCollection::Complete && batch.tasks.len() == 1
     });
     let task_id = batch.tasks[0].id;
+    assert_eq!(batch.tasks[0].future_size_bytes, Some(body_size(body)));
     assert_eq!(
         (
             batch.tasks[0].metrics_scope,
@@ -108,6 +128,10 @@ fn live_tasks_are_visible_without_recording_or_historical_timing() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "native TCP monitor transport runs natively and under cargo careful; remaining live-query tests and arty_executor inspection tests retain storage/lifecycle coverage"
+)]
 fn the_seismograph_monitor_protocol_can_capture_live_tasks_without_recording() {
     use seismograph_protocol::message::{Request, Response, SnapshotOptions as RemoteSnapshotOptions};
     use seismograph_protocol::{read_response, write_request};
@@ -190,9 +214,9 @@ fn task_requests_are_bounded_and_report_truncation() {
         SubscriptionOptions {
             query: QueryOptions {
                 limit_per_worker: NonZeroUsize::new(1).unwrap(),
-                ..QueryOptions::default()
+                ..subscription_options().query
             },
-            ..SubscriptionOptions::default()
+            ..subscription_options()
         },
         move |batch| {
             let _ = sender.send(batch);
@@ -244,7 +268,7 @@ fn an_already_monitored_worker_exposes_its_current_task_if_it_stalls() {
     seismograph::recorder(Configuration::default());
     let runtime = runtime();
     let (sender, receiver) = mpsc::channel();
-    let subscription = subscribe(id(&runtime), SubscriptionOptions::default(), move |batch| {
+    let subscription = subscribe(id(&runtime), subscription_options(), move |batch| {
         let _ = sender.send(batch);
     })
     .unwrap();
@@ -338,7 +362,7 @@ fn scoped_future_size_survives_erasure_without_recording_or_eager_descriptors() 
     let (release, waiting) = Event::<()>::boxed();
     let (started, ready) = mpsc::channel();
     let (sender, receiver) = mpsc::channel();
-    let subscription = subscribe(id(&runtime), SubscriptionOptions::default(), move |batch| {
+    let subscription = subscribe(id(&runtime), subscription_options(), move |batch| {
         let _ = sender.send(batch);
     })
     .unwrap();
@@ -387,7 +411,7 @@ fn slow_callbacks_do_not_block_task_execution_or_cancellation() {
     let runtime = runtime();
     let (entered, entry) = mpsc::channel();
     let (release, blocked) = mpsc::channel();
-    let subscription = subscribe(id(&runtime), SubscriptionOptions::default(), move |_| {
+    let subscription = subscribe(id(&runtime), subscription_options(), move |_| {
         entered.send(()).unwrap();
         blocked.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
     })
@@ -427,7 +451,7 @@ fn timing_starts_on_demand_and_stops_after_the_last_interested_subscription() {
         SubscriptionOptions {
             measurements: Measurements::PollTiming,
             refresh_interval: Duration::from_millis(50),
-            ..SubscriptionOptions::default()
+            ..subscription_options()
         },
         move |batch| {
             let _ = sender.send(batch);
@@ -445,7 +469,7 @@ fn timing_starts_on_demand_and_stops_after_the_last_interested_subscription() {
     drop(subscription);
     wake.send(()).unwrap();
     let (sender, receiver) = mpsc::channel();
-    let state_only = subscribe(id(&runtime), SubscriptionOptions::default(), move |batch| {
+    let state_only = subscribe(id(&runtime), subscription_options(), move |batch| {
         let _ = sender.send(batch);
     })
     .unwrap();
