@@ -75,7 +75,7 @@ impl CounterSchema {
                 validate_name("counter name", &spec.name)?;
                 validate_text("unit", &spec.unit, MAX_NAME, false)?;
                 validate_text("description", &spec.description, MAX_TEXT, false)?;
-                Ok(CounterDefinition {
+                let counter = CounterDefinition {
                     name: spec.name.clone(),
                     unit: spec.unit.clone(),
                     description: spec.description.clone(),
@@ -83,7 +83,9 @@ impl CounterSchema {
                     offset: 0,
                     source_index: spec.source_index,
                     kind: spec.kind,
-                })
+                };
+                validate_text("counter help", &counter.help(), MAX_TEXT, false)?;
+                Ok(counter)
             })
             .collect::<Result<Vec<_>, Error>>()?;
         counters.sort_unstable_by_key(|counter| counter.id);
@@ -282,10 +284,46 @@ mod tests {
         let schema = CounterSchema::new(&"s".repeat(MAX_NAME), &"i".repeat(MAX_NAME), &[spec(&"c".repeat(MAX_NAME), 0)]).unwrap();
         assert_eq!(schema.counters.len(), 1);
         let mut description = spec("Value", 0);
+        description.unit.clear();
         description.description = "d".repeat(MAX_TEXT);
         CounterSchema::new("Service", "worker", &[description.clone()]).unwrap();
         description.description.push('d');
         CounterSchema::new("Service", "worker", &[description]).unwrap_err();
+    }
+
+    #[test]
+    fn a_valid_description_cannot_exceed_the_help_limit_after_appending_its_unit() {
+        let mut counter = spec("Value", 0);
+        counter.description = "d".repeat(MAX_TEXT);
+        assert_eq!(
+            CounterSchema::new("Service", "worker", &[counter]).unwrap_err().to_string(),
+            "invalid performance-counter configuration: counter help exceeds 8192 UTF-16 code units",
+        );
+    }
+
+    #[test]
+    fn final_help_accepts_the_exact_utf16_limit_and_rejects_one_more_code_unit() {
+        for unit in ["By", "🦀"] {
+            let mut counter = spec("Value", 0);
+            counter.unit = unit.into();
+            let suffix = format!(" [unit: {unit}]");
+            counter.description = "d".repeat(MAX_TEXT - suffix.encode_utf16().count());
+            let expected_help = format!("{}{suffix}", counter.description);
+            let schema = CounterSchema::new("Service", "worker", &[counter.clone()]).unwrap();
+            assert_eq!(schema.counters[0].help(), expected_help);
+            assert_eq!(schema.counters[0].help().encode_utf16().count(), MAX_TEXT);
+            assert!(
+                schema
+                    .manifest("service.dll")
+                    .unwrap()
+                    .contains(&format!("description=\"{expected_help}\""))
+            );
+            counter.description.push('d');
+            assert_eq!(
+                CounterSchema::new("Service", "worker", &[counter]).unwrap_err().to_string(),
+                "invalid performance-counter configuration: counter help exceeds 8192 UTF-16 code units",
+            );
+        }
     }
 
     #[test]
