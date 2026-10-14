@@ -35,7 +35,7 @@ const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 // distinguish.
 const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
 
-/// Maximum compressed streams decoded from one HTTP body unless the caller overrides it.
+/// Maximum compressed streams decoded by each decompression stage unless the caller overrides it.
 const DEFAULT_MAX_DECOMPRESSED_STREAMS: u64 = 1024;
 
 const fn default_decompressor_limits() -> DecompressorLimits {
