@@ -84,13 +84,13 @@ impl SinkBuilder {
     /// Sets the clock that stamps the timestamp on every event the sink
     /// dispatches, replacing the default system clock.
     ///
-    /// Accepts anything that is `AsRef<SimpleClock>` - both
-    /// [`tick::SimpleClock`] and [`tick::Clock`]. Pass the application's clock
-    /// if it has one. In tests pass a frozen clock
-    /// (`SimpleClock::new_frozen()`) for deterministic, Miri-safe timestamps.
+    /// Accepts a [`tick::SimpleClock`], or a [`tick::Clock`] by value or by
+    /// reference. Pass the application's clock if it has one. In tests pass a
+    /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
+    /// timestamps.
     #[must_use]
-    pub fn clock(mut self, clock: impl AsRef<SimpleClock>) -> Self {
-        self.clock = clock.as_ref().clone();
+    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
+        self.clock = clock.into();
         self
     }
 

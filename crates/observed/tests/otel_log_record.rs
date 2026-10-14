@@ -222,7 +222,7 @@ fn maps_the_sink_captured_timestamp() {
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
     let sink = Sink::builder("test")
-        .clock(&clock)
+        .clock(clock)
         .processors(vec![Arc::new(otel_processor(&provider))])
         .build();
 
