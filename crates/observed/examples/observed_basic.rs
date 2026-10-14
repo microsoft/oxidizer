@@ -72,7 +72,7 @@ fn main() {
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
     // 2. Build a sink with a processor backed by the logger provider.
-    let sink = Sink::builder("basic", tick::SimpleClock::new_system())
+    let sink = Sink::builder("basic")
         .processors(vec![Arc::new(SimpleLogProcessor {
             logger: provider.logger("basic"),
             redaction_engine: redaction::passthrough_redaction_engine(),

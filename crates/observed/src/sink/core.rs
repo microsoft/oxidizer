@@ -77,13 +77,6 @@ impl Sink {
     /// [`enrich_for`](crate::enrichment::EnrichFutureExt::enrich_for) addresses
     /// entries to a sink by this id.
     ///
-    /// `clock` stamps the timestamp on every event the sink dispatches. It
-    /// accepts anything that is `AsRef<SimpleClock>` - both
-    /// [`tick::SimpleClock`] and [`tick::Clock`]. In production pass the
-    /// application's clock (e.g. `SimpleClock::new_system()`); in tests pass a
-    /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
-    /// timestamps.
-    ///
     /// All other settings are optional; see [`SinkBuilder`].
     ///
     /// # Examples
@@ -91,11 +84,11 @@ impl Sink {
     /// ```
     /// use observed::Sink;
     ///
-    /// let sink = Sink::builder("service", tick::SimpleClock::new_system()).build();
+    /// let sink = Sink::builder("service").build();
     /// ```
     #[must_use]
-    pub fn builder(id: impl Into<SinkId>, clock: impl AsRef<SimpleClock>) -> SinkBuilder {
-        SinkBuilder::new(id.into(), clock.as_ref().clone())
+    pub fn builder(id: impl Into<SinkId>) -> SinkBuilder {
+        SinkBuilder::new(id.into())
     }
 
     /// Constructs a sink from the settings collected by [`SinkBuilder`].
@@ -555,7 +548,8 @@ mod tests {
     }
 
     fn failing_sink(id: &'static str) -> Sink {
-        Sink::builder(id, SimpleClock::new_frozen())
+        Sink::builder(id)
+            .clock(SimpleClock::new_frozen())
             .processors(vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>])
             .build()
     }
@@ -658,7 +652,8 @@ mod tests {
     #[test]
     fn always_off_sampler_always_drops() {
         let processor = Arc::new(AlwaysInterestedProcessor::default());
-        let sink = Sink::builder("sampled", SimpleClock::new_frozen())
+        let sink = Sink::builder("sampled")
+            .clock(SimpleClock::new_frozen())
             .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
             .event_sampler(AlwaysOffSampler)
             .build();
@@ -675,7 +670,8 @@ mod tests {
     fn uninterested_processor_is_skipped_despite_interested_peer() {
         let interested = Arc::new(AlwaysInterestedProcessor::default());
         let uninterested = Arc::new(NeverInterestedProcessor::default());
-        let sink = Sink::builder("mixed", SimpleClock::new_frozen())
+        let sink = Sink::builder("mixed")
+            .clock(SimpleClock::new_frozen())
             .processors(vec![
                 Arc::clone(&uninterested) as Arc<dyn EventProcessor>,
                 Arc::clone(&interested) as Arc<dyn EventProcessor>,
@@ -694,7 +690,8 @@ mod tests {
     /// a real query over the processors, not an unconditional yes.
     #[test]
     fn single_sink_is_not_interested_when_no_processor_is() {
-        let sink = Sink::builder("uninterested", SimpleClock::new_frozen())
+        let sink = Sink::builder("uninterested")
+            .clock(SimpleClock::new_frozen())
             .processors(vec![Arc::new(NeverInterestedProcessor::default()) as Arc<dyn EventProcessor>])
             .build();
 

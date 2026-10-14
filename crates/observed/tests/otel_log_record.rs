@@ -168,7 +168,8 @@ fn otel_emitter() -> (Sink, SdkLoggerProvider, InMemoryLogExporter) {
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(otel_processor(&provider))])
         .build();
     (sink, provider, exporter)
@@ -220,7 +221,8 @@ fn maps_the_sink_captured_timestamp() {
 
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
-    let sink = Sink::builder("test", &clock)
+    let sink = Sink::builder("test")
+        .clock(&clock)
         .processors(vec![Arc::new(otel_processor(&provider))])
         .build();
 
@@ -458,7 +460,8 @@ fn isolated_sink_excludes_globals_keeps_targeted() {
 
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
-    let sink = Sink::builder(LIB, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(LIB)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(otel_processor(&provider))])
         .isolated_enrichment()
         .build();
@@ -494,10 +497,12 @@ fn enrich_for_targets_only_matching_child_at_dispatch() {
     let exporter_b = InMemoryLogExporter::default();
     let provider_b = SdkLoggerProvider::builder().with_simple_exporter(exporter_b.clone()).build();
 
-    let a = Sink::builder(A, tick::SimpleClock::new_frozen())
+    let a = Sink::builder(A)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(otel_processor(&provider_a))])
         .build();
-    let b = Sink::builder(B, tick::SimpleClock::new_frozen())
+    let b = Sink::builder(B)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(otel_processor(&provider_b))])
         .build();
     let composite = Sink::composite([a, b]);

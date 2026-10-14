@@ -47,7 +47,8 @@ fn active_sink() -> Sink {
     let redactor = RedactionEngine::builder()
         .suppress_redaction(data_privacy::DataClass::new("arty", "SystemMetadata"))
         .build();
-    Sink::builder("arty-benchmark", SimpleClock::new_frozen())
+    Sink::builder("arty-benchmark")
+        .clock(SimpleClock::new_frozen())
         .processors(vec![Arc::new(ReadFields(redactor))])
         .build()
 }

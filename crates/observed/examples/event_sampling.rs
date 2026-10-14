@@ -92,7 +92,7 @@ fn main() {
         Arc::new(PrintingProcessor { signal: Signal::Log }),
         Arc::new(PrintingProcessor { signal: Signal::Metric }),
     ];
-    let sink = Sink::builder("service", tick::SimpleClock::new_system())
+    let sink = Sink::builder("service")
         .processors(processors)
         .event_sampler(DropHealthChecks)
         .build();

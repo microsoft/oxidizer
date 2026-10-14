@@ -46,7 +46,8 @@ fn severity_filter_drops_low_severity_events() {
     }
 
     let processor = MockProcessor::with_filter(|desc| desc.log().is_some_and(|l| l.severity() >= Severity::Warn));
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .build();
 
@@ -78,7 +79,8 @@ fn severity_filter_drops_low_severity_events() {
 #[test]
 fn uninterested_processor_receives_nothing() {
     let processor = MockProcessor::with_filter(|_| false);
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .build();
 
@@ -97,7 +99,8 @@ fn uninterested_processor_receives_nothing() {
 #[test]
 fn flushing_a_failing_processor_reports_it_and_keeps_the_events() {
     let processor = MockProcessor::with_flush_error("mock", "exporter offline");
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .build();
 
@@ -115,7 +118,8 @@ fn multiple_processors_receive_events_independently() {
     let all_processor = MockProcessor::new();
     let warn_processor = MockProcessor::with_filter(|desc| desc.log().is_some_and(|l| l.severity() >= Severity::Warn));
 
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(all_processor.clone()), Arc::new(warn_processor.clone())])
         .build();
 
@@ -141,11 +145,13 @@ fn composite_fans_out_to_each_child() {
     let base_processor = MockProcessor::new();
     let extra_processor = MockProcessor::new();
 
-    let base = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let base = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(base_processor.clone())])
         .build();
 
-    let extra = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let extra = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(extra_processor.clone())])
         .build();
 
@@ -216,7 +222,8 @@ fn lazy_construction() {
 
     // All processors reject via is_interested - closure should NOT be called.
     let rejected = MockProcessor::with_filter(|_| false);
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(rejected.clone()), Arc::new(rejected.clone())])
         .build();
 
@@ -237,7 +244,8 @@ fn lazy_construction() {
     // Multiple interested processors - closure called exactly once, both receive event.
     let processor_a = MockProcessor::new();
     let processor_b = MockProcessor::new();
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor_a.clone()), Arc::new(processor_b.clone())])
         .build();
 
@@ -299,7 +307,8 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
         events: Mutex::new(Vec::new()),
     });
 
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::clone(&processor) as Arc<dyn observed::processing::EventProcessor>])
         .build();
 
@@ -384,7 +393,8 @@ fn metric_only_sink(interested: bool) -> (Sink, Arc<Mutex<Vec<&'static str>>>) {
         extracted: Arc::clone(&extracted),
         engine: observed_testing::passthrough_redaction_engine(),
     };
-    let sink = Sink::builder("cost", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("cost")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor) as Arc<dyn observed::processing::EventProcessor>])
         .build();
     (sink, extracted)

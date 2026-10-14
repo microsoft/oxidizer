@@ -82,7 +82,8 @@ fn constant_sampler(decision: EventSamplingDecision) -> (impl EventSampler, Arc<
 /// Builds a sink with one [`MockProcessor`] and the given sampler.
 fn sampled_emitter(id: SinkId, sampler: impl Into<Box<dyn EventSampler>>) -> (Sink, MockProcessor) {
     let processor = MockProcessor::new();
-    let sink = Sink::builder(id, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(id)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -177,7 +178,8 @@ fn always_off_sampler_always_drops() {
     let logs = MockProcessor::with_filter(|description| description.log().is_some());
     let metrics = MockProcessor::with_filter(EventDescription::contains_metrics);
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(logs.clone()), Arc::new(metrics.clone())])
         .event_sampler(sampler)
         .build();
@@ -199,7 +201,8 @@ fn always_off_sampler_always_drops() {
 fn event_sampler_is_not_called_without_processor_interest() {
     let processor = MockProcessor::with_filter(|_| false);
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -244,7 +247,8 @@ fn event_sampler_receives_description_sink_id_and_timestamp() {
         EventSamplingDecision::Continue
     });
 
-    let sink = Sink::builder(id, clock.clone())
+    let sink = Sink::builder(id)
+        .clock(clock.clone())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -277,11 +281,13 @@ fn composite_leaves_decide_independently() {
         EventSamplingDecision::Drop
     });
 
-    let sampled_sink = Sink::builder(sampled_id, tick::SimpleClock::new_frozen())
+    let sampled_sink = Sink::builder(sampled_id)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(sampled_processor.clone())])
         .event_sampler(sampler)
         .build();
-    let other_sink = Sink::builder(other_id, tick::SimpleClock::new_frozen())
+    let other_sink = Sink::builder(other_id)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(other_processor.clone())])
         .build();
     let composite = Sink::composite([sampled_sink, other_sink]);
@@ -313,11 +319,13 @@ fn composite_does_not_sample_uninterested_leaf() {
     let (uninterested_sampler, uninterested_calls) = constant_sampler(EventSamplingDecision::Continue);
 
     let composite = Sink::composite([
-        Sink::builder("interested", tick::SimpleClock::new_frozen())
+        Sink::builder("interested")
+            .clock(tick::SimpleClock::new_frozen())
             .processors(vec![Arc::new(interested.clone())])
             .event_sampler(interested_sampler)
             .build(),
-        Sink::builder("uninterested", tick::SimpleClock::new_frozen())
+        Sink::builder("uninterested")
+            .clock(tick::SimpleClock::new_frozen())
             .processors(vec![Arc::new(uninterested.clone())])
             .event_sampler(uninterested_sampler)
             .build(),
@@ -341,7 +349,8 @@ fn composite_does_not_sample_uninterested_leaf() {
 fn sampled_sink_accepts_stack_borrowing_event() {
     let processor = MockProcessor::new();
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -371,7 +380,8 @@ fn dynamic_borrowed_event_reaches_sampler() {
         assert_eq!(event.sink_id(), TEST_ID);
         EventSamplingDecision::Continue
     });
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -416,7 +426,8 @@ fn later_event_sampler_replaces_earlier_one() {
     let processor = MockProcessor::new();
     let (first, first_calls) = constant_sampler(EventSamplingDecision::Continue);
     let (second, second_calls) = constant_sampler(EventSamplingDecision::Drop);
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(first)
         .event_sampler(second)
@@ -490,7 +501,8 @@ fn shared_sampler_state_spans_composite_leaves() {
 #[test]
 fn processorless_leaf_never_calls_its_sampler() {
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
-    let sink = Sink::builder(TEST_ID, tick::SimpleClock::new_frozen())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .event_sampler(sampler)
         .build();
     let built = Cell::new(false);

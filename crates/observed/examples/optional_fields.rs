@@ -39,7 +39,7 @@ fn main() {
     // example; a real deployment would configure redactors per data class.
     let redaction_engine = redaction::passthrough_redaction_engine();
 
-    let sink = Sink::builder("optional_fields", tick::SimpleClock::new_system())
+    let sink = Sink::builder("optional_fields")
         .processors(vec![Arc::new(PrintProcessor { redaction_engine })])
         .build();
 

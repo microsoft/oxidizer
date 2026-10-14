@@ -295,10 +295,8 @@ fn main() {
     let app_logs = InMemoryLogExporter::default();
     let app_logger = SdkLoggerProvider::builder().with_simple_exporter(app_logs.clone()).build();
 
-    let clock = tick::SimpleClock::new_system();
-
     // App sink - receives global enrichments (not isolated).
-    let app_emitter = Sink::builder(APP, &clock)
+    let app_emitter = Sink::builder(APP)
         .processors(vec![Arc::new(SimpleLogProcessor {
             logger: app_logger.logger("app"),
             redaction_engine: redaction::passthrough_redaction_engine(),
@@ -312,7 +310,7 @@ fn main() {
     // ignores untargeted (global) entries broadcast through the composite and
     // only picks up entries addressed to `DB`.
     let db_logger = SdkLoggerProvider::builder().with_simple_exporter(DB_LOGS.clone()).build();
-    let db_standalone = Sink::builder(DB, &clock)
+    let db_standalone = Sink::builder(DB)
         .processors(vec![Arc::new(SimpleLogProcessor {
             logger: db_logger.logger("db"),
             redaction_engine: redaction::passthrough_redaction_engine(),
@@ -323,7 +321,7 @@ fn main() {
 
     // TOKEN_ISSUER sink - same composite pattern.
     let token_logger = SdkLoggerProvider::builder().with_simple_exporter(TOKEN_LOGS.clone()).build();
-    let token_standalone = Sink::builder(TOKEN_ISSUER, &clock)
+    let token_standalone = Sink::builder(TOKEN_ISSUER)
         .processors(vec![Arc::new(SimpleLogProcessor {
             logger: token_logger.logger("token_issuer"),
             redaction_engine: redaction::passthrough_redaction_engine(),

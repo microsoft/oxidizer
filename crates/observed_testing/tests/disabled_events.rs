@@ -41,7 +41,8 @@ fn disabled_event_captured_by_default_processor_with_flag() {
 #[test]
 fn disabled_event_filtered_by_log_and_metric_proc() {
     let processor = MockProcessor::with_filter(|desc| !desc.is_disabled() && (desc.is_log() || desc.contains_metrics()));
-    let sink = Sink::builder("test", tick::SimpleClock::new_frozen())
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .build();
 

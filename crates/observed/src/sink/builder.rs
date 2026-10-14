@@ -15,12 +15,13 @@ use crate::{Sink, SinkId};
 
 /// Builds a [`Sink`].
 ///
-/// Created by [`Sink::builder`], which takes the sink's id and clock. All other
-/// settings are optional:
+/// Created by [`Sink::builder`], which takes the sink's id. All other settings
+/// are optional:
 ///
 /// | Setting | Default |
 /// |---|---|
 /// | [`processors`](Self::processors) | None. The sink drops every event. |
+/// | [`clock`](Self::clock) | `SimpleClock::new_system()`. Timestamps come from the operating system. |
 /// | [`isolated_enrichment`](Self::isolated_enrichment) | Off. The sink sees entries added with [`enrich`] and entries that [`enrich_for`] addresses to its id. |
 /// | [`event_sampler`](Self::event_sampler) | None. Every event reaches the sink's interested processors. |
 ///
@@ -44,7 +45,7 @@ use crate::{Sink, SinkId};
 /// #     }
 /// # }
 ///
-/// let sink = Sink::builder("service", tick::SimpleClock::new_system())
+/// let sink = Sink::builder("service")
 ///     .processors(vec![Arc::new(LogProcessor)])
 ///     .build();
 /// ```
@@ -60,10 +61,10 @@ pub struct SinkBuilder {
 }
 
 impl SinkBuilder {
-    pub(super) fn new(id: SinkId, clock: SimpleClock) -> Self {
+    pub(super) fn new(id: SinkId) -> Self {
         Self {
             id,
-            clock,
+            clock: SimpleClock::new_system(),
             processors: Vec::new(),
             isolated_enrichment: false,
             sampler: None,
@@ -77,6 +78,19 @@ impl SinkBuilder {
     #[must_use]
     pub fn processors(mut self, processors: Vec<Arc<dyn EventProcessor>>) -> Self {
         self.processors = processors;
+        self
+    }
+
+    /// Sets the clock that stamps the timestamp on every event the sink
+    /// dispatches, replacing the default system clock.
+    ///
+    /// Accepts anything that is `AsRef<SimpleClock>` - both
+    /// [`tick::SimpleClock`] and [`tick::Clock`]. Pass the application's clock
+    /// if it has one. In tests pass a frozen clock
+    /// (`SimpleClock::new_frozen()`) for deterministic, Miri-safe timestamps.
+    #[must_use]
+    pub fn clock(mut self, clock: impl AsRef<SimpleClock>) -> Self {
+        self.clock = clock.as_ref().clone();
         self
     }
 
@@ -135,9 +149,7 @@ impl SinkBuilder {
     /// } else {
     ///     Box::new(KeepAll)
     /// };
-    /// let sink = Sink::builder("service", tick::SimpleClock::new_system())
-    ///     .event_sampler(sampler)
-    ///     .build();
+    /// let sink = Sink::builder("service").event_sampler(sampler).build();
     /// ```
     #[must_use]
     pub fn event_sampler(mut self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
@@ -197,11 +209,11 @@ mod tests {
 
     #[test]
     fn default_builder_debug_reports_defaults() {
-        let debug = format!("{:?}", Sink::builder("plain", SimpleClock::new_frozen()));
+        let debug = format!("{:?}", Sink::builder("plain"));
 
         assert!(debug.contains("SinkBuilder"), "{debug}");
         assert!(debug.contains("\"plain\""), "{debug}");
-        assert!(debug.contains("SimpleClock"), "{debug}");
+        assert!(debug.contains("SimpleClock(System)"), "{debug}");
         assert!(debug.contains("processors: 0"), "{debug}");
         assert!(debug.contains("isolated_enrichment: false"), "{debug}");
         assert!(debug.contains("event_sampler: false"), "{debug}");
@@ -209,21 +221,23 @@ mod tests {
 
     #[test]
     fn configured_builder_debug_reports_every_setting() {
-        let builder = Sink::builder("configured", SimpleClock::new_frozen())
+        let builder = Sink::builder("configured")
             .processors(vec![Arc::new(NoopProcessor)])
+            .clock(SimpleClock::new_frozen())
             .isolated_enrichment()
             .event_sampler(KeepAll);
 
         let debug = format!("{builder:?}");
 
         assert!(debug.contains("processors: 1"), "{debug}");
+        assert!(debug.contains("SimpleClock(Controlled"), "{debug}");
         assert!(debug.contains("isolated_enrichment: true"), "{debug}");
         assert!(debug.contains("event_sampler: true"), "{debug}");
     }
 
     #[test]
     fn build_without_optional_settings_has_no_processors() {
-        let sink = Sink::builder("plain", SimpleClock::new_frozen()).build();
+        let sink = Sink::builder("plain").build();
 
         assert_eq!(sink.id(), SinkId::new("plain"));
         assert!(sink.is_noop());
@@ -231,16 +245,14 @@ mod tests {
 
     #[test]
     fn build_keeps_the_configured_processors() {
-        let sink = Sink::builder("processing", SimpleClock::new_frozen())
-            .processors(vec![Arc::new(NoopProcessor)])
-            .build();
+        let sink = Sink::builder("processing").processors(vec![Arc::new(NoopProcessor)]).build();
 
         assert!(!sink.is_noop());
     }
 
     #[test]
     fn later_processors_replace_earlier_ones() {
-        let sink = Sink::builder("replaced", SimpleClock::new_frozen())
+        let sink = Sink::builder("replaced")
             .processors(vec![Arc::new(NoopProcessor)])
             .processors(Vec::new())
             .build();

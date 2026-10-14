@@ -75,7 +75,7 @@ async fn main() {
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
-    let sink = Sink::builder("tokio_multithread", tick::SimpleClock::new_system())
+    let sink = Sink::builder("tokio_multithread")
         .processors(vec![Arc::new(SimpleLogProcessor {
             logger: provider.logger("tokio_mt"),
             redaction_engine: redaction::passthrough_redaction_engine(),

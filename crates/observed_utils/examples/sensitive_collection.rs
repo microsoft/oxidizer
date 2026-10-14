@@ -32,7 +32,7 @@ fn main() {
     let passthrough_proc = Arc::new(PrintingProcessor::new("passthrough", passthrough));
     let redacting_proc = Arc::new(PrintingProcessor::new("redacted", redacting));
 
-    let sink = Sink::builder("sensitive_collection", tick::SimpleClock::new_system())
+    let sink = Sink::builder("sensitive_collection")
         .processors(vec![
             Arc::clone(&passthrough_proc) as Arc<dyn EventProcessor>,
             Arc::clone(&redacting_proc) as Arc<dyn EventProcessor>,
