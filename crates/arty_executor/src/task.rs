@@ -386,10 +386,12 @@ enum TerminalOutcome<R> {
 
 enum ResultTarget<R: 'static> {
     Local(PooledLocalSender<R>),
+    // Type erasure keeps the `Send` requirement on remote results without imposing it on local
+    // executor tasks.
     Remote(Box<dyn RemoteResult<R>>),
 }
 
-trait RemoteResult<R>: std::fmt::Debug {
+trait RemoteResult<R> {
     fn complete(self: Box<Self>, result: R) -> Result<(), TaskPanic>;
 
     fn panicked(self: Box<Self>, panic: TaskPanic) -> Result<(), TaskPanic>;

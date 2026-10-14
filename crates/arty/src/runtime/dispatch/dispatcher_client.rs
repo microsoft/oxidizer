@@ -14,6 +14,7 @@ use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
+#[derive(Clone)]
 pub(crate) struct DispatcherClient {
     core: Arc<DispatcherCore>,
 }
@@ -94,14 +95,6 @@ impl Debug for DispatcherClient {
     #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>()).finish()
-    }
-}
-
-impl Clone for DispatcherClient {
-    fn clone(&self) -> Self {
-        Self {
-            core: Arc::clone(&self.core),
-        }
     }
 }
 
