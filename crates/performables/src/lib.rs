@@ -26,7 +26,8 @@
 //! feature enables runtime ownership and synchronization telemetry.
 //! Ready blocking channel operations do not allocate waiter storage. Queue
 //! payload storage and enabled telemetry may allocate independently. Final
-//! arrivals at an async-capable barrier also bypass the blocking executor.
+//! arrivals at an async-capable barrier do not allocate their own waiter
+//! storage.
 //!
 //! [`arc::Arc`] defaults to a process-wide allocation with the same
 //! representation size as [`std::sync::Arc`]. Its thread-aware per-thread and

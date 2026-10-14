@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 //! Uncontended ownership, lock, and ready blocking benchmarks.
+//!
+//! Scalar payload values are arbitrary transfer markers without payload allocations.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -38,6 +40,7 @@ const READY_BATCH: BatchSize = BatchSize::NumIterations(64);
 
 type Queue = (Sender<u64>, Receiver<u64>);
 
+/// Warms payload storage and initial queue bookkeeping outside the measured operation.
 fn empty_queue(bounded: bool) -> Queue {
     let queue = if bounded { channel::bounded(1) } else { channel::unbounded() };
     queue.0.try_send(7).expect("an empty queue with a live receiver accepts a value");
@@ -78,7 +81,7 @@ fn queue_recv_timeout(queue: &mut Queue) -> u64 {
 
 #[expect(
     clippy::unnecessary_wraps,
-    reason = "batched fixtures consume the receiver through a mutable Option reference"
+    reason = "batched fixtures take the receiver through an exclusive reference to the Option"
 )]
 fn ready_oneshot() -> Option<OneshotReceiver<u64>> {
     let (sender, receiver) = channel::oneshot();

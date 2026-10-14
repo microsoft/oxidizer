@@ -35,7 +35,8 @@ independently versioned latest-value observation. The optional `seismograph`
 feature enables runtime ownership and synchronization telemetry.
 Ready blocking channel operations do not allocate waiter storage. Queue
 payload storage and enabled telemetry may allocate independently. Final
-arrivals at an async-capable barrier also bypass the blocking executor.
+arrivals at an async-capable barrier do not allocate their own waiter
+storage.
 
 [`arc::Arc`][__link10] defaults to a process-wide allocation with the same
 representation size as [`std::sync::Arc`][__link11]. Its thread-aware per-thread and
@@ -110,7 +111,7 @@ require_send(mutex.lock());
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb32Bm4jqN8sgbirhEEdWFPPMbIA0qyAccYhobQL3N5dS6Uc1hZIGCbHBlcmZvcm1hYmxlc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb3FADtmoSeTkbBsJGU_D-tUAbP1AAORsFjBob9ThYEYxGbGFhZIGCbHBlcmZvcm1hYmxlc2UwLjIuMA
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=sync::mode::Sync
  [__link1]: https://docs.rs/performables/0.2.0/performables/?search=sync::mode::Async
  [__link10]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc

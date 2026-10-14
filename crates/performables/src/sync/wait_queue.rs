@@ -45,6 +45,10 @@ pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Optio
     block_on_until(future, Instant::now().checked_add(timeout))
 }
 
+/// Preserves a timeout budget captured before a readiness check.
+///
+/// `None` means unbounded waiting, including `Instant::checked_add` overflow.
+/// Polls readiness before expiry so an already-ready result wins at the deadline.
 pub(super) fn block_on_until<F: Future>(future: F, deadline: Option<Instant>) -> Option<F::Output> {
     let Some(deadline) = deadline else {
         return Some(block_on(future));

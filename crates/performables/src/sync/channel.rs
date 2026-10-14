@@ -243,6 +243,10 @@ pub struct Sender<T> {
     shared: Arc<QueueShared<T>>,
 }
 
+/// Tracks whether an operation has emitted its single contention event.
+///
+/// Blocking readiness checks can record contention before entering the shared
+/// async waiting path; `Recorded` prevents duplicates during handoff and retries.
 #[derive(Clone, Copy)]
 enum ContentionRecording {
     Pending,
@@ -263,6 +267,7 @@ impl<T> Sender<T> {
         self.send_with_recording_async(value, ContentionRecording::Pending).await
     }
 
+    /// Shares queue-send waiting between async callers and blocking fallbacks.
     async fn send_with_recording_async(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
         let mut value = value;
         #[cfg(test)]
@@ -407,6 +412,7 @@ impl<T> Receiver<T> {
         self.recv_with_recording_async(ContentionRecording::Pending).await
     }
 
+    /// Shares queue-receive waiting between async callers and blocking fallbacks.
     async fn recv_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -440,6 +446,7 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub fn recv(&self) -> Result<T, Error> {
+        // An empty try_recv() records contention before handing off to the async path.
         match self.try_recv() {
             Err(error) if error.is_empty() => block_on(self.recv_with_recording_async(ContentionRecording::Recorded)),
             result => result,
@@ -458,6 +465,7 @@ impl<T> Receiver<T> {
             Err(error) if error.is_empty() => {}
             result => return result,
         }
+        // The empty try_recv() has already recorded this operation's contention.
         match block_on_until(self.recv_with_recording_async(ContentionRecording::Recorded), deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
@@ -1103,6 +1111,7 @@ impl<T> WatchReceiver<T> {
         self.changed_with_recording_async(ContentionRecording::Pending).await
     }
 
+    /// Shares watch-change waiting between async callers and blocking fallbacks.
     async fn changed_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -1336,6 +1345,9 @@ mod tests {
         }
     }
 
+    // Fixture budgets are arbitrary generous scheduling safeguards, not timing requirements.
+    // Miri gets more registration time. The timed receives use an independent generous
+    // budget because these fixtures test delivery and closure, not timeout expiry.
     fn wait_for_waiter<T>(queue: &WaitQueue, worker: &std::thread::JoinHandle<T>) {
         let deadline = Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
         while !queue.has_waiters() {

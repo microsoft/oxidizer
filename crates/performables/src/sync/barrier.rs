@@ -135,6 +135,7 @@ impl Barrier<Async> {
     pub fn wait(&self) -> BarrierWaitResult {
         match self.arrive() {
             Arrival::Leader => BarrierWaitResult { leader: true },
+            // Arrival is already counted; carrying its generation avoids arriving twice.
             Arrival::Waiting(generation) => block_on(BarrierWait {
                 barrier: self,
                 generation: Some(generation),
@@ -342,8 +343,12 @@ mod tests {
     #[test]
     fn blocking_waiter_retains_its_first_arrival() {
         let barrier = Arc::new(Barrier::<Async>::new(2));
-        let other = Arc::clone(&barrier);
-        let worker = std::thread::spawn(move || other.wait());
+        let worker = std::thread::spawn({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        });
+        // Arbitrary generous watchdogs allow worker scheduling, not a required response time.
+        // Miri needs a larger wall-clock allowance for interpreted execution.
         let deadline = std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
         while Barrier::<Async>::count(barrier.raw.state.load(Ordering::Acquire)) == 0 {
             assert!(

@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 //! Ready blocking channel and barrier operations must not allocate waiter storage.
+//!
+//! Scalar payloads are arbitrary, allocation-free markers; distinct values identify transfers.
 
 #![cfg(not(miri))] // Native allocation counting; channel and barrier behavior remains covered under Miri.
 
