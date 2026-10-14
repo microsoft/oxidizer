@@ -335,7 +335,7 @@ async fn none_removes_a_previously_configured_output_limit() {
 }
 
 #[tokio::test]
-async fn automatic_decompression_defaults_to_1024_streams() {
+async fn automatic_decompression_inherits_the_http_stream_default() {
     for (token, compression_format, decompression_format) in [
         ("gzip", Format::Gzip, DecompressionFormat::Gzip),
         ("zstd", Format::Zstd, DecompressionFormat::Zstd),

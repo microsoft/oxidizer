@@ -698,9 +698,10 @@ that was not asked for is handed back untouched rather than failing.
 decompress.
 
 Decompression is lazy, so a malformed body fails when it is read rather than when the response
-arrives, and that failure therefore does not trigger a retry. Decompressed
-output is capped at 64 MiB by default, while each decompression stage accepts
-at most 1,024 concatenated streams.
+arrives, and that failure therefore does not trigger a retry. The client
+inherits the safe `http_compression` defaults: decompressed output is capped
+at 64 MiB, while each decompression stage accepts at most 1,024 concatenated
+streams. `fetch` adds no default overrides of its own.
 
 [`DecompressionOptions`][__link84] can explicitly bound
 decompressed output and the number of compressed streams, or remove the
@@ -781,7 +782,7 @@ names it and those options are applied with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbz3lRej3OhYYbAL56BKh90ecbLhY2HWz0CIsbU4r67goA5VJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMS4wgmVmZXRjaGYwLjE4LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEyLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZjAuMTAuMIJtdGVtcGxhdGVkX3VyaWUwLjYuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYX2biHSnzdYbPpDjAsdXBAEbzj3vtt_FroEbFPXRzVAThDlhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMS4wgmVmZXRjaGYwLjE4LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEyLjCCZ2xheWVyZWRlMC4zLjeCaHNlYXRiZWx0ZjAuMTAuMIJtdGVtcGxhdGVkX3VyaWUwLjYuMA
  [__link0]: https://docs.rs/fetch/0.18.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.12.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.18.0/fetch/?search=HttpClient::post

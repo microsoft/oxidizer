@@ -92,9 +92,9 @@ impl DecompressionFormat {
 /// Configures automatic response decompression and its resource limits.
 ///
 /// Decompression is off until [`formats`][Self::formats] names a format. The
-/// client accepts at most 64 MiB of decompressed output by default. The stream
-/// count defaults to 1,024 so empty concatenated members cannot consume
-/// unbounded CPU.
+/// client inherits the safe HTTP defaults from `http_compression`: at most
+/// 64 MiB of decompressed output and 1,024 compressed streams per decompression
+/// stage.
 /// Configured bounds apply while reading the body, including when streaming
 /// without buffering it.
 ///
@@ -118,9 +118,6 @@ pub struct DecompressionOptions {
     stream_limit: StreamLimit,
 }
 
-/// HTTP responses should not contain enough members for this guardrail to be observable.
-const DEFAULT_MAX_STREAMS: u64 = 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputLimit {
     Inherit,
@@ -130,13 +127,14 @@ enum OutputLimit {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamLimit {
+    Inherit,
     Bounded(u64),
     Unbounded,
 }
 
 impl DecompressionOptions {
-    /// Creates options with no enabled formats, the default 64 MiB effective
-    /// output limit, and the default 1,024-stream bound.
+    /// Creates options with no enabled formats and no overrides to the safe HTTP
+    /// decompression defaults.
     ///
     /// This is what [`Default`] returns.
     #[must_use]
@@ -144,7 +142,7 @@ impl DecompressionOptions {
         Self {
             formats: Vec::new(),
             output_limit: OutputLimit::Inherit,
-            stream_limit: StreamLimit::Bounded(DEFAULT_MAX_STREAMS),
+            stream_limit: StreamLimit::Inherit,
         }
     }
 
@@ -169,11 +167,11 @@ impl DecompressionOptions {
 
     /// Bounds the total decompressed output, in bytes.
     ///
-    /// The client applies a 64 MiB bound when this setter is not called. Pass a
-    /// byte count or `Some(count)` to replace it, or `None` to explicitly remove
-    /// the output-size bound. An explicit bound applies even when the caller
-    /// streams the body into a file or another service without buffering it in
-    /// memory.
+    /// When this setter is not called, the client inherits the safe HTTP default
+    /// from `http_compression`, currently 64 MiB. Pass a byte count or
+    /// `Some(count)` to replace it, or `None` to explicitly remove the
+    /// output-size bound. An explicit bound applies even when the caller streams
+    /// the body into a file or another service without buffering it in memory.
     ///
     /// This is independent of [`HttpBodyOptions::buffer_limit`][super::HttpBodyOptions::buffer_limit],
     /// which limits how much a body-buffering operation may retain.
@@ -195,9 +193,10 @@ impl DecompressionOptions {
 
     /// Bounds the number of compressed streams decoded by each decompression stage.
     ///
-    /// Defaults to 1,024 streams. Each concatenated gzip member or zstd frame
-    /// counts as one stream, including empty ones that would never reach the
-    /// output-size bound.
+    /// When this setter is not called, the client inherits the safe HTTP default
+    /// from `http_compression`, currently 1,024 streams. Each concatenated gzip
+    /// member or zstd frame counts as one stream, including empty ones that
+    /// would never reach the output-size bound.
     ///
     /// # Panics
     ///
@@ -238,6 +237,7 @@ impl DecompressionOptions {
         };
 
         match self.stream_limit {
+            StreamLimit::Inherit => limits,
             StreamLimit::Bounded(streams) => {
                 limits.max_streams(NonZeroU64::new(streams).expect("DecompressionOptions::max_streams rejects zero"))
             }
@@ -290,8 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn constructors_and_format_conversions_apply_only_the_default_stream_limit() {
-        let expected = compressors::DecompressorLimits::new().max_streams(std::num::NonZeroU64::new(DEFAULT_MAX_STREAMS).unwrap());
+    fn constructors_and_format_conversions_leave_http_defaults_unset() {
+        let expected = compressors::DecompressorLimits::new();
         for options in [
             DecompressionOptions::new(),
             DecompressionOptions::default(),
@@ -306,12 +306,7 @@ mod tests {
     #[test]
     fn explicit_unbounded_output_is_distinct_from_inheritance() {
         let options = DecompressionOptions::new().max_output_len(None);
-        assert_eq!(
-            options.limits(),
-            compressors::DecompressorLimits::new()
-                .unbounded_output_len()
-                .max_streams(std::num::NonZeroU64::new(DEFAULT_MAX_STREAMS).unwrap())
-        );
+        assert_eq!(options.limits(), compressors::DecompressorLimits::new().unbounded_output_len());
     }
 
     #[test]

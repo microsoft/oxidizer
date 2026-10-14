@@ -802,9 +802,10 @@
 //! decompress.
 //!
 //! Decompression is lazy, so a malformed body fails when it is read rather than when the response
-//! arrives, and that failure therefore does not trigger a retry. Decompressed
-//! output is capped at 64 MiB by default, while each decompression stage accepts
-//! at most 1,024 concatenated streams.
+//! arrives, and that failure therefore does not trigger a retry. The client
+//! inherits the safe `http_compression` defaults: decompressed output is capped
+//! at 64 MiB, while each decompression stage accepts at most 1,024 concatenated
+//! streams. `fetch` adds no default overrides of its own.
 //!
 //! [`DecompressionOptions`][options::DecompressionOptions] can explicitly bound
 //! decompressed output and the number of compressed streams, or remove the
