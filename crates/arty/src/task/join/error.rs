@@ -103,19 +103,18 @@ impl JoinError {
         Self { panic: None }
     }
 
-    pub(crate) fn into_panic(self) -> Box<dyn Any + Send + 'static> {
-        self.panic
-            .expect("into_panic() requires a JoinError for which is_panic() is true")
-            .into_inner()
+    /// Returns the captured panic payload, or `None` if this error represents shutdown.
+    #[must_use]
+    pub fn into_panic(self) -> Option<Box<dyn Any + Send + 'static>> {
+        self.panic.map(Mutex::into_inner)
     }
 }
 
 impl JoinError {
     pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
-        if error.is_panic() {
-            Self::panicked(error.into_panic())
-        } else {
-            Self::shutdown()
+        match error.into_panic() {
+            Some(payload) => Self::panicked(payload),
+            None => Self::shutdown(),
         }
     }
 }

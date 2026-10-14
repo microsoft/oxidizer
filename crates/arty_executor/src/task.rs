@@ -789,7 +789,7 @@ mod tests {
             panic!("captured panic must be published to the remote join handle");
         };
         assert!(error.is_panic());
-        discard_task_panic_payload(error.into_panic());
+        discard_task_panic_payload(error.into_panic().expect("the join error was checked as a panic"));
 
         let events = processor.events();
         let panicked = events.iter().find(|event| event.name() == "arty.rt.task.panicked").unwrap();

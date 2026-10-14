@@ -63,17 +63,11 @@ impl JoinError {
         self.panic.is_none()
     }
 
-    /// Returns the captured panic payload.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this error represents executor shutdown rather than a task panic.
+    /// Returns the captured panic payload, or `None` if this error represents shutdown.
     #[must_use]
-    pub fn into_panic(self) -> TaskPanicPayload {
+    pub fn into_panic(self) -> Option<TaskPanicPayload> {
         self.panic
-            .expect("into_panic() requires a JoinError for which is_panic() is true")
-            .into_inner()
-            .expect("the private panic payload mutex cannot be poisoned")
+            .map(|panic| panic.into_inner().expect("the private panic payload mutex cannot be poisoned"))
     }
 }
 
@@ -247,6 +241,6 @@ mod tests {
 
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
-        assert_eq!(*error.into_panic().downcast::<u64>().unwrap(), 42);
+        assert_eq!(*error.into_panic().unwrap().downcast::<u64>().unwrap(), 42);
     }
 }
