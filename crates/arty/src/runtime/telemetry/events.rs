@@ -47,11 +47,6 @@ impl From<usize> for ProcessorIndex {
 #[derive(Clone, Copy)]
 pub(crate) struct BlockingWorkerPoolMode(pub &'static str);
 
-/// Scheduling route (`any`, `same_thread`, or `local`).
-#[classified(SYSTEM_METADATA)]
-#[derive(Clone, Copy)]
-pub(crate) struct PlacementLabel(pub &'static str);
-
 /// The name of an OS thread the runtime owns.
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone)]
@@ -145,19 +140,6 @@ pub(crate) struct AsyncWorkerActive {
     #[unredacted]
     pub delta: i64,
 }
-
-/// Emitted when a task is spawned.
-#[event("arty.rt.task.spawned")]
-#[counter(name = "arty.rt.task.spawned")]
-pub(crate) struct TaskSpawned {
-    #[dimension(metric = "placement")]
-    pub placement: PlacementLabel,
-}
-
-/// Emitted when a task completes successfully.
-#[event("arty.rt.task.succeeded")]
-#[counter(name = "arty.rt.task.succeeded")]
-pub(crate) struct TaskSucceeded;
 
 /// Emitted when a task panics.
 #[event("arty.rt.task.panicked")]
@@ -358,35 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn task_spawned_carries_placement() {
+    fn task_panicked_is_an_error_event() {
         let (sink, processor) = test_emitter(TEST_ID);
 
-        emit!(
-            sink,
-            TaskSpawned {
-                placement: PlacementLabel("any")
-            }
-        );
+        emit!(sink, TaskPanicked);
 
         assert_eq!(
             processor.single_event(),
-            ExpectedEvent::without_severity("arty.rt.task.spawned")
-                .dimension("placement", "any")
-                .metric()
-        );
-    }
-
-    #[test]
-    fn task_succeeded_and_panicked_are_distinct_events() {
-        let (sink, processor) = test_emitter(TEST_ID);
-
-        emit!(sink, TaskSucceeded);
-        emit!(sink, TaskPanicked);
-
-        let events = processor.events();
-        assert_eq!(events[0], ExpectedEvent::without_severity("arty.rt.task.succeeded").metric());
-        assert_eq!(
-            events[1],
             ExpectedEvent::new("arty.rt.task.panicked", Severity::Error)
                 .body("task panicked")
                 .metric()

@@ -3,7 +3,7 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinEventLake, JoinHandle};
+use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -41,11 +41,23 @@ impl TaskSet {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
+        self.add_with_options(future, TaskOptions::default())
+    }
+
+    /// Registers a future with lifecycle context and reporting options.
+    ///
+    /// This behaves like [`add`](Self::add), while allowing runtime integrations to attach
+    /// observed context and classify the task's terminal output.
+    pub fn add_with_options<F, R>(&self, future: F, options: TaskOptions<R>) -> JoinHandle<R>
+    where
+        F: IntoFuture<Output = R> + 'static,
+        R: 'static,
+    {
         let Some(core) = self.core.upgrade() else {
             return self.join_events.disconnected();
         };
 
-        core.add_task(future)
+        core.add_task(future, options)
     }
 }
 

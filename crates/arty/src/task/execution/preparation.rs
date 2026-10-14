@@ -4,7 +4,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicBool;
 
-use arty_executor::TaskSet;
+use arty_executor::{TaskOptions, TaskOutcome, TaskSet};
 use events_once::{BoxedSender, Event};
 use observed::Sink;
 use observed::context::Transfer;
@@ -12,7 +12,7 @@ use performables::arc::Arc;
 
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
-use crate::task::execution::remote::RemoteTaskFuture;
+use crate::task::execution::remote::{RemoteTaskFuture, RemoteTaskOutcome};
 use crate::task::execution::result::TaskResult;
 use crate::task::execution::storage::TaskFactory;
 use crate::task::join::JoinHandle;
@@ -34,6 +34,7 @@ pub(crate) fn prepare_remote<C, FF, F, R>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
     sink: Sink,
+    placement: &'static str,
     shutdown_signal: Arc<AtomicBool>,
 ) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
 where
@@ -51,13 +52,11 @@ where
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
-            inner,
-            result_tx,
-            parent_task_enrichment,
-            sink,
-            Some(shutdown_signal),
-        )));
+        let options = TaskOptions::observed(sink, parent_task_enrichment, placement, classify_remote_outcome);
+        drop(tasks.add_with_options(
+            RemoteTaskFuture::new_with_shutdown(inner, result_tx, Some(shutdown_signal)),
+            options,
+        ));
     });
     (future_factory, JoinHandle::new(result_rx))
 }
@@ -77,14 +76,24 @@ where
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let inner = async move { future_factory(builtins).await };
-    drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
-        inner,
-        result_tx,
-        parent_task_enrichment,
-        sink,
-        Some(shutdown_signal),
-    )));
+    let options = TaskOptions::observed(sink, parent_task_enrichment, "same_thread", classify_remote_outcome);
+    drop(tasks.add_with_options(
+        RemoteTaskFuture::new_with_shutdown(inner, result_tx, Some(shutdown_signal)),
+        options,
+    ));
     JoinHandle::new(result_rx)
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "TaskOptions classifiers inspect task outputs by reference"
+)]
+fn classify_remote_outcome(outcome: &RemoteTaskOutcome) -> Option<TaskOutcome> {
+    match outcome {
+        RemoteTaskOutcome::Succeeded => Some(TaskOutcome::Succeeded),
+        RemoteTaskOutcome::Panicked => Some(TaskOutcome::Panicked),
+        RemoteTaskOutcome::Cancelled => None,
+    }
 }
 
 pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
@@ -184,6 +193,7 @@ mod tests {
             },
             sink.transfer_context(),
             sink,
+            "any",
             shutdown_signal,
         );
 
@@ -211,6 +221,7 @@ mod tests {
             },
             sink.transfer_context(),
             sink,
+            "any",
             PArc::clone(&shutdown_signal),
         );
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -263,6 +274,7 @@ mod tests {
             |()| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             sink,
+            "any",
             shutdown_signal,
         );
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();

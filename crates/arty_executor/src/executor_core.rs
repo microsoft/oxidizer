@@ -14,7 +14,7 @@ use plurality::MultiPool;
 use tick::SimpleClock;
 
 use crate::wake::WakeShared;
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskRef, WakeSignal};
+use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskOptions, TaskRef, WakeSignal};
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -141,7 +141,7 @@ impl ExecutorCore {
         }
     }
 
-    pub(crate) fn add_task<F, R>(&self, future: F) -> JoinHandle<R>
+    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions<R>) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
@@ -160,8 +160,7 @@ impl ExecutorCore {
         }
         let (result_tx, join_handle) = state.join_events.rent::<R>();
 
-        let task = state.task_storage.alloc_box(Task::new(future, result_tx));
-        let task_ref = TaskRef::new(task);
+        let task_ref = TaskRef::new(state.task_storage.alloc_box(Task::new_with_options(future, result_tx, options)));
 
         let wake_signal = WakeSignal::new(Arc::clone(&self.wake), task_ref);
 
@@ -174,6 +173,7 @@ impl ExecutorCore {
         let task = unsafe { task_ref.as_task() };
 
         task.initialize(wake_signal);
+        task.report_created();
 
         state.new_tasks.push_back(task_ref);
 

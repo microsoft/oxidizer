@@ -205,15 +205,9 @@ impl Scheduler {
                 future_factory,
                 current.builtins.clone(),
                 parent_task_enrichment,
-                sink.clone(),
+                sink,
                 self.dispatcher.shutdown_signal(),
                 &current.tasks,
-            );
-            observed::emit!(
-                &sink,
-                crate::runtime::telemetry::events::TaskSpawned {
-                    placement: crate::runtime::telemetry::events::PlacementLabel("same_thread"),
-                }
             );
             Ok(join_handle)
         })

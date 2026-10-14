@@ -27,6 +27,8 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.poll()
     }
 
+    fn report_created(&self) {}
+
     fn consume_awakened(&self) -> bool {
         self.consume_awakened()
     }

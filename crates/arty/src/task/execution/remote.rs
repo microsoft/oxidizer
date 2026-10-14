@@ -7,14 +7,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{self, Poll};
 
 use events_once::BoxedSender;
-use observed::context::Transfer;
-use observed::{Sink, emit};
 use performables::arc::Arc;
 use pin_project::{pin_project, pinned_drop};
 
-use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
 use crate::task::execution::TaskResult;
 use crate::task::execution::storage::{TaskStorage, discard_panic};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RemoteTaskOutcome {
+    Succeeded,
+    Panicked,
+    Cancelled,
+}
 
 /// Wraps an inner future to be executed as a remote task.
 ///
@@ -27,11 +31,6 @@ where
 {
     #[pin]
     inner: TaskStorage<F>,
-
-    parent_task_enrichment: Transfer,
-
-    /// Sink for completion/panic telemetry, routed to the runtime's `observed` destination.
-    sink: Sink,
 
     /// Becomes `None` once a result has been sent.
     result_tx: Option<BoxedSender<TaskResult<R>>>,
@@ -55,21 +54,13 @@ where
     R: Send + 'static,
 {
     #[cfg(test)]
-    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
-        Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None)
+    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>) -> Self {
+        Self::new_with_shutdown(inner, result_tx, None)
     }
 
-    pub(super) fn new_with_shutdown(
-        inner: F,
-        result_tx: BoxedSender<TaskResult<R>>,
-        parent_task_enrichment: Transfer,
-        sink: Sink,
-        shutdown_signal: Option<Arc<AtomicBool>>,
-    ) -> Self {
+    pub(super) fn new_with_shutdown(inner: F, result_tx: BoxedSender<TaskResult<R>>, shutdown_signal: Option<Arc<AtomicBool>>) -> Self {
         Self {
             inner: TaskStorage::new(inner),
-            parent_task_enrichment,
-            sink,
             result_tx: Some(result_tx),
             shutdown_signal,
         }
@@ -85,12 +76,10 @@ where
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         let result_tx = this.result_tx.take();
-        if this.inner.is_live() {
-            let _guard = this.parent_task_enrichment.apply_current_thread();
-            if let Err(panic) = this.inner.destroy_pinned() {
-                emit!(this.sink, TaskPanicked);
-                discard_panic(panic);
-            }
+        if this.inner.is_live()
+            && let Err(panic) = this.inner.destroy_pinned()
+        {
+            discard_panic(panic);
         }
         if let Some(sender) = result_tx {
             dispose_sender(|| drop(sender));
@@ -103,15 +92,14 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    type Output = ();
+    type Output = RemoteTaskOutcome;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
             let _ = this.result_tx.take().map(|sender| dispose_sender(|| drop(sender)));
-            return Poll::Ready(());
+            return Poll::Ready(RemoteTaskOutcome::Cancelled);
         }
 
         // We AssertUnwindSafe here because we consider the task completed on panic, which means
@@ -129,8 +117,7 @@ where
                     // change that outcome or its telemetry classification.
                     discard_panic(panic);
                 }
-                emit!(this.sink, TaskSucceeded);
-                Poll::Ready(())
+                Poll::Ready(RemoteTaskOutcome::Succeeded)
             }
             Ok(Poll::Pending) => Poll::Pending,
             Err(panic) => {
@@ -145,9 +132,7 @@ where
                     discard_panic(disposal);
                 }
 
-                emit!(this.sink, TaskPanicked);
-
-                Poll::Ready(())
+                Poll::Ready(RemoteTaskOutcome::Panicked)
             }
         }
     }
@@ -227,23 +212,18 @@ mod tests {
 
     #[test]
     fn shutdown_signal_discards_a_direct_task_result() {
-        let sink = Sink::noop();
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
-        let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
-            std::future::ready(42),
-            sender,
-            sink.transfer_context(),
-            sink,
-            Some(signal),
-        ));
+        let mut task = pin!(RemoteTaskFuture::new_with_shutdown(std::future::ready(42), sender, Some(signal),));
 
-        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert_eq!(
+            task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(RemoteTaskOutcome::Cancelled)
+        );
     }
 
     #[test]
     fn panic_notification_follows_future_retirement() {
-        let sink = Sink::noop();
         let dropped = StdArc::new(AtomicBool::new(false));
         let (sender, receiver) = Event::<TaskResult<()>>::boxed();
         let mut receiver = pin!(receiver);
@@ -257,10 +237,11 @@ mod tests {
                 dropped: StdArc::clone(&dropped),
             },
             sender,
-            sink.transfer_context(),
-            sink,
         ));
-        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert_eq!(
+            task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(RemoteTaskOutcome::Panicked)
+        );
         assert!(dropped.load(Ordering::Acquire));
         assert!(matches!(
             receiver.as_mut().poll(&mut Context::from_waker(Waker::noop())),
@@ -270,7 +251,6 @@ mod tests {
 
     #[test]
     fn poll_and_destructor_panics_are_contained_before_notification() {
-        let sink = Sink::noop();
         let dropped = StdArc::new(AtomicBool::new(false));
         let (sender, receiver) = Event::<TaskResult<()>>::boxed();
         let mut task = pin!(RemoteTaskFuture::new(
@@ -278,11 +258,12 @@ mod tests {
                 dropped: StdArc::clone(&dropped),
             },
             sender,
-            sink.transfer_context(),
-            sink,
         ));
 
-        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert_eq!(
+            task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(RemoteTaskOutcome::Panicked)
+        );
         assert!(dropped.load(Ordering::Acquire));
         assert!(matches!(futures::executor::block_on(receiver).unwrap(), TaskResult::Panicked(_)));
     }

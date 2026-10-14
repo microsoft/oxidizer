@@ -14,7 +14,7 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
+use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::task::Builtins;
@@ -221,23 +221,16 @@ impl<WFS> DispatcherCore<WFS> {
             future_factory,
             parent_task_enrichment,
             self.sink.clone(),
+            placement,
             Arc::clone(&self.shutdown_started),
         );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
+        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
             future_factory: Some(future_factory),
         });
 
-        if send_result.is_ok() {
-            emit!(
-                &self.sink,
-                TaskSpawned {
-                    placement: PlacementLabel(placement),
-                }
-            );
-        }
         endpoint.waker.wake_by_ref();
 
         join_handle
