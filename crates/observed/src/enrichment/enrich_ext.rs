@@ -5,8 +5,9 @@
 
 use std::any::type_name;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{self, Poll};
+
+use performables::arc::Arc;
 
 use super::entry::EnrichmentEntry;
 use crate::context::{Transfer, Transferred};
