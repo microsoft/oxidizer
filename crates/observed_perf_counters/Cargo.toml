@@ -40,10 +40,12 @@ uuid = { workspace = true, features = ["std", "v5"] }
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Performance"] }
 
 [dev-dependencies]
-alloc_tracker = { workspace = true }
 ctor = { workspace = true }
 testing_aids = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(all(windows, target_pointer_width = "64"))'.dev-dependencies]
+alloc_tracker = { workspace = true }
 
 [lints]
 workspace = true
