@@ -108,8 +108,11 @@ cycle failed.
 When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
 calls [`Driver::shutdown`][__link12] for every driver owned by that worker. Each driver rejects new
 operations and may cancel or disrupt operations still in flight. Cleanup uses a finite limit
-chosen by the driver. The runtime reports a [`DriverError`][__link13] and continues shutting down the
-remaining drivers. Contexts remain valid as closed handles.
+chosen by the driver. Shutdown is best effort: the runtime reports a returned [`DriverError`][__link13]
+and attempts the remaining drivers, but this contract does not convert panics from driver
+teardown, custom wakers, diagnostics, cleanup hooks, poisoned state, or failed invariants into
+errors or promise recovery from them. Contexts remain valid as closed handles after normal
+shutdown control flow.
 
 
 <hr/>
@@ -117,7 +120,7 @@ remaining drivers. Contexts remain valid as closed handles.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8DcCL1qlteIbJL45ng1VMnYb3CjFXuc3dOsbOH-eKyc7-jFhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEHFjfuMY2oQbAfwxPVZIyxEbnTtJTtlPtfgblSjcX2P8h1hhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
  [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
  [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions

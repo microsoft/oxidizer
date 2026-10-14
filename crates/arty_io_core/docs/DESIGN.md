@@ -100,13 +100,21 @@ progress; it cannot require another driver on the same async worker to run. The
 driver chooses a finite time limit and returns an error instead of waiting
 forever.
 
-The runtime reports a shutdown error but still calls `shutdown` on the remaining
-drivers. This includes the driver whose `execute_cycle` failed and every driver
-of an unpublished registration that was created successfully, including drivers
-that finish creation after another worker reports the failure. A failed
-`IoContext::driver` call returns no driver; that implementation cleans up its
-own partial construction. Context values may outlive their drivers, but they
-remain closed and reject new operations.
+Shutdown is best effort. When a driver returns a shutdown error, the runtime
+reports it and attempts `shutdown` on the remaining drivers. This includes the
+driver whose `execute_cycle` failed and every driver of an unpublished
+registration that was created successfully, including drivers that finish
+creation after another worker reports the failure. A failed `IoContext::driver`
+call returns no driver; that implementation cleans up its own partial
+construction.
+
+This contract does not convert panics from driver teardown, custom wakers,
+diagnostics, cleanup hooks, poisoned state, or failed invariants into
+`DriverError`, and it does not promise that shutdown continues after such a
+panic. Driver implementations must not panic from those paths. Panic conversion
+is a runtime policy for runtime-owned user execution bodies, not a driver
+lifecycle guarantee. Context values may outlive their drivers, but they remain
+closed and reject new operations after normal shutdown control flow.
 
 ## Scope
 

@@ -104,8 +104,11 @@
 //! When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
 //! calls [`Driver::shutdown`] for every driver owned by that worker. Each driver rejects new
 //! operations and may cancel or disrupt operations still in flight. Cleanup uses a finite limit
-//! chosen by the driver. The runtime reports a [`DriverError`] and continues shutting down the
-//! remaining drivers. Contexts remain valid as closed handles.
+//! chosen by the driver. Shutdown is best effort: the runtime reports a returned [`DriverError`]
+//! and attempts the remaining drivers, but this contract does not convert panics from driver
+//! teardown, custom wakers, diagnostics, cleanup hooks, poisoned state, or failed invariants into
+//! errors or promise recovery from them. Contexts remain valid as closed handles after normal
+//! shutdown control flow.
 pub use cycle::Cycle;
 pub use driver::Driver;
 pub use driver_error::DriverError;

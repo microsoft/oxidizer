@@ -60,6 +60,11 @@ pub trait Driver: 'static {
     /// The runtime attempts remaining drivers after an error. It may shut down secondaries before
     /// the primary.
     ///
+    /// Shutdown is best effort. This method reports failures returned by the implementation; it
+    /// does not convert panics into [`DriverError`]. Drivers and their custom wakers, diagnostics,
+    /// and cleanup hooks must not panic. The runtime does not promise recovery from those panics,
+    /// poisoned state, or failed invariants.
+    ///
     /// # Errors
     ///
     /// Returns an error if operations do not finish and the driver cannot complete shutdown.
