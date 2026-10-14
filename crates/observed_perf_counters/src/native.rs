@@ -364,10 +364,7 @@ fn template(schema: &CounterSchema) -> Result<Vec<u64>, Error> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use observed::metadata::InstrumentKind;
-
     use super::*;
-    use crate::schema::CounterSpec;
 
     pub(super) struct Collection;
 
@@ -410,27 +407,7 @@ mod tests {
     #[test]
     fn registered_native_references_are_frozen_through_overlapping_collections() {
         let _native_tests = TEST_NATIVE.lock();
-        let schema = CounterSchema::new(
-            "Native snapshots",
-            "worker",
-            &[
-                CounterSpec {
-                    name: "Bytes".into(),
-                    unit: "By".into(),
-                    description: String::new(),
-                    source_index: 0,
-                    kind: InstrumentKind::Counter,
-                },
-                CounterSpec {
-                    name: "Requests".into(),
-                    unit: String::new(),
-                    description: String::new(),
-                    source_index: 1,
-                    kind: InstrumentKind::Counter,
-                },
-            ],
-        )
-        .unwrap();
+        let schema = crate::testing::counter_schema("Native snapshots", &["Bytes", "Requests"]);
         let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(4096), AtomicU64::new(7)].into();
         let provider = testing::start_mock(&schema, Arc::clone(&totals));
         let first = Collection::begin();
@@ -462,27 +439,7 @@ mod tests {
 
     #[test]
     fn native_template_matches_ctrpp_u64_reference_records() {
-        let schema = CounterSchema::new(
-            "Layout test",
-            "worker",
-            &[
-                CounterSpec {
-                    name: "Bytes".into(),
-                    unit: "By".into(),
-                    description: String::new(),
-                    source_index: 0,
-                    kind: InstrumentKind::Counter,
-                },
-                CounterSpec {
-                    name: "Requests".into(),
-                    unit: String::new(),
-                    description: String::new(),
-                    source_index: 1,
-                    kind: InstrumentKind::Counter,
-                },
-            ],
-        )
-        .unwrap();
+        let schema = crate::testing::counter_schema("Layout test", &["Bytes", "Requests"]);
         let buffer = template(&schema).unwrap();
         assert_eq!(
             buffer.len() * 8,

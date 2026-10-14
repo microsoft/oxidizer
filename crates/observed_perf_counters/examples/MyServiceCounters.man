@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events">
+  <instrumentation>
+    <counters xmlns="http://schemas.microsoft.com/win/2005/12/counters" schemaVersion="1.1">
+      <provider providerGuid="{6ae97c31-c343-4f66-94b7-027b2646b55e}" symbol="MYSERVICE_PROVIDER"
+                providerType="userMode" callback="custom" applicationIdentity="MyServiceCounters.dll">
+        <counterSet guid="{8fa87d62-531d-45e3-89e3-b2f4b5b2a8b7}" uri="urn:example:myservice"
+                    symbol="MYSERVICE_COUNTERS" name="MyService" description="MyService integer readings" instances="multiple">
+          <counter id="17" uri="urn:example:myservice:bytes" symbol="BYTES_SENT" name="Bytes Sent"
+                   description="Completed request bytes" type="perf_counter_large_rawcount" detailLevel="standard" defaultScale="0">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="3" uri="urn:example:myservice:active" symbol="ACTIVE_REQUESTS" name="Active Requests"
+                   description="Active requests" type="perf_counter_large_rawcount" detailLevel="standard" defaultScale="0">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="29" uri="urn:example:myservice:depth" symbol="QUEUE_DEPTH" name="Queue Depth"
+                   description="Queued requests" type="perf_counter_large_rawcount" detailLevel="standard" defaultScale="0">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+        </counterSet>
+      </provider>
+    </counters>
+  </instrumentation>
+</instrumentationManifest>

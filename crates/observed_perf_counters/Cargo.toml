@@ -37,8 +37,9 @@ no-run = ["publish"]
 observed = { workspace = true }
 ohno = { workspace = true }
 performables = { workspace = true }
+quick-xml = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
-uuid = { workspace = true, features = ["std", "v5"] }
+uuid = { workspace = true, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Performance"] }
@@ -47,8 +48,10 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 ctor = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 static_assertions = { workspace = true }
+tempfile = { workspace = true }
 testing_aids = { path = "../testing_aids", default-features = false }
 tick = { path = "../tick", default-features = false, features = ["test-util"] }
+uuid = { workspace = true, features = ["std", "v5"] }
 
 [target.'cfg(all(windows, target_pointer_width = "64"))'.dev-dependencies]
 alloc_tracker = { workspace = true }

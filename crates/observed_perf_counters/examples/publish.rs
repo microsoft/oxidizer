@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Pass `--manifest` to print deployment XML without starting a provider.
-//! Otherwise publish until Enter is pressed; no schema is installed.
+//! Publish using an externally authored .man until Enter is pressed.
+//! Pass the manifest path as the first argument; no schema is installed.
 
 use std::env::args;
 use std::io::stdin;
+use std::path::PathBuf;
 use std::process::id;
 
 use observed::{Sink, emit, event};
@@ -35,19 +36,25 @@ struct QueueDepth {
 }
 
 fn main() -> Result<(), ohno::AppError> {
-    let builder = PerfCounterProcessor::builder()
+    let manifest = args().nth(1).map_or_else(
+        || {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("MyServiceCounters.man")
+        },
+        PathBuf::from,
+    );
+    let processor = PerfCounterProcessor::builder()
+        .manifest_file(manifest)?
         .category("MyService")
         .instance(format!("worker-{}", id()))
         .bind_event::<RequestCompleted>()
         .bind_event::<ActiveRequests>()
-        .bind_event::<QueueDepth>();
-    if args().any(|argument| argument == "--manifest") {
-        println!("{}", builder.manifest("MyServiceCounters.dll")?);
-        return Ok(());
-    }
+        .bind_event::<QueueDepth>()
+        .build()?;
     let sink = Sink::new(
         "app",
-        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(builder.build()?))],
+        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))],
         SimpleClock::new_system(),
     );
     emit!(sink, ActiveRequests { delta: 1 });

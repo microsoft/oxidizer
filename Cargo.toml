@@ -234,6 +234,7 @@ prost-reflect = { version = "0.16.4", default-features = false }
 prost-types = { version = "0.14.4", default-features = false }
 protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
+quick-xml = { version = "0.41.0", default-features = false }
 quinn = { version = "0.11.11", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rallocator = { path = "crates/rallocator", default-features = false, version = "0.2.0" }
@@ -285,7 +286,6 @@ templated_uri_macros = { path = "crates/templated_uri_macros", default-features 
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "=0.6.0" }
 terminal_size = { version = "0.4.4", default-features = false }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thiserror = { version = "2.0.20", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.12.0" }
 thread_aware_core = { path = "crates/thread_aware_core", default-features = false, version = "0.1.1" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "=0.12.0" }

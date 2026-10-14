@@ -5,6 +5,8 @@
 
 #![cfg(all(windows, target_pointer_width = "64", not(miri)))]
 
+use std::path::PathBuf;
+
 use alloc_tracker::{Allocator, Session};
 use observed::{Sink, emit, event};
 use observed_perf_counters::PerfCounterProcessor;
@@ -32,7 +34,14 @@ struct Measurements {
 #[test]
 fn valid_counter_updown_and_gauge_updates_allocate_nothing() {
     let processor = PerfCounterProcessor::builder()
-        .category("Observed integer allocation contract")
+        .manifest_file(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("test_data")
+                .join("ConsumerCounters.man"),
+        )
+        .unwrap()
+        .category("IntegerMetrics")
         .instance("worker")
         .bind_event::<Measurements>()
         .build()

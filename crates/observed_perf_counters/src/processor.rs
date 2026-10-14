@@ -3,6 +3,9 @@
 
 use std::any::type_name;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use observed::metadata::{EventDescription, InstrumentKind, MetricValue, MetricValueKind};
@@ -14,21 +17,26 @@ use performables::sync::mutex::Mutex;
 use crate::Error;
 #[cfg(not(all(windows, target_pointer_width = "64")))]
 use crate::error::UnsupportedPlatform;
-use crate::error::configuration::{MeasurementMismatch, UnsupportedMetric};
-use crate::error::{Overflow, Poisoned, Underflow};
+use crate::error::configuration::{EmptyField, ManifestDefinition, MeasurementMismatch, UnsupportedMetric};
+use crate::error::{ManifestRead, Overflow, Poisoned, Underflow};
 #[cfg(all(windows, target_pointer_width = "64"))]
 use crate::native::Provider;
-use crate::schema::{CounterSchema, CounterSpec};
+use crate::schema::{CounterSchema, CounterSpec, Manifest};
+
+// Bound both input storage and XML parsing work during startup.
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 /// Builder for typed counters and one Windows category/instance.
 ///
-/// Binding validation failures are retained and returned by `manifest`
-/// or `build`, permitting the same fluent configuration in deployment tooling.
+/// Load an externally authored `.man` file, select its counter set by category
+/// name, and bind Rust instruments to matching declared counter names.
+/// Binding validation failures are retained and returned by `build`.
 pub struct PerfCounterProcessorBuilder {
     category: String,
     instance: String,
     bindings: MetricBindings<MetricTarget>,
     specs: Vec<CounterSpec>,
+    manifest: Option<Manifest>,
     error: Option<Error>,
 }
 
@@ -50,13 +58,46 @@ impl Default for PerfCounterProcessorBuilder {
             instance: String::new(),
             bindings: MetricBindings::new(),
             specs: Vec::new(),
+            manifest: None,
             error: None,
         }
     }
 }
 
 impl PerfCounterProcessorBuilder {
-    /// Sets the deployed Windows category name and provider identity.
+    /// Reads and parses a Windows V2 `.man` definition file during startup.
+    ///
+    /// The supplied provider and counter-set identifiers remain authoritative.
+    /// This does not install definitions, load the resource DLL, or start a
+    /// native provider. The file is read once; emission never reads it.
+    ///
+    /// Supports UTF-8 XML with inline names and user-mode, multiple-instance
+    /// sets of zero-scale, standard-detail `perf_counter_large_rawcount` reference
+    /// counters with `callback="custom"`. Other formats are rejected rather than
+    /// silently reinterpreted. Parsing checks this backend profile, not the full
+    /// Windows SDK schema; deployment should also validate with `ctrpp`.
+    /// Files larger than one MiB and document type declarations are rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns a path-bearing I/O error or an explicit invalid-manifest error.
+    pub fn manifest_file(mut self, path: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = path.as_ref();
+        let mut xml = String::new();
+        File::open(path)
+            .and_then(|file| file.take(MAX_MANIFEST_BYTES + 1).read_to_string(&mut xml))
+            .map_err(|source| Error::from(ManifestRead::caused_by(path.to_path_buf(), source)))?;
+        if xml.len() as u64 > MAX_MANIFEST_BYTES {
+            return Err(Error::configuration(ManifestDefinition::new("manifest exceeds one MiB")));
+        }
+        self.manifest = Some(Manifest::parse(&xml)?);
+        Ok(self)
+    }
+
+    /// Selects a counter set by its category name in the supplied manifest.
+    ///
+    /// Does not derive or override deployment identities. Unknown or ambiguous
+    /// category names are rejected by `build`.
     #[must_use]
     pub fn category(mut self, category: impl Into<String>) -> Self {
         self.category = category.into();
@@ -72,14 +113,17 @@ impl PerfCounterProcessorBuilder {
 
     /// Registers every supported integer metric declared on an event.
     ///
-    /// Names, descriptions, and units come from the event's metric attributes.
+    /// Each event instrument name must exactly match one counter name in the
+    /// selected set. The manifest supplies IDs, names, and Windows formats;
+    /// Rust attributes supply the aggregation operation, not deployment metadata.
     /// Counters add unsigned increments, gauges replace unsigned readings, and
     /// up/down counters apply signed deltas to a non-negative `u64` total.
     /// Histograms, floats, signed gauges, and unknown numeric types are rejected.
     /// An unsupported instrument,
     /// an event without metrics, or duplicate registration is a startup error.
     /// Names must be unique across the category, including case variants.
-    /// A category must contain between one and 256 instruments across all events.
+    /// A selected set must contain between one and 256 counters. Unbound declared
+    /// counters remain at zero; every instrument on a bound event must be mapped.
     /// No redactor or general field visitor runs when recording values.
     #[must_use]
     pub fn bind_event<E: Event>(mut self) -> Self {
@@ -105,10 +149,7 @@ impl PerfCounterProcessorBuilder {
             let source_index = specs.len();
             specs.push(CounterSpec {
                 name: metric.instrument_name().into(),
-                unit: metric.unit().into(),
-                description: metric.description().into(),
                 source_index,
-                kind: metric.kind(),
             });
             MetricTarget {
                 index: source_index,
@@ -125,19 +166,11 @@ impl PerfCounterProcessorBuilder {
         if let Some(error) = &self.error {
             return Err(error.clone());
         }
-        CounterSchema::new(&self.category, &self.instance, &self.specs)
-    }
-
-    /// Generates deployment XML without starting or installing a native provider.
-    ///
-    /// `application_identity` is the deployed `.dll`/`.exe` resource filename.
-    /// Run Windows SDK `ctrpp` on the returned manifest to create its `.rc`.
-    ///
-    /// # Errors
-    ///
-    /// Rejects invalid configuration or an invalid resource binary filename.
-    pub fn manifest(&self, application_identity: impl AsRef<str>) -> Result<String, Error> {
-        self.schema()?.manifest(application_identity.as_ref())
+        let manifest = self
+            .manifest
+            .as_ref()
+            .ok_or_else(|| Error::configuration(EmptyField::new("manifest")))?;
+        CounterSchema::from_manifest(manifest, &self.category, &self.instance, &self.specs)
     }
 
     /// Starts a native provider and registers stable backing storage once.
@@ -152,7 +185,7 @@ impl PerfCounterProcessorBuilder {
         let schema = self.schema()?;
         #[cfg(all(windows, target_pointer_width = "64"))]
         {
-            let totals = (0..self.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
+            let totals = (0..schema.counters.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
             let native = Provider::start(&schema, &self.instance, Arc::clone(&totals))?;
             Ok(PerfCounterProcessor {
                 bindings: self.bindings,
@@ -361,6 +394,42 @@ mod tests {
         value: u64,
     }
 
+    #[test]
+    fn supplied_guids_and_counter_ids_map_to_typed_slots_without_regenerating_metadata() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        // Inject the parsed file content so the same native-layout test runs
+        // under Miri isolation; public file-system loading is tested separately.
+        let mut builder = PerfCounterProcessor::builder();
+        builder.manifest = Some(Manifest::parse(include_str!("../tests/test_data/ConsumerCounters.man")).unwrap());
+        let builder = builder
+            .category("Observed Windows consumer test <&\"'> 中文🦀")
+            .instance("mapped")
+            .bind_event::<RequestCompleted>();
+        let processor = Arc::new(build_for_test(builder));
+        assert_eq!(processor.schema.provider_id.as_u128(), 0x9fc72d85_9d1e_4c4b_a031_6d9288c3b405);
+        assert_eq!(processor.schema.counter_set_id.as_u128(), 0x1b623456_789a_4bcd_8ef0_123456789abc);
+        assert_eq!(
+            processor.schema.counters.iter().map(|counter| counter.id.get()).collect::<Vec<_>>(),
+            [2, 7, 13, 31, 41, 53, 59],
+        );
+        let sink = test_sink(&processor);
+        emit!(sink, RequestCompleted { bytes_sent: 37 });
+        assert_eq!(
+            named_values(&processor),
+            [
+                ("Active Requests".into(), 0),
+                ("Bytes Sent".into(), 37),
+                ("Disabled".into(), 0),
+                ("Huge".into(), 0),
+                ("Malformed".into(), 0),
+                ("Queue Depth".into(), 0),
+                ("Requests".into(), 1),
+            ],
+        );
+        sink.flush().unwrap();
+    }
+
     fn named_values(processor: &PerfCounterProcessor) -> Vec<(String, u64)> {
         #[cfg(all(windows, target_pointer_width = "64"))]
         let values = crate::native::test_snapshot(&processor.native, &processor.schema);
@@ -416,10 +485,14 @@ mod tests {
     }
 
     // Assemble local aggregation tests without acquiring real Windows providers.
-    fn build_for_test(builder: PerfCounterProcessorBuilder) -> PerfCounterProcessor {
+    fn build_for_test(mut builder: PerfCounterProcessorBuilder) -> PerfCounterProcessor {
         {
+            if builder.manifest.is_none() {
+                let names = builder.specs.iter().map(|spec| spec.name.as_str()).collect::<Vec<_>>();
+                builder.manifest = Some(Manifest::parse(&crate::testing::manifest(&builder.category, &names)).unwrap());
+            }
             let schema = builder.schema().unwrap();
-            let totals: Arc<[AtomicU64]> = (0..builder.specs.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
+            let totals: Arc<[AtomicU64]> = (0..schema.counters.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
             #[cfg(all(windows, target_pointer_width = "64"))]
             let native = crate::native::testing::start_mock(&schema, Arc::clone(&totals));
             PerfCounterProcessor {

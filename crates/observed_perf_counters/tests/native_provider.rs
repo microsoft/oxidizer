@@ -8,6 +8,7 @@
 use std::any::TypeId;
 use std::iter::once;
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::process::id;
 use std::ptr::{copy_nonoverlapping, null, null_mut};
 use std::sync::Mutex;
@@ -31,6 +32,16 @@ use windows_sys::core::GUID;
 testing_aids::init_tracing!();
 
 static NATIVE_TESTS: Mutex<()> = Mutex::new(());
+
+const CATEGORY: &str = "Observed Windows consumer test <&\"'> 中文🦀";
+const COUNTER_SET_ID: u128 = 0x1b623456_789a_4bcd_8ef0_123456789abc;
+
+fn manifest_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("test_data")
+        .join("ConsumerCounters.man")
+}
 
 #[event("request.completed")]
 #[counter(name = "Requests")]
@@ -71,30 +82,19 @@ struct QueueDepth {
 // Owns a real Perflib consumer query; unlike the lifecycle mock, it needs installed definitions.
 struct Query(HANDLE);
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "native test fixture requires its known generated schema and complete native buffers"
-)]
+#[expect(clippy::unwrap_used, reason = "native test fixture requires complete returned native buffers")]
 impl Query {
-    fn open(manifest: &str, counter_name: &str, instance: &str) -> Self {
+    fn open(counter_id: u32, instance: &str) -> Self {
         let mut handle = null_mut();
         // SAFETY: null denotes this machine; handle is a valid output parameter.
         let code = unsafe { PerfOpenQueryHandle(null(), &raw mut handle) };
         assert_eq!(code, ERROR_SUCCESS, "PerfOpenQueryHandle");
         let query = Self(handle);
-        // This fixture reads only the known, ASCII-named counters in its generated manifest.
-        let definition = manifest
-            .lines()
-            .find(|line| line.starts_with("<counter ") && line.contains(&format!("name=\"{counter_name}\"")))
-            .unwrap();
-        let counter_id = attribute(definition, "id").parse::<u32>().unwrap();
-        let counter_set = manifest.lines().find(|line| line.starts_with("<counterSet ")).unwrap();
-        let counter_set_id = Uuid::parse_str(attribute(counter_set, "guid")).unwrap();
         let name = instance.encode_utf16().chain(once(0)).collect::<Vec<_>>();
         let bytes = (size_of::<PERF_COUNTER_IDENTIFIER>() + name.len() * 2).next_multiple_of(8);
         let mut buffer = vec![0_u64; bytes / 8];
         let identifier = PERF_COUNTER_IDENTIFIER {
-            CounterSetGuid: GUID::from_u128(counter_set_id.as_u128()),
+            CounterSetGuid: GUID::from_u128(COUNTER_SET_ID),
             Size: u32::try_from(bytes).unwrap(),
             CounterId: counter_id,
             InstanceId: id(),
@@ -188,20 +188,17 @@ fn dword(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
-#[expect(clippy::unwrap_used, reason = "test fixture parses attributes in its known generated manifest")]
-fn attribute<'a>(line: &'a str, name: &str) -> &'a str {
-    line.split_once(&format!("{name}=\"")).unwrap().1.split_once('"').unwrap().0
-}
-
 #[test]
-// TODO: Run discovery and exact-read validation on a host with the generated
+// TODO: Run discovery and exact-read validation on a host with the supplied
 // schema/resources installed; compiling the resource DLL alone does not cover it.
-#[ignore = "Requires installed schema/resources: examples/consumer_manifest.rs; uninstalled GUID discovery returns Windows 4200"]
+#[ignore = "Requires tests/test_data/ConsumerCounters.man and its resources installed; uninstalled discovery returns Windows 4200"]
 fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
     let _native_tests = NATIVE_TESTS.lock().unwrap();
-    let category = "Observed Windows consumer test <&\"'> 中文🦀";
+    let category = CATEGORY;
     let instance = "worker-中文🦀";
     let builder = PerfCounterProcessor::builder()
+        .manifest_file(manifest_path())
+        .unwrap()
         .category(category)
         .instance(instance)
         .bind_event::<RequestCompleted>()
@@ -209,14 +206,15 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
         .bind_event::<Disabled>()
         .bind_event::<ActiveRequests>()
         .bind_event::<QueueDepth>();
-    let manifest = builder.manifest("ObservedWindowsTestCounters.dll").unwrap();
     let processor = Arc::new(builder.build().unwrap());
-    let query = Query::open(&manifest, "Bytes Sent", instance);
-    let requests = Query::open(&manifest, "Requests", instance);
-    let huge = Query::open(&manifest, "Huge", instance);
-    let disabled = Query::open(&manifest, "Disabled", instance);
-    let active = Query::open(&manifest, "Active Requests", instance);
-    let depth = Query::open(&manifest, "Queue Depth", instance);
+    // IDs are deliberately fixed by the externally authored fixture, not derived
+    // from application metric metadata or from the implementation under test.
+    let query = Query::open(7, instance);
+    let requests = Query::open(41, instance);
+    let huge = Query::open(31, instance);
+    let disabled = Query::open(13, instance);
+    let active = Query::open(2, instance);
+    let depth = Query::open(53, instance);
     let sink = Sink::new(
         "app",
         vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
@@ -260,6 +258,8 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
 
     // Successful teardown allows the same native category to be registered again.
     let recreated = PerfCounterProcessor::builder()
+        .manifest_file(manifest_path())
+        .unwrap()
         .category(category)
         .instance(instance)
         .bind_event::<RequestCompleted>()
@@ -283,7 +283,9 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     let _native_tests = NATIVE_TESTS.lock().unwrap();
     let processor = Arc::new(
         PerfCounterProcessor::builder()
-            .category(format!("Observed malformed {}", id()))
+            .manifest_file(manifest_path())
+            .unwrap()
+            .category(CATEGORY)
             .instance("worker")
             .bind_event::<Malformed>()
             .build()
@@ -309,7 +311,9 @@ fn native_provider_can_recreate_a_unicode_instance_after_shutdown() {
     let _native_tests = NATIVE_TESTS.lock().unwrap();
     let builder = || {
         PerfCounterProcessor::builder()
-            .category(format!("Observed native lifecycle {}", id()))
+            .manifest_file(manifest_path())
+            .unwrap()
+            .category(CATEGORY)
             .instance("worker-中文🦀")
             .bind_event::<RequestCompleted>()
     };

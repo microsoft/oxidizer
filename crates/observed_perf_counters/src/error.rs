@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::path::PathBuf;
+
 use observed::processing::{MetricBindingError, MetricReadError};
 use ohno::ErrorExt;
 
@@ -77,7 +79,8 @@ cause_conversions!(
     Overflow,
     Underflow,
     CollectionFailure,
-    Poisoned
+    Poisoned,
+    ManifestRead
 );
 
 // Typed causes stay private so callers need not exhaustively match backend internals.
@@ -89,22 +92,31 @@ cause_conversions!(
     configuration::ControlCharacter,
     configuration::CounterPathCharacter,
     configuration::CounterCount,
-    configuration::CounterIndexOverflow,
-    configuration::UnsupportedAggregation,
-    configuration::ApplicationIdentity,
     configuration::DuplicateName,
     configuration::IdCollision,
     configuration::UnsupportedMetric,
     configuration::MeasurementMismatch,
     configuration::PublishedCapacity,
     configuration::NativeTemplateSize,
-    configuration::NativeCounterCount
+    configuration::NativeCounterCount,
+    configuration::ManifestDefinition,
+    configuration::ManifestSyntax
 )]
 pub(crate) struct InvalidConfiguration;
 
 // Distinct validation causes keep their inputs available without parsing messages.
 pub(crate) mod configuration {
     use observed::metadata::{InstrumentKind, MetricValueKind};
+
+    #[ohno::error]
+    #[display("invalid counter manifest: {detail}")]
+    pub(crate) struct ManifestDefinition {
+        pub(crate) detail: String,
+    }
+
+    #[ohno::error]
+    #[display("cannot parse counter manifest")]
+    pub(crate) struct ManifestSyntax;
 
     #[ohno::error]
     #[display("invalid performance-counter configuration: {field} must not be empty")]
@@ -143,20 +155,6 @@ pub(crate) mod configuration {
         pub(crate) count: usize,
         pub(crate) maximum: usize,
     }
-
-    #[ohno::error]
-    #[display("invalid performance-counter configuration: too many counters")]
-    pub(crate) struct CounterIndexOverflow;
-
-    #[ohno::error]
-    #[display("invalid performance-counter configuration: unsupported native metric aggregation {kind:?}")]
-    pub(crate) struct UnsupportedAggregation {
-        pub(crate) kind: InstrumentKind,
-    }
-
-    #[ohno::error]
-    #[display("invalid performance-counter configuration: application identity must be a .dll or .exe filename without a directory")]
-    pub(crate) struct ApplicationIdentity;
 
     #[ohno::error]
     #[display("invalid performance-counter configuration: duplicate counter display name {name:?}")]
@@ -239,6 +237,12 @@ pub(crate) struct CollectionFailure {
 #[ohno::error]
 #[display("performance-counter state lock was poisoned")]
 pub(crate) struct Poisoned;
+
+#[ohno::error]
+#[display("cannot read counter manifest {path:?}")]
+pub(crate) struct ManifestRead {
+    path: PathBuf,
+}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

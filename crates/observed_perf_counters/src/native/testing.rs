@@ -112,18 +112,7 @@ pub(crate) fn start_mock(schema: &CounterSchema, totals: Arc<[AtomicU64]>) -> Pr
 }
 
 fn schema() -> CounterSchema {
-    CounterSchema::new(
-        "Failure tests",
-        "worker",
-        &[crate::schema::CounterSpec {
-            name: "Value".into(),
-            description: String::new(),
-            unit: String::new(),
-            source_index: 0,
-            kind: observed::metadata::InstrumentKind::Counter,
-        }],
-    )
-    .unwrap()
+    crate::testing::counter_schema("Failure tests", &["Value"])
 }
 
 #[test]

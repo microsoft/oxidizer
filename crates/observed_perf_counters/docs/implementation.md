@@ -6,12 +6,16 @@
 total and an aggregation operation. The processor's private schema input retains
 the event-slot index.
 
-[`schema.rs`](../src/schema.rs) validates names and limits, derives deployment
-identities from a fixed namespace and length-delimited components, and sorts
-counter definitions by native ID. Each sorted definition retains its source
-index so native ordering does not change emission routing. The same resolved
-schema produces both the native registration template and deployment XML.
-Changing its identity-format inputs changes installed identities.
+[`schema.rs`](../src/schema.rs) parses the externally authored V2 manifest,
+validates its supported native profile, and selects one set by category name.
+The supplied GUIDs and counter IDs are retained verbatim. Binding matches names
+once, resolves event slots to storage indices, and rejects unknown or conflicting
+destinations. Unbound declared counters receive zero-valued storage.
+
+Counter definitions are sorted by their declared native IDs. Each definition
+retains its resolved storage index, so native order does not change event-slot
+routing. Native registration uses that prepared schema; there is no XML export
+or application-derived identity calculation.
 
 ## Ownership
 
@@ -48,9 +52,10 @@ Injected lifecycle and processor tests exercise failure retention, checked
 arithmetic, teardown ownership, and cooperation between admitted collectors.
 Native tests exercise operating-system registration and error propagation.
 The installed-schema consumer scenario is opt-in: it additionally needs
-generated definitions and resources installed on a Windows host. Compiling
+the supplied definitions and resources installed on a Windows host. Compiling
 those resources does not establish discovery or correct consumer readings.
 
-The [consumer manifest example](../examples/consumer_manifest.rs) generates the
-installer input. Its consumer test carries the outstanding installed-host
-validation task. Neither the test nor the library installs machine metadata.
+The [consumer definition fixture](../tests/test_data/ConsumerCounters.man) is the
+installer input for the opt-in consumer test. Its GUIDs and IDs are fixed
+independently of the implementation. The test carries the outstanding installed-
+host validation task. Neither the test nor the library installs machine metadata.
