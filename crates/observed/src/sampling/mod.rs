@@ -74,7 +74,7 @@ impl Debug for EventSamplingContext<'_> {
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventSamplingDecision {
-    /// Build the event and deliver it to the processors that want it.
+    /// Continue to processor interest checks and deliver the event to those that want it.
     Continue,
     /// Run none of this Sink's processors for the event.
     Drop,
