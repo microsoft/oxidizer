@@ -140,8 +140,8 @@ impl<T> fmt::Display for Error<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.kind {
             ErrorKind::ForeignOwner => "a supplied thread belongs to a different runtime owner",
-            ErrorKind::Duplicate => "multiple values were supplied for the same thread partition",
-            ErrorKind::MissingCurrent => "no value was supplied for the current thread partition",
+            ErrorKind::Duplicate => "multiple values were supplied for the same affinity partition",
+            ErrorKind::MissingCurrent => "no value was supplied for the current affinity partition",
             ErrorKind::Poisoned => "poisoned lock: another thread panicked while holding the lock",
             ErrorKind::Full => "channel has no available capacity",
             ErrorKind::Empty => "channel has no value available",
@@ -170,12 +170,12 @@ mod tests {
             (ErrorKind::ForeignOwner, "a supplied thread belongs to a different runtime owner", 0),
             (
                 ErrorKind::Duplicate,
-                "multiple values were supplied for the same thread partition",
+                "multiple values were supplied for the same affinity partition",
                 1,
             ),
             (
                 ErrorKind::MissingCurrent,
-                "no value was supplied for the current thread partition",
+                "no value was supplied for the current affinity partition",
                 2,
             ),
             (
