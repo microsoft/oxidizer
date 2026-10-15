@@ -4,6 +4,7 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,7 @@ use thread_aware::Thread;
 use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
+use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -22,6 +24,7 @@ use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
 const COMMANDS_PER_CYCLE: usize = 256;
+const IO_IDLE_WAIT: Duration = Duration::from_millis(1);
 
 fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
@@ -90,6 +93,7 @@ pub(crate) struct AsyncWorker {
 
     time: SimpleClock,
     signal: Arc<WorkerSignal>,
+    driver_host: Option<Rc<RuntimeDriverHost>>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -99,6 +103,8 @@ impl AsyncWorker {
         dispatcher: DispatcherClient,
         thread: Thread,
         sink: Sink,
+        io: Io,
+        driver_host: Rc<RuntimeDriverHost>,
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
@@ -114,7 +120,7 @@ impl AsyncWorker {
             .build();
         let tasks = executor.tasks();
 
-        let builtins = Builtins::new(dispatcher, clock, thread, sink);
+        let builtins = Builtins::new(dispatcher, clock, io, thread, sink);
         Scheduler::register_current(builtins.clone(), tasks.clone());
 
         Self {
@@ -127,6 +133,7 @@ impl AsyncWorker {
             time,
             blocking_worker,
             signal,
+            driver_host: Some(driver_host),
             _single_threaded: PhantomData,
         }
     }
@@ -170,15 +177,29 @@ impl AsyncWorker {
 
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
+        let can_suspend = matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted;
+        let max_wait = if can_suspend {
+            next_timer
+                .map(|deadline| suspend_wait(deadline, self.time.instant()))
+                .unwrap_or(IO_IDLE_WAIT)
+                .min(IO_IDLE_WAIT)
+        } else {
+            Duration::ZERO
+        };
+        let cycle_started = Instant::now();
+        if self
+            .driver_host
+            .as_ref()
+            .is_some_and(|driver_host| driver_host.execute_cycle(max_wait).is_err())
+        {
+            self.begin_shutdown();
+            _ = self.clock_driver.advance_timers(self.time.instant());
+            return ControlFlow::Break(());
+        }
 
-        if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
+        if can_suspend {
             // A notification arriving before this wait is retained by WorkerSignal.
-            // Timer advancement invokes wakers synchronously, so account for that work before
-            // starting a relative deadline wait.
-            match next_timer {
-                Some(deadline) => self.signal.wait(suspend_wait(deadline, self.time.instant())),
-                None => self.signal.wait_for_notification(),
-            }
+            self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed()));
         }
 
         ControlFlow::Continue(())
@@ -205,6 +226,9 @@ impl AsyncWorker {
                 Ok(command) => match command {
                     AsyncWorkerCommand::EnqueueTask { future_factory } => {
                         future_factory.into_inner()(builtins.clone(), &self.tasks);
+                    }
+                    AsyncWorkerCommand::AccessIo { access } => {
+                        access.into_inner()(builtins);
                     }
                     AsyncWorkerCommand::Shutdown => {
                         self.begin_shutdown();
@@ -238,6 +262,7 @@ impl AsyncWorker {
 
         // Safe executor drop synchronously cancels and releases all remaining task storage.
         self.executor = None;
+        self.driver_host = None;
     }
 }
 

@@ -12,13 +12,14 @@ use nonempty::NonEmpty;
 use observed::emit;
 use performables::arc::Arc;
 use performables::sync::channel;
+use performables::sync::mutex::Mutex;
 use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedTaskFactory};
+use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -60,6 +61,7 @@ pub(crate) struct DispatcherCore {
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
     stopped_reported: AtomicBool,
+    shutdown_error: Mutex<Option<Error>>,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
 
@@ -108,6 +110,7 @@ impl DispatcherCore {
             wait_for_shutdown,
             shutdown_started,
             stopped_reported: AtomicBool::new(false),
+            shutdown_error: Mutex::new(None),
             worker_endpoints,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
@@ -119,9 +122,24 @@ impl DispatcherCore {
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
     pub(crate) fn stop(&self) {
+        self.stop_inner();
+    }
+
+    pub(crate) fn stop_with_error(&self, error: Error) {
+        let mut shutdown_error = self.shutdown_error.lock();
+        _ = shutdown_error.get_or_insert(error);
+        drop(shutdown_error);
+        self.stop_inner();
+    }
+
+    fn stop_inner(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
+        }
+
+        pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
+            self.shutdown_error.lock().take()
         }
 
         emit!(&self.sink, RuntimeStopping);
@@ -168,6 +186,21 @@ impl DispatcherCore {
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
+    }
+
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> bool {
+        if self.is_shutting_down() {
+            return false;
+        }
+        let endpoint = self
+            .worker_endpoints
+            .get(usize::from(worker_index))
+            .expect("worker index must identify a registered runtime worker");
+        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::AccessIo {
+            access: QueuedIoAccess::new(access),
+        });
+        endpoint.waker.wake_by_ref();
+        send_result.is_ok()
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {

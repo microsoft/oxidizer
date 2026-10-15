@@ -18,6 +18,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "arty_io_core::io_context::IoContext",
     "arty_macros::main",
     "arty_macros::test",
     "observed::sink::core::Sink",
@@ -39,6 +40,7 @@ macros = ["rt", "dep:arty_macros"]
 rt = [
     "time",
     "dep:arty_executor",
+    "dep:arty_io_host",
     "dep:data_privacy",
     "dep:derive_more",
     "dep:events_once",
@@ -57,6 +59,7 @@ test-util = ["tick?/test-util", "many_cpus?/test-util"]
 [dependencies]
 arty_executor = { workspace = true, optional = true }
 arty_io_core = { workspace = true }
+arty_io_host = { workspace = true, optional = true }
 arty_macros = { workspace = true, optional = true }
 data_privacy = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug"], optional = true }
@@ -122,6 +125,10 @@ required-features = ["rt"]
 
 [[example]]
 name = "arty_basic"
+required-features = ["macros"]
+
+[[example]]
+name = "arty_io"
 required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints

@@ -6,7 +6,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
 
+use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
+
+pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
 
 /// Owns a complete submission closure until the destination worker registers it.
 ///
@@ -39,6 +42,32 @@ impl Drop for QueuedTaskFactory {
     }
 }
 
+/// Owns a synchronous I/O access closure until the destination worker invokes it.
+pub(crate) struct QueuedIoAccess {
+    inner: Option<IoAccess>,
+}
+
+impl QueuedIoAccess {
+    pub(crate) fn new(inner: IoAccess) -> Self {
+        Self { inner: Some(inner) }
+    }
+
+    pub(crate) fn into_inner(mut self) -> IoAccess {
+        self.inner.take().expect("a queued I/O access is consumed exactly once")
+    }
+}
+
+impl Drop for QueuedIoAccess {
+    fn drop(&mut self) {
+        let Some(access) = self.inner.take() else {
+            return;
+        };
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(access))) {
+            discard_task_panic_payload(panic);
+        }
+    }
+}
+
 pub(crate) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will
     /// be used to create the future that becomes the body of the task. The factory registers the
@@ -47,6 +76,9 @@ pub(crate) enum AsyncWorkerCommand {
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
     EnqueueTask { future_factory: QueuedTaskFactory },
+
+    /// Executes synchronous I/O context access on this worker.
+    AccessIo { access: QueuedIoAccess },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
@@ -62,6 +94,7 @@ impl fmt::Debug for AsyncWorkerCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
+            Self::AccessIo { .. } => write!(f, "AccessIo"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }

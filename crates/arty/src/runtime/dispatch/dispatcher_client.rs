@@ -91,6 +91,18 @@ impl DispatcherClient {
         self.core.spawn_everywhere(make_factory)
     }
 
+    pub(crate) fn stop_with_error(&self, error: Error) {
+        self.core.stop_with_error(error);
+    }
+
+    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
+        self.core.take_shutdown_error()
+    }
+
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> bool {
+        self.core.access_io(worker_index, access)
+    }
+
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self) {
         self.core.stop();

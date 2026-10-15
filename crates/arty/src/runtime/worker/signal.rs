@@ -16,6 +16,7 @@ use performables::sync::mutex::Mutex;
 pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
+    driver_waker: Mutex<Option<Waker>>,
     #[cfg(test)]
     test_hooks: WorkerSignalTestHooks,
 }
@@ -79,6 +80,7 @@ impl WorkerSignal {
         Self {
             notified: Mutex::new(false),
             ready: Condvar::new(),
+            driver_waker: Mutex::new(None),
             test_hooks,
         }
     }
@@ -130,6 +132,13 @@ impl WorkerSignal {
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
 
+    pub(crate) fn set_driver_waker(&self, waker: Waker) {
+        assert!(
+            self.driver_waker.lock().replace(waker).is_none(),
+            "a worker installs its I/O driver interrupt waker once"
+        );
+    }
+
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
@@ -139,6 +148,9 @@ impl WorkerSignal {
 
     fn notify(&self) {
         *self.notified.lock() = true;
+        if let Some(driver_waker) = self.driver_waker.lock().as_ref() {
+            driver_waker.wake_by_ref();
+        }
         self.wake_waiter();
     }
 
