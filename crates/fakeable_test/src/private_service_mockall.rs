@@ -17,7 +17,10 @@ pub(crate) struct Request {
     value: u32,
 }
 
-#[cfg_attr(test, fakeable::fakeable(generate_mockall_fake = true, fakes_feature = false))]
+#[cfg_attr(
+    test,
+    fakeable::fakeable(generate_mockall_fake = true, fakes_feature = false, mockall_fake_visibility = "pub(crate)")
+)]
 impl Backend {
     pub(crate) const fn new() -> Self {
         Self {}
@@ -56,7 +59,12 @@ mod tests {
         #[fakeable::fakeable(fake_impl = MockLocal, fakes_feature = false)]
         pub(super) struct Local;
 
-        #[fakeable::fakeable(generate_mockall_fake = true, mockall_fake_module = ".", fakes_feature = false)]
+        #[fakeable::fakeable(
+            generate_mockall_fake = true,
+            mockall_fake_module = ".",
+            fakes_feature = false,
+            mockall_fake_visibility = "pub(super)"
+        )]
         #[expect(
             clippy::unused_self,
             reason = "Verifies that explicit impl lint expectations still take precedence"

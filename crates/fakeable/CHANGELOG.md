@@ -6,6 +6,7 @@
 
   - Add `fakes_feature = false` for unit-test-only fakes without a consumer Cargo feature ([#823](https://github.com/microsoft/oxidizer/pull/823)).
   - Support generated Mockall fakes for `pub(crate)` methods, preserving their visibility ([#823](https://github.com/microsoft/oxidizer/pull/823)).
+  - Add `mockall_fake_visibility` to control generated mock container visibility without changing the public default ([#823](https://github.com/microsoft/oxidizer/pull/823)).
 
 - Bug Fixes
 

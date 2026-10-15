@@ -133,6 +133,22 @@ declarations. When a cfg-gated method has an unsupported signature, its
 diagnostic is emitted with the same gating attributes so a disabled API does
 not fail the build.
 
+Generated containers remain public by default. Set
+`mockall_fake_visibility = "pub(crate)"` on the generating impl to keep an
+internal adapter's mock container crate-private. The option accepts a Rust
+visibility string, including `""` for private, and requires
+`generate_mockall_fake = true`. For a named mock module, it controls that
+module's visibility and the mock type is public inside the module. With
+`mockall_fake_module = "."`, it controls the mock type directly. Relative
+visibility is resolved in the module containing the impl block, not inside the generated
+module. Method visibility is preserved independently.
+
+This is explicit rather than inferred from methods so adding, removing, or
+cfg-gating a method cannot silently change the container's API. Choose a
+visibility compatible with the wrapper's fake constructor: a public wrapper
+with a public fake constructor needs an accessible fake type. Internal
+wrappers can use internal mocks without exposing either as a public API.
+
 Method forwarding rejects receiver/parameter/generic attributes, by-reference
 bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete
 service-type references in parameters, returns, or generic predicates.

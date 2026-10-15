@@ -20,6 +20,8 @@ pub(super) struct FakeableArgs {
     pub(super) generate_mockall_fake: Option<bool>,
     /// The module where mockall fake should be generated (for impl blocks only).
     pub(super) mockall_fake_module: Option<String>,
+    /// Effective visibility of the generated mock container (for impl blocks only).
+    pub(super) mockall_fake_visibility: Option<syn::Visibility>,
 }
 
 impl Parse for FakeableArgs {
@@ -29,6 +31,7 @@ impl Parse for FakeableArgs {
         let mut fake_constructor = None;
         let mut generate_mockall_fake = None;
         let mut mockall_fake_module = None;
+        let mut mockall_fake_visibility = None;
 
         let args: Punctuated<FakeableArg, Token![,]> = Punctuated::parse_terminated(input)?;
 
@@ -71,6 +74,18 @@ impl Parse for FakeableArgs {
                     }
                     mockall_fake_module = Some(module.value());
                 }
+                FakeableArg::MockallFakeVisibility(value) => {
+                    if mockall_fake_visibility.is_some() {
+                        return Err(syn::Error::new_spanned(&value, "mockall_fake_visibility specified multiple times"));
+                    }
+                    let visibility = syn::parse_str(&value.value()).map_err(|_error| {
+                        syn::Error::new_spanned(
+                            &value,
+                            "mockall_fake_visibility must be a Rust visibility, or an empty string for private",
+                        )
+                    })?;
+                    mockall_fake_visibility = Some(visibility);
+                }
             }
         }
 
@@ -84,6 +99,7 @@ impl Parse for FakeableArgs {
             fake_constructor,
             generate_mockall_fake,
             mockall_fake_module,
+            mockall_fake_visibility,
         })
     }
 }
@@ -95,6 +111,7 @@ enum FakeableArg {
     FakeConstructor(LitStr),
     GenerateMockallFake(LitBool),
     MockallFakeModule(LitStr),
+    MockallFakeVisibility(LitStr),
 }
 
 impl Parse for FakeableArg {
@@ -137,9 +154,10 @@ impl Parse for FakeableArg {
                 }
                 Ok(Self::MockallFakeModule(value))
             }
+            "mockall_fake_visibility" => Ok(Self::MockallFakeVisibility(input.parse()?)),
             _ => Err(syn::Error::new_spanned(
                 name,
-                "unknown argument; expected fakes_feature (or fakes_attribute), fake_impl, fake_constructor, generate_mockall_fake, or mockall_fake_module",
+                "unknown argument; expected fakes_feature (or fakes_attribute), fake_impl, fake_constructor, generate_mockall_fake, mockall_fake_module, or mockall_fake_visibility",
             )),
         }
     }

@@ -462,6 +462,77 @@ fn fakeable_on_impl_with_mockall_supports_crate_visibility() {
 }
 
 #[test]
+fn mockall_container_visibility_is_explicit() {
+    for visibility in ["pub", "pub(crate)", "pub(super)", "pub(in crate::services)", ""] {
+        let result = fakeable_impl::fakeable_impl(
+            quote! { generate_mockall_fake = true, mockall_fake_visibility = #visibility },
+            quote! {
+                impl MyService {
+                    pub(crate) fn value(&self) -> u32 { 42 }
+                }
+            },
+        );
+        let file: syn::File = syn::parse2(result).unwrap();
+        let module = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Mod(module) => Some(module),
+                _ => None,
+            })
+            .unwrap();
+        let expected: syn::Visibility = syn::parse_str(visibility).unwrap();
+        assert_eq!(module.vis, expected);
+        let items = &module.content.as_ref().unwrap().1;
+        let mock = items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Macro(item) => Some(item),
+                _ => None,
+            })
+            .unwrap();
+        assert!(mock.mac.tokens.to_string().contains("pub MyService"));
+    }
+}
+
+#[test]
+fn mockall_current_module_visibility_is_explicit() {
+    for visibility in ["pub", "pub(crate)", "pub(super)", "pub(in crate::services)", ""] {
+        let expected: syn::Visibility = syn::parse_str(visibility).unwrap();
+        let result = fakeable_impl::fakeable_impl(
+            quote! {
+                generate_mockall_fake = true,
+                mockall_fake_module = ".",
+                mockall_fake_visibility = #visibility
+            },
+            quote! {
+                impl MyService {
+                    pub(crate) fn value(&self) -> u32 { 42 }
+                }
+            },
+        );
+        let file: syn::File = syn::parse2(result).unwrap();
+        let mock = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Macro(item) => Some(item),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            mock.mac.tokens.to_string().starts_with(
+                &quote! {
+                    #[derive(Debug)]
+                    #expected MyService
+                }
+                .to_string()
+            )
+        );
+    }
+}
+
+#[test]
 fn fakeable_on_impl_with_mockall_rejects_relative_visibility() {
     let input = quote! {
         impl MyService {

@@ -67,8 +67,18 @@ pub fn fakeable_impl(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Try to parse as struct first, then as impl
     if let Ok(item_struct) = syn::parse2::<ItemStruct>(input.clone()) {
+        if args.mockall_fake_visibility.is_some() {
+            return syn::Error::new_spanned(
+                input,
+                "mockall_fake_visibility is only supported on impl blocks with generate_mockall_fake = true",
+            )
+            .into_compile_error();
+        }
         process_struct(&args, &item_struct)
     } else if let Ok(item_impl) = syn::parse2::<ItemImpl>(input.clone()) {
+        if args.mockall_fake_visibility.is_some() && args.generate_mockall_fake != Some(true) {
+            return syn::Error::new_spanned(input, "mockall_fake_visibility requires generate_mockall_fake = true").into_compile_error();
+        }
         process_impl(&args, &item_impl)
     } else {
         syn::Error::new_spanned(input, "fakeable attribute can only be applied to structs or impl blocks").into_compile_error()
@@ -369,7 +379,8 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
         {
             let fake_name = struct_name.to_string();
             let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
-            let generated = match generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module) {
+            let visibility = args.mockall_fake_visibility.clone().unwrap_or_else(|| parse_quote!(pub));
+            let generated = match generate_mockall_fake(item_impl, &fake_name, fakes_attribute, fake_module, &visibility) {
                 Ok(mock) => mock,
                 Err(err) => return err.into_compile_error(),
             };
@@ -1477,6 +1488,7 @@ fn generate_mockall_fake(
     fake_name: &str,
     fakes_attribute: Option<&str>,
     fake_module: &str,
+    visibility: &syn::Visibility,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
     // Use the provided name directly - mockall will add "Mock" prefix automatically
     let fake_ident = quote::format_ident!("{}", fake_name);
@@ -1545,7 +1557,7 @@ fn generate_mockall_fake(
             #fakes_cfg
             ::mockall::mock! {
                 #[derive(Debug)]
-                pub #fake_ident {
+                #visibility #fake_ident {
                     #(#mock_methods)*
                 }
             }
@@ -1559,7 +1571,7 @@ fn generate_mockall_fake(
             #[allow(clippy::all)]
             #[allow(clippy::pedantic)]
             #[allow(clippy::style)]
-            pub mod #module_ident {
+            #visibility mod #module_ident {
                 use super::*;
                 ::mockall::mock! {
                     #[derive(Debug)]
@@ -1855,11 +1867,44 @@ mod tests {
                 "mockall_fake_module must be a valid Rust identifier",
             ),
             (quote!(unknown = true), "unknown argument"),
+            (
+                quote!(mockall_fake_visibility = "", mockall_fake_visibility = "pub"),
+                "mockall_fake_visibility specified multiple times",
+            ),
+            (
+                quote!(mockall_fake_visibility = "public"),
+                "mockall_fake_visibility must be a Rust visibility",
+            ),
+            (
+                quote!(mockall_fake_visibility = "pub trailing"),
+                "mockall_fake_visibility must be a Rust visibility",
+            ),
         ];
 
         for (args, expected) in cases {
             assert!(expansion(args, input.clone()).contains(expected));
         }
+    }
+
+    #[test]
+    fn rejects_mockall_visibility_without_generation() {
+        assert!(
+            expansion(quote!(mockall_fake_visibility = "pub(crate)"), quote!(impl Service {}))
+                .contains("mockall_fake_visibility requires generate_mockall_fake = true")
+        );
+        assert!(
+            expansion(
+                quote!(
+                    generate_mockall_fake = true,
+                    mockall_fake_visibility = "pub(crate)",
+                    fake_impl = MockService
+                ),
+                quote!(
+                    struct Service;
+                )
+            )
+            .contains("mockall_fake_visibility is only supported on impl blocks")
+        );
     }
 
     #[test]

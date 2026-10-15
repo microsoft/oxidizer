@@ -6,6 +6,7 @@
 
   - Parse `fakes_feature = false` and emit `cfg(test)` gates for fake storage, constructors, delegation, and generated mocks ([#823](https://github.com/microsoft/oxidizer/pull/823)).
   - Generate Mockall methods with `pub(crate)` visibility, including signatures that use crate-private types ([#823](https://github.com/microsoft/oxidizer/pull/823)).
+  - Parse explicit `mockall_fake_visibility` for named mock modules and current-module mock types ([#823](https://github.com/microsoft/oxidizer/pull/823)).
 
 - Bug Fixes
 

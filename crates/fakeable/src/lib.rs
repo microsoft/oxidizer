@@ -131,6 +131,11 @@ use proc_macro::TokenStream;
 ///   `mockall` feature and a direct consumer dependency on `mockall`
 /// - **`mockall_fake_module`** (optional): Module for the generated mock (default: `"fakes"`);
 ///   use `"."` to emit it in the current module
+/// - **`mockall_fake_visibility`** (optional): Rust visibility string for the mock container
+///   (default: `"pub"`); use `"pub(crate)"` for internal adapters or `""` for private mocks.
+///   Requires `generate_mockall_fake = true`. For a named module it controls the module's
+///   visibility; the mock type is public inside that module. With `"."`, it controls the
+///   mock type directly. Relative visibility is resolved in the module containing the impl block.
 ///
 /// `fakes_attribute` is accepted as a deprecated alias for `fakes_feature` for compatibility with
 /// the imported experimental API.
@@ -223,6 +228,11 @@ use proc_macro::TokenStream;
 /// helpers are not mocked. Enable the `mockall` feature and declare `mockall` as a
 /// direct dev-dependency to use its argument matchers, call counts, ordered
 /// sequences, and scripted results without writing a separate fake.
+/// Set `mockall_fake_visibility` explicitly to keep the generated container internal.
+/// Visibility is not inferred from methods: adding, removing, or gating a method must
+/// not silently change the container's API. Choose a visibility that also permits use
+/// in the wrapper's fake constructor; a public wrapper with a public fake constructor
+/// needs an accessible fake type.
 ///
 /// ```rust
 /// # #[cfg(feature = "mockall")]
@@ -230,7 +240,11 @@ use proc_macro::TokenStream;
 /// #[fakeable::fakeable(fake_impl = fakes::MockReader, fakes_feature = false)]
 /// pub(crate) struct Reader;
 ///
-/// #[fakeable::fakeable(generate_mockall_fake = true, fakes_feature = false)]
+/// #[fakeable::fakeable(
+///     generate_mockall_fake = true,
+///     fakes_feature = false,
+///     mockall_fake_visibility = "pub(crate)"
+/// )]
 /// impl Reader {
 ///     pub(crate) fn read(&self, key: &str) -> usize {
 ///         key.len()
