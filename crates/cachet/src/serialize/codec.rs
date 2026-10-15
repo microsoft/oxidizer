@@ -19,6 +19,7 @@ use crate::transform::DecodeOutcome;
 use crate::{Codec, Encoder, Error};
 
 const FORMAT_VERSION: u8 = 1;
+const MAX_CONTIGUOUS_PREALLOC_BYTES: usize = 1024 * 1024;
 
 /// An encoder that serializes values to [`BytesView`] using postcard (one-directional).
 ///
@@ -106,12 +107,16 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     if first.len() == view.len() {
         Cow::Borrowed(first)
     } else {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(contiguous_preallocation(view.len()));
         for (slice, _) in view.slices() {
             buf.extend_from_slice(slice);
         }
         Cow::Owned(buf)
     }
+}
+
+fn contiguous_preallocation(len: usize) -> usize {
+    len.min(MAX_CONTIGUOUS_PREALLOC_BYTES)
 }
 
 #[cfg(test)]
@@ -197,5 +202,19 @@ mod tests {
 
         let outcome: DecodeOutcome<String> = codec.decode(first_half).expect("decode should succeed");
         assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
+    }
+
+    #[test]
+    fn contiguous_preallocation_preserves_known_size_below_cap() {
+        assert_eq!(contiguous_preallocation(4096), 4096);
+    }
+
+    #[test]
+    fn contiguous_preallocation_caps_large_size() {
+        assert_eq!(
+            contiguous_preallocation(MAX_CONTIGUOUS_PREALLOC_BYTES + 1),
+            MAX_CONTIGUOUS_PREALLOC_BYTES
+        );
+        assert_eq!(contiguous_preallocation(usize::MAX), MAX_CONTIGUOUS_PREALLOC_BYTES);
     }
 }
