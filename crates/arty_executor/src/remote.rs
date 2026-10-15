@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(format!("{:?}", TaskResult::Completed(1)), "Completed(..)");
         assert_eq!(format!("{:?}", TaskResult::<u8>::Panicked(Box::new("panic"))), "Panicked(..)");
         assert!(format!("{pool:?}").starts_with("Pool"));
-        assert!(format!("{sender:?}").starts_with("Sender"));
+        assert!(format!("{sender:?}").starts_with(std::any::type_name::<Sender<u8>>()));
         assert!(format!("{handle:?}").starts_with("JoinHandle"));
     }
 }

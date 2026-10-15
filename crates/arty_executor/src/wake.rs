@@ -367,10 +367,15 @@ impl WakerState {
     }
 
     fn retire(&self) {
+        self.retire_with(|_active| {});
+    }
+
+    fn retire_with(&self, after_deactivate: impl FnOnce(bool)) {
         // Release publishes retirement before queue removal. Acquire wake checks that observe
         // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
         // its active check.
         self.active.store(false, atomic::Ordering::Release);
+        after_deactivate(self.active.load(atomic::Ordering::Acquire));
         if let Some(shared) = self.shared.upgrade() {
             remove_queued_notification(&shared.awakened, &self.queued, self.task_ref);
         }
@@ -623,7 +628,6 @@ mod tests {
     use std::pin::pin;
     use std::sync::{Barrier, mpsc};
     use std::thread;
-    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::testing::TestWaker;
@@ -730,6 +734,11 @@ mod tests {
 
     #[test]
     fn retirement_waits_for_an_in_progress_enqueue() {
+        enum RetirementProgress {
+            Deactivated(bool),
+            Returned,
+        }
+
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
         let shared = Arc::new(WakeShared::new(
@@ -747,7 +756,7 @@ mod tests {
             let wake_task_ref = fake_task_ref;
             let active_checked = &active_checked;
             let resume_enqueue = &resume_enqueue;
-            let (retire_done_tx, retire_done_rx) = mpsc::channel();
+            let (retirement_progress_tx, retirement_progress_rx) = mpsc::channel();
             let wake = scope.spawn({
                 let shared = Arc::clone(&shared);
                 move || {
@@ -762,20 +771,14 @@ mod tests {
 
             active_checked.wait();
             let retire = scope.spawn(move || {
-                retire_state.retire();
-                retire_done_tx.send(()).unwrap();
+                retire_state.retire_with(|active| {
+                    retirement_progress_tx.send(RetirementProgress::Deactivated(active)).unwrap();
+                });
+                retirement_progress_tx.send(RetirementProgress::Returned).unwrap();
             });
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let retired_while_enqueue_blocked = loop {
-                let active = state.active.load(atomic::Ordering::Acquire);
-                let retire_is_pending = retire_done_rx.try_recv().is_err();
-                let before_deadline = Instant::now() < deadline;
-                let succeeded = !active;
-                let failed = !retire_is_pending || !before_deadline;
-                if succeeded || failed {
-                    break succeeded;
-                }
-                thread::yield_now();
+            let retired_while_enqueue_blocked = match retirement_progress_rx.recv().unwrap() {
+                RetirementProgress::Deactivated(active) => !active,
+                RetirementProgress::Returned => false,
             };
             resume_enqueue.wait();
 
@@ -783,7 +786,7 @@ mod tests {
             retire.join().unwrap();
             assert!(
                 retired_while_enqueue_blocked,
-                "retirement must deactivate the state before returning and within five seconds"
+                "retirement must deactivate the state before waiting for an in-progress enqueue"
             );
         });
 
