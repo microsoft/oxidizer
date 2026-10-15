@@ -879,6 +879,7 @@ mod tests {
         assert!(outcome.is_break());
         assert!(worker.executor.is_none());
         assert!(is_blocking_worker_shutting_down(&blocking_worker));
+        assert!(!worker.process_commands());
         drop(commands);
     }
 }

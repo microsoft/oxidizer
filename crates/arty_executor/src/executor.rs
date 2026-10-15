@@ -137,7 +137,7 @@ impl Drop for Executor {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::future::{Ready, pending, poll_fn, ready};
+    use std::future::{Ready, poll_fn, ready};
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
@@ -169,7 +169,37 @@ mod tests {
     struct DropOwnerDuringConversion {
         owner: Rc<RefCell<Option<Executor>>>,
         tasks: TaskSet,
-        nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+        existing_dropped: Rc<Cell<bool>>,
+        nested_rejected: Rc<Cell<bool>>,
+    }
+
+    struct DropSignalFuture(Rc<Cell<bool>>);
+
+    struct DropOwnerOnPoll {
+        owner: Rc<RefCell<Option<Executor>>>,
+    }
+
+    impl Future for DropSignalFuture {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for DropSignalFuture {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    impl Future for DropOwnerOnPoll {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            drop(self.owner.borrow_mut().take());
+            Poll::Pending
+        }
     }
 
     impl IntoFuture for DropOwnerDuringConversion {
@@ -178,8 +208,13 @@ mod tests {
 
         fn into_future(self) -> Self::IntoFuture {
             drop(self.owner.borrow_mut().take());
-            let nested = self.tasks.add_test(async { 42 });
-            assert!(self.nested.replace(Some(nested)).is_none());
+            assert!(self.existing_dropped.get(), "owner drop must synchronously cancel existing tasks");
+            let mut nested = self.tasks.add_test(async { 42 });
+            let mut cx = Context::from_waker(Waker::noop());
+            self.nested_rejected.set(matches!(
+                Pin::new(&mut nested).poll(&mut cx),
+                Poll::Ready(Err(error)) if error.is_shutdown()
+            ));
             ready(7)
         }
     }
@@ -188,21 +223,41 @@ mod tests {
     fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
         let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
         let tasks = owner.borrow().as_ref().unwrap().tasks();
-        let mut existing = tasks.add_test(pending::<()>());
-        let nested = Rc::new(RefCell::new(None));
+        let existing_dropped = Rc::new(Cell::new(false));
+        let mut existing = tasks.add_test(DropSignalFuture(Rc::clone(&existing_dropped)));
+        let nested_rejected = Rc::new(Cell::new(false));
 
         let mut outer = tasks.add_test(DropOwnerDuringConversion {
             owner: Rc::clone(&owner),
             tasks: tasks.clone(),
-            nested: Rc::clone(&nested),
+            existing_dropped: Rc::clone(&existing_dropped),
+            nested_rejected: Rc::clone(&nested_rejected),
         });
 
         assert!(owner.borrow().is_none());
+        assert!(existing_dropped.get());
         let mut cx = Context::from_waker(Waker::noop());
         assert!(matches!(Pin::new(&mut existing).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
         assert!(matches!(Pin::new(&mut outer).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
-        let mut nested = nested.borrow_mut().take().unwrap();
-        assert!(matches!(Pin::new(&mut nested).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(nested_rejected.get());
+    }
+
+    #[test]
+    fn owner_drop_during_active_cycle_defers_cancellation_to_the_cycle() {
+        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
+        let executor_core = Rc::clone(&owner.borrow().as_ref().unwrap().core);
+        let mut task = owner
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .tasks()
+            .add_test(DropOwnerOnPoll { owner: Rc::clone(&owner) });
+
+        assert_eq!(executor_core.execute_cycle(), CycleOutcome::Shutdown);
+
+        assert!(owner.borrow().is_none());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]

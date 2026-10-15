@@ -183,4 +183,16 @@ mod tests {
 
         assert!(poll_ready(handle).unwrap_err().is_shutdown());
     }
+
+    #[test]
+    fn diagnostics_cover_each_endpoint_and_result_kind() {
+        let pool = Pool::default();
+        let (sender, handle) = pool.channel::<u8>();
+
+        assert_eq!(format!("{:?}", TaskResult::Completed(1)), "Completed(..)");
+        assert_eq!(format!("{:?}", TaskResult::<u8>::Panicked(Box::new("panic"))), "Panicked(..)");
+        assert!(format!("{pool:?}").starts_with("Pool"));
+        assert!(format!("{sender:?}").starts_with("Sender"));
+        assert!(format!("{handle:?}").starts_with("JoinHandle"));
+    }
 }

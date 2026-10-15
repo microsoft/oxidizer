@@ -233,6 +233,28 @@ mod tests {
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
     }
 
+    #[test]
+    fn shutdown_cancelled_deferred_task_stays_pending_without_invoking_factory() {
+        let (runtime, builtins) = test_builtins();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let factory_invoked = Arc::clone(&invoked);
+        let shutdown = performables::arc::Arc::new(AtomicBool::new(true));
+        let mut task = pin!(DeferredTask::new(
+            move |_| {
+                factory_invoked.store(true, Ordering::Release);
+                std::future::ready(())
+            },
+            builtins,
+            shutdown,
+        ));
+        let mut cx = Context::from_waker(Waker::noop());
+
+        assert!(task.as_mut().poll(&mut cx).is_pending());
+        assert!(task.as_mut().poll(&mut cx).is_pending());
+        assert!(!invoked.load(Ordering::Acquire));
+        runtime.stop().unwrap();
+    }
+
     /// Drives the executor until it reports that no further progress can be made.
     fn run_to_completion(executor: &Executor) {
         while executor.execute_cycle() == CycleOutcome::Continue {}

@@ -64,6 +64,7 @@ impl fmt::Debug for AsyncWorkerCommand {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

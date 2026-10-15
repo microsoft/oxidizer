@@ -103,4 +103,12 @@ mod tests {
         assert!(options.context.is_some());
         assert_eq!(options.placement, TaskPlacement::SameThread);
     }
+
+    #[test]
+    fn new_options_keep_placement_without_context() {
+        let options = TaskOptions::new(TaskPlacement::SameThread);
+
+        assert!(options.context.is_none());
+        assert_eq!(options.placement, TaskPlacement::SameThread);
+    }
 }

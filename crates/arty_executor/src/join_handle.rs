@@ -173,6 +173,7 @@ mod tests {
 
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
+        assert_eq!(error.to_string(), "task panicked");
         assert_eq!(*error.into_panic().unwrap().downcast::<u64>().unwrap(), 42);
     }
 

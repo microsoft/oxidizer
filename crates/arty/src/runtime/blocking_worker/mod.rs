@@ -484,6 +484,18 @@ pub(super) mod blocking_worker_tests {
     }
 
     #[test]
+    fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop());
+        let _scope = BlockingTaskScope::enter(Arc::clone(&worker.pool.identity));
+        worker.shutdown();
+
+        let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
+
+        assert!(rejected.is_shutdown());
+        worker.join();
+    }
+
+    #[test]
     fn blocking_pool_grow_increases_thread_count() {
         let blocking_pool = BlockingPool::new(None);
         assert!(blocking_pool.grow());

@@ -737,6 +737,22 @@ mod tests {
         }
     }
 
+    struct PanicOnPollAndDropFuture;
+
+    impl Future for PanicOnPollAndDropFuture {
+        type Output = u64;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+            panic!("panic from future poll");
+        }
+    }
+
+    impl Drop for PanicOnPollAndDropFuture {
+        fn drop(&mut self) {
+            panic!("panic from future destructor");
+        }
+    }
+
     #[test]
     fn smoke_test() {
         let event_pool = LocalEventPool::<u64>::new();
@@ -855,6 +871,7 @@ mod tests {
         task.created_reporter().report();
 
         task.abort();
+        task.abort();
 
         let events = processor.events();
         assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
@@ -889,6 +906,40 @@ mod tests {
         let events = processor.events();
         assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
         assert!(!events.iter().any(|event| event.name() == "arty.rt.task.panicked"));
+    }
+
+    #[test]
+    fn local_completion_notification_panic_follows_fail_fast_path() {
+        let event_pool = LocalEventPool::<u64>::new();
+        let (result_tx, mut result_rx) = event_pool.rent();
+        let waker = Waker::from(Arc::new(PanickingJoinWake));
+        assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());
+        let task = pin!(Task::new(std::future::ready(42), result_tx));
+        let task = task.as_ref();
+        task.initialize(WakeSignal::fake());
+
+        assert_panic!(task.poll());
+    }
+
+    #[test]
+    fn remote_poll_and_destructor_panics_are_both_contained() {
+        let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
+        let task = pin!(Task::new_remote(
+            PanicOnPollAndDropFuture,
+            TaskOptions::default(),
+            Sink::noop(),
+            result_tx,
+        ));
+        let task = task.as_ref();
+        task.initialize(WakeSignal::fake());
+
+        assert!(task.poll().is_ready());
+
+        let mut cx = task::Context::from_waker(Waker::noop());
+        let task::Poll::Ready(Err(error)) = Pin::new(&mut result_rx).poll(&mut cx) else {
+            panic!("captured poll panic must reach the remote join");
+        };
+        discard_task_panic_payload(error.into_panic().unwrap());
     }
 
     #[test]

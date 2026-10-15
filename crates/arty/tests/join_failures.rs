@@ -206,6 +206,47 @@ fn shutdown_between_remote_tasks_skips_later_factory() {
 }
 
 #[test]
+fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
+    let runtime = runtime();
+    let operations = RuntimeOperations::from(&runtime);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (blocker, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let blocker = cx.scheduler().spawn(move |_| {
+                    let mut started_tx = Some(started_tx);
+                    poll_fn(move |_| {
+                        if let Some(started_tx) = started_tx.take() {
+                            started_tx.send(()).unwrap();
+                        }
+                        release_rx.recv().unwrap();
+                        Poll::Ready(())
+                    })
+                });
+                let skipped = cx.scheduler().spawn(move |_| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (blocker, skipped)
+            }
+        })
+        .unwrap();
+    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    std::thread::spawn(move || operations.request_stop()).join().unwrap();
+    release_tx.send(()).unwrap();
+
+    blocker.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Acquire));
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn stop_rejects_remote_and_blocking_factories_immediately() {
     runtime()
         .scheduler()
