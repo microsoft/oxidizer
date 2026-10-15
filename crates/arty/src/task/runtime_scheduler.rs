@@ -436,14 +436,8 @@ mod tests {
                 assert!(panics);
                 let error = error.into_source().downcast::<JoinError>().unwrap();
                 assert!(error.is_panic());
-                #[cfg(feature = "macros")]
-                {
-                    let payload = catch_unwind(AssertUnwindSafe(|| {
-                        std::panic::resume_unwind(error.into_panic().expect("the join error was checked as a panic"));
-                    }))
-                    .unwrap_err();
-                    assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
-                }
+                let payload = error.into_panic().expect("the join error was checked as a panic");
+                assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
             }
         }
         assert_eq!(

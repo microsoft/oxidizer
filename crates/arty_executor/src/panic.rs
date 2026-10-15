@@ -11,7 +11,9 @@ pub type TaskPanicPayload = Box<dyn Any + Send + 'static>;
 ///
 /// Cancellation and result delivery sometimes need to discard a panic payload. Payload destructors
 /// are user code and may themselves panic, so disposal catches replacement payloads and aborts only
-/// if they keep panicking beyond a bounded number of attempts.
+/// if they keep panicking beyond a generous finite budget. Aborting avoids abandoning an opaque
+/// payload that may still own task resources while also preventing an endlessly replacing
+/// destructor chain from monopolizing executor cleanup.
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
 pub fn discard_task_panic_payload(mut panic: TaskPanicPayload) {
     const MAX_DISPOSAL_ATTEMPTS: usize = 32;

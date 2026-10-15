@@ -12,6 +12,10 @@ use events_once::{LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 use crate::TaskPanicPayload;
 
 /// A task failed to return its result.
+///
+/// This error intentionally stores the classification and optional panic payload directly.
+/// Shutdown has no underlying cause, and a panic payload need not implement [`Error`], so an error
+/// source chain would not preserve additional typed diagnostic information.
 pub struct JoinError {
     // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
     // thread-safe error while preserving the original payload for `into_panic`.
@@ -144,6 +148,8 @@ impl<R: 'static> Future for JoinHandle<R> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::*;
@@ -156,7 +162,7 @@ mod tests {
 
     #[test]
     fn shutdown_error_contract() {
-        assert_impl_all!(JoinError: Error, Send, Sync);
+        assert_impl_all!(JoinError: Error, Send, Sync, UnwindSafe, RefUnwindSafe);
 
         let error = JoinError::shutdown();
 

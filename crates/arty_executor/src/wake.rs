@@ -154,6 +154,8 @@ impl WakeSignal {
 
     fn install_state(&self, candidate: WakerStateRef) -> *mut WakerState {
         let candidate_ptr = candidate.as_ptr().cast_mut();
+        // Release publishes the fully initialized pooled state to Acquire readers. On failure,
+        // Acquire observes the state installed by the winning contender before its pointer is used.
         match self.state.compare_exchange(
             std::ptr::null_mut(),
             candidate_ptr,
@@ -365,6 +367,9 @@ impl WakerState {
     }
 
     fn retire(&self) {
+        // Release publishes retirement before queue removal. Acquire wake checks that observe
+        // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
+        // its active check.
         self.active.store(false, atomic::Ordering::Release);
         if let Some(shared) = self.shared.upgrade() {
             remove_queued_notification(&shared.awakened, &self.queued, self.task_ref);
@@ -420,6 +425,9 @@ fn enqueue_wake(
 }
 
 fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_ref: TaskRef) {
+    // Lock before testing `queued`: an enqueue may hold the mutex after its active check but before
+    // publishing the flag. Acquiring the same mutex waits for that insertion so retirement can
+    // remove the task identity even when the flag was initially false.
     let mut queue = queue.lock().expect("wake queue is never held while invoking user code");
     if !queued.swap(false, atomic::Ordering::AcqRel) {
         return;
@@ -471,6 +479,8 @@ impl Deref for WakerStateRef {
 
 impl Drop for WakerStateRef {
     fn drop(&mut self) {
+        // Each owner publishes its prior accesses with Release. The final owner acquires those
+        // publications before reclaiming the pooled slot.
         if self.ref_count.fetch_sub(1, atomic::Ordering::Release) != 1 {
             return;
         }
@@ -525,6 +535,8 @@ fn waker_clone_waker(ptr: *const ()) -> RawWaker {
 }
 
 fn increment_reference_count(ref_count: &AtomicUsize, on_overflow: fn() -> !) {
+    // Cloning only reserves another owner; it does not publish or consume state, so Relaxed is
+    // sufficient. Final Release/Acquire reclamation synchronizes prior owners before reuse.
     let previous = ref_count.fetch_add(1, atomic::Ordering::Relaxed);
     if previous >= MAX_WAKER_COUNT {
         on_overflow();
@@ -686,7 +698,7 @@ mod tests {
         let installed = std::ptr::from_ref(signal.state()).cast_mut();
 
         let candidate = signal.allocate_state();
-        assert!(format!("{candidate:?}").contains("WakerState"));
+        assert!(format!("{candidate:?}").contains(std::any::type_name::<WakerState>()));
         assert_eq!(signal.install_state(candidate), installed);
     }
 
@@ -730,20 +742,22 @@ mod tests {
         let resume_enqueue = Barrier::new(2);
 
         thread::scope(|scope| {
-            let wake_shared = Arc::clone(&shared);
             let wake_state = &state;
             let retire_state = &state;
             let wake_task_ref = fake_task_ref;
             let active_checked = &active_checked;
             let resume_enqueue = &resume_enqueue;
             let (retire_done_tx, retire_done_rx) = mpsc::channel();
-            let wake = scope.spawn(move || {
-                enqueue_wake(&wake_shared.awakened, &wake_state.queued, wake_task_ref, Waker::noop(), || {
-                    let active = wake_state.active.load(atomic::Ordering::Acquire);
-                    active_checked.wait();
-                    resume_enqueue.wait();
-                    active
-                })
+            let wake = scope.spawn({
+                let shared = Arc::clone(&shared);
+                move || {
+                    enqueue_wake(&shared.awakened, &wake_state.queued, wake_task_ref, Waker::noop(), || {
+                        let active = wake_state.active.load(atomic::Ordering::Acquire);
+                        active_checked.wait();
+                        resume_enqueue.wait();
+                        active
+                    })
+                }
             });
 
             active_checked.wait();

@@ -125,7 +125,7 @@ impl<R: Send + 'static> Sender<R> {
 
 impl<R: Send + 'static> Debug for Sender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Sender").finish_non_exhaustive()
+        f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
     }
 }
 

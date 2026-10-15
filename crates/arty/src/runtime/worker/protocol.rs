@@ -8,6 +8,12 @@ use arty_executor::discard_task_panic_payload;
 
 use crate::task::execution::BoxedRemoteFutureFactory;
 
+/// Owns a complete submission closure until the destination worker registers it.
+///
+/// The closure includes every unregistered capture, such as the user's factory and its result
+/// sender. Dropping the wrapper contains a panic from disposing that complete closure; successful
+/// registration transfers the closure out. Captured endpoints retain their own disposal guards for
+/// paths that do not pass through this wrapper.
 pub(crate) struct QueuedTaskFactory {
     inner: Option<BoxedRemoteFutureFactory>,
 }

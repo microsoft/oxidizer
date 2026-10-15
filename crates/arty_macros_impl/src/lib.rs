@@ -49,10 +49,10 @@ fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
     match found {
         Some(FoundCrate::Name(name)) => {
             let name = name.replace('-', "_");
-            let ident = syn::parse_str::<Ident>(&name)
+            let name = syn::parse_str::<Ident>(&name)
                 .or_else(|_| syn::parse_str::<Ident>(&format!("r#{name}")))
                 .expect("Cargo dependency aliases are valid Rust identifiers, possibly requiring raw syntax");
-            quote!(::#ident)
+            quote!(::#name)
         }
         Some(FoundCrate::Itself) | None => quote!(::arty),
     }

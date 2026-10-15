@@ -70,7 +70,8 @@ pub(crate) struct AsyncWorker {
     builtins: Option<Builtins>,
 
     // Published before shutdown commands are queued, so command backlogs can be rejected without
-    // invoking factories that preceded the shutdown command.
+    // invoking factories that preceded the shutdown command. Acquire loads only need to observe
+    // this published flag; command-channel synchronization owns command contents and ordering.
     shutdown_signal: Arc<AtomicBool>,
 
     // Becomes None during shutdown when the executor is dropped to cancel and release its tasks.

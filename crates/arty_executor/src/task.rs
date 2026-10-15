@@ -414,11 +414,20 @@ enum TerminalOutcome<R> {
     Cancelled,
 }
 
+/// Inline result-delivery policy owned by a task.
+///
+/// Local targets keep raw executor task panics fail-fast. Remote targets transport captured task
+/// panics to another thread and contain panics raised while notifying or disposing that endpoint.
+/// Publishing consumes the target. A returned panic payload comes from delivery or disposal and
+/// does not imply that the task outcome was not already published.
 pub(crate) trait TaskResultTarget<R>: Debug + 'static {
+    /// Returns whether this target transports captured task panics instead of terminating.
     fn is_remote(&self) -> bool;
 
+    /// Publishes a successful task result, returning any panic raised by delivery.
     fn complete(self, result: R) -> Result<(), TaskPanicPayload>;
 
+    /// Publishes a captured task panic, returning a distinct panic raised by delivery.
     fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload>;
 }
 

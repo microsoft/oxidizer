@@ -94,7 +94,16 @@ impl TaskOptions {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
+
     use super::*;
+
+    assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
+    // Captured enrichment can contain user-defined interior state, so options intentionally do
+    // not promise that they may cross a caught-unwind boundary.
+    assert_not_impl_any!(TaskOptions: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn observed_options_keep_context_and_placement() {
