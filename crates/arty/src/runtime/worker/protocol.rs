@@ -97,7 +97,12 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let sink = Sink::noop();
-        let (factory, join) = prepare_remote(|_| async { 42 }, sink.transfer_context(), TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            |_| async { 42 },
+            sink.transfer_context(),
+            TaskPlacement::Any,
+            performables::arc::Arc::new(AtomicBool::new(false)),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

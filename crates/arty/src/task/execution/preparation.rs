@@ -1,10 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::future::pending;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
+use performables::arc::Arc;
 
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -58,6 +61,7 @@ pub(crate) fn prepare_remote<FF, F, R>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
     placement: TaskPlacement,
+    shutdown_signal: Arc<AtomicBool>,
 ) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
 where
     FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -69,7 +73,14 @@ where
     let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let inner = async move { future_factory(cx).await };
+        let tasks_for_shutdown = tasks.clone();
+        let inner = async move {
+            if shutdown_signal.load(Ordering::Acquire) {
+                tasks_for_shutdown.begin_shutdown();
+                return pending().await;
+            }
+            future_factory(cx).await
+        };
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
@@ -129,7 +140,6 @@ mod tests {
     use std::pin::pin;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::{CycleOutcome, Executor};
@@ -163,6 +173,7 @@ mod tests {
             },
             sink.transfer_context(),
             TaskPlacement::Any,
+            performables::arc::Arc::new(AtomicBool::new(false)),
         );
 
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -214,6 +225,7 @@ mod tests {
             |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             TaskPlacement::Any,
+            performables::arc::Arc::new(AtomicBool::new(false)),
         );
         let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();

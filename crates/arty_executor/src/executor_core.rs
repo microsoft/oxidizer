@@ -577,11 +577,9 @@ impl Drop for ExecutorCore {
         let state_exclusive = self.exclusive.get_mut();
         let state_reentrant = self.reentrancy_safe.get_mut();
 
-        if !state_reentrant.shutting_down {
-            state_reentrant.shutting_down = true;
-            let aborted_count = Self::prepare_task_abort(&self.wake, state_exclusive, state_reentrant);
-            Self::abort_prepared_tasks(state_exclusive, aborted_count);
-        }
+        state_reentrant.shutting_down = true;
+        let aborted_count = Self::prepare_task_abort(&self.wake, state_exclusive, state_reentrant);
+        Self::abort_prepared_tasks(state_exclusive, aborted_count);
 
         Self::drop_completed_tasks(state_exclusive, false);
         match EXECUTOR_PUSHER.try_with(MetricsPusher::push) {

@@ -106,6 +106,18 @@ fn direct_executor_drop_cancels_tasks_safely() {
 }
 
 #[test]
+fn request_only_shutdown_then_drop_cancels_tasks_safely() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let mut handle = tasks.add(pending::<()>(), TaskOptions::default());
+
+    tasks.begin_shutdown();
+    drop(executor);
+
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+#[test]
 fn executor_drop_during_thread_local_teardown_is_safe() {
     std::thread::spawn(|| {
         THREAD_LOCAL_EXECUTOR.with(|slot| {
