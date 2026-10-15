@@ -734,11 +734,6 @@ mod tests {
 
     #[test]
     fn retirement_waits_for_an_in_progress_enqueue() {
-        enum RetirementProgress {
-            Deactivated(bool),
-            Returned,
-        }
-
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
         let shared = Arc::new(WakeShared::new(
@@ -756,7 +751,8 @@ mod tests {
             let wake_task_ref = fake_task_ref;
             let active_checked = &active_checked;
             let resume_enqueue = &resume_enqueue;
-            let (retirement_progress_tx, retirement_progress_rx) = mpsc::channel();
+            let (deactivated_tx, deactivated_rx) = mpsc::channel();
+            let (retire_done_tx, retire_done_rx) = mpsc::channel();
             let wake = scope.spawn({
                 let shared = Arc::clone(&shared);
                 move || {
@@ -772,22 +768,17 @@ mod tests {
             active_checked.wait();
             let retire = scope.spawn(move || {
                 retire_state.retire_with(|active| {
-                    retirement_progress_tx.send(RetirementProgress::Deactivated(active)).unwrap();
+                    deactivated_tx.send(active).unwrap();
                 });
-                retirement_progress_tx.send(RetirementProgress::Returned).unwrap();
+                retire_done_tx.send(()).unwrap();
             });
-            let retired_while_enqueue_blocked = match retirement_progress_rx.recv().unwrap() {
-                RetirementProgress::Deactivated(active) => !active,
-                RetirementProgress::Returned => false,
-            };
+            assert!(!deactivated_rx.recv().unwrap());
+            assert_eq!(retire_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
             resume_enqueue.wait();
 
             assert!(wake.join().unwrap());
             retire.join().unwrap();
-            assert!(
-                retired_while_enqueue_blocked,
-                "retirement must deactivate the state before waiting for an in-progress enqueue"
-            );
+            retire_done_rx.recv().unwrap();
         });
 
         assert!(shared.awakened.lock().unwrap().is_empty());
