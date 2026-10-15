@@ -89,6 +89,13 @@ pub enum TlsBackend {
 
     /// Platform native TLS backend (`SChannel` on Windows, Security Framework
     /// on `macOS`, `OpenSSL` on Linux).
+    ///
+    /// # Migration from `fetch_tls` 0.4
+    ///
+    /// This variant now contains [`NativeTlsBackend`] instead of
+    /// [`native_tls::TlsConnector`]. Construct it with `connector.into()`.
+    /// After destructuring the variant, access the platform connector with
+    /// [`NativeTlsBackend::connector`].
     #[cfg(any(feature = "native-tls", test))]
     NativeTls(NativeTlsBackend),
 }

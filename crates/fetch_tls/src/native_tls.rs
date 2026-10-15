@@ -110,8 +110,8 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
     ///
     /// # Panics
     ///
-    /// Panics if `endpoint` is not a valid URI authority or if `server_name`
-    /// is empty.
+    /// Panics if `endpoint` is not a valid URI authority, if an explicit port
+    /// cannot be represented as a `u16`, or if `server_name` is empty.
     pub fn server_name_override<E>(mut self, endpoint: E, server_name: impl Into<String>) -> Self
     where
         E: TryInto<Authority>,
@@ -120,12 +120,28 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
         let endpoint = endpoint
             .try_into()
             .expect("native TLS server name override endpoint must be a valid URI authority");
+        assert!(
+            !Self::has_explicit_port(&endpoint) || endpoint.port_u16().is_some(),
+            "native TLS server name override endpoint port must fit in a u16"
+        );
         let server_name = server_name.into();
         assert!(!server_name.is_empty(), "native TLS server name override cannot be empty");
         self.backend
             .server_name_overrides
             .insert(server_name_override_key(&endpoint), server_name);
         self
+    }
+
+    fn has_explicit_port(endpoint: &Authority) -> bool {
+        let authority = endpoint.as_str();
+        if authority.starts_with('[') {
+            authority
+                .find(']')
+                .and_then(|closing_bracket| authority.as_bytes().get(closing_bracket + 1))
+                == Some(&b':')
+        } else {
+            authority.contains(':')
+        }
     }
 
     /// Builds the final [`TlsOptions`] with the native TLS backend.
@@ -293,5 +309,35 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
     #[should_panic(expected = "native TLS server name override endpoint must be a valid URI authority")]
     fn server_name_override_rejects_invalid_endpoint() {
         let _ = TlsOptions::builder_native_tls().server_name_override("not a valid authority", "expected.example.test");
+    }
+
+    #[test]
+    #[should_panic(expected = "native TLS server name override endpoint port must fit in a u16")]
+    fn server_name_override_rejects_out_of_range_port() {
+        let _ = TlsOptions::builder_native_tls().server_name_override("localhost:65536", "expected.example.test");
+    }
+
+    #[test]
+    fn server_name_override_accepts_ipv6_without_port() {
+        let builder = TlsOptions::builder_native_tls().server_name_override("[::1]", "expected.example.test");
+        assert_eq!(
+            builder.backend.server_name_overrides.get("::1").map(String::as_str),
+            Some("expected.example.test")
+        );
+    }
+
+    #[test]
+    fn server_name_override_accepts_ipv6_with_port() {
+        let builder = TlsOptions::builder_native_tls().server_name_override("[::1]:8443", "expected.example.test");
+        assert_eq!(
+            builder.backend.server_name_overrides.get("[::1]:8443").map(String::as_str),
+            Some("expected.example.test")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "native TLS server name override endpoint port must fit in a u16")]
+    fn server_name_override_rejects_out_of_range_ipv6_port() {
+        let _ = TlsOptions::builder_native_tls().server_name_override("[::1]:65536", "expected.example.test");
     }
 }
