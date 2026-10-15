@@ -202,7 +202,7 @@ impl Scheduler {
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
             #[cfg(any(test, feature = "seismograph"))]
-            let join_handle = if crate::runtime::seismograph::recording_requested() {
+            let join_handle = if self.dispatcher.is_monitored() && crate::runtime::seismograph::recording_requested() {
                 let task_telemetry = self.dispatcher.register_task::<F>(self.binding.worker_index);
                 prepare_remote_on_worker(
                     future_factory,

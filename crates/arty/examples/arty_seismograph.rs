@@ -19,9 +19,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{MonitorOptions, Runtime, WorkersPolicy};
 use arty::task::Builtins;
-use seismograph::monitor::Monitor;
 use seismograph::recorder::Configuration;
 use thread_aware::Unaware;
 
@@ -30,8 +29,10 @@ const RECURRING_TASKS: usize = 6;
 fn main() -> Result<(), ohno::AppError> {
     let duration = demo_duration()?;
     seismograph::recorder(Configuration::default());
-    let runtime = Runtime::builder().workers(WorkersPolicy::at_most(2)).build()?;
-    let monitor = Monitor::builder().name("arty-live-tasks").start()?;
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::at_most(2))
+        .monitor(MonitorOptions::default().name("arty-live-tasks"))
+        .build()?;
     let stopped = Arc::new(AtomicBool::new(false));
     let tasks: Vec<_> = (0..RECURRING_TASKS)
         .map(|index| {
@@ -44,9 +45,8 @@ fn main() -> Result<(), ohno::AppError> {
     let spawner = runtime.scheduler().spawn_anywhere(Unaware(Arc::clone(&stopped)), spawn_children);
 
     println!(
-        "arty-live-tasks: PID {}, runtime {}, running for {} seconds",
+        "arty-live-tasks: PID {}, running for {} seconds",
         std::process::id(),
-        runtime.id(),
         duration.as_secs()
     );
     println!("Six recurring tasks plus a spawner and its child remain visible.");
@@ -64,9 +64,6 @@ fn main() -> Result<(), ohno::AppError> {
     }
     futures::executor::block_on(spawner)??;
     runtime.stop()?;
-    if let Some(error) = monitor.last_error() {
-        eprintln!("Seismograph monitor connection error: {error}");
-    }
     println!("Demo stopped cleanly.");
     Ok(())
 }

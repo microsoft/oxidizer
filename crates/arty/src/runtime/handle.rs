@@ -4,8 +4,6 @@
 use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-#[cfg(any(test, feature = "seismograph"))]
-use crate::runtime::identity::RuntimeId;
 use crate::task::{RuntimeScheduler, Scheduler};
 
 /// Owns an Arty runtime's workers and their shutdown.
@@ -53,7 +51,7 @@ use crate::task::{RuntimeScheduler, Scheduler};
 #[derive(Debug)]
 pub struct Runtime {
     #[cfg(any(test, feature = "seismograph"))]
-    id: RuntimeId,
+    monitor: Option<seismograph::monitor::Monitor>,
     scheduler: RuntimeScheduler,
     shutdown_on_drop: bool,
 }
@@ -131,19 +129,6 @@ impl Runtime {
         &self.scheduler
     }
 
-    /// Returns this runtime's stable process-local identity.
-    ///
-    /// The numeric value matches the runtime identity retained by
-    /// `seismograph_runtime` snapshots. It is unique only within the current
-    /// process execution.
-    /// Available with the `seismograph` feature.
-    #[must_use]
-    #[inline]
-    #[cfg(any(test, feature = "seismograph"))]
-    pub const fn id(&self) -> RuntimeId {
-        self.id
-    }
-
     /// Consumes this runtime, requests shutdown, and waits for its workers to stop.
     ///
     /// Cancels pending async tasks and prevents queued blocking callbacks from
@@ -199,14 +184,18 @@ impl Runtime {
     }
 
     pub(in crate::runtime) fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
-        #[cfg(any(test, feature = "seismograph"))]
-        let id = dispatcher.runtime_id();
         Self {
             #[cfg(any(test, feature = "seismograph"))]
-            id,
+            monitor: None,
             scheduler: RuntimeScheduler::new(dispatcher),
             shutdown_on_drop: true,
         }
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn with_monitor(mut self, monitor: Option<seismograph::monitor::Monitor>) -> Self {
+        self.monitor = monitor;
+        self
     }
 }
 

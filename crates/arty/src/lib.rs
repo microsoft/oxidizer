@@ -128,16 +128,22 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `performables`.
 //!
 //! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`time`** - Enables clocks, timers, and timeouts.
-//! - **`seismograph`** - Enables Arty runtime/task diagnostics and `performables`
-//!   Arc/lock/channel hooks together, and implies `rt`. Disabled by default;
-//!   recording policies still determine which event streams are collected.
+//! - **`performables`** - Selects the primitive Arc/lock/channel dependency.
+//!   This does not enable event recording; `rt` also selects this feature.
+//! - **`seismograph`** - Compiles the private diagnostic backend and primitive
+//!   hooks without enabling `rt` itself. Disabled by default; runtime diagnostics
+//!   additionally require `rt` and an explicit builder `monitor` setting.
+//!   Recording policies determine which event streams are collected.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
+
+#[cfg(all(test, miri))]
+extern crate self as arty;
 
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.

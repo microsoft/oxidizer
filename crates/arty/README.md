@@ -124,14 +124,17 @@ it is not part of the public API available to applications.
 
 ## Features
 
-The default feature set enables `rt` and `macros`.
+The default feature set enables `rt`, `macros`, and `performables`.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
 * **`macros`** - Enables [`main`][__link24] and [`test`][__link25], and implies `rt`.
 * **`time`** - Enables clocks, timers, and timeouts.
-* **`seismograph`** - Enables Arty runtime/task diagnostics and `performables`
-  Arc/lock/channel hooks together, and implies `rt`. Disabled by default;
-  recording policies still determine which event streams are collected.
+* **`performables`** - Selects the primitive Arc/lock/channel dependency.
+  This does not enable event recording; `rt` also selects this feature.
+* **`seismograph`** - Compiles the private diagnostic backend and primitive
+  hooks without enabling `rt` itself. Disabled by default; runtime diagnostics
+  additionally require `rt` and an explicit builder `monitor` setting.
+  Recording policies determine which event streams are collected.
 * **`test-util`** - Enables testing utilities, including [`ClockControl`][__link26] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
@@ -141,7 +144,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTTNzHvGpk5obCBtf9zP7STgb7o_yhd-ZY1obZ8ZWcf3oT1dhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbUcZjzk15usYbg_xdZfEkTZ8b6wsSor2fIMgbl-VEVTCzOAlhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl

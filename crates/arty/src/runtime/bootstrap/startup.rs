@@ -36,22 +36,58 @@ use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::Builtins;
 use crate::task::scheduler::Scheduler;
 
+#[cfg(any(test, feature = "seismograph"))]
+struct Monitoring {
+    monitor: Option<seismograph::monitor::Monitor>,
+    telemetry: Option<RuntimeTelemetry>,
+    workers: std::vec::IntoIter<WorkerTelemetry>,
+}
+
+#[cfg(any(test, feature = "seismograph"))]
+fn monitoring(options: Option<crate::runtime::MonitorOptions>, processors: &[ProcessorSet], sink: &Sink) -> Result<Monitoring, Error> {
+    let Some(options) = options else {
+        return Ok(Monitoring {
+            monitor: None,
+            telemetry: None,
+            workers: Vec::new().into_iter(),
+        });
+    };
+    let name = options.runtime_name().to_owned();
+    let monitor = options.start(sink.clone())?;
+    let (telemetry, workers) = RuntimeTelemetry::register_named(
+        processors.iter().map(|processor| processor.processors().first().id()),
+        sink.clone(),
+        &name,
+    );
+    Ok(Monitoring {
+        monitor,
+        telemetry: Some(telemetry),
+        workers,
+    })
+}
+
+fn report_start_failed(sink: &Sink, pool_mode: &'static str) {
+    emit!(
+        sink,
+        RuntimeStartFailed {
+            blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode)
+        }
+    );
+}
+
 pub(in crate::runtime) fn build(
     processor_config: RuntimeConfig,
     clock: &InactiveClock,
     sink: Sink,
     thread_builder: &ThreadBuilder,
+    #[cfg(any(test, feature = "seismograph"))] monitor_options: Option<crate::runtime::MonitorOptions>,
 ) -> Result<Runtime, Error> {
     let pool_mode = processor_config.blocking_pool_policy.mode_label();
     let available = available_processors();
-    let processors = processor_config.workers_policy.select(&available).inspect_err(|_| {
-        emit!(
-            &sink,
-            RuntimeStartFailed {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
-            }
-        );
-    })?;
+    let processors = processor_config
+        .workers_policy
+        .select(&available)
+        .inspect_err(|_| report_start_failed(&sink, pool_mode))?;
     // Decomposition yields singleton processor sets, one per worker. Sort by their sole
     // processor's ID so startup endpoints and service slots share a stable worker ordering.
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
@@ -71,17 +107,12 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
-        emit!(
-            &sink,
-            RuntimeStartFailed {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
-            }
-        );
-    })?;
+    let blocking_pools = processor_config
+        .blocking_pool_policy
+        .into_pools()
+        .inspect_err(|_| report_start_failed(&sink, pool_mode))?;
     #[cfg(any(test, feature = "seismograph"))]
-    let (runtime_telemetry, mut worker_telemetries) =
-        RuntimeTelemetry::register(processors.iter().map(|processor| processor.processors().first().id()), sink.clone());
+    let mut monitoring = monitoring(monitor_options, &processors, &sink).inspect_err(|_| report_start_failed(&sink, pool_mode))?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         let (command_tx, command_rx) = channel::unbounded();
@@ -106,7 +137,7 @@ pub(in crate::runtime) fn build(
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
                 #[cfg(any(test, feature = "seismograph"))]
-                worker_telemetry: worker_telemetries.next().expect("one registration per selected processor"),
+                worker_telemetry: monitoring.workers.next(),
             }
             .start(),
         );
@@ -131,7 +162,7 @@ pub(in crate::runtime) fn build(
         sink,
         shutdown_started,
         #[cfg(any(test, feature = "seismograph"))]
-        runtime_telemetry,
+        monitoring.telemetry,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -158,7 +189,10 @@ pub(in crate::runtime) fn build(
         }
     );
 
-    Ok(Runtime::with_dispatcher(dispatcher_client))
+    let runtime = Runtime::with_dispatcher(dispatcher_client);
+    #[cfg(any(test, feature = "seismograph"))]
+    let runtime = runtime.with_monitor(monitoring.monitor);
+    Ok(runtime)
 }
 
 /// The data set required to start one async worker (the message channels and associated data).
@@ -178,7 +212,7 @@ struct AsyncWorkerStartInfo {
     shutdown_started: Arc<AtomicBool>,
     sink: Sink,
     #[cfg(any(test, feature = "seismograph"))]
-    worker_telemetry: WorkerTelemetry,
+    worker_telemetry: Option<WorkerTelemetry>,
 }
 
 impl AsyncWorkerStartInfo {
@@ -216,7 +250,9 @@ impl AsyncWorkerStartInfo {
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
         #[cfg(any(test, feature = "seismograph"))]
-        worker_telemetry.attach_current_thread();
+        if let Some(telemetry) = &worker_telemetry {
+            telemetry.attach_current_thread();
+        }
 
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
@@ -226,7 +262,11 @@ impl AsyncWorkerStartInfo {
         let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
 
         #[cfg(any(test, feature = "seismograph"))]
-        let signal = Arc::new(WorkerSignal::with_telemetry(worker_telemetry.handle()));
+        let signal = Arc::new(
+            worker_telemetry
+                .as_ref()
+                .map_or_else(WorkerSignal::default, |telemetry| WorkerSignal::with_telemetry(telemetry.handle())),
+        );
         #[cfg(not(any(test, feature = "seismograph")))]
         let signal = Arc::new(WorkerSignal::default());
 
@@ -270,7 +310,9 @@ impl AsyncWorkerStartInfo {
         #[cfg(any(test, feature = "seismograph"))]
         let mut worker = worker;
         #[cfg(any(test, feature = "seismograph"))]
-        worker.enable_live_inspection(worker_telemetry.handle());
+        if let Some(telemetry) = &worker_telemetry {
+            worker.enable_live_inspection(telemetry.handle());
+        }
 
         emit!(
             worker_sink,

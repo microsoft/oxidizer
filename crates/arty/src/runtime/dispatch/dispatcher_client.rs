@@ -9,8 +9,6 @@ use std::thread::ThreadId;
 use performables::arc::Arc;
 
 use crate::runtime::Error;
-#[cfg(any(test, feature = "seismograph"))]
-use crate::runtime::RuntimeId;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 #[cfg(any(test, feature = "seismograph"))]
@@ -46,8 +44,8 @@ impl DispatcherClient {
     }
 
     #[cfg(any(test, feature = "seismograph"))]
-    pub(crate) fn runtime_id(&self) -> RuntimeId {
-        self.core.runtime_id()
+    pub(crate) fn is_monitored(&self) -> bool {
+        self.core.is_monitored()
     }
 
     pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {

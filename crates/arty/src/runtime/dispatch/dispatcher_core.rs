@@ -15,8 +15,6 @@ use thread_aware::Thread;
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 #[cfg(any(test, feature = "seismograph"))]
-use crate::runtime::identity::RuntimeId;
-#[cfg(any(test, feature = "seismograph"))]
 use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskTelemetryPlacement, recording_requested};
 use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
@@ -62,8 +60,7 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
     #[cfg(any(test, feature = "seismograph"))]
-    runtime_telemetry: RuntimeTelemetry,
-    #[cfg(not(any(test, feature = "seismograph")))]
+    runtime_telemetry: Option<RuntimeTelemetry>,
     observed_stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
@@ -90,7 +87,7 @@ impl<WFS> DispatcherCore<WFS> {
             worker_endpoints,
             sink,
             Arc::new(AtomicBool::new(false)),
-            runtime_telemetry,
+            Some(runtime_telemetry),
         )
     }
 
@@ -99,7 +96,7 @@ impl<WFS> DispatcherCore<WFS> {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
-        #[cfg(any(test, feature = "seismograph"))] runtime_telemetry: RuntimeTelemetry,
+        #[cfg(any(test, feature = "seismograph"))] runtime_telemetry: Option<RuntimeTelemetry>,
     ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -117,28 +114,29 @@ impl<WFS> DispatcherCore<WFS> {
             "each runtime worker must have a distinct thread ID"
         );
         #[cfg(any(test, feature = "seismograph"))]
-        for (index, endpoint) in worker_endpoints.iter().enumerate() {
-            let sender = endpoint.command_tx.clone();
-            let waker = endpoint.waker.clone();
-            runtime_telemetry.register_task_provider(index, move |request| {
-                if sender
-                    .send(AsyncWorkerCommand::InspectTasks {
-                        request: Some(Box::new(request)),
-                    })
-                    .is_ok()
-                {
-                    waker.wake_by_ref();
-                }
-                // A closed command channel drops the request. Its caller reports
-                // unavailable data rather than a complete empty task list.
-            });
+        if let Some(runtime_telemetry) = &runtime_telemetry {
+            for (index, endpoint) in worker_endpoints.iter().enumerate() {
+                let sender = endpoint.command_tx.clone();
+                let waker = endpoint.waker.clone();
+                runtime_telemetry.register_task_provider(index, move |request| {
+                    if sender
+                        .send(AsyncWorkerCommand::InspectTasks {
+                            request: Some(Box::new(request)),
+                        })
+                        .is_ok()
+                    {
+                        waker.wake_by_ref();
+                    }
+                    // A closed command channel drops the request. Its caller reports
+                    // unavailable data rather than a complete empty task list.
+                });
+            }
         }
         Self {
             wait_for_shutdown,
             shutdown_started,
             #[cfg(any(test, feature = "seismograph"))]
             runtime_telemetry,
-            #[cfg(not(any(test, feature = "seismograph")))]
             observed_stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             worker_indices,
@@ -156,7 +154,9 @@ impl<WFS> DispatcherCore<WFS> {
         }
 
         #[cfg(any(test, feature = "seismograph"))]
-        self.runtime_telemetry.stopping();
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.stopping();
+        }
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
@@ -228,8 +228,8 @@ impl<WFS> DispatcherCore<WFS> {
     }
 
     #[cfg(any(test, feature = "seismograph"))]
-    pub(in crate::runtime) fn runtime_id(&self) -> RuntimeId {
-        RuntimeId::from_seismograph(self.runtime_telemetry.id())
+    pub(in crate::runtime) fn is_monitored(&self) -> bool {
+        self.runtime_telemetry.is_some()
     }
 
     pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
@@ -262,7 +262,10 @@ impl<WFS> DispatcherCore<WFS> {
 
     #[cfg(any(test, feature = "seismograph"))]
     pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
-        self.runtime_telemetry.register_task::<F>(usize::from(worker_index))
+        self.runtime_telemetry
+            .as_ref()
+            .expect("submission checks that runtime monitoring is enabled")
+            .register_task::<F>(usize::from(worker_index))
     }
 
     pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
@@ -302,9 +305,11 @@ impl<WFS> DispatcherCore<WFS> {
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         #[cfg(any(test, feature = "seismograph"))]
-        let (future_factory, join_handle) = if recording_requested() {
+        let (future_factory, join_handle) = if self.is_monitored() && recording_requested() {
             let task_telemetry = self
                 .runtime_telemetry
+                .as_ref()
+                .expect("runtime monitoring was checked above")
                 .register_task_with_descriptor(usize::from(worker_index), descriptor.unwrap_or_else(TaskDescriptor::of::<F>));
             prepare_remote(
                 future_factory,
@@ -368,7 +373,11 @@ where
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
         #[cfg(any(test, feature = "seismograph"))]
-        self.runtime_telemetry.stopped();
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.stopped();
+        } else {
+            crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
+        }
         #[cfg(not(any(test, feature = "seismograph")))]
         crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
         outcome
@@ -629,7 +638,7 @@ mod tests {
             NonEmpty::new(endpoint(worker_tx, &threads[0])),
             observed::Sink::noop(),
         );
-        let runtime_id = dispatcher.runtime_telemetry.id();
+        let runtime_id = dispatcher.runtime_telemetry.as_ref().unwrap().id();
         drop(worker_rx);
 
         let mut task = pin!(dispatcher.spawn(|_| async {}));

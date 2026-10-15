@@ -34,13 +34,14 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["rt", "macros"]
+default = ["rt", "macros", "performables"]
 macros = ["rt", "dep:arty_macros"]
+performables = ["dep:performables"]
 seismograph = [
-    "rt",
     "dep:seismograph",
     "dep:seismograph_runtime",
-    "performables/seismograph",
+    "seismograph/monitor",
+    "performables?/seismograph",
 ]
 rt = [
     "time",
@@ -53,7 +54,7 @@ rt = [
     "dep:many_cpus",
     "dep:nonempty",
     "dep:observed",
-    "dep:performables",
+    "performables",
     "dep:pin-project",
     "dep:thread_aware",
     "dep:threadpool",
@@ -137,7 +138,7 @@ required-features = ["rt"]
 
 [[example]]
 name = "arty_seismograph"
-required-features = ["seismograph"]
+required-features = ["rt", "seismograph"]
 
 [[example]]
 name = "arty_basic"

@@ -326,13 +326,22 @@ impl RuntimeTelemetry {
             .expect("bootstrap registers task providers before worker retirement");
     }
 
+    #[cfg(test)]
     pub(crate) fn register(
         processor_indices: impl ExactSizeIterator<Item = u32>,
         sink: Sink,
     ) -> (Self, std::vec::IntoIter<WorkerTelemetry>) {
+        Self::register_named(processor_indices, sink, "arty")
+    }
+
+    pub(crate) fn register_named(
+        processor_indices: impl ExactSizeIterator<Item = u32>,
+        sink: Sink,
+        name: &str,
+    ) -> (Self, std::vec::IntoIter<WorkerTelemetry>) {
         let worker_count = processor_indices.len();
         let configured_workers = u32::try_from(worker_count).expect("an Arty runtime cannot configure more than u32::MAX workers");
-        let registration = register_runtime(RuntimeMetadata::new("arty", configured_workers));
+        let registration = register_runtime(RuntimeMetadata::new(name, configured_workers));
         let runtime_handle = registration.handle();
         let lifecycle = Arc::new(RuntimeLifecycle {
             registration,
@@ -373,6 +382,7 @@ impl RuntimeTelemetry {
         self.lifecycle.stopped();
     }
 
+    #[cfg(test)]
     pub(crate) fn id(&self) -> SeismographRuntimeId {
         self.lifecycle.registration.id()
     }

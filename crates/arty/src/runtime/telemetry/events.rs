@@ -112,6 +112,20 @@ pub(crate) struct RuntimeStartFailed {
     pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
 }
 
+/// Description of a background diagnostic transport failure.
+#[cfg(any(test, feature = "seismograph"))]
+#[classified(SYSTEM_METADATA)]
+#[derive(Clone)]
+pub(crate) struct MonitorMessage(pub String);
+
+/// A runtime-owned diagnostic endpoint encountered a background failure.
+#[cfg(any(test, feature = "seismograph"))]
+#[event("arty.rt.monitor.failed")]
+#[error("runtime monitor failed")]
+pub(crate) struct MonitorFailure {
+    pub message: MonitorMessage,
+}
+
 /// Emitted when runtime shutdown begins.
 #[event("arty.rt.stopping")]
 #[debug("runtime stopping")]

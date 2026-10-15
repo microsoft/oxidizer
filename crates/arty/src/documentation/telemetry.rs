@@ -1,98 +1,41 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime telemetry through [`observed`] and [`seismograph`].
+//! Runtime telemetry and opt-in local diagnostics.
 //!
-//! Arty emits runtime events through an [`observed::Sink`]. The default sink is
-//! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
-//! before starting the runtime. Tasks can access it through
-//! [`Builtins::sink`](crate::task::Builtins::sink).
-//! Configure processors that do not panic: event delivery is synchronous and
-//! Arty does not recover from telemetry-processor panics.
+//! # Runtime events and task enrichment
 //!
-//! Applications configuring a sink or emitting their own events need a direct
-//! dependency on [`observed`]. See its documentation for event definitions,
-//! enrichment, processing, and redaction.
+//! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) configures
+//! [`observed`] events and enrichment independently of local monitoring.
+//! Tasks capture the configured sink's current enrichment at submission and
+//! restore it while executing. Runtime-owned event processors must not panic.
+//! Classified runtime fields use `arty` / `SystemMetadata`; panic text uses
+//! the separate `arty` / `PanicMessage` class.
 //!
-//! Async tasks inherit the enrichment active when submitted and restore it
-//! while polling. Blocking callbacks and unrelated threads do not inherit that
-//! context automatically. A task cancelled at shutdown need not emit an outcome
-//! event, so task events are not an exactly-once completion record.
+//! # Locally accessible diagnostics
 //!
-//! Enable Arty's `seismograph` Cargo feature to register runtimes and workers and
-//! enable `performables` primitive hooks together. This feature is off by default;
-//! the plain `rt` build has no Seismograph integration.
-//! Arty's enabled integration does not maintain
-//! a second diagnostic task list. Snapshots request descriptions from each worker's
-//! actual executor storage between polls. Inspection is bounded; unavailable or
-//! truncated results are reported explicitly. While observation is requested, a
-//! worker's current-task identity remains readable even if it gets stuck inside a
-//! poll. A worker that was already stuck before monitoring started cannot report
-//! a retroactive current-task identity.
+//! Enable the independent `seismograph` Cargo feature and opt a runtime in with
+//! `MonitorOptions` and the builder's
+//! `monitor` setting. `seismograph` does not enable `rt` itself. The default
+//! runtime configuration has no diagnostic endpoint or runtime/task registration,
+//! even when support is compiled.
 //!
-//! With no monitoring or recording, tasks use zero-sized instrumentation. Submission
-//! does not allocate diagnostic identities, resolve task types, update task counters,
-//! or retain diagnostic runtime/worker handles. Task poll callbacks compile away.
-//! Runtime registration remains available; one recording-policy check on submission
-//! and one observer-demand check per worker cycle support dynamic activation.
-//! Identities and type descriptions are constructed only when a task is inspected
-//! or observed. There is no complete history of task outcomes or execution time:
-//! inspect `counters_scope` before interpreting source counters.
-//!
-//! Enable Seismograph's `runtime_tasks` policy for requested task-event recording,
-//! or request poll timing through a live subscription.
-//! Measurements cover the observation window, not execution before collection.
-//! Live descriptions do not retain creation times; recorded spawn events have
-//! their own timestamps. Live inspection does not collect wake-to-poll timing
-//! or spawn backtraces retroactively.
-//! Primitive Arc/lock/channel recording uses this same `seismograph` feature
-//! and the corresponding recording policy; there is no separate primitive feature.
-//! Other dependencies can also enable those primitive hooks through Cargo
-//! feature unification.
-//! Existing tasks remain available for inspection when a monitor connects after they were
-//! submitted. Polls observed after activation can be measured, but earlier spawn
-//! events and parent identities are not reconstructed.
-//!
-//! Applications configuring recording and decoding runtime diagnostics need
-//! direct dependencies on `seismograph` and `seismograph_runtime`:
-//!
-//! ```sh
-//! cargo add seismograph seismograph_runtime
-//! ```
-//!
-//! To try live inspection from this repository, run
-//! `cargo run -p arty --features seismograph --example arty_seismograph -- --seconds 300`.
-//! In another terminal on the same operating system, run
-//! `cargo run -p seismograph_cli -- monitor`, select `arty-live-tasks`, then
-//! press `s` to capture and `6` for Runtime. Recording starts disabled; current
-//! tasks come from callback-based inspection. Press `s` again to refresh the
-//! task list. The TUI uses explicit captures, not a continuous task subscription.
-//!
-//! Subscribe to current task descriptions without enabling event recording:
+//! Arty owns the configuration and endpoint lifecycle. Backend types,
+//! diagnostic identities and server handles are not exposed through Arty's
+//! public Rust API. The endpoint protocol belongs to diagnostic tooling rather
+//! than the Rust API compatibility contract.
 //!
 //! ```
 //! # fn main() {
-//! # #[cfg(feature = "seismograph")] {
+//! # #[cfg(all(feature = "rt", feature = "seismograph"))] {
 //! # (|| {
-//! use arty::runtime::{Runtime, WorkersPolicy};
-//! use seismograph::recorder::runtime::RuntimeId;
-//! use seismograph_runtime::live::{SubscriptionOptions, subscribe};
+//! use arty::runtime::{MonitorOptions, Runtime, WorkersPolicy};
 //!
 //! let runtime = Runtime::builder()
-//!     .workers(WorkersPolicy::exactly(1))
+//!     .workers(WorkersPolicy::at_most(2))
+//!     .monitor(MonitorOptions::default().name("my-runtime"))
 //!     .build()?;
-//! let id = RuntimeId::from_raw(runtime.id().get())
-//!     .expect("Arty runtime identities are nonzero Seismograph identities");
-//! let subscription = subscribe(id, SubscriptionOptions::default(), |batch| {
-//!     println!(
-//!         "worker {:?}: {:?}, {} tasks",
-//!         batch.worker_id,
-//!         batch.collection,
-//!         batch.tasks.len()
-//!     );
-//! })?;
 //! runtime.scheduler().block_on(async |_| ())?;
-//! drop(subscription);
 //! runtime.stop()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! # })().unwrap();
@@ -100,58 +43,58 @@
 //! # }
 //! ```
 //!
-//! Callbacks run on a diagnostic thread, not on workers. Dropping the subscription
-//! stops new delivery; an already-running callback may finish afterward. Set
-//! `SubscriptionOptions::measurements` to `Measurements::PollTiming` to collect
-//! execution measurements while subscribed. Inspect each task's `metrics_scope`
-//! before interpreting its numeric fields. Poll durations are elapsed time inside
-//! completed executor task polls, including result delivery and task cleanup.
-//! They are not CPU time; operating-system preemption is included.
+//! Each opted-in runtime has a separate authenticated localhost endpoint, with
+//! discovery metadata in the current user's diagnostic directory. Building,
+//! stopping and dropping one runtime does not start or close another runtime's
+//! endpoint. `build` returns endpoint-startup failures; background connection
+//! and listener failures are reported to the configured runtime telemetry sink
+//! as `arty.rt.monitor.failed`.
 //!
-//! Enable runtime-task events before starting runtimes, then capture and decode
-//! a process snapshot:
+//! Monitoring does not install an allocator, start event recording or reset
+//! existing process recording policies. The diagnostic tool controls recording.
+//! Recorder policies, event buffers and allocator observations remain
+//! process-wide: separate endpoints are not isolated recorders, and snapshots
+//! can include other registered process sources and runtimes. Clear or Stop
+//! commands through one endpoint affect the shared process recorder.
 //!
+//! The same feature enables primitive hooks for the optional `performables`
+//! dependency when that dependency is selected. Actual Arc/lock/channel event
+//! collection still requires the corresponding recording policy. Other
+//! dependencies can enable these hooks through Cargo feature unification.
+//!
+//! # On-demand native task inspection
+//!
+//! Arty does not maintain a second diagnostic live-task registry. Queries
+//! request descriptions from each worker's actual executor storage between
+//! polls. Collection is bounded and explicitly distinguishes complete,
+//! truncated, busy, timed-out, stopped and failed workers.
+//!
+//! There is no complete history from before observation was requested: outcomes, creation times,
+//! parentage, wake-to-poll delays or execution time. Identities and type
+//! descriptions are created lazily during observation. Inspect source coverage
+//! and measurement scope before interpreting counters; unavailable is not zero.
+//! Requested poll timing covers only its observation window. Poll duration is
+//! elapsed time, including preemption, not CPU time.
+//!
+//! While observation is requested, current-task identity remains independently
+//! readable even when a worker gets stuck in a poll. A worker already blocked
+//! before observation starts cannot reconstruct a retroactive identity.
+//! Recorded event streams retain only their configured bounded rings.
+//!
+//! Callback processing occurs on diagnostic threads, not runtime workers.
+//! User callback failures do not become task failures. Dropping a subscription
+//! stops new delivery while an already-running callback can finish afterward.
+//!
+//! # Try the connectable example
+//!
+//! From this repository, in two terminals on the same operating system:
+//!
+//! ```text
+//! cargo run -p arty --features seismograph --example arty_seismograph -- --seconds 300
+//! cargo run -p seismograph_cli -- monitor
 //! ```
-//! # fn main() {
-//! # #[cfg(feature = "seismograph")] {
-//! # (|| {
-//! use arty::runtime::{Runtime, WorkersPolicy};
-//! use seismograph::recorder::{Configuration, RecordingPolicy};
-//! use seismograph::snapshot::SnapshotOptions;
-//! use seismograph_runtime::snapshot::source;
 //!
-//! seismograph::recorder(Configuration {
-//!     runtime_tasks: RecordingPolicy::all(false),
-//!     ..Configuration::default()
-//! });
-//! let runtime = Runtime::builder()
-//!     .workers(WorkersPolicy::exactly(1))
-//!     .build()?;
-//! let runtime_id = runtime.id();
-//! runtime.scheduler().block_on(async |_| ())?;
-//! runtime.stop()?;
-//!
-//! let snapshot = seismograph::snapshot(SnapshotOptions::default())?;
-//! let decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
-//! let runtime_source = decoded
-//!     .sources
-//!     .iter()
-//!     .find(|entry| entry.id == source::ID)
-//!     .expect("Arty registers the runtime diagnostics source");
-//! let diagnostics = seismograph_runtime::snapshot::decode(&runtime_source.data)?;
-//! let runtime_diagnostics = diagnostics
-//!     .runtimes
-//!     .iter()
-//!     .find(|entry| entry.id.get() == runtime_id.get())
-//!     .expect("the public Arty identity matches its retained diagnostics");
-//! assert_eq!(runtime_diagnostics.name, "arty");
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! # })().unwrap();
-//! # }
-//! # }
-//! ```
-//!
-//! Routine classified runtime fields use the `arty` / `SystemMetadata`
-//! identifier when configuring redaction. Panic diagnostics use the separate
-//! `arty` / `PanicMessage` identifier, so configure both classes when panic
-//! text should remain visible.
+//! Select `arty-live-tasks`, press Enter, `s` to capture, then `6` for Runtime.
+//! Press `s` again to refresh current tasks. The TUI uses explicit captures,
+//! not a continuous remote task subscription. Recording starts disabled; use
+//! `c` to enable runtime or primitive event collection.
