@@ -35,7 +35,7 @@ min-lines-percent = 0
 proc-macro = true
 
 [dependencies]
-ohno_macros_impl = { workspace = true }
+ohno_macros_impl = { path = "../ohno_macros_impl", default-features = false, version = "=0.5.4" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

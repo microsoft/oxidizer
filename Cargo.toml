@@ -211,9 +211,7 @@ observed_macros = { path = "crates/observed_macros", default-features = false, v
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.30.1" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.6.1" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.5.4" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.4" }
-ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.4" }
+ohno = { default-features = false, version = "0.5.4" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
