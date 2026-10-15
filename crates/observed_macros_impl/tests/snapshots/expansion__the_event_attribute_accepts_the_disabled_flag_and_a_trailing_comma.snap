@@ -13,13 +13,14 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::None,
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::None,
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(&[]);
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -40,13 +41,14 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::None,
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::None,
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(&[]);
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -67,13 +69,14 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::None,
-            ::core::option::Option::None,
-            false,
-            true,
-        );
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::None,
+                ::core::option::Option::None,
+                false,
+                true,
+            )
+            .with_fields(&[]);
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -94,13 +97,14 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::None,
-            ::core::option::Option::None,
-            false,
-            true,
-        );
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::None,
+                ::core::option::Option::None,
+                false,
+                true,
+            )
+            .with_fields(&[]);
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

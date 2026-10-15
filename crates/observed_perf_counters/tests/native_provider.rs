@@ -272,10 +272,18 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
 fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     struct Malformed;
     impl Event for Malformed {
-        const DESCRIPTION: EventDescription = EventDescription::new("malformed", Some(TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("Malformed", InstrumentKind::Counter)
-            .value_kind(MetricValueKind::U64)
-            .build()];
+        const DESCRIPTION: EventDescription = EventDescription::new("malformed", Some(TypeId::of::<Self>()), None, None, true, false)
+            .with_fields(&[observed::metadata::FieldDescriptor::new(
+                "value",
+                None,
+                Some(observed::metadata::MetricFieldEntry::instrument(
+                    "value",
+                    MetricDescription::builder("Malformed", InstrumentKind::Counter)
+                        .value_kind(MetricValueKind::U64)
+                        .build(),
+                )),
+            )
+            .with_field_index(0)]);
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
@@ -302,7 +310,7 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
             .flush()
             .unwrap_err()
             .to_string()
-            .contains("event `malformed` has invalid metric slot 0: no measurement supplied")
+            .contains("event `malformed` has invalid metric field 0: no measurement supplied")
     );
 }
 

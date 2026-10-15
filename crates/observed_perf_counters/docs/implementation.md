@@ -3,17 +3,18 @@
 ## Preparation and identity
 
 `MetricBindings` prepares per-event targets once. Each target selects an atomic
-total and an aggregation operation. The processor's private schema input retains
-the event-slot index.
+total and an aggregation operation. Static field metadata and the lazy visitor
+share stable field indices; omitted optional fields cannot shift later targets.
+The processor's private schema input retains the prepared target's storage index.
 
 [`schema.rs`](../src/schema.rs) parses the externally authored V2 manifest,
 validates its supported native profile, and selects one set by category name.
 The supplied GUIDs and counter IDs are retained verbatim. Binding matches names
-once, resolves event slots to storage indices, and rejects unknown or conflicting
+once, resolves event fields to storage indices, and rejects unknown or conflicting
 destinations. Unbound declared counters receive zero-valued storage.
 
 Counter definitions are sorted by their declared native IDs. Each definition
-retains its resolved storage index, so native order does not change event-slot
+retains its resolved storage index, so native order does not change event-field
 routing. Native registration uses that prepared schema; there is no XML export
 or application-derived identity calculation.
 

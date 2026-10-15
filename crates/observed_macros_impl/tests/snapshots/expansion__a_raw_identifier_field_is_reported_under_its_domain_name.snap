@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"raw\"\"#,\nr\"\n            #[info]\n            struct Raw {\n                r#type: ClassifiedString,\n                #[dimension(metric)]\n                #[unredacted]\n                r#match: i64,\n            }\n            \",)"
+expression: "expand_event(r#\"\"raw\"\"#,\nr\"\n        #[info]\n        struct Raw {\n            r#type: ClassifiedString,\n            #[dimension(metric)]\n            #[unredacted]\n            r#match: i64,\n        }\n        \",)"
 ---
 struct Raw {
     r#type: ClassifiedString,
@@ -9,48 +9,54 @@ struct Raw {
 const _: () = {
     impl ::observed::Event for Raw {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "raw",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "raw",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "raw",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "raw",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "type",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("type"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "match",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("match"),
+                            ),
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::dimension("match"),
+                            ),
+                        )
+                        .with_field_index(1usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "type",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("type"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.r#type, engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "match",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("match"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("match"),
-                    ),
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|_| ::observed::Value::from(self.r#match.clone()),
                 )?;
             }

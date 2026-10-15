@@ -13,35 +13,40 @@ struct Shapes<'a, T> {
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -61,35 +66,40 @@ struct Shapes<'a, T> {
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -109,35 +119,40 @@ struct Shapes<'a, T> {
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -157,35 +172,40 @@ struct Shapes<'a, T> {
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -205,35 +225,40 @@ struct Shapes<'a, T> {
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -257,35 +282,40 @@ const _: () = {
         [T; 4]: ::core::marker::Send + ::core::marker::Sync,
     {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }
@@ -309,35 +339,40 @@ const _: () = {
         (T, u8): ::core::marker::Send + ::core::marker::Sync,
     {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shapes",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Shapes<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shapes",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shapes",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shapes",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "field",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("field"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "field",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("field"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.field, engine),
                 )?;
             }

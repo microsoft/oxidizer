@@ -435,7 +435,8 @@ fn parse_guid(element: &XmlElement, attribute: &str, guids: &mut HashSet<Uuid>) 
     let value = element.required(attribute)?;
     let id = Uuid::parse_str(value)
         .map_err(|cause| Error::configuration(ManifestDefinition::caused_by(format!("invalid {attribute} GUID {value:?}"), cause)))?;
-    if value.len() != 38 || !value.starts_with('{') || !value.ends_with('}') || id.is_nil() {
+    // Of the formats accepted by uuid, only a braced GUID is 38 bytes long.
+    if value.len() != 38 || id.is_nil() {
         return Err(definition_error(format!("{attribute} must be a nonnil braced GUID")));
     }
     if !guids.insert(id) {
@@ -1144,10 +1145,15 @@ mod tests {
             r#"<counterAttribute name="reference"/>"#,
             r#"<counterAttribute name="reference"/><counterAttribute name="noDisplay"/>"#,
         ));
-        definition_failure(&XML.replace(
+        let duplicate_flags = XML.replace(
             r#"<counterAttribute name="reference"/>"#,
             r#"<counterAttribute name="reference"/><counterAttribute name="reference"/>"#,
-        ));
+        );
+        let error = Manifest::parse(&duplicate_flags).unwrap_err();
+        assert_eq!(
+            error.find_source::<ManifestDefinition>().unwrap().detail,
+            "duplicate counterAttribute \"reference\"",
+        );
     }
 
     #[test]

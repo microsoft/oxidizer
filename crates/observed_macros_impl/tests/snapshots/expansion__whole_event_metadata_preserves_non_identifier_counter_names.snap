@@ -6,48 +6,28 @@ struct Request;
 const _: () = {
     impl ::observed::Event for Request {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "request",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
-            ::core::option::Option::None,
-            ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
-                    "!",
-                    ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
+                "request",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
+                ::core::option::Option::None,
+                ::core::option::Option::Some(
+                    ::observed::metadata::MetricDescription::builder(
+                            "!",
+                            ::observed::metadata::InstrumentKind::Counter,
+                        )
+                        .description("")
+                        .unit("")
+                        .value_kind(::observed::metadata::MetricValueKind::U64)
+                        .build(),
                 ),
-            ),
-            false,
-            false,
-        );
+                false,
+                false,
+            )
+            .with_fields(&[]);
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             ::core::ops::ControlFlow::Continue(())
-        }
-        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::builder(
-                    "!",
-                    ::observed::metadata::InstrumentKind::Counter,
-                )
-                .description("")
-                .unit("")
-                .value_kind(::observed::metadata::MetricValueKind::U64)
-                .build(),
-        ];
-        fn metric_value(
-            &self,
-            slot: usize,
-        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
-            match slot {
-                0 => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::U64(1_u64),
-                    )
-                }
-                _ => ::core::option::Option::None,
-            }
         }
     }
 };

@@ -68,43 +68,52 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "e",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::Some("nothing to interpolate"),
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "e",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::Some("nothing to interpolate"),
+                    ),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "status",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("status"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "original",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("renamed"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(1usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "status",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("status"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.status.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "original",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|engine| ::observed::Value::from_redacted(&self.original, engine),
                 )?;
             }
@@ -134,45 +143,54 @@ struct Subject {
 const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "e",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::Some(
-                        "{{literal}} {status} {} and a dangling {",
+                "e",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "e",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::Some(
+                            "{{literal}} {status} {} and a dangling {",
+                        ),
                     ),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "status",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("status"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "original",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("renamed"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(1usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "status",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("status"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.status.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "original",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|engine| ::observed::Value::from_redacted(&self.original, engine),
                 )?;
             }

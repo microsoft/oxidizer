@@ -5,6 +5,7 @@
 
 use std::any::TypeId;
 
+use crate::metadata::FieldDescriptor;
 use crate::metadata::log::LogDescription;
 use crate::metadata::metric::MetricDescription;
 
@@ -24,6 +25,7 @@ pub struct EventDescription {
     metric: Option<MetricDescription>,
     has_field_metrics: bool,
     disabled: bool,
+    fields: &'static [FieldDescriptor],
 }
 
 impl EventDescription {
@@ -44,7 +46,36 @@ impl EventDescription {
             metric,
             has_field_metrics,
             disabled,
+            fields: &[],
         }
+    }
+
+    /// Attaches the static inventory of routed event fields in declaration order.
+    ///
+    /// Each [`FieldDescriptor::field_index`] must equal its position in this slice.
+    /// Visitors reuse these descriptors, including when an optional field is absent.
+    /// This inventory determines field-metric presence instead of the legacy flag.
+    /// Runtime-only descriptions may leave the inventory empty.
+    #[must_use]
+    pub const fn with_fields(mut self, fields: &'static [FieldDescriptor]) -> Self {
+        self.fields = fields;
+        self.has_field_metrics = false;
+        let mut remaining = fields;
+        while let [field, tail @ ..] = remaining {
+            if let Some(entry) = field.metric()
+                && entry.instrument_description().is_some()
+            {
+                self.has_field_metrics = true;
+            }
+            remaining = tail;
+        }
+        self
+    }
+
+    /// Returns routed field metadata without constructing an event.
+    #[must_use]
+    pub const fn fields(&self) -> &'static [FieldDescriptor] {
+        self.fields
     }
 
     /// Returns the event name (from `#[event("...")]`).

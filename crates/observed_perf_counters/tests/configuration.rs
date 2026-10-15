@@ -64,10 +64,18 @@ struct RequestCompleted {
 struct UntypedEvent;
 
 impl Event for UntypedEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new("untyped", None, None, None, false, false);
-    const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("count", InstrumentKind::Counter)
-        .value_kind(MetricValueKind::U64)
-        .build()];
+    const DESCRIPTION: EventDescription = EventDescription::new(
+        "untyped",
+        None,
+        None,
+        Some(
+            MetricDescription::builder("count", InstrumentKind::Counter)
+                .value_kind(MetricValueKind::U64)
+                .build(),
+        ),
+        false,
+        false,
+    );
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         ControlFlow::Continue(())
@@ -248,6 +256,24 @@ fn malformed_xml_invalid_utf8_and_oversized_files_are_not_accepted() {
 }
 
 #[test]
+fn valid_xml_at_the_file_size_limit_is_accepted_but_one_extra_byte_is_rejected() {
+    const LIMIT: usize = 1024 * 1024;
+    for size in [LIMIT - 1, LIMIT, LIMIT + 1] {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(MANIFEST.as_bytes()).unwrap();
+        file.write_all(&vec![b' '; size - MANIFEST.len()]).unwrap();
+        let result = PerfCounterProcessor::builder().manifest_file(file.path());
+        if size <= LIMIT {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.is_invalid_configuration());
+            assert!(error.to_string().contains("manifest exceeds one MiB"));
+        }
+    }
+}
+
+#[test]
 fn public_types_are_send_and_sync() {
     fn assert_traits<T: Send + Sync>() {}
     assert_traits::<PerfCounterProcessor>();
@@ -301,8 +327,16 @@ fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
     }
     struct MissingType;
     impl Event for MissingType {
-        const DESCRIPTION: EventDescription = EventDescription::new("missing.type", Some(TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [MetricDescription] = &[MetricDescription::new("Unknown", InstrumentKind::Counter, "", "")];
+        const DESCRIPTION: EventDescription = EventDescription::new("missing.type", Some(TypeId::of::<Self>()), None, None, true, false)
+            .with_fields(&[observed::metadata::FieldDescriptor::new(
+                "value",
+                None,
+                Some(observed::metadata::MetricFieldEntry::instrument(
+                    "value",
+                    MetricDescription::new("Unknown", InstrumentKind::Counter, "", ""),
+                )),
+            )
+            .with_field_index(0)]);
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

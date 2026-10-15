@@ -42,7 +42,8 @@ pub enum MetricValueKind {
 
 /// A numeric metric measurement, separate from general telemetry field values.
 ///
-/// Generated access preserves signedness and integer precision. This value
+/// Binding converts numeric field values using their declared representation,
+/// preserving signedness and integer precision. This value
 /// carries no dimensions, redaction, or destination-specific aggregation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -184,10 +185,10 @@ impl MetricDescriptionBuilder {
         self
     }
 
-    /// Declares the representation returned by direct measurement access.
+    /// Declares the numeric representation of this instrument's measurement.
     ///
-    /// Generated [`Event::METRICS`](crate::Event::METRICS) includes this metadata
-    /// so backends can reject unsupported numeric types during startup.
+    /// Generated [`EventDescription`](crate::metadata::EventDescription) field metadata
+    /// includes this so backends can reject unsupported numeric types during startup.
     #[must_use]
     pub const fn value_kind(mut self, kind: MetricValueKind) -> Self {
         self.metric.value_kind = Some(kind);

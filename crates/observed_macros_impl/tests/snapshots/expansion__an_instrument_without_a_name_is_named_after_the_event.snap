@@ -8,81 +8,55 @@ struct Heartbeat {
 const _: () = {
     impl ::observed::Event for Heartbeat {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "heartbeat",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
-            ::core::option::Option::None,
-            ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
-                    "heartbeat",
-                    ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
+                "heartbeat",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
+                ::core::option::Option::None,
+                ::core::option::Option::Some(
+                    ::observed::metadata::MetricDescription::builder(
+                            "heartbeat",
+                            ::observed::metadata::InstrumentKind::Counter,
+                        )
+                        .description("")
+                        .unit("")
+                        .value_kind(::observed::metadata::MetricValueKind::U64)
+                        .build(),
                 ),
-            ),
-            true,
-            false,
-        );
+                true,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "level",
+                            ::core::option::Option::None,
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::instrument(
+                                    "level",
+                                    ::observed::metadata::MetricDescription::builder(
+                                            "heartbeat",
+                                            ::observed::metadata::InstrumentKind::Gauge,
+                                        )
+                                        .description("")
+                                        .unit("")
+                                        .value_kind(::observed::metadata::MetricValueKind::F64)
+                                        .build(),
+                                ),
+                            ),
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "level",
-                    ::core::option::Option::None,
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "level",
-                            ::observed::metadata::MetricDescription::new(
-                                "heartbeat",
-                                ::observed::metadata::InstrumentKind::Gauge,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.level.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.level.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
-        }
-        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::builder(
-                    "heartbeat",
-                    ::observed::metadata::InstrumentKind::Counter,
-                )
-                .description("")
-                .unit("")
-                .value_kind(::observed::metadata::MetricValueKind::U64)
-                .build(),
-            ::observed::metadata::MetricDescription::builder(
-                    "heartbeat",
-                    ::observed::metadata::InstrumentKind::Gauge,
-                )
-                .description("")
-                .unit("")
-                .value_kind(::observed::metadata::MetricValueKind::F64)
-                .build(),
-        ];
-        fn metric_value(
-            &self,
-            slot: usize,
-        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
-            match slot {
-                0 => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::U64(1_u64),
-                    )
-                }
-                1usize => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::F64(
-                            ::core::convert::From::from(self.level),
-                        ),
-                    )
-                }
-                _ => ::core::option::Option::None,
-            }
         }
     }
 };

@@ -39,7 +39,7 @@ impl EventProcessor for Processor {
                     unreachable!("the event declares an unsigned counter");
                 }
             })
-            .expect("generated event metadata and numeric accessors declare the same slots");
+            .expect("generated field metadata and visitor descriptors share their indices");
     }
 
     fn flush(&self) -> Result<(), FlushError> {

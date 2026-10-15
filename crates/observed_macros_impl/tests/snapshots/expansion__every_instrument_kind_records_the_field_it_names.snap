@@ -11,180 +11,132 @@ struct Operation {
 const _: () = {
     impl ::observed::Event for Operation {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "operation",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "operation",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "operation",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "operation",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
                 ),
-            ),
-            ::core::option::Option::None,
-            true,
-            false,
-        );
+                ::core::option::Option::None,
+                true,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "hits",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("hits"),
+                            ),
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::instrument(
+                                    "hits",
+                                    ::observed::metadata::MetricDescription::builder(
+                                            "operation.hits",
+                                            ::observed::metadata::InstrumentKind::Counter,
+                                        )
+                                        .description("completed operations")
+                                        .unit("1")
+                                        .value_kind(::observed::metadata::MetricValueKind::U64)
+                                        .build(),
+                                ),
+                            ),
+                        )
+                        .with_field_index(0usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "queue_delta",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("queue_delta"),
+                            ),
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::instrument(
+                                    "queue_delta",
+                                    ::observed::metadata::MetricDescription::builder(
+                                            "operation",
+                                            ::observed::metadata::InstrumentKind::UpDownCounter,
+                                        )
+                                        .description("")
+                                        .unit("")
+                                        .value_kind(::observed::metadata::MetricValueKind::I64)
+                                        .build(),
+                                ),
+                            ),
+                        )
+                        .with_field_index(1usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "level",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("level"),
+                            ),
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::instrument(
+                                    "level",
+                                    ::observed::metadata::MetricDescription::builder(
+                                            "operation",
+                                            ::observed::metadata::InstrumentKind::Gauge,
+                                        )
+                                        .description("")
+                                        .unit("")
+                                        .value_kind(::observed::metadata::MetricValueKind::F64)
+                                        .build(),
+                                ),
+                            ),
+                        )
+                        .with_field_index(2usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "duration_ms",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("duration_ms"),
+                            ),
+                            ::core::option::Option::Some(
+                                ::observed::metadata::MetricFieldEntry::instrument(
+                                    "duration_ms",
+                                    ::observed::metadata::MetricDescription::builder(
+                                            "operation",
+                                            ::observed::metadata::InstrumentKind::Histogram,
+                                        )
+                                        .description("")
+                                        .unit("ms")
+                                        .value_kind(::observed::metadata::MetricValueKind::F64)
+                                        .build(),
+                                ),
+                            ),
+                        )
+                        .with_field_index(3usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "hits",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("hits"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "hits",
-                            ::observed::metadata::MetricDescription::new(
-                                "operation.hits",
-                                ::observed::metadata::InstrumentKind::Counter,
-                                "completed operations",
-                                "1",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.hits.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.hits.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "queue_delta",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("queue_delta"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "queue_delta",
-                            ::observed::metadata::MetricDescription::new(
-                                "operation",
-                                ::observed::metadata::InstrumentKind::UpDownCounter,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|_| ::observed::Value::from(self.queue_delta.clone()),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "level",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("level"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "level",
-                            ::observed::metadata::MetricDescription::new(
-                                "operation",
-                                ::observed::metadata::InstrumentKind::Gauge,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.level.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|_| ::observed::Value::from(self.level.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "duration_ms",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("duration_ms"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "duration_ms",
-                            ::observed::metadata::MetricDescription::new(
-                                "operation",
-                                ::observed::metadata::InstrumentKind::Histogram,
-                                "",
-                                "ms",
-                            ),
-                        ),
-                    ),
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
                     &|_| ::observed::Value::from(self.duration_ms.clone()),
                 )?;
             }
             ::core::ops::ControlFlow::Continue(())
-        }
-        const METRICS: &'static [::observed::metadata::MetricDescription] = &[
-            ::observed::metadata::MetricDescription::builder(
-                    "operation.hits",
-                    ::observed::metadata::InstrumentKind::Counter,
-                )
-                .description("completed operations")
-                .unit("1")
-                .value_kind(::observed::metadata::MetricValueKind::U64)
-                .build(),
-            ::observed::metadata::MetricDescription::builder(
-                    "operation",
-                    ::observed::metadata::InstrumentKind::UpDownCounter,
-                )
-                .description("")
-                .unit("")
-                .value_kind(::observed::metadata::MetricValueKind::I64)
-                .build(),
-            ::observed::metadata::MetricDescription::builder(
-                    "operation",
-                    ::observed::metadata::InstrumentKind::Gauge,
-                )
-                .description("")
-                .unit("")
-                .value_kind(::observed::metadata::MetricValueKind::F64)
-                .build(),
-            ::observed::metadata::MetricDescription::builder(
-                    "operation",
-                    ::observed::metadata::InstrumentKind::Histogram,
-                )
-                .description("")
-                .unit("ms")
-                .value_kind(::observed::metadata::MetricValueKind::F64)
-                .build(),
-        ];
-        fn metric_value(
-            &self,
-            slot: usize,
-        ) -> ::core::option::Option<::observed::metadata::MetricValue> {
-            match slot {
-                0usize => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::U64(
-                            ::core::convert::From::from(self.hits),
-                        ),
-                    )
-                }
-                1usize => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::I64(
-                            ::core::convert::From::from(self.queue_delta),
-                        ),
-                    )
-                }
-                2usize => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::F64(
-                            ::core::convert::From::from(self.level),
-                        ),
-                    )
-                }
-                3usize => {
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValue::F64(
-                            ::core::convert::From::from(self.duration_ms),
-                        ),
-                    )
-                }
-                _ => ::core::option::Option::None,
-            }
         }
     }
 };

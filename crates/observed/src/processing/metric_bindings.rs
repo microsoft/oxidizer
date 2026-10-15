@@ -4,17 +4,21 @@
 //! Prepared destinations for numeric metric measurements.
 
 use std::any::TypeId;
+use std::ops::ControlFlow;
 
-use crate::Event;
+use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+
 use crate::metadata::{EventDescription, MetricDescription, MetricValue, MetricValueKind};
 use crate::processing::EventView;
+use crate::{Event, Value};
 
 /// Backend-neutral bindings from complete event types to prepared metric targets.
 ///
 /// Configure bindings at startup, then share them read-only across processors.
-/// Recording selects registered Rust type identities and numeric slots; slot
-/// selection and extraction use generated numeric accessors. Recording performs
-/// no string matching, hashing, allocation, redaction, or generic field visits.
+/// Recording selects registered Rust type identities and stable numeric field
+/// indices. The lazy field visitor evaluates only bound measurement getters.
+/// Successful recording performs no string matching, hashing, allocation,
+/// redaction, or enrichment visits; other event fields are still enumerated.
 ///
 /// Type identities are process-local Rust identities, not a cross-DLL ABI.
 /// Dynamic events without a matching typed identity are not accepted.
@@ -47,15 +51,26 @@ impl<T> MetricBindings<T> {
     /// # Errors
     ///
     /// Returns an error if the event has no typed identity or no instruments,
-    /// or is already registered. No target is prepared and no bindings are
+    /// declares inconsistent field indices, or is already registered.
+    /// No target is prepared and no bindings are
     /// changed when validation fails.
     pub fn bind_event<E: Event>(&mut self, mut prepare: impl FnMut(&MetricDescription) -> T) -> Result<(), MetricBindingError> {
         let description = E::DESCRIPTION;
         let identity = description
             .type_id()
             .ok_or_else(|| MetricBindingError::from(MissingIdentity::new(description.name())))?;
-        if E::METRICS.is_empty() {
+        if description.metric().is_none()
+            && !description
+                .fields()
+                .iter()
+                .any(|field| field.metric().is_some_and(|entry| entry.instrument_description().is_some()))
+        {
             return Err(MissingInstruments::new(description.name()).into());
+        }
+        for (index, field) in description.fields().iter().enumerate() {
+            if field.field_index() != Some(index) {
+                return Err(InvalidFieldIndex::new(description.name(), index, field.field_index()).into());
+            }
         }
         // Sorted vectors avoid hashing and first-use cache mutation at emit time.
         let index = self
@@ -63,14 +78,21 @@ impl<T> MetricBindings<T> {
             .binary_search_by_key(&identity, |event| event.identity)
             .err()
             .ok_or_else(|| MetricBindingError::from(DuplicateEvent::new(description.name())))?;
-        let metrics = E::METRICS
+        let counter = description.metric().map(&mut prepare);
+        let fields = description
+            .fields()
             .iter()
-            .map(|metric| MetricTarget {
-                value_kind: metric.value_kind(),
-                target: prepare(metric),
+            .map(|field| {
+                field
+                    .metric()
+                    .and_then(|entry| entry.instrument_description())
+                    .map(|metric| MetricTarget {
+                        value_kind: metric.value_kind(),
+                        target: prepare(metric),
+                    })
             })
             .collect();
-        self.events.insert(index, EventTargets { identity, metrics });
+        self.events.insert(index, EventTargets { identity, counter, fields });
         Ok(())
     }
 
@@ -83,14 +105,14 @@ impl<T> MetricBindings<T> {
     /// Reads bound numeric measurements and passes them to backend targets.
     ///
     /// Unbound and disabled events are ignored. Events emitted through a sink
-    /// follow that sink's timestamp, context, and sampling rules. Direct numeric
+    /// follow that sink's timestamp, context, and sampling rules. Numeric
     /// recording never inspects enrichment or constructs signal records.
     ///
     /// # Errors
     ///
-    /// Returns an error if an accepted event lacks a bound numeric slot or its
-    /// representation differs from the declaration. Earlier targets have already
-    /// received their measurements.
+    /// Returns an error if an accepted event omits, repeats, or reorders bound
+    /// fields, or supplies a non-numeric or incompatible value. Earlier targets
+    /// have already received their measurements.
     pub fn record(&self, event: &EventView<'_>, mut record: impl FnMut(&T, MetricValue)) -> Result<(), MetricReadError> {
         let description = event.description();
         if description.is_disabled() {
@@ -99,18 +121,73 @@ impl<T> MetricBindings<T> {
         let Some(targets) = self.targets(&description) else {
             return Ok(());
         };
-        for (slot, metric) in targets.metrics.iter().enumerate() {
-            let value = event
-                .metric_value(slot)
-                .ok_or_else(|| MetricReadError::from(MissingMeasurement::new(description.name(), slot)))?;
-            if let Some(expected) = metric.value_kind
-                && expected != value.kind()
-            {
-                return Err(MismatchedRepresentation::new(description.name(), slot, expected, value.kind()).into());
+        if let Some(counter) = &targets.counter {
+            record(counter, MetricValue::U64(1));
+        }
+        let mut remaining = targets
+            .fields
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| field.as_ref().map(|_| index));
+        let mut expected = remaining.next();
+        if expected.is_none() {
+            return Ok(());
+        }
+        let mut failure = None;
+        // Classified getters erase rather than disclose data if a manual event
+        // violates the required unredacted numeric measurement contract.
+        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
+        let _ = event.visit_fields(&mut |descriptor, getter| {
+            let Some(index) = descriptor.field_index() else {
+                return ControlFlow::Continue(());
+            };
+            let Some(Some(metric)) = targets.fields.get(index) else {
+                return ControlFlow::Continue(());
+            };
+            if expected != Some(index) {
+                failure = Some(InvalidFieldVisit::new(description.name(), expected, index).into());
+                return ControlFlow::Break(());
             }
-            record(&metric.target, value);
+            match Self::measurement(&getter(&redactor), metric.value_kind, description.name(), index) {
+                Ok(value) => record(&metric.target, value),
+                Err(error) => {
+                    failure = Some(error);
+                    return ControlFlow::Break(());
+                }
+            }
+            expected = remaining.next();
+            ControlFlow::Continue(())
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        if let Some(index) = expected {
+            return Err(MissingMeasurement::new(description.name(), index).into());
         }
         Ok(())
+    }
+
+    fn measurement(
+        value: &Value,
+        expected: Option<MetricValueKind>,
+        event_name: &'static str,
+        slot: usize,
+    ) -> Result<MetricValue, MetricReadError> {
+        let value = match *value {
+            // Value widens u8/u16/u32 into I64. Static metadata retains their
+            // unsigned origin so counters can recover it without losing bits.
+            Value::I64(value) if expected == Some(MetricValueKind::U64) && value >= 0 => MetricValue::U64(value.cast_unsigned()),
+            Value::I64(value) => MetricValue::I64(value),
+            Value::U64(value) => MetricValue::U64(value),
+            Value::F64(value) => MetricValue::F64(value),
+            _ => return Err(NonnumericMeasurement::new(event_name, slot).into()),
+        };
+        if let Some(expected) = expected
+            && expected != value.kind()
+        {
+            return Err(MismatchedRepresentation::new(event_name, slot, expected, value.kind()).into());
+        }
+        Ok(value)
     }
 
     // Common identity lookup for interest checks and numeric recording.
@@ -127,15 +204,15 @@ impl<T> MetricBindings<T> {
 ///
 /// The source retains the specific registration failure.
 #[ohno::error]
-#[from(MissingIdentity, MissingInstruments, DuplicateEvent)]
+#[from(MissingIdentity, MissingInstruments, DuplicateEvent, InvalidFieldIndex)]
 pub struct MetricBindingError;
 
-/// A bound event did not supply a numeric slot with the declared representation.
+/// A bound event did not visit its declared numeric fields correctly.
 ///
 /// This indicates an inconsistent hand-written event implementation.
 /// Processors must report the failure through their diagnostics or flush API.
 #[ohno::error]
-#[from(MissingMeasurement, MismatchedRepresentation)]
+#[from(MissingMeasurement, MismatchedRepresentation, NonnumericMeasurement, InvalidFieldVisit)]
 pub struct MetricReadError;
 
 // One prepared destination and its declared measurement representation.
@@ -145,11 +222,12 @@ struct MetricTarget<T> {
     target: T,
 }
 
-// Ordered metric slots belonging to one registered Rust event identity.
+// Prepared event-level target and indexed field targets for one Rust identity.
 #[derive(Debug)]
 struct EventTargets<T> {
     identity: TypeId,
-    metrics: Vec<MetricTarget<T>>,
+    counter: Option<T>,
+    fields: Vec<Option<MetricTarget<T>>>,
 }
 
 #[ohno::error]
@@ -171,7 +249,30 @@ struct DuplicateEvent {
 }
 
 #[ohno::error]
-#[display("event `{event_name}` has invalid metric slot {slot}: no measurement supplied")]
+#[display("cannot bind metrics on event `{event_name}`: field {index} declares invalid index {actual:?}")]
+struct InvalidFieldIndex {
+    event_name: &'static str,
+    index: usize,
+    actual: Option<usize>,
+}
+
+#[ohno::error]
+#[display("event `{event_name}` visited metric field {actual} out of order (expected {expected:?})")]
+struct InvalidFieldVisit {
+    event_name: &'static str,
+    expected: Option<usize>,
+    actual: usize,
+}
+
+#[ohno::error]
+#[display("event `{event_name}` has invalid metric field {slot}: nonnumeric measurement supplied")]
+struct NonnumericMeasurement {
+    event_name: &'static str,
+    slot: usize,
+}
+
+#[ohno::error]
+#[display("event `{event_name}` has invalid metric field {slot}: no measurement supplied")]
 struct MissingMeasurement {
     event_name: &'static str,
     slot: usize,
@@ -179,7 +280,7 @@ struct MissingMeasurement {
 
 #[ohno::error]
 #[display(
-    "event `{event_name}` has invalid metric slot {slot}: numeric representation differs from its declaration (expected {expected:?}, got {actual:?})"
+    "event `{event_name}` has invalid metric field {slot}: numeric representation differs from its declaration (expected {expected:?}, got {actual:?})"
 )]
 struct MismatchedRepresentation {
     event_name: &'static str,
@@ -193,7 +294,6 @@ struct MismatchedRepresentation {
 mod tests {
     use std::borrow::Cow;
     use std::cell::Cell;
-    use std::ops::ControlFlow;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::time::SystemTime;
 
@@ -205,8 +305,11 @@ mod tests {
     use crate::processing::FieldVisitorFn;
 
     #[event("bound")]
-    #[counter]
-    struct Bound;
+    #[counter(value)]
+    struct Bound {
+        #[unredacted]
+        value: u64,
+    }
 
     #[event("empty")]
     #[info]
@@ -215,8 +318,8 @@ mod tests {
     struct Unidentified;
 
     impl Event for Unidentified {
-        const DESCRIPTION: EventDescription = EventDescription::new("untyped", None, None, None, true, false);
-        const METRICS: &'static [MetricDescription] = Bound::METRICS;
+        const DESCRIPTION: EventDescription =
+            EventDescription::new("untyped", None, None, None, true, false).with_fields(Bound::DESCRIPTION.fields());
 
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
@@ -224,7 +327,7 @@ mod tests {
     }
 
     // Supplies missing or deliberately incompatible values to the real recording path.
-    struct ReadProbe(Option<MetricValue>);
+    struct ReadProbe(Option<Value>);
 
     impl DynEvent for ReadProbe {
         fn name(&self) -> &'static str {
@@ -242,14 +345,14 @@ mod tests {
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
         }
-        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            if let Some(value) = &self.0 {
+                visitor(&Bound::DESCRIPTION.fields()[0], &|_| value.clone())?;
+            }
             ControlFlow::Continue(())
         }
         fn description(&self) -> EventDescription {
             Bound::DESCRIPTION
-        }
-        fn metric_value(&self, _: usize) -> Option<MetricValue> {
-            self.0
         }
     }
 
@@ -273,7 +376,7 @@ mod tests {
         let read = MetricReadError::from(MissingMeasurement::new("request", 2_usize)).enrich("recording counters");
         assert_eq!(
             read.message().lines().next().unwrap(),
-            "event `request` has invalid metric slot 2: no measurement supplied"
+            "event `request` has invalid metric field 2: no measurement supplied"
         );
         assert!(read.to_string().contains("recording counters"));
     }
@@ -293,7 +396,7 @@ mod tests {
         let read = bindings.record(&view, |(), _| unreachable!()).unwrap_err();
         let cause = read.find_source::<MissingMeasurement>().unwrap();
         assert_eq!((cause.event_name, cause.slot), ("bound", 0));
-        let signed_value = ReadProbe(Some(MetricValue::I64(-1)));
+        let signed_value = ReadProbe(Some(Value::I64(-1)));
         let view = EventView::new_synthetic(&signed_value, SystemTime::UNIX_EPOCH);
         let mismatch = bindings.record(&view, |(), _| unreachable!()).unwrap_err();
         let cause = mismatch.find_source::<MismatchedRepresentation>().unwrap();

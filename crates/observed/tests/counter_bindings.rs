@@ -4,7 +4,7 @@
 //! Whole-event registration, numeric delivery, and legacy processor compatibility.
 
 #![expect(clippy::unwrap_used, reason = "test helpers use unwrap for informative failure backtraces")]
-#![expect(clippy::panic, reason = "test adapters trip if numeric delivery falls back to generic visitors")]
+#![expect(clippy::panic, reason = "test adapters trip on unexpected getters or metric delivery")]
 
 use std::any::TypeId;
 use std::borrow::Cow;
@@ -15,7 +15,9 @@ use std::time::SystemTime;
 
 use data_privacy::RedactionEngine;
 use observed::interop::{DynEvent, emit_dyn_event};
-use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValue, MetricValueKind};
+use observed::metadata::{
+    EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricFieldEntry, MetricValue, MetricValueKind,
+};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
 use observed::{Event, FlushError, Sink, Value, emit, event};
 use ohno::ErrorExt;
@@ -248,33 +250,214 @@ fn generic_and_borrowed_events_need_neither_clone_nor_any() {
     assert_eq!(total.load(Ordering::Relaxed), 18);
 }
 
-/// Supplies numeric slots while rejecting any fallback to generic field visits.
+/// Supplies an indexed measurement through the same visitor used by other processors.
 struct NumericOnly {
     amount: u32,
 }
 
 impl Event for NumericOnly {
-    const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(TypeId::of::<Self>()), None, None, true, false);
-    const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("numeric", InstrumentKind::Counter)
-        .value_kind(MetricValueKind::U64)
-        .build()];
+    const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(TypeId::of::<Self>()), None, None, true, false)
+        .with_fields(&[FieldDescriptor::new(
+            "amount",
+            None,
+            Some(MetricFieldEntry::instrument(
+                "amount",
+                MetricDescription::builder("numeric", InstrumentKind::Counter)
+                    .value_kind(MetricValueKind::U64)
+                    .build(),
+            )),
+        )
+        .with_field_index(0)]);
 
-    fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        panic!("numeric bindings must never visit generic fields")
-    }
-
-    fn metric_value(&self, slot: usize) -> Option<MetricValue> {
-        (slot == 0).then_some(MetricValue::U64(u64::from(self.amount)))
+    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        visitor(&Self::DESCRIPTION.fields()[0], &|_| Value::from(self.amount))
     }
 }
 
 #[test]
-fn numeric_recording_does_not_visit_generic_fields() {
+fn numeric_recording_uses_the_indexed_field_visitor() {
     let total = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<NumericOnly>(|_| Arc::clone(&total)).unwrap();
-    emit!(sink(bindings), NumericOnly { amount: 123 });
+    let sink = sink(bindings);
+    emit!(sink, NumericOnly { amount: 0 });
+    emit!(sink, NumericOnly { amount: 123 });
     assert_eq!(total.load(Ordering::Relaxed), 123);
+}
+
+#[test]
+fn optional_fields_keep_the_static_index_of_later_measurements() {
+    #[event("optional.route")]
+    #[info]
+    #[counter(bytes, name = "bytes")]
+    struct OptionalRoute {
+        #[unredacted]
+        #[if_none(drop)]
+        route: Option<&'static str>,
+        #[unredacted]
+        bytes: u32,
+    }
+    let fields = OptionalRoute::DESCRIPTION.fields();
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.field_index(), field.field_name()))
+            .collect::<Vec<_>>(),
+        [(Some(0), "route"), (Some(1), "bytes")],
+    );
+    let mut visited = Vec::new();
+    let result = OptionalRoute { route: None, bytes: 7 }.visit_fields(&mut |field, _| {
+        visited.push((field.field_index(), field.field_name()));
+        ControlFlow::Continue(())
+    });
+    assert_eq!(result, ControlFlow::Continue(()));
+    assert_eq!(visited, [(Some(1), "bytes")]);
+    let total = Arc::new(AtomicU64::new(0));
+    let mut bindings = MetricBindings::new();
+    bindings.bind_event::<OptionalRoute>(|_| Arc::clone(&total)).unwrap();
+    let sink = sink(bindings);
+    emit!(sink, OptionalRoute { route: None, bytes: 7 });
+    emit!(
+        sink,
+        OptionalRoute {
+            route: Some("/items"),
+            bytes: 11
+        }
+    );
+    assert_eq!(total.load(Ordering::Relaxed), 18);
+}
+
+#[test]
+fn generated_visitors_use_trait_metadata_when_an_event_has_its_own_description_constant() {
+    #[event("description.shadow")]
+    #[counter(value)]
+    struct Shadowed {
+        #[unredacted]
+        value: u32,
+    }
+    impl Shadowed {
+        const DESCRIPTION: &str = "application metadata";
+    }
+    assert_eq!(Shadowed::DESCRIPTION, "application metadata");
+    let total = Arc::new(AtomicU64::new(0));
+    let mut bindings = MetricBindings::new();
+    bindings.bind_event::<Shadowed>(|_| Arc::clone(&total)).unwrap();
+    emit!(sink(bindings), Shadowed { value: 17 });
+    assert_eq!(total.load(Ordering::Relaxed), 17);
+}
+
+#[test]
+fn bound_recording_never_evaluates_unbound_field_getters() {
+    struct Guarded;
+    impl Event for Guarded {
+        const DESCRIPTION: EventDescription = EventDescription::new("guarded", Some(TypeId::of::<Self>()), None, None, false, false)
+            .with_fields(&[
+                FieldDescriptor::log_only("payload").with_field_index(0),
+                FieldDescriptor::new(
+                    "amount",
+                    None,
+                    Some(MetricFieldEntry::instrument(
+                        "amount",
+                        MetricDescription::builder("amount", InstrumentKind::Counter)
+                            .value_kind(MetricValueKind::U64)
+                            .build(),
+                    )),
+                )
+                .with_field_index(1),
+            ]);
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&Self::DESCRIPTION.fields()[0], &|_| panic!("unbound field getter"))?;
+            visitor(&FieldDescriptor::log_only("runtime-only"), &|_| panic!("unindexed getter"))?;
+            visitor(&FieldDescriptor::log_only("foreign").with_field_index(usize::MAX), &|_| {
+                panic!("unknown getter")
+            })?;
+            visitor(&Self::DESCRIPTION.fields()[1], &|_| Value::U64(23))
+        }
+    }
+    assert!(Guarded::DESCRIPTION.contains_metrics());
+    assert!(!Guarded::DESCRIPTION.with_fields(&[]).contains_metrics());
+    assert_eq!(FieldDescriptor::log_only("enrichment").field_index(), None);
+    let total = Arc::new(AtomicU64::new(0));
+    let mut bindings = MetricBindings::new();
+    bindings.bind_event::<Guarded>(|_| Arc::clone(&total)).unwrap();
+    emit!(sink(bindings), Guarded);
+    assert_eq!(total.load(Ordering::Relaxed), 23);
+}
+
+#[test]
+fn runtime_field_inventory_determines_metric_presence() {
+    const FIELDS: &[FieldDescriptor] = &[
+        FieldDescriptor::log_only("label").with_field_index(0),
+        FieldDescriptor::new("region", None, Some(MetricFieldEntry::dimension("region"))).with_field_index(1),
+        FieldDescriptor::new(
+            "amount",
+            None,
+            Some(MetricFieldEntry::instrument(
+                "amount",
+                MetricDescription::new("amount", InstrumentKind::Counter, "", ""),
+            )),
+        )
+        .with_field_index(2),
+    ];
+    let description = std::hint::black_box(EventDescription::new("runtime", None, None, None, false, false));
+    let description = description.with_fields(FIELDS);
+    assert!(description.contains_metrics());
+    assert_eq!(description.fields().len(), 3);
+    assert_eq!(description.fields()[2].field_index(), Some(2));
+    assert!(!description.with_fields(&FIELDS[..2]).contains_metrics());
+}
+
+#[test]
+fn fieldless_counters_record_one_without_visiting_unneeded_fields() {
+    struct CountOnly;
+    impl Event for CountOnly {
+        const DESCRIPTION: EventDescription = EventDescription::new(
+            "count.only",
+            Some(TypeId::of::<Self>()),
+            None,
+            Some(MetricDescription::new("count", InstrumentKind::Counter, "", "")),
+            false,
+            false,
+        )
+        .with_fields(&[FieldDescriptor::log_only("unused").with_field_index(0)]);
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            panic!("a fieldless counter needs no field values")
+        }
+    }
+    let total = Arc::new(AtomicU64::new(0));
+    let mut bindings = MetricBindings::new();
+    bindings.bind_event::<CountOnly>(|_| Arc::clone(&total)).unwrap();
+    let sink = sink(bindings);
+    emit!(sink, CountOnly);
+    emit!(sink, CountOnly);
+    assert_eq!(total.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn invalid_static_field_indices_fail_before_preparing_targets() {
+    struct Unindexed;
+    impl Event for Unindexed {
+        const DESCRIPTION: EventDescription = EventDescription::new("unindexed", Some(TypeId::of::<Self>()), None, None, true, false)
+            .with_fields(&[FieldDescriptor::new(
+                "value",
+                None,
+                Some(MetricFieldEntry::instrument(
+                    "value",
+                    MetricDescription::new("value", InstrumentKind::Counter, "", ""),
+                )),
+            )]);
+        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+    let mut bindings = MetricBindings::<()>::new();
+    let error = bindings
+        .bind_event::<Unindexed>(|_| panic!("invalid metadata must fail before preparing targets"))
+        .unwrap_err();
+    assert_eq!(
+        primary_message(&error),
+        "cannot bind metrics on event `unindexed`: field 0 declares invalid index None"
+    );
 }
 
 #[test]
@@ -297,8 +480,16 @@ fn standard_arc_processor_delegates_interest_and_delivery() {
 fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored() {
     struct LegacyNumeric;
     impl Event for LegacyNumeric {
-        const DESCRIPTION: EventDescription = NumericOnly::DESCRIPTION;
-        const METRICS: &'static [MetricDescription] = &[MetricDescription::new("numeric", InstrumentKind::Counter, "", "")];
+        const DESCRIPTION: EventDescription = EventDescription::new("numeric", Some(TypeId::of::<NumericOnly>()), None, None, true, false)
+            .with_fields(&[FieldDescriptor::new(
+                "amount",
+                None,
+                Some(MetricFieldEntry::instrument(
+                    "amount",
+                    MetricDescription::new("numeric", InstrumentKind::Counter, "", ""),
+                )),
+            )
+            .with_field_index(0)]);
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
@@ -312,23 +503,23 @@ fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored(
     bindings.bind_event::<LegacyNumeric>(|_| ()).unwrap();
     let mut values = Vec::new();
     bindings.record(&view, |(), value| values.push(value)).unwrap();
-    assert_eq!(values, [MetricValue::U64(19)]);
+    assert_eq!(values, [MetricValue::I64(19)]);
 }
 
-/// Declares numeric metadata but leaves the slot reader at its missing-value default.
+/// Declares numeric metadata but never visits its measurement.
 struct MissingSlot;
 
 impl Event for MissingSlot {
-    const DESCRIPTION: EventDescription = EventDescription::new("missing", Some(TypeId::of::<Self>()), None, None, true, false);
-    const METRICS: &'static [MetricDescription] = NumericOnly::METRICS;
+    const DESCRIPTION: EventDescription = EventDescription::new("missing", Some(TypeId::of::<Self>()), None, None, true, false)
+        .with_fields(NumericOnly::DESCRIPTION.fields());
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        panic!("numeric bindings must never visit generic fields")
+        ControlFlow::Continue(())
     }
 }
 
 #[test]
-fn missing_numeric_slots_are_reported() {
+fn missing_numeric_field_visits_are_reported() {
     struct Inspect(MetricBindings<()>);
     impl EventProcessor for Inspect {
         fn is_interested(&self, _: &EventDescription) -> bool {
@@ -341,7 +532,7 @@ fn missing_numeric_slots_are_reported() {
                 .unwrap_err();
             assert_eq!(
                 primary_message(&error),
-                "event `missing` has invalid metric slot 0: no measurement supplied"
+                "event `missing` has invalid metric field 0: no measurement supplied"
             );
         }
         fn flush(&self) -> Result<(), FlushError> {
@@ -354,7 +545,7 @@ fn missing_numeric_slots_are_reported() {
     emit!(sink, MissingSlot);
 }
 
-/// Forwards the numeric-only fixture through the dynamic event boundary.
+/// Forwards the indexed-field fixture through the dynamic event boundary.
 struct NumericAdapter<'a>(&'a NumericOnly);
 
 impl DynEvent for NumericAdapter<'_> {
@@ -373,19 +564,16 @@ impl DynEvent for NumericAdapter<'_> {
     fn source_crate(&self) -> Option<Cow<'static, str>> {
         None
     }
-    fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        panic!("numeric bindings must not visit adapter fields")
+    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        self.0.visit_fields(visitor)
     }
     fn description(&self) -> EventDescription {
         NumericOnly::DESCRIPTION
     }
-    fn metric_value(&self, slot: usize) -> Option<MetricValue> {
-        self.0.metric_value(slot)
-    }
 }
 
 #[test]
-fn synthetic_views_and_dynamic_emission_forward_numeric_slots() {
+fn synthetic_views_and_dynamic_emission_forward_indexed_fields() {
     let total = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<NumericOnly>(|_| Arc::clone(&total)).unwrap();
@@ -471,8 +659,8 @@ fn registering_an_event_twice_fails_without_changing_its_existing_targets() {
 struct Unidentified;
 
 impl Event for Unidentified {
-    const DESCRIPTION: EventDescription = EventDescription::new("unidentified", None, None, None, true, false);
-    const METRICS: &'static [MetricDescription] = NumericOnly::METRICS;
+    const DESCRIPTION: EventDescription =
+        EventDescription::new("unidentified", None, None, None, true, false).with_fields(NumericOnly::DESCRIPTION.fields());
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }
@@ -600,34 +788,34 @@ fn every_supported_unsigned_width_widens_without_losing_bits() {
     );
 }
 
-#[test]
-fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations() {
-    #[event("numeric.kinds")]
-    #[counter(name = "Count")]
-    #[updown_counter(small, name = "Small")]
-    #[updown_counter(medium, name = "Medium")]
-    #[updown_counter(large, name = "Large")]
-    #[updown_counter(wide, name = "Wide")]
-    #[updown_counter(pointer, name = "Pointer")]
-    #[gauge(level, name = "Level")]
-    #[histogram(duration, name = "Duration")]
-    struct NumericKinds {
-        #[unredacted]
-        small: i8,
-        #[unredacted]
-        medium: i16,
-        #[unredacted]
-        large: i32,
-        #[unredacted]
-        wide: i64,
-        #[unredacted]
-        pointer: isize,
-        #[unredacted]
-        level: u64,
-        #[unredacted]
-        duration: f32,
-    }
+#[event("numeric.kinds")]
+#[counter(name = "Count")]
+#[updown_counter(small, name = "Small")]
+#[updown_counter(medium, name = "Medium")]
+#[updown_counter(large, name = "Large")]
+#[updown_counter(wide, name = "Wide")]
+#[updown_counter(pointer, name = "Pointer")]
+#[gauge(level, name = "Level")]
+#[histogram(duration, name = "Duration")]
+struct NumericKinds {
+    #[unredacted]
+    small: i8,
+    #[unredacted]
+    medium: i16,
+    #[unredacted]
+    large: i32,
+    #[unredacted]
+    wide: i64,
+    #[unredacted]
+    pointer: isize,
+    #[unredacted]
+    level: u64,
+    #[unredacted]
+    duration: f32,
+}
 
+#[test]
+fn visitor_recording_preserves_signed_deltas_gauges_and_float_observations() {
     struct Capture(MetricBindings<usize>, Arc<Mutex<Vec<MetricValue>>>);
     impl EventProcessor for Capture {
         fn is_interested(&self, description: &EventDescription) -> bool {
@@ -687,7 +875,17 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
         ]
     );
     assert_eq!(
-        NumericKinds::METRICS.iter().map(MetricDescription::value_kind).collect::<Vec<_>>(),
+        NumericKinds::DESCRIPTION
+            .metric()
+            .into_iter()
+            .chain(
+                NumericKinds::DESCRIPTION
+                    .fields()
+                    .iter()
+                    .filter_map(|field| field.metric()?.instrument_description()),
+            )
+            .map(MetricDescription::value_kind)
+            .collect::<Vec<_>>(),
         [
             Some(MetricValueKind::U64),
             Some(MetricValueKind::I64),
@@ -705,13 +903,10 @@ fn numeric_access_preserves_signed_deltas_gauges_and_legacy_float_observations()
 fn inconsistent_numeric_representation_is_reported_before_delivery() {
     struct WrongType;
     impl Event for WrongType {
-        const DESCRIPTION: EventDescription = EventDescription::new("wrong.type", Some(TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [MetricDescription] = NumericOnly::METRICS;
-        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            panic!("numeric access must not visit general fields")
-        }
-        fn metric_value(&self, _: usize) -> Option<MetricValue> {
-            Some(MetricValue::I64(-1))
+        const DESCRIPTION: EventDescription = EventDescription::new("wrong.type", Some(TypeId::of::<Self>()), None, None, true, false)
+            .with_fields(NumericOnly::DESCRIPTION.fields());
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&Self::DESCRIPTION.fields()[0], &|_| Value::I64(-1))
         }
     }
     struct Inspect(MetricBindings<()>);
@@ -726,7 +921,7 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
                 .unwrap_err();
             assert_eq!(
                 primary_message(&error),
-                "event `wrong.type` has invalid metric slot 0: numeric representation differs from its declaration (expected U64, got I64)"
+                "event `wrong.type` has invalid metric field 0: numeric representation differs from its declaration (expected U64, got I64)"
             );
         }
         fn flush(&self) -> Result<(), FlushError> {
@@ -737,4 +932,120 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
     bindings.bind_event::<WrongType>(|_| ()).unwrap();
     let sink = Sink::new("wrong.type", vec![Arc::new(Inspect(bindings))], SimpleClock::new_frozen());
     emit!(sink, WrongType);
+}
+
+#[test]
+fn nonnumeric_getters_and_incompatible_float_values_are_reported() {
+    struct InvalidValue(Value);
+    impl Event for InvalidValue {
+        const DESCRIPTION: EventDescription = NumericOnly::DESCRIPTION;
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&Self::DESCRIPTION.fields()[0], &|_| self.0.clone())
+        }
+    }
+    impl DynEvent for InvalidValue {
+        fn name(&self) -> &'static str {
+            "numeric"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn description(&self) -> EventDescription {
+            Self::DESCRIPTION
+        }
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            Event::visit_fields(self, visitor)
+        }
+    }
+    let mut bindings = MetricBindings::<()>::new();
+    bindings.bind_event::<InvalidValue>(|_| ()).unwrap();
+    for (value, expected) in [
+        (Value::Bool(true), "nonnumeric measurement supplied"),
+        (
+            Value::F64(1.5),
+            "numeric representation differs from its declaration (expected U64, got F64)",
+        ),
+    ] {
+        let probe = InvalidValue(value);
+        let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
+        let error = bindings
+            .record(&view, |(), _| panic!("invalid value must not be delivered"))
+            .unwrap_err();
+        assert_eq!(
+            primary_message(&error),
+            format!("event `numeric` has invalid metric field 0: {expected}")
+        );
+    }
+}
+
+#[test]
+fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
+    struct Visits(&'static [usize]);
+    const VISIT_FIELDS: &[FieldDescriptor] = &[
+        NumericOnly::DESCRIPTION.fields()[0],
+        NumericOnly::DESCRIPTION.fields()[0].with_field_index(1),
+    ];
+    impl Event for Visits {
+        const DESCRIPTION: EventDescription =
+            EventDescription::new("visits", Some(TypeId::of::<Self>()), None, None, true, false).with_fields(VISIT_FIELDS);
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            for &index in self.0 {
+                visitor(&Self::DESCRIPTION.fields()[index], &|_| Value::U64(7))?;
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    impl DynEvent for Visits {
+        fn name(&self) -> &'static str {
+            "visits"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn description(&self) -> EventDescription {
+            Self::DESCRIPTION
+        }
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            Event::visit_fields(self, visitor)
+        }
+    }
+    let mut bindings = MetricBindings::new();
+    let mut index = 0;
+    bindings
+        .bind_event::<Visits>(|_| {
+            let target = index;
+            index += 1;
+            target
+        })
+        .unwrap();
+    for (indices, delivered) in [
+        (&[1, 0][..], vec![]),
+        (&[0, 0][..], vec![(0, MetricValue::U64(7))]),
+        (&[0, 1, 1][..], vec![(0, MetricValue::U64(7)), (1, MetricValue::U64(7))]),
+    ] {
+        let probe = Visits(indices);
+        let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
+        let mut values = Vec::new();
+        let error = bindings.record(&view, |target, value| values.push((*target, value))).unwrap_err();
+        assert!(primary_message(&error).contains("out of order"));
+        assert_eq!(values, delivered);
+    }
 }

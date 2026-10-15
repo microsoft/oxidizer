@@ -124,13 +124,20 @@ impl PerfCounterProcessorBuilder {
     /// Names must be unique across the category, including case variants.
     /// A selected set must contain between one and 256 counters. Unbound declared
     /// counters remain at zero; every instrument on a bound event must be mapped.
-    /// No redactor or general field visitor runs when recording values.
+    /// Recording visits event fields but evaluates only bound numeric getters,
+    /// without redaction or enrichment visits.
     #[must_use]
     pub fn bind_event<E: Event>(mut self) -> Self {
         if self.error.is_some() {
             return self;
         }
-        for metric in E::METRICS {
+        let description = E::DESCRIPTION;
+        for metric in description.metric().into_iter().chain(
+            description
+                .fields()
+                .iter()
+                .filter_map(|field| field.metric()?.instrument_description()),
+        ) {
             if !matches!(
                 (metric.kind(), metric.value_kind()),
                 (InstrumentKind::Counter | InstrumentKind::Gauge, Some(MetricValueKind::U64))
@@ -643,10 +650,18 @@ mod tests {
     struct MissingSlot;
 
     impl Event for MissingSlot {
-        const DESCRIPTION: EventDescription = EventDescription::new("missing.slot", Some(TypeId::of::<Self>()), None, None, true, false);
-        const METRICS: &'static [MetricDescription] = &[MetricDescription::builder("Missing", InstrumentKind::Counter)
-            .value_kind(MetricValueKind::U64)
-            .build()];
+        const DESCRIPTION: EventDescription = EventDescription::new("missing.slot", Some(TypeId::of::<Self>()), None, None, true, false)
+            .with_fields(&[observed::metadata::FieldDescriptor::new(
+                "value",
+                None,
+                Some(observed::metadata::MetricFieldEntry::instrument(
+                    "value",
+                    MetricDescription::builder("Missing", InstrumentKind::Counter)
+                        .value_kind(MetricValueKind::U64)
+                        .build(),
+                )),
+            )
+            .with_field_index(0)]);
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
@@ -696,7 +711,7 @@ mod tests {
                 .lines()
                 .next()
                 .unwrap(),
-            "event `missing.slot` has invalid metric slot 0: no measurement supplied"
+            "event `missing.slot` has invalid metric field 0: no measurement supplied"
         );
     }
     #[test]

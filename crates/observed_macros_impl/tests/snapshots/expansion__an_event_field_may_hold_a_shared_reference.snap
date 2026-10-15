@@ -10,62 +10,78 @@ struct SharedRefs<'a> {
 const _: () = {
     impl<'a> ::observed::Event for SharedRefs<'a> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shared.refs",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<SharedRefs<'static>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shared.refs",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "shared.refs",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<SharedRefs<'static>>(),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "shared.refs",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "plain",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("plain"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "nested",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("nested"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(1usize),
+                    ::observed::metadata::FieldDescriptor::new(
+                            "optional",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("optional"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(2usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "plain",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("plain"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.plain.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.plain.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "nested",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("nested"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.nested.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.nested.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "optional",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("optional"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 match self.optional.as_ref() {
                     ::core::option::Option::Some(__val) => {
                         visitor(
-                            &FIELD_DESC,
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
                             &|_engine| ::observed::Value::from(*__val),
                         )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                            &|_| ::observed::Value::from("n/a"),
+                        )?;
                     }
                 }
             }

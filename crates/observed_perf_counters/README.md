@@ -126,8 +126,10 @@ This crate exposes local counters; it does not send readings to a server.
 
 ## Behavior
 
-Emission updates atomic `u64` storage without string lookup, allocation,
-redaction, or Windows API calls. Windows collection snapshots these values
+Emission uses the lazy event-field visitor and prepared numeric indices to
+update atomic `u64` storage without string lookup, allocation, redaction, or
+Windows API calls. Only bound numeric getters run; other fields are enumerated
+without evaluating their values. Windows collection snapshots these values
 into registered reference cells. Events emitted through a sink follow that
 sink’s timestamp, context, enrichment, and sampling rules; the backend does
 not extract enrichment.

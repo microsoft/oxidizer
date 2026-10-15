@@ -57,7 +57,7 @@ fn do_something(sink: &Sink) {
 ## Whole-event metric bindings
 
 Metric destinations register an event type at startup. The event macro
-supplies its instruments’ names, descriptions, units, and numeric slots:
+supplies a static field inventory, including instrument metadata:
 
 ```rust
 use observed::processing::MetricBindings;
@@ -75,13 +75,19 @@ let mut bindings = MetricBindings::new();
 bindings
     .bind_event::<RequestCompleted>(|metric| metric.instrument_name())
     .unwrap();
-assert_eq!(RequestCompleted::METRICS[0].unit(), "By");
+let instrument = RequestCompleted::DESCRIPTION.fields()[0]
+    .metric()
+    .unwrap()
+    .instrument_description()
+    .unwrap();
+assert_eq!(instrument.unit(), "By");
 ```
 
 Destination processors use [`MetricBindings`][__link4]
 to associate complete events with prepared targets. Numeric recording selects event
-identities and generated slots without string matching, hashing, allocating,
-redacting, or enumerating generic fields. Events emitted through a sink follow
+identities and stable field indices without string matching, hashing, or allocating.
+The field visitor enumerates routed fields but evaluates only bound numeric getters,
+without redaction or enrichment visits. Events emitted through a sink follow
 that sink’s timestamp, context, and sampling rules.
 
 ## Enrichment
@@ -186,7 +192,7 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbq4rk7ouqcp8bX8rgE5nlUEkbzhcnnvvFb68by1etl4TdppNhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjCCaG9ic2VydmVkZjAuMjcuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbZ4pISYOldoUb-BWdK0INEpcb4MVn8ndwX_Ib7GTygFqidPthZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjCCaG9ic2VydmVkZjAuMjcuMA
  [__link0]: `emit!`
  [__link1]: https://docs.rs/data_privacy/0.13.0/data_privacy/?search=RedactionEngine
  [__link10]: https://docs.rs/observed/0.27.0/observed/?search=context::Transfer::with_enrichment

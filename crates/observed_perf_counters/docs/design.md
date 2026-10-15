@@ -3,9 +3,11 @@
 ## Metric behavior
 
 The processor connects typed `observed` events to local Windows performance
-counters. Startup binds every instrument on an event to a numeric slot.
-Emission reads those slots without resolving metric names or visiting general
-telemetry fields.
+counters. Startup reads the event's static field inventory and binds instruments
+to stable numeric field indices. Emission uses the existing lazy field visitor:
+it enumerates routed fields but evaluates only bound numeric getters, without
+resolving metric names or visiting enrichment. Optional fields keep their indices
+even when their visits are omitted. Fieldless counters record one separately.
 
 Unsigned counters add, signed up/down counters adjust a nonnegative total, and
 unsigned gauges replace their readings. Arithmetic overflow and underflow leave

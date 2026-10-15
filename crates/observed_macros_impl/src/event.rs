@@ -1004,12 +1004,11 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         // A fieldless event-level metric is always a counter (records `1`).
         quote! {
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
+                ::observed::metadata::MetricDescription::builder(
                     #instrument_name,
                     ::observed::metadata::InstrumentKind::Counter,
-                    #description,
-                    #unit,
-                )
+                ).description(#description).unit(#unit)
+                    .value_kind(::observed::metadata::MetricValueKind::U64).build()
             )
         }
     } else {
@@ -1021,7 +1020,15 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
     let has_log = def.log.is_some();
 
     let visit_fields_body = generate_visit_fields_body(&def.fields, has_log);
-    let metric_items = generate_metric_items(def);
+    let fields = def
+        .fields
+        .iter()
+        .filter(|field| field_reaches_signal(field, has_log))
+        .enumerate()
+        .map(|(index, field)| {
+            let descriptor = generate_field_descriptor(field, has_log);
+            quote! { #descriptor.with_field_index(#index) }
+        });
 
     quote! {
         const _: () = {
@@ -1034,7 +1041,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
                         #metric_expr,
                         #has_field_metrics,
                         #disabled,
-                    );
+                    ).with_fields(&[#(#fields),*]);
 
                 fn visit_fields(
                     &self,
@@ -1043,91 +1050,21 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
                     #visit_fields_body
                     ::core::ops::ControlFlow::Continue(())
                 }
-
-                #metric_items
             }
         };
-    }
-}
-
-/// Emits paired whole-event metadata and direct numeric readers in matching slot order,
-/// independent of generic field visiting, for prepared metric destinations.
-fn generate_metric_items(def: &EventDef) -> TokenStream {
-    let mut metrics = Vec::new();
-    let mut arms = Vec::new();
-    if let Some(metric) = &def.metric {
-        let name = metric.name.as_deref().unwrap_or(&def.event_name);
-        let description = metric.description.as_deref().unwrap_or("");
-        let unit = metric.unit.as_deref().unwrap_or("");
-        metrics.push(quote! {
-            ::observed::metadata::MetricDescription::builder(
-                #name, ::observed::metadata::InstrumentKind::Counter,
-            ).description(#description).unit(#unit)
-                .value_kind(::observed::metadata::MetricValueKind::U64).build(),
-        });
-        arms.push(quote! { 0 => ::core::option::Option::Some(::observed::metadata::MetricValue::U64(1_u64)), });
-    }
-    for field in &def.fields {
-        let Some(metric) = &field.metric_value else {
-            continue;
-        };
-        let slot = metrics.len();
-        let field_ident = &field.ident;
-        let ty = &field.ty;
-        let name = &metric.name;
-        let kind = metric.kind;
-        let description = metric.description.as_deref().unwrap_or("");
-        let unit = metric.unit.as_deref().unwrap_or("");
-        // Metric value types were already validated while resolving instruments.
-        let representation = match numeric_kind(ty) {
-            Some(NumericKind::UnsignedInt) => format_ident!("U64"),
-            Some(NumericKind::SignedInt) => format_ident!("I64"),
-            Some(NumericKind::Float) => format_ident!("F64"),
-            None => unreachable!("instrument value types are validated before code generation"),
-        };
-        metrics.push(quote! {
-            ::observed::metadata::MetricDescription::builder(
-                #name, ::observed::metadata::InstrumentKind::#kind,
-            ).description(#description).unit(#unit)
-                .value_kind(::observed::metadata::MetricValueKind::#representation).build(),
-        });
-        let value = match strip_type_wrappers(ty) {
-            Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "usize") => {
-                quote! { self.#field_ident as u64 }
-            }
-            Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "isize") => {
-                quote! { self.#field_ident as i64 }
-            }
-            _ => quote! { ::core::convert::From::from(self.#field_ident) },
-        };
-        arms.push(quote! {
-            #slot => ::core::option::Option::Some(::observed::metadata::MetricValue::#representation(#value)),
-        });
-    }
-    if metrics.is_empty() {
-        return quote! {};
-    }
-    let reader = quote! {
-            fn metric_value(&self, slot: usize) -> ::core::option::Option<::observed::metadata::MetricValue> {
-                match slot {
-                    #(#arms)*
-                    _ => ::core::option::Option::None,
-                }
-            }
-    };
-    quote! {
-        const METRICS: &'static [::observed::metadata::MetricDescription] = &[#(#metrics)*];
-        #reader
     }
 }
 
 fn generate_visit_fields_body(fields: &[FieldDef], has_log: bool) -> TokenStream {
-    let visits: Vec<TokenStream> = fields.iter().map(|f| generate_field_visit(f, has_log)).collect();
+    let visits = fields
+        .iter()
+        .filter(|field| field_reaches_signal(field, has_log))
+        .enumerate()
+        .map(|(index, field)| generate_field_visit(field, index));
     quote! { #(#visits)* }
 }
 
-fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
-    let field_ident = &field.ident;
+fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
     // Unraw-ed so a field written as `r#type` is exported under the domain key
     // `type`; `field_ident` keeps the raw form because it addresses the field.
     let default_key = field.ident.unraw().to_string();
@@ -1146,15 +1083,20 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         let kind = decl.kind;
         let description = decl.description.as_deref().unwrap_or("");
         let unit = decl.unit.as_deref().unwrap_or("");
+        let representation = match numeric_kind(&field.ty) {
+            Some(NumericKind::UnsignedInt) => format_ident!("U64"),
+            Some(NumericKind::SignedInt) => format_ident!("I64"),
+            Some(NumericKind::Float) => format_ident!("F64"),
+            None => unreachable!("instrument value types are validated before code generation"),
+        };
         quote! {
             ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
                 #default_key,
-                ::observed::metadata::MetricDescription::new(
+                ::observed::metadata::MetricDescription::builder(
                     #name,
                     ::observed::metadata::InstrumentKind::#kind,
-                    #description,
-                    #unit,
-                ),
+                ).description(#description).unit(#unit)
+                    .value_kind(::observed::metadata::MetricValueKind::#representation).build(),
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {
@@ -1163,21 +1105,17 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         quote! { ::core::option::Option::None }
     };
 
-    // Skip emitting a visit if the field is not routed to any signal. The
-    // `where` clause is built from the same predicate, so both must agree.
-    if !field_reaches_signal(field, has_log) {
-        return quote! {};
-    }
+    quote! { ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry) }
+}
 
-    let field_desc = quote! {
-        const FIELD_DESC: ::observed::metadata::FieldDescriptor =
-            ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
-    };
+fn generate_field_visit(field: &FieldDef, index: usize) -> TokenStream {
+    let field_ident = &field.ident;
+    let descriptor = quote! { &<Self as ::observed::Event>::DESCRIPTION.fields()[#index] };
 
     // `Option<T>` fields dispatch on `#[if_none(...)]`: a `None` value is
     // either dropped or replaced with a placeholder string (default `"n/a"`).
     if let Some(inner_ty) = option_inner_type(&field.ty) {
-        return generate_option_field_visit(field, inner_ty, &field_desc);
+        return generate_option_field_visit(field, inner_ty, &descriptor);
     }
 
     let owned = quote! { self.#field_ident.clone() };
@@ -1198,8 +1136,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
 
     quote! {
         {
-            #field_desc
-            visitor(&FIELD_DESC, & #getter )?;
+            visitor(#descriptor, & #getter )?;
         }
     }
 }
@@ -1252,7 +1189,7 @@ fn value_expr(
 ///   [`Drop`](IfNone::Drop) skips the field entirely (`visitor` is never
 ///   called), while [`Fill`](IfNone::Fill) records the placeholder string
 ///   in place of the missing value.
-fn generate_option_field_visit(field: &FieldDef, inner_ty: &Type, field_desc: &TokenStream) -> TokenStream {
+fn generate_option_field_visit(field: &FieldDef, inner_ty: &Type, descriptor: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     let inner_is_ref = is_reference_type(inner_ty);
     let engine = quote! { _engine };
@@ -1272,20 +1209,18 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &Type, field_desc: &T
         // `drop`: omit the field entirely when `None`.
         IfNone::Drop => quote! {
             if let ::core::option::Option::Some(__val) = self.#field_ident.as_ref() {
-                #field_desc
-                visitor(&FIELD_DESC, &|_engine| #some_value )?;
+                visitor(#descriptor, &|_engine| #some_value )?;
             }
         },
         // Fill: record the placeholder string in place of a missing value.
         IfNone::Fill(placeholder) => quote! {
             {
-                #field_desc
                 match self.#field_ident.as_ref() {
                     ::core::option::Option::Some(__val) => {
-                        visitor(&FIELD_DESC, &|_engine| #some_value )?;
+                        visitor(#descriptor, &|_engine| #some_value )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from(#placeholder))?;
+                        visitor(#descriptor, &|_| ::observed::Value::from(#placeholder))?;
                     }
                 }
 

@@ -11,32 +11,40 @@ struct Ignored {
 const _: () = {
     impl ::observed::Event for Ignored {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "ignored",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "ignored",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+                "ignored",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
+                ::core::option::Option::Some(
+                    ::observed::metadata::LogDescription::new(
+                        "ignored",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
                 ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+                ::core::option::Option::None,
+                false,
+                false,
+            )
+            .with_fields(
+                &[
+                    ::observed::metadata::FieldDescriptor::new(
+                            "v",
+                            ::core::option::Option::Some(
+                                ::observed::metadata::LogFieldEntry::new("v"),
+                            ),
+                            ::core::option::Option::None,
+                        )
+                        .with_field_index(0usize),
+                ],
+            );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.v.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

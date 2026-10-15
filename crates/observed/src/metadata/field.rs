@@ -94,13 +94,19 @@ pub struct FieldDescriptor {
     field_name: &'static str,
     log: Option<LogFieldEntry>,
     metric: Option<MetricFieldEntry>,
+    field_index: Option<usize>,
 }
 
 impl FieldDescriptor {
     /// Creates a descriptor with explicit per-signal entries.
     #[must_use]
     pub const fn new(field_name: &'static str, log: Option<LogFieldEntry>, metric: Option<MetricFieldEntry>) -> Self {
-        Self { field_name, log, metric }
+        Self {
+            field_name,
+            log,
+            metric,
+            field_index: None,
+        }
     }
 
     /// Creates a descriptor included in logs only.
@@ -110,7 +116,24 @@ impl FieldDescriptor {
             field_name: key,
             log: Some(LogFieldEntry::new(key)),
             metric: None,
+            field_index: None,
         }
+    }
+
+    /// Associates this event field with its position in [`EventDescription::fields`](super::EventDescription::fields).
+    ///
+    /// The index is stable when optional fields omit their visit. Enrichment and
+    /// runtime-only descriptors have no event-field index by default.
+    #[must_use]
+    pub const fn with_field_index(mut self, index: usize) -> Self {
+        self.field_index = Some(index);
+        self
+    }
+
+    /// Returns the static event-field index, if this is an indexed event field.
+    #[must_use]
+    pub const fn field_index(&self) -> Option<usize> {
+        self.field_index
     }
 
     /// Returns the log routing entry for this field, if any.
