@@ -6,23 +6,13 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use arty_executor::{
-    RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskOutcome, TaskPlacement, TaskSet, discard_task_panic_payload,
-};
+use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
 use performables::arc::Arc;
 use pin_project::pin_project;
 
 use crate::task::Builtins;
-use crate::task::execution::{RemoteTaskFuture, RemoteTaskOutcome};
 use crate::task::join::JoinHandle;
-
-fn classify_remote_outcome(outcome: &RemoteTaskOutcome) -> TaskOutcome {
-    match outcome {
-        RemoteTaskOutcome::Succeeded => TaskOutcome::Succeeded,
-        RemoteTaskOutcome::Panicked => TaskOutcome::Panicked,
-    }
-}
 
 #[pin_project]
 pub(crate) struct DeferredTask<FF, F> {
@@ -135,9 +125,10 @@ where
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
         let inner = DeferredTask::new(future_factory, cx, shutdown_signal);
 
-        let inner = RemoteTaskFuture::new(inner, result_tx);
-        let options = TaskOptions::observed_with_outcome(parent_task_enrichment, placement, classify_remote_outcome);
-        drop(tasks.add(inner, options));
+        // The executor join handle is not used - the task delivers its result through the
+        // channel above, which unlike the executor's join handle can cross thread boundaries.
+        let options = TaskOptions::observed(parent_task_enrichment, placement);
+        drop(tasks.add_with_remote_result(inner, options, result_tx));
     });
     (future_factory, JoinHandle::new(result_rx))
 }

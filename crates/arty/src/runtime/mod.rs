@@ -60,7 +60,6 @@ pub use operations::RuntimeOperations;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]
-#[doc(hidden)]
 pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;

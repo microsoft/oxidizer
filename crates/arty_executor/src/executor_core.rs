@@ -16,8 +16,8 @@ use tick::SimpleClock;
 
 use crate::wake::WakeShared;
 use crate::{
-    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskOptions, TaskRef, TypeErasedTask,
-    WakeSignal,
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, RemoteTaskSender, Task, TaskOptions, TaskRef,
+    TypeErasedTask, WakeSignal,
 };
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
@@ -147,7 +147,7 @@ impl ExecutorCore {
         }
     }
 
-    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions<R>) -> JoinHandle<R>
+    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
@@ -159,6 +159,21 @@ impl ExecutorCore {
         self.register_task(move |join_events, sink| {
             let (result_tx, join_handle) = join_events.rent();
             (Task::new_with_options(future, result_tx, options, sink), join_handle)
+        })
+    }
+
+    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
+    where
+        F: IntoFuture<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        if let Some(join_handle) = self.rejected_submission() {
+            return join_handle;
+        }
+        let future = future.into_future();
+        self.register_task(move |join_events, sink| {
+            let join_handle = join_events.disconnected();
+            (Task::new_remote(future, options, sink, remote_result_tx), join_handle)
         })
     }
 

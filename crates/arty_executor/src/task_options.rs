@@ -6,17 +6,6 @@ use observed::context::Transfer;
 
 use crate::telemetry;
 
-/// The terminal outcome of an executor task.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TaskOutcome {
-    /// The task completed successfully.
-    Succeeded,
-
-    /// The task caught and transported a panic.
-    Panicked,
-}
-
 /// Describes how the submitter selected this executor for a task.
 ///
 /// This value is lifecycle telemetry metadata. It does not change how the executor schedules or
@@ -37,18 +26,10 @@ pub enum TaskPlacement {
 /// lifecycle events so all task activity keeps the submission dimensions. Placement records how
 /// the caller chose the executor; it does not select a worker. The default options add no context
 /// and report [`TaskPlacement::Any`].
-#[derive(Debug)]
-pub struct TaskOptions<R = ()> {
+#[derive(Debug, Default)]
+pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,
-    classify: Option<fn(&R) -> TaskOutcome>,
-    capture_panics: bool,
-}
-
-impl<R> Default for TaskOptions<R> {
-    fn default() -> Self {
-        Self::new(TaskPlacement::default())
-    }
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -68,16 +49,11 @@ impl TaskCreatedReporter {
     }
 }
 
-impl<R> TaskOptions<R> {
+impl TaskOptions {
     /// Creates options with the specified placement metadata.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
-        Self {
-            context: None,
-            placement,
-            classify: None,
-            capture_panics: false,
-        }
+        Self { context: None, placement }
     }
 
     /// Creates options that apply the captured observed `context` throughout the task lifecycle.
@@ -86,20 +62,6 @@ impl<R> TaskOptions<R> {
         Self {
             context: Some(context),
             placement,
-            classify: None,
-            capture_panics: false,
-        }
-    }
-
-    /// Creates observed options for a future that transports its own panic outcome.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn observed_with_outcome(context: Transfer, placement: TaskPlacement, classify: fn(&R) -> TaskOutcome) -> Self {
-        Self {
-            context: Some(context),
-            placement,
-            classify: Some(classify),
-            capture_panics: true,
         }
     }
 
@@ -120,23 +82,12 @@ impl<R> TaskOptions<R> {
         }
     }
 
-    pub(crate) fn completed_outcome(&self, result: &R) -> TaskOutcome {
-        self.classify.map_or(TaskOutcome::Succeeded, |classify| classify(result))
-    }
-
-    pub(crate) fn report_outcome(&self, sink: &Sink, outcome: TaskOutcome, polls: u64) {
-        self.with_context(|| match outcome {
-            TaskOutcome::Succeeded => telemetry::report_succeeded(sink, polls),
-            TaskOutcome::Panicked => telemetry::report_panicked(sink, polls),
-        });
+    pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
+        self.with_context(|| telemetry::report_succeeded(sink, polls));
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
         self.with_context(|| telemetry::report_panicked(sink, polls));
-    }
-
-    pub(crate) const fn captures_panics(&self) -> bool {
-        self.capture_panics
     }
 }
 
@@ -147,10 +98,9 @@ mod tests {
 
     #[test]
     fn observed_options_keep_context_and_placement() {
-        let options = TaskOptions::<()>::observed(Sink::noop().transfer_context(), TaskPlacement::SameThread);
+        let options = TaskOptions::observed(Sink::noop().transfer_context(), TaskPlacement::SameThread);
 
         assert!(options.context.is_some());
         assert_eq!(options.placement, TaskPlacement::SameThread);
-        assert!(!options.captures_panics());
     }
 }

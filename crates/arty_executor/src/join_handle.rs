@@ -157,7 +157,6 @@ impl<R: 'static> Future for JoinHandle<R> {
 }
 
 /// A cross-thread handle for receiving a task result.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct RemoteJoinHandle<R: Send + 'static> {
     rx: BoxedReceiver<TaskResult<R>>,
@@ -165,7 +164,6 @@ pub struct RemoteJoinHandle<R: Send + 'static> {
 
 impl<R: Send + 'static> RemoteJoinHandle<R> {
     /// Creates a result sender and its matching join handle.
-    #[doc(hidden)]
     #[must_use]
     pub fn channel() -> (RemoteTaskSender<R>, Self) {
         let (tx, rx) = events_once::Event::boxed();
@@ -186,7 +184,6 @@ impl<R: Send + 'static> Future for RemoteJoinHandle<R> {
 }
 
 /// The sending endpoint for a [`RemoteJoinHandle`].
-#[doc(hidden)]
 pub struct RemoteTaskSender<R: Send + 'static> {
     tx: Option<BoxedSender<TaskResult<R>>>,
 }
@@ -204,13 +201,11 @@ impl<R: Send + 'static> RemoteTaskSender<R> {
     }
 
     /// Sends a successfully completed result.
-    #[doc(hidden)]
     pub fn completed(self, result: R) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Completed(result))
     }
 
     /// Sends a captured task panic.
-    #[doc(hidden)]
     pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Panicked(panic))
     }
