@@ -10,8 +10,9 @@ testing_aids::init_tracing!();
 
 mod support;
 
-use std::future::pending;
+use std::future::{pending, poll_fn};
 use std::sync::mpsc;
+use std::task::Poll;
 
 use arty::runtime::{Runtime, RuntimeOperations};
 #[cfg(feature = "macros")]
@@ -241,17 +242,18 @@ fn cancelled_task_destructor_keeps_the_submission_context() {
     let (started, ready) = mpsc::channel();
     let task = runtime
         .scheduler()
-        .spawn_anywhere(Unaware((sink.clone(), started)), |cx, Unaware((sink, started))| async move {
+        .spawn_anywhere(Unaware((sink, started)), |cx, Unaware((sink, started))| {
             let task_sink = sink.clone();
-            async move {
-                cx.scheduler().spawn(async move |_| {
+            let mut factory = Some((cx, task_sink, started));
+            poll_fn(move |_| {
+                let (cx, task_sink, started) = factory.take().expect("the factory future completes on its first poll");
+                Poll::Ready(cx.scheduler().spawn(async move |_| {
                     let _drop_event = EmitTaskDrop(task_sink);
                     started.send(()).unwrap();
                     pending::<()>().await;
-                })
-            }
+                }))
+            })
             .enrich(&sink, RequestCtx::new(42))
-            .await
         })
         .join()
         .unwrap();

@@ -51,7 +51,7 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     wake_signal: UnsafeCell<Option<WakeSignal>>,
 
-    options: TaskOptions,
+    options: TaskOptions<R>,
 
     sink: Sink,
 
@@ -80,7 +80,7 @@ where
     }
 
     #[must_use]
-    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
+    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions<R>, sink: Sink) -> Self {
         Self::new_with_target(future, result_tx, options, sink)
     }
 
@@ -98,7 +98,8 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteTaskSender<R>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new_remote(future: F, options: TaskOptions<R>, sink: Sink, remote_result_tx: RemoteTaskSender<R>) -> Self {
         Self::new_with_target(future, remote_result_tx, options, sink)
     }
 }
@@ -109,7 +110,7 @@ where
     R: 'static,
     T: TaskResultTarget<R>,
 {
-    fn new_with_target(future: F, result_target: T, options: TaskOptions, sink: Sink) -> Self {
+    fn new_with_target(future: F, result_target: T, options: TaskOptions<R>, sink: Sink) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
                 future: FutureStorage::new(future),
@@ -294,12 +295,13 @@ where
         panic: TaskPanicPayload,
     ) -> task::Poll<()> {
         let payload = maybe_payload.as_mut().expect("a polled task retains its payload");
-        let result_is_remote = payload
+        let capture_panic = self.options.captures_panics()
+            || payload
             .result_target
             .as_ref()
             .expect("a polled task retains its result target")
             .is_remote();
-        if !result_is_remote {
+        if !capture_panic {
             // Keep the local sender on the fail-fast unwind path so its receiver disconnects.
             let _result_target = payload.result_target.take().expect("a polled task retains its result target");
             on_unhandled_task_panic(panic);
@@ -320,6 +322,7 @@ where
             .take()
             .expect("the result target is present until the task enters a terminal state");
         let remote = result_target.is_remote();
+        let capture_panics = remote || self.options.captures_panics();
 
         let future_panic = if matches!(&outcome, TerminalOutcome::Succeeded(_)) {
             // FutureStorage retires the future before returning Ready.
@@ -334,23 +337,31 @@ where
 
         match outcome {
             TerminalOutcome::Succeeded(result) => {
+                let outcome = self.options.completed_outcome(&result);
                 if let Err(panic) = result_target.complete(result) {
-                    if remote {
+                    if capture_panics {
                         discard_task_panic_payload(panic);
                     } else {
                         self.options.report_panicked(&self.sink, self.poll_count.get());
                         on_unhandled_task_panic(panic);
                     }
                 }
-                self.options.report_succeeded(&self.sink, self.poll_count.get());
+                self.options.report_outcome(&self.sink, outcome, self.poll_count.get());
             }
             TerminalOutcome::Panicked(panic) => {
-                debug_assert!(remote, "plain task panics must follow the fail-fast path");
+                debug_assert!(capture_panics, "plain task panics must follow the fail-fast path");
                 if let Some(disposal) = future_panic {
                     discard_task_panic_payload(disposal);
                 }
-                if let Err(disposal) = result_target.panicked(panic) {
-                    discard_task_panic_payload(disposal);
+                if remote {
+                    if let Err(disposal) = result_target.panicked(panic) {
+                        discard_task_panic_payload(disposal);
+                    }
+                } else {
+                    discard_task_panic_payload(panic);
+                    if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| drop(result_target))) {
+                        discard_task_panic_payload(disposal);
+                    }
                 }
                 self.options.report_panicked(&self.sink, self.poll_count.get());
             }
@@ -360,7 +371,7 @@ where
                 }
                 let result_panic = catch_unwind(AssertUnwindSafe(|| drop(result_target))).err();
                 for panic in [future_panic, result_panic].into_iter().flatten() {
-                    if remote {
+                    if capture_panics {
                         discard_task_panic_payload(panic);
                     } else {
                         on_unhandled_task_panic(panic);

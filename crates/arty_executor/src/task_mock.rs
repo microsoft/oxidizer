@@ -29,7 +29,7 @@ impl TypeErasedTask for MockTypeErasedTask {
     }
 
     fn created_reporter(&self) -> TaskCreatedReporter {
-        TaskOptions::default().created_reporter(observed::Sink::noop())
+        TaskOptions::<()>::default().created_reporter(observed::Sink::noop())
     }
 
     fn consume_awakened(&self) -> bool {

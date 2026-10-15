@@ -7,5 +7,8 @@
 //! payloads and their result channels without deciding whether work is accepted.
 
 mod preparation;
+mod remote;
+mod storage;
 
 pub(crate) use preparation::{BoxedRemoteFutureFactory, DeferredTask, prepare_blocking, prepare_remote};
+pub(crate) use remote::{RemoteTaskFuture, RemoteTaskOutcome};

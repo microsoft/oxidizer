@@ -3,14 +3,14 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::{RemoteJoinHandle, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{RemoteJoinHandle, TaskOptions, TaskOutcome, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::DeferredTask;
+use crate::task::execution::{DeferredTask, RemoteTaskFuture, RemoteTaskOutcome};
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -217,8 +217,14 @@ impl Scheduler {
             let (result_tx, result_rx) = RemoteJoinHandle::channel();
             let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
             let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
-            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
-            drop(current.tasks.add_with_remote_result(inner, options, result_tx));
+            let inner = RemoteTaskFuture::new(inner, result_tx);
+            let options = TaskOptions::observed_with_outcome(parent_task_enrichment, TaskPlacement::SameThread, |outcome| {
+                match outcome {
+                    RemoteTaskOutcome::Succeeded => TaskOutcome::Succeeded,
+                    RemoteTaskOutcome::Panicked => TaskOutcome::Panicked,
+                }
+            });
+            drop(current.tasks.add(inner, options));
             Ok(JoinHandle::new(result_rx))
         })
     }
@@ -405,7 +411,10 @@ impl AsRef<Self> for Scheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::future::Future as _;
+    use std::pin::pin;
     use std::sync::mpsc;
+    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
     use super::*;
@@ -425,6 +434,29 @@ mod tests {
             .unwrap();
 
         assert!(registered);
+        runtime.stop().unwrap();
+    }
+
+    #[test]
+    fn current_executor_shutdown_rejects_direct_submissions_immediately() {
+        let runtime = crate::runtime::Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let rejected = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher);
+                let mut task = pin!(cx.scheduler().spawn(async |_| 42));
+
+                matches!(
+                    task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                    Poll::Ready(Err(error)) if error.is_shutdown()
+                )
+            })
+            .unwrap();
+
+        assert!(rejected);
         runtime.stop().unwrap();
     }
 
