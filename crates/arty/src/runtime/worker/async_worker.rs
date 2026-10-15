@@ -27,6 +27,10 @@ const SUSPEND_SLEEP_DURATION: Duration = Duration::from_millis(1);
 
 const COMMANDS_PER_CYCLE: usize = 256;
 
+fn can_suspend(cycle_outcome: CycleOutcome, batch_exhausted: bool) -> bool {
+    matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted
+}
+
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
 /// woken by local or remote futures, incoming commands, and timers.
@@ -197,8 +201,11 @@ where
 
         // Advances the timers registered with the clock.
         _ = self.clock_driver.advance_timers(Instant::now());
-        let can_suspend = matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted;
-        let max_wait = if can_suspend { SUSPEND_SLEEP_DURATION } else { Duration::ZERO };
+        let max_wait = if can_suspend(cycle_outcome, batch_exhausted) {
+            SUSPEND_SLEEP_DURATION
+        } else {
+            Duration::ZERO
+        };
         let cycle_started = Instant::now();
         let driver_failed = self
             .thread_state
@@ -348,6 +355,17 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
+
+    #[test]
+    fn suspend_budget_requires_suspend_outcome_and_non_exhausted_batch() {
+        assert!(can_suspend(CycleOutcome::Suspend, false));
+        assert!(!can_suspend(CycleOutcome::Suspend, true));
+        assert!(!can_suspend(CycleOutcome::Continue, false));
+        assert!(!can_suspend(CycleOutcome::Continue, true));
+        assert!(!can_suspend(CycleOutcome::Shutdown, false));
+        assert!(!can_suspend(CycleOutcome::Shutdown, true));
+    }
+
     #[derive(Clone, Debug)]
     struct TestTaskContext;
 

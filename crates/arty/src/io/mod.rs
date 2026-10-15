@@ -79,6 +79,7 @@ use std::fmt;
 
 use arty_io_core::DriverError;
 use arty_io_host::IoRuntime;
+pub(crate) use current_host::RuntimeDriverHost;
 use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
@@ -86,7 +87,6 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::Error;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::{Builtins, Scheduler};
-pub(crate) use current_host::RuntimeDriverHost;
 
 pub(crate) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
     dispatcher.is_shutting_down().then(Error::runtime_shutting_down)
