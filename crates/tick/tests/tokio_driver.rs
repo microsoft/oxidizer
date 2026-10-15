@@ -9,8 +9,9 @@ use std::future::poll_fn;
 use std::task::Poll;
 use std::time::Duration;
 
+use futures::StreamExt as _;
 use thread_aware::Relocator;
-use tick::Clock;
+use tick::{Clock, Delay, PeriodicTimer};
 
 #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
 #[tokio::test]
@@ -55,4 +56,30 @@ async fn earlier_timer_registration_interrupts_the_tokio_driver_wait() {
 
     long_timer.abort();
     _ = long_timer.await;
+}
+
+#[cfg(feature = "fast-instant")]
+#[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
+#[tokio::test]
+async fn fast_instant_clock_keeps_driver_timer_scheduling_precise() {
+    let clock = Clock::new_tokio().with_fast_instant(true);
+
+    tokio::time::timeout(Duration::from_secs(1), Delay::new(&clock, Duration::from_millis(5)))
+        .await
+        .unwrap();
+
+    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+    tokio::time::timeout(Duration::from_secs(1), timer.next()).await.unwrap();
+}
+
+#[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
+#[tokio::test]
+async fn live_tokio_clock_debug_output_reports_an_active_driver() {
+    let clock = Clock::new_tokio();
+    clock.delay(Duration::from_millis(1)).await;
+
+    assert_eq!(
+        format!("{clock:#?}"),
+        "Clock {\n    kind: \"system\",\n    timers: 0,\n    alive: true,\n    ..\n}"
+    );
 }

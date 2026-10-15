@@ -1,0 +1,251 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Public API contracts available without optional features.
+
+use std::error::Error as _;
+use std::task::{Context, Poll, Waker};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
+
+use futures::Stream;
+use tick::runtime::{ClockDriver, InactiveClock, Isolated, Shared};
+use tick::{Clock, Delay, Error, PeriodicTimer, SimpleClock, Stopwatch};
+
+#[test]
+fn public_types_have_their_threading_and_clone_contracts() {
+    static_assertions::assert_impl_all!(Clock: Send, Sync, Clone, AsRef<Clock>);
+    static_assertions::assert_impl_all!(Delay: Send, Sync);
+    static_assertions::assert_impl_all!(Error: Send, Sync, thread_aware::ThreadAware);
+    static_assertions::assert_impl_all!(InactiveClock: Send, Sync, Clone);
+    static_assertions::assert_impl_all!(InactiveClock<Shared>: Send, Sync);
+    static_assertions::assert_not_impl_any!(InactiveClock<Shared>: Clone);
+    static_assertions::assert_impl_all!(PeriodicTimer: Send, Sync);
+    static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
+    static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
+    static_assertions::assert_impl_all!(ClockDriver: Send, Sync);
+    static_assertions::assert_not_impl_all!(ClockDriver: Clone);
+    static_assertions::assert_impl_all!(Isolated: Send, Sync, Clone, Copy);
+}
+
+#[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
+#[test]
+fn system_clock_reads_current_system_time() {
+    let before = SystemTime::now();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+
+    assert!(clock.system_time() >= before);
+}
+
+#[test]
+fn system_clock_instant_uses_the_system_instant_domain() {
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let clock_instant = clock.instant();
+    let system_instant = Instant::now();
+
+    assert!(system_instant.duration_since(clock_instant) < Duration::from_secs(10));
+}
+
+#[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
+#[test]
+fn simple_system_clock_is_monotonic() {
+    let clock = SimpleClock::new_system();
+    let first = clock.instant();
+    let second = clock.instant();
+
+    assert!(second >= first);
+}
+
+#[test]
+fn stopwatch_accepts_every_public_time_source_shape() {
+    let simple_clock = SimpleClock::new_system();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+
+    let _ = Stopwatch::new(&clock);
+    let _ = Stopwatch::new(clock);
+    let _ = Stopwatch::new(&simple_clock);
+    let _ = Stopwatch::new(simple_clock);
+}
+
+#[test]
+fn stopwatch_into_instant_returns_its_start() {
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let watch = clock.stopwatch();
+
+    let start: Instant = watch.into();
+
+    assert!(start <= clock.instant());
+}
+
+#[cfg_attr(miri, ignore)] // Uses real elapsed time.
+#[test]
+fn system_stopwatch_measures_elapsed_time() {
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let watch = clock.stopwatch();
+
+    thread::sleep(Duration::from_millis(1));
+
+    assert!(watch.elapsed() >= Duration::from_millis(1));
+}
+
+#[test]
+fn zero_delay_is_immediately_ready() {
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = Delay::new(&clock, Duration::ZERO);
+
+    assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
+}
+
+#[test]
+fn maximum_delay_stays_pending_without_a_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = Delay::new(&clock, Duration::MAX);
+
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[test]
+fn overflowing_delay_stays_pending_without_a_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
+
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+}
+
+#[test]
+fn dropping_a_delay_removes_its_public_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = Delay::new(&clock, Duration::from_mins(1));
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+
+    drop(delay);
+
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[cfg_attr(miri, ignore)] // Uses real elapsed time.
+#[test]
+fn completing_a_delay_removes_its_public_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let period = Duration::from_millis(1);
+    let mut delay = Delay::new(&clock, period);
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+
+    thread::sleep(period);
+    assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
+
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[test]
+fn periodic_timer_is_lazy_and_first_poll_is_pending() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+
+    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+}
+
+#[test]
+fn zero_period_is_adjusted_to_the_public_minimum_resolution() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let before = Instant::now();
+    let mut timer = PeriodicTimer::new(&clock, Duration::ZERO);
+
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+
+    let deadline = driver.advance_timers(before).unwrap().unwrap();
+    assert!(deadline >= before + Duration::from_millis(1));
+}
+
+#[test]
+fn near_maximum_period_never_registers_a_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut timer = PeriodicTimer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
+
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[test]
+fn dropping_a_periodic_timer_removes_its_public_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+
+    drop(timer);
+
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[cfg_attr(miri, ignore)] // Uses real elapsed time.
+#[test]
+fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let period = Duration::from_millis(1);
+    let mut timer = PeriodicTimer::new(&clock, period);
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+
+    thread::sleep(period);
+    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+
+    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+}
+
+#[test]
+fn clock_gone_error_is_public_and_has_no_source() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    drop(clock);
+
+    let error = driver.advance_timers(Instant::now()).unwrap_err();
+
+    assert_eq!(error.to_string(), "all clock owners have been dropped");
+    assert!(error.source().is_none());
+}
+
+#[test]
+fn system_time_error_conversion_preserves_message_and_source() {
+    let later = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    let source = SystemTime::UNIX_EPOCH.duration_since(later).unwrap_err();
+    let expected = source.to_string();
+
+    let error = Error::from(source);
+
+    assert_eq!(error.to_string(), expected);
+    assert!(error.source().is_some());
+}
+
+#[test]
+fn pending_delay_keeps_the_driver_alive_after_the_original_clock_is_dropped() {
+    let now = Instant::now();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = clock.delay(Duration::from_secs(1));
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    drop(clock);
+
+    driver.advance_timers(now).unwrap();
+    driver.advance_timers(now + Duration::from_secs(2)).unwrap();
+    drop(delay);
+
+    driver.advance_timers(now + Duration::from_secs(2)).unwrap_err();
+}
+
+fn poll_delay(delay: &mut Delay) -> Poll<()> {
+    let mut context = Context::from_waker(Waker::noop());
+    std::pin::pin!(delay).poll(&mut context)
+}
+
+fn poll_timer(timer: &mut PeriodicTimer) -> Poll<Option<()>> {
+    let mut context = Context::from_waker(Waker::noop());
+    std::pin::pin!(timer).poll_next(&mut context)
+}

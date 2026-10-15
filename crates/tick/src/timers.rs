@@ -133,6 +133,7 @@ impl Timers {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    // `Timers`, `TimerKey`, discriminators, and raw registration are private storage details.
     use super::*;
     use crate::Clock;
     use crate::state::ClockState;

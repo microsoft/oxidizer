@@ -90,60 +90,11 @@ mod sealed {
 mod tests {
     use std::time::Duration;
 
-    use jiff::Timestamp;
-
     use super::*;
 
     #[test]
-    fn display_ok() {
-        assert_eq!(SystemTime::UNIX_EPOCH.display_iso_8601().to_string(), "1970-01-01T00:00:00Z");
-
-        assert_eq!(
-            (SystemTime::UNIX_EPOCH + Duration::from_hours(1)).display_iso_8601().to_string(),
-            "1970-01-01T01:00:00Z"
-        );
-    }
-
-    #[test]
-    fn display_out_of_range() {
-        let time = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12345);
-        assert_eq!(time.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
-    }
-
-    #[test]
-    fn display_ecmascript_ok() {
-        assert_eq!(SystemTime::UNIX_EPOCH.display_ecmascript().to_string(), "1970-01-01T00:00:00.000Z");
-
-        assert_eq!(
-            (SystemTime::UNIX_EPOCH + Duration::from_hours(1)).display_ecmascript().to_string(),
-            "1970-01-01T01:00:00.000Z"
-        );
-    }
-
-    #[test]
-    fn display_ecmascript_before_epoch() {
-        let before = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
-        assert_eq!(before.display_ecmascript().to_string(), "1969-12-31T23:59:59.000Z");
-    }
-
-    #[test]
-    fn display_ecmascript_saturates_year_10001() {
-        let year_10001 = SystemTime::UNIX_EPOCH + Duration::from_hours(70_398_312);
-        assert_eq!(year_10001.display_ecmascript().to_string(), "9999-12-30T22:00:00.999Z");
-    }
-
-    // On Windows a `SystemTime` cannot represent an instant before the FILETIME
-    // epoch (1601-01-01), so an instant below `Timestamp::MIN` (year -9999) is
-    // unconstructable there and this saturation path is only reachable elsewhere.
-    #[cfg(not(windows))]
-    #[test]
-    fn display_ecmascript_saturates_below_min() {
-        let time = SystemTime::UNIX_EPOCH - Duration::from_secs(400_000_000_000);
-        assert_eq!(time.display_ecmascript().to_string(), "-009999-01-02T01:59:59.000Z");
-    }
-
-    #[test]
-    fn to_timestamp_fallback_ok() {
+    fn private_fallback_selects_the_nearest_jiff_boundary() {
+        // The helper is only reachable after the public conversion has failed.
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(12345);
         assert_eq!(to_timestamp_min_max(now), jiff::Timestamp::MAX);
 

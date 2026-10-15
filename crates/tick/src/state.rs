@@ -276,12 +276,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clock_state_send_and_sync() {
+    fn private_clock_state_is_send_and_sync() {
+        // `ClockState` is a crate-internal representation shared by public clock types.
         static_assertions::assert_impl_all!(ClockState: Send, Sync);
     }
 
     #[test]
-    fn shared_timer_uniqueness_tracks_clones() {
+    fn private_shared_timer_uniqueness_tracks_internal_clones() {
+        // Arc uniqueness is an implementation detail used by driver lifecycle detection.
         let timers = SynchronizedTimers::new_shared();
         assert!(timers.is_unique());
 
