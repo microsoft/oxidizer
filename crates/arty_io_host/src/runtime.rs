@@ -4,9 +4,14 @@
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::Waker;
 
 use arty_io_core::{DriverRole, IoContext};
 use foldhash::HashMap;
+use observed::Sink;
+use thread_aware_core::Thread;
+
+use crate::DriverHost;
 
 pub(crate) struct Resolution<C> {
     pub(crate) context: C,
@@ -79,6 +84,12 @@ impl IoRuntime {
         Self {
             registry: Arc::new(Mutex::new(Registry::default())),
         }
+    }
+
+    /// Creates a worker-local driver host for one Arty async worker.
+    #[must_use]
+    pub fn driver_host(&self, thread: Thread, owner_waker: Waker, sink: Sink) -> DriverHost {
+        DriverHost::new(self.clone(), thread, owner_waker, sink)
     }
 
     pub(crate) fn get_context<C>(&self, options: &C::ContextOptions) -> Resolution<C>

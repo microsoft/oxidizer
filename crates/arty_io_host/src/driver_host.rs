@@ -127,9 +127,7 @@ impl fmt::Debug for DriverHost {
 }
 
 impl DriverHost {
-    /// Creates a worker-local host for one Arty async worker.
-    #[must_use]
-    pub fn new(runtime: IoRuntime, thread: Thread, owner_waker: Waker, sink: Sink) -> Self {
+    pub(crate) fn new(runtime: IoRuntime, thread: Thread, owner_waker: Waker, sink: Sink) -> Self {
         Self {
             runtime,
             thread,

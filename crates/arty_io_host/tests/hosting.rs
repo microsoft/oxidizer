@@ -119,15 +119,15 @@ impl Drop for WakeHostOnDrop {
     }
 }
 
-fn host(runtime: IoRuntime) -> DriverHost {
+fn host(runtime: &IoRuntime) -> DriverHost {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
-    DriverHost::new(runtime, thread, Waker::noop().clone(), observed::Sink::noop())
+    runtime.driver_host(thread, Waker::noop().clone(), observed::Sink::noop())
 }
 
 #[test]
 fn first_context_is_primary_and_later_contexts_are_secondary() {
     let runtime = IoRuntime::new();
-    let host = host(runtime);
+    let host = host(&runtime);
     let state = Arc::new(State::default());
 
     let _ = host.context::<Context<false>>(&state).unwrap();
@@ -150,8 +150,8 @@ fn runtime_identity_is_shared_only_by_clones() {
 #[test]
 fn worker_local_drivers_are_created_lazily() {
     let runtime = IoRuntime::new();
-    let first = host(runtime.clone());
-    let second = host(runtime);
+    let first = host(&runtime);
+    let second = host(&runtime);
     let state = Arc::new(State::default());
 
     let _ = first.context::<Context<false>>(&state).unwrap();
@@ -166,7 +166,7 @@ fn worker_local_drivers_are_created_lazily() {
 
 #[test]
 fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
-    let host = host(IoRuntime::new());
+    let host = host(&IoRuntime::new());
     let state = Arc::new(State::default());
     let wait = Duration::from_millis(7);
     let _ = host.context::<Context<false>>(&state).unwrap();
@@ -183,7 +183,7 @@ fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
 
 #[test]
 fn cycle_failures_are_returned_to_the_runtime() {
-    let host = host(IoRuntime::new());
+    let host = host(&IoRuntime::new());
     let state = Arc::new(State::default());
     let _ = host.context::<Context<false>>(&state).unwrap();
     state.fail_cycle.store(true, Ordering::SeqCst);
@@ -195,7 +195,7 @@ fn cycle_failures_are_returned_to_the_runtime() {
 
 #[test]
 fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
-    let host = host(IoRuntime::new());
+    let host = host(&IoRuntime::new());
     let state = Arc::new(State::default());
     let interrupt = host.waker();
     let _ = host.context::<Context<false>>(&state).unwrap();
@@ -214,7 +214,7 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
 
 #[test]
 fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
-    let host = host(IoRuntime::new());
+    let host = host(&IoRuntime::new());
     let state = Arc::new(State::default());
     let dropped = Arc::new(AtomicBool::new(false));
     let driver_waker = Waker::from(Arc::new(WakeHostOnDrop {
@@ -232,7 +232,7 @@ fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
 
 #[test]
 fn drop_attempts_every_driver_after_shutdown_errors() {
-    let host = host(IoRuntime::new());
+    let host = host(&IoRuntime::new());
     let state = Arc::new(State::default());
     state.fail_shutdown.store(true, Ordering::SeqCst);
     let _ = host.context::<Context<false>>(&state).unwrap();

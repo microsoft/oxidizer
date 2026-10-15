@@ -15,6 +15,6 @@ assert_not_impl_any!(DriverHost: Send, Sync);
 #[test]
 fn approved_public_constructors_are_available() {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
-    let host = DriverHost::new(IoRuntime::new(), thread, Waker::noop().clone(), observed::Sink::noop());
+    let host = IoRuntime::new().driver_host(thread, Waker::noop().clone(), observed::Sink::noop());
     drop(host.waker());
 }
