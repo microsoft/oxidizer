@@ -15,6 +15,7 @@ use performables::sync::channel;
 use tick::Clock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
+use crate::io::RuntimeDriverHost;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
@@ -96,6 +97,7 @@ where
     clock_driver: ClockDriver,
 
     signal: Arc<WorkerSignal>,
+    driver_host: Option<Rc<RuntimeDriverHost>>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -156,8 +158,14 @@ where
             clock_driver,
             blocking_worker,
             signal,
+            driver_host: None,
             _single_threaded: PhantomData,
         }
+    }
+
+    pub(in crate::runtime) fn with_driver_host(mut self, driver_host: Rc<RuntimeDriverHost>) -> Self {
+        self.driver_host = Some(driver_host);
+        self
     }
 
     /// Worker thread entry point, invoked by bootstrap after startup coordination completes.
@@ -189,15 +197,33 @@ where
 
         // Advances the timers registered with the clock.
         _ = self.clock_driver.advance_timers(Instant::now());
+        let can_suspend = matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted;
+        let max_wait = if can_suspend { SUSPEND_SLEEP_DURATION } else { Duration::ZERO };
+        let cycle_started = Instant::now();
+        let driver_failed = self
+            .thread_state
+            .as_ref()
+            .and(self.driver_host.as_ref())
+            .is_some_and(|driver_host| driver_host.execute_cycle(max_wait).is_err());
+        if driver_failed {
+            self.begin_shutdown();
+        }
+        if matches!(cycle_outcome, CycleOutcome::Shutdown) {
+            self.driver_host = None;
+            return ControlFlow::Break(());
+        }
+        if driver_failed {
+            return ControlFlow::Continue(());
+        }
 
         match cycle_outcome {
             // Retain the donor's timer cadence, including externally controlled clocks.
             // A notification arriving before this wait is retained by WorkerSignal.
-            CycleOutcome::Suspend if !batch_exhausted => self.signal.wait(SUSPEND_SLEEP_DURATION),
+            CycleOutcome::Suspend if !batch_exhausted => {
+                self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed()));
+            }
             CycleOutcome::Continue | CycleOutcome::Suspend => {}
-            // This is the only way to exit the loop, guaranteeing safe shutdown of the
-            // executor. The storage has already been retired before timer callbacks run.
-            CycleOutcome::Shutdown => return ControlFlow::Break(()),
+            CycleOutcome::Shutdown => unreachable!("executor shutdown is handled before suspension"),
         }
 
         ControlFlow::Continue(())
@@ -236,6 +262,13 @@ where
                             }
                             future_factory.take().expect("queued task factory is consumed exactly once")(thread_state.clone(), &self.tasks);
                         }
+                        AsyncWorkerCommand::AccessIo { access } => {
+                            if self.shutdown_signal.load(Ordering::Acquire) {
+                                self.begin_shutdown();
+                                return false;
+                            }
+                            access.take().expect("queued I/O access is consumed exactly once")(thread_state);
+                        }
                         AsyncWorkerCommand::Shutdown => {
                             self.begin_shutdown();
 
@@ -257,6 +290,9 @@ where
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
+        if self.thread_state.is_none() {
+            return;
+        }
         Scheduler::clear_current();
         // Drop the thread state, as it may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).

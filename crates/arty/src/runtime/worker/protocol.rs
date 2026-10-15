@@ -7,6 +7,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use crate::task::Builtins;
 use crate::task::execution::{BoxedRemoteFutureFactory, discard_panic};
 
+pub(in crate::runtime) type IoAccess<TS> = Box<dyn FnOnce(&TS) + Send>;
+
 pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
     /// Schedules a new task for execution on this worker, providing the factory function that will
     /// be used to create the future that becomes the body of the task. The factory registers the
@@ -23,6 +25,9 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
         future_factory: Option<BoxedRemoteFutureFactory<TS>>,
     },
 
+    /// Executes a synchronous I/O registry access on this worker.
+    AccessIo { access: Option<IoAccess<TS>> },
+
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
     /// not yet know about the shutdown).
@@ -33,13 +38,17 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
 
 impl<TS> Drop for AsyncWorkerCommand<TS> {
     fn drop(&mut self) {
-        let Self::EnqueueTask { future_factory } = self else {
+        let callback: Option<Box<dyn FnOnce()>> = match self {
+            Self::EnqueueTask { future_factory } => future_factory
+                .take()
+                .map(|future_factory| Box::new(move || drop(future_factory)) as _),
+            Self::AccessIo { access } => access.take().map(|access| Box::new(move || drop(access)) as _),
+            Self::Shutdown => None,
+        };
+        let Some(callback) = callback else {
             return;
         };
-        let Some(future_factory) = future_factory.take() else {
-            return;
-        };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(future_factory))) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
             discard_panic(panic);
         }
     }
@@ -51,6 +60,7 @@ impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
+            Self::AccessIo { .. } => write!(f, "AccessIo"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }

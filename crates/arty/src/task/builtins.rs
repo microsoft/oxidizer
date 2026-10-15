@@ -9,6 +9,7 @@ use observed::emit;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
+use crate::io::Io;
 use crate::runtime::context::RuntimeBuiltins;
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
@@ -53,6 +54,7 @@ pub struct Builtins {
     pub(crate) scheduler: Scheduler,
     thread: Thread,
     clock: Clock,
+    io: Io,
     sink: Sink,
 }
 
@@ -138,6 +140,18 @@ impl Builtins {
         &self.clock
     }
 
+    /// Returns access to I/O contexts hosted by this runtime.
+    ///
+    /// Each context type is registered once per runtime. Registration creates
+    /// one worker-local driver on every async worker before returning.
+    #[must_use]
+    #[inline]
+    pub fn io(&self) -> &Io {
+        self.validate();
+
+        &self.io
+    }
+
     /// Returns this runtime's telemetry sink.
     ///
     /// Emit application events through this [`Sink`] to use the same telemetry
@@ -210,6 +224,7 @@ impl ThreadAware for Builtins {
         self.scheduler.relocate_to_worker(destination, worker_index);
         self.thread = destination.clone();
         self.clock.relocate(Some(&source), destination);
+        self.io.relocate(Some(&source), destination);
         self.sink.relocate(Some(&source), destination);
     }
 }
@@ -220,6 +235,7 @@ impl Builtins {
             scheduler: builtins.task_scheduler,
             thread: builtins.thread,
             clock: builtins.clock,
+            io: builtins.io,
             sink: builtins.sink,
         }
     }

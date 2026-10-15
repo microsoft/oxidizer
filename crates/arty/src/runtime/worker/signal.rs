@@ -11,9 +11,10 @@ use performables::sync::mutex::Mutex;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
-pub(in crate::runtime) struct WorkerSignal {
+pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
+    driver_waker: Mutex<Option<Waker>>,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -40,7 +41,7 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
-    pub(in crate::runtime) fn wait(&self, timeout: Duration) {
+    pub(crate) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
         wait_until_deadline(
@@ -67,7 +68,7 @@ impl WorkerSignal {
         *notified = false;
     }
 
-    pub(in crate::runtime) fn waker(signal: &Arc<Self>) -> Waker {
+    pub(crate) fn waker(signal: &Arc<Self>) -> Waker {
         // Wake requires a standard Arc; both handles share the same allocation.
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
@@ -79,8 +80,19 @@ impl WorkerSignal {
         *self.notified.lock()
     }
 
-    fn notify(&self) {
+    pub(crate) fn set_driver_waker(&self, waker: Waker) {
+        let mut driver_waker = self.driver_waker.lock();
+        assert!(
+            driver_waker.replace(waker).is_none(),
+            "a worker installs its I/O driver interrupt waker once"
+        );
+    }
+
+    pub(crate) fn notify(&self) {
         *self.notified.lock() = true;
+        if let Some(driver_waker) = self.driver_waker.lock().as_ref() {
+            driver_waker.wake_by_ref();
+        }
         self.wake_waiter();
     }
 
@@ -104,6 +116,7 @@ impl Wake for WorkerSignal {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::thread;
 
@@ -143,6 +156,29 @@ mod tests {
         WorkerSignal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn installed_driver_waker_releases_its_state_with_the_signal() {
+        struct TrackedWake(Arc<AtomicBool>);
+
+        impl Drop for TrackedWake {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        impl Wake for TrackedWake {
+            fn wake(self: StdArc<Self>) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let signal = WorkerSignal::default();
+        let dropped = Arc::new(AtomicBool::new(false));
+        signal.set_driver_waker(Waker::from(Arc::into_std_arc(Arc::new(TrackedWake(Arc::clone(&dropped))))));
+        drop(signal);
+        assert!(dropped.load(Ordering::SeqCst));
     }
 
     #[test]
