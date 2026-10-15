@@ -106,7 +106,7 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     if first.len() == view.len() {
         Cow::Borrowed(first)
     } else {
-        let mut buf = Vec::with_capacity(view.len());
+        let mut buf = Vec::new();
         for (slice, _) in view.slices() {
             buf.extend_from_slice(slice);
         }
