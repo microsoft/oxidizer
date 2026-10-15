@@ -10,32 +10,28 @@ struct Ignored {
 }
 const _: () = {
     impl ::observed::Event for Ignored {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "ignored",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "ignored",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
-                    ),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "ignored",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "ignored",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "v",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("v"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

@@ -9,62 +9,56 @@ struct FromMacro<'a> {
 }
 const _: () = {
     impl<'a> ::observed::Event for FromMacro<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "macro.built",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<FromMacro<'static>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "macro.built",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<FromMacro<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "macro.built",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "macro.built",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "hits",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("hits"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "hits",
+                            ::observed::metadata::MetricDescription::builder(
+                                    "macro.built",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                )
+                                .description("")
+                                .unit("")
+                                .value_kind(::observed::metadata::MetricValueKind::U64)
+                                .build(),
+                        ),
                     ),
                 ),
-                ::core::option::Option::None,
-                true,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "hits",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("hits"),
-                            ),
-                            ::core::option::Option::Some(
-                                ::observed::metadata::MetricFieldEntry::instrument(
-                                    "hits",
-                                    ::observed::metadata::MetricDescription::builder(
-                                            "macro.built",
-                                            ::observed::metadata::InstrumentKind::Counter,
-                                        )
-                                        .description("")
-                                        .unit("")
-                                        .value_kind(::observed::metadata::MetricValueKind::U64)
-                                        .build(),
-                                ),
-                            ),
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "maybe",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("maybe"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(1usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "label",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("label"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(2usize),
-                ],
-            );
+                ::observed::__private::field_descriptor(
+                    "maybe",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("maybe"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "label",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("label"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

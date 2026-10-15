@@ -147,7 +147,7 @@ mod tests {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("bridged.event", None, None, None, false, false)
+            EventDescription::new("bridged.event")
         }
     }
 

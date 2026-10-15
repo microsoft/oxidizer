@@ -67,40 +67,35 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "e",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "e",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::Some("nothing to interpolate"),
-                    ),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("nothing to interpolate"),
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "status",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("status"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "original",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("renamed"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(1usize),
-                ],
-            );
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "original",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -142,42 +137,37 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "e",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "e",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::Some(
-                            "{{literal}} {status} {} and a dangling {",
-                        ),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some(
+                        "{{literal}} {status} {} and a dangling {",
                     ),
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "status",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("status"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "original",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("renamed"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(1usize),
-                ],
-            );
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "original",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

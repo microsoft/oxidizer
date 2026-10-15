@@ -7,32 +7,28 @@ struct AuditWrite {
 }
 const _: () = {
     impl ::observed::Event for AuditWrite {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "audit.write",
-                ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "audit.write",
-                        ::observed::Severity::Warn,
-                        ::core::option::Option::None,
-                    ),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "audit.write",
+            ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "audit.write",
+                    ::observed::Severity::Warn,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                true,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "attempts",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("attempts"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ),
+            ::core::option::Option::None,
+            true,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "attempts",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("attempts"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

@@ -304,7 +304,7 @@ mod tests {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("test.event", None, None, None, false, false)
+            EventDescription::new("test.event")
         }
     }
 

@@ -5,24 +5,23 @@ expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n        #[counter(name = \"
 struct Request;
 const _: () = {
     impl ::observed::Event for Request {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "request",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
-                ::core::option::Option::None,
-                ::core::option::Option::Some(
-                    ::observed::metadata::MetricDescription::builder(
-                            "!",
-                            ::observed::metadata::InstrumentKind::Counter,
-                        )
-                        .description("")
-                        .unit("")
-                        .value_kind(::observed::metadata::MetricValueKind::U64)
-                        .build(),
-                ),
-                false,
-                false,
-            )
-            .with_fields(&[]);
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::builder(
+                        "!",
+                        ::observed::metadata::InstrumentKind::Counter,
+                    )
+                    .description("")
+                    .unit("")
+                    .value_kind(::observed::metadata::MetricValueKind::U64)
+                    .build(),
+            ),
+            false,
+            &::observed::__private::event_fields([]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

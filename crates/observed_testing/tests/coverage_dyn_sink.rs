@@ -54,14 +54,7 @@ impl DynEvent for DynProbe {
     }
 
     fn description(&self) -> EventDescription {
-        EventDescription::new(
-            "dyn.probe",
-            None,
-            Some(LogDescription::new("dyn.probe", Severity::Info, None)),
-            None,
-            false,
-            false,
-        )
+        EventDescription::new("dyn.probe").with_log(LogDescription::new("dyn.probe", Severity::Info, None))
     }
 }
 
@@ -136,7 +129,7 @@ impl Enrichment for EmptyEnrichment {
 #[test]
 fn standard_arc_processor_delegates_interest_filter() {
     let processor: Arc<dyn EventProcessor> = Arc::new(MockProcessor::with_filter(EventDescription::is_log));
-    let no_signals = EventDescription::new("no.signals", None, None, None, false, false);
+    let no_signals = EventDescription::new("no.signals");
 
     assert!(EventProcessor::is_interested(&processor, &DynProbe.description()));
     assert!(!EventProcessor::is_interested(&processor, &no_signals));
@@ -226,7 +219,7 @@ fn a_dyn_event_without_a_log_signal_has_no_severity_and_never_reaches_logs() {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("dyn.undeclared", None, None, None, false, false)
+            EventDescription::new("dyn.undeclared")
         }
     }
 
@@ -293,14 +286,7 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new(
-                "dyn.redaction",
-                None,
-                Some(LogDescription::new("dyn.redaction", Severity::Info, None)),
-                None,
-                false,
-                false,
-            )
+            EventDescription::new("dyn.redaction").with_log(LogDescription::new("dyn.redaction", Severity::Info, None))
         }
     }
 

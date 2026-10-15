@@ -1015,7 +1015,6 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         quote! { ::core::option::Option::None }
     };
 
-    let has_field_metrics = def.fields.iter().any(|f| f.metric_value.is_some());
     let disabled = def.disabled;
     let has_log = def.log.is_some();
 
@@ -1024,24 +1023,20 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         .fields
         .iter()
         .filter(|field| field_reaches_signal(field, has_log))
-        .enumerate()
-        .map(|(index, field)| {
-            let descriptor = generate_field_descriptor(field, has_log);
-            quote! { #descriptor.with_field_index(#index) }
-        });
+        .map(|field| generate_field_descriptor(field, has_log));
 
     quote! {
         const _: () = {
             impl #impl_generics ::observed::Event for #struct_ident #ty_generics #where_clause {
                 const DESCRIPTION: ::observed::metadata::EventDescription =
-                    ::observed::metadata::EventDescription::new(
+                    ::observed::__private::event_description(
                         #event_name,
                         #type_id_expr,
                         #log_expr,
                         #metric_expr,
-                        #has_field_metrics,
                         #disabled,
-                    ).with_fields(&[#(#fields),*]);
+                        &::observed::__private::event_fields([#(#fields),*]),
+                    );
 
                 fn visit_fields(
                     &self,
@@ -1105,7 +1100,7 @@ fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
         quote! { ::core::option::Option::None }
     };
 
-    quote! { ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry) }
+    quote! { ::observed::__private::field_descriptor(#default_key, #log_entry, #metric_entry) }
 }
 
 fn generate_field_visit(field: &FieldDef, index: usize) -> TokenStream {

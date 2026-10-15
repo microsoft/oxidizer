@@ -8,42 +8,37 @@ struct Raw {
 }
 const _: () = {
     impl ::observed::Event for Raw {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "raw",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "raw",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "raw",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "raw",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "type",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("type"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "match",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("match"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::dimension("match"),
                     ),
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "type",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("type"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "match",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("match"),
-                            ),
-                            ::core::option::Option::Some(
-                                ::observed::metadata::MetricFieldEntry::dimension("match"),
-                            ),
-                        )
-                        .with_field_index(1usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

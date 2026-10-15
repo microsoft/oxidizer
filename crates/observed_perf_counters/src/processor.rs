@@ -650,8 +650,13 @@ mod tests {
     struct MissingSlot;
 
     impl Event for MissingSlot {
-        const DESCRIPTION: EventDescription = EventDescription::new("missing.slot", Some(TypeId::of::<Self>()), None, None, true, false)
-            .with_fields(&[observed::metadata::FieldDescriptor::new(
+        const DESCRIPTION: EventDescription = observed::__private::event_description(
+            "missing.slot",
+            Some(TypeId::of::<Self>()),
+            None,
+            None,
+            false,
+            &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
                 Some(observed::metadata::MetricFieldEntry::instrument(
@@ -660,8 +665,8 @@ mod tests {
                         .value_kind(MetricValueKind::U64)
                         .build(),
                 )),
-            )
-            .with_field_index(0)]);
+            )]),
+        );
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

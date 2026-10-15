@@ -89,6 +89,10 @@ impl MetricFieldEntry {
 ///
 /// All keys are compile-time `'static` strings, so descriptors are `Copy` and
 /// snapshotting consumers can retain them without allocating.
+///
+/// Event macros construct indexed descriptors automatically. Dynamic adapters
+/// can use [`log_only`](Self::log_only), [`dimension`](Self::dimension), or
+/// [`instrument`](Self::instrument); these do not claim a static event position.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDescriptor {
     field_name: &'static str,
@@ -98,9 +102,8 @@ pub struct FieldDescriptor {
 }
 
 impl FieldDescriptor {
-    /// Creates a descriptor with explicit per-signal entries.
     #[must_use]
-    pub const fn new(field_name: &'static str, log: Option<LogFieldEntry>, metric: Option<MetricFieldEntry>) -> Self {
+    pub(crate) const fn new(field_name: &'static str, log: Option<LogFieldEntry>, metric: Option<MetricFieldEntry>) -> Self {
         Self {
             field_name,
             log,
@@ -120,17 +123,36 @@ impl FieldDescriptor {
         }
     }
 
-    /// Associates this event field with its position in [`EventDescription::fields`](super::EventDescription::fields).
-    ///
-    /// The index is stable when optional fields omit their visit. Enrichment and
-    /// runtime-only descriptors have no event-field index by default.
+    /// Describes a dynamic metric dimension without an event-field index.
     #[must_use]
-    pub const fn with_field_index(mut self, index: usize) -> Self {
+    pub const fn dimension(key: &'static str) -> Self {
+        Self::new(key, None, Some(MetricFieldEntry::dimension(key)))
+    }
+
+    /// Describes a dynamic measurement without an event-field index.
+    #[must_use]
+    pub const fn instrument(key: &'static str, metric: MetricDescription) -> Self {
+        Self::new(key, None, Some(MetricFieldEntry::instrument(key, metric)))
+    }
+
+    /// Also includes this dynamic field in logs under the supplied key.
+    #[must_use]
+    pub const fn with_log_key(mut self, key: &'static str) -> Self {
+        self.log = Some(LogFieldEntry::new(key));
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_field_index(mut self, index: usize) -> Self {
         self.field_index = Some(index);
         self
     }
 
-    /// Returns the static event-field index, if this is an indexed event field.
+    /// Returns this field's position in [`EventDescription::fields`](super::EventDescription::fields).
+    ///
+    /// Returns `None` for enrichment and dynamic descriptors without a static
+    /// event-field position. Macro-generated event fields always have an index,
+    /// even when an absent optional value omits their visit.
     #[must_use]
     pub const fn field_index(&self) -> Option<usize> {
         self.field_index

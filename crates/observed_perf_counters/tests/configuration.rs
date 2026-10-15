@@ -64,17 +64,10 @@ struct RequestCompleted {
 struct UntypedEvent;
 
 impl Event for UntypedEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new(
-        "untyped",
-        None,
-        None,
-        Some(
-            MetricDescription::builder("count", InstrumentKind::Counter)
-                .value_kind(MetricValueKind::U64)
-                .build(),
-        ),
-        false,
-        false,
+    const DESCRIPTION: EventDescription = EventDescription::new("untyped").with_metric(
+        MetricDescription::builder("count", InstrumentKind::Counter)
+            .value_kind(MetricValueKind::U64)
+            .build(),
     );
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -327,16 +320,21 @@ fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
     }
     struct MissingType;
     impl Event for MissingType {
-        const DESCRIPTION: EventDescription = EventDescription::new("missing.type", Some(TypeId::of::<Self>()), None, None, true, false)
-            .with_fields(&[observed::metadata::FieldDescriptor::new(
+        const DESCRIPTION: EventDescription = observed::__private::event_description(
+            "missing.type",
+            Some(TypeId::of::<Self>()),
+            None,
+            None,
+            false,
+            &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
                 Some(observed::metadata::MetricFieldEntry::instrument(
                     "value",
                     MetricDescription::new("Unknown", InstrumentKind::Counter, "", ""),
                 )),
-            )
-            .with_field_index(0)]);
+            )]),
+        );
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

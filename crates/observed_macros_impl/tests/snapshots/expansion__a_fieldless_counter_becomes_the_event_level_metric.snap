@@ -7,24 +7,23 @@ struct Heartbeat {
 }
 const _: () = {
     impl ::observed::Event for Heartbeat {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "heartbeat",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
-                ::core::option::Option::None,
-                ::core::option::Option::Some(
-                    ::observed::metadata::MetricDescription::builder(
-                            "heartbeat.total",
-                            ::observed::metadata::InstrumentKind::Counter,
-                        )
-                        .description("heartbeats")
-                        .unit("1")
-                        .value_kind(::observed::metadata::MetricValueKind::U64)
-                        .build(),
-                ),
-                false,
-                false,
-            )
-            .with_fields(&[]);
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "heartbeat",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::builder(
+                        "heartbeat.total",
+                        ::observed::metadata::InstrumentKind::Counter,
+                    )
+                    .description("heartbeats")
+                    .unit("1")
+                    .value_kind(::observed::metadata::MetricValueKind::U64)
+                    .build(),
+            ),
+            false,
+            &::observed::__private::event_fields([]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

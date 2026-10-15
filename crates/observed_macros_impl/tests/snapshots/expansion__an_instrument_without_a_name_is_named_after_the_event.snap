@@ -7,45 +7,41 @@ struct Heartbeat {
 }
 const _: () = {
     impl ::observed::Event for Heartbeat {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "heartbeat",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
-                ::core::option::Option::None,
-                ::core::option::Option::Some(
-                    ::observed::metadata::MetricDescription::builder(
-                            "heartbeat",
-                            ::observed::metadata::InstrumentKind::Counter,
-                        )
-                        .description("")
-                        .unit("")
-                        .value_kind(::observed::metadata::MetricValueKind::U64)
-                        .build(),
-                ),
-                true,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "heartbeat",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::builder(
+                        "heartbeat",
+                        ::observed::metadata::InstrumentKind::Counter,
+                    )
+                    .description("")
+                    .unit("")
+                    .value_kind(::observed::metadata::MetricValueKind::U64)
+                    .build(),
+            ),
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "level",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
                             "level",
-                            ::core::option::Option::None,
-                            ::core::option::Option::Some(
-                                ::observed::metadata::MetricFieldEntry::instrument(
-                                    "level",
-                                    ::observed::metadata::MetricDescription::builder(
-                                            "heartbeat",
-                                            ::observed::metadata::InstrumentKind::Gauge,
-                                        )
-                                        .description("")
-                                        .unit("")
-                                        .value_kind(::observed::metadata::MetricValueKind::F64)
-                                        .build(),
-                                ),
-                            ),
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+                            ::observed::metadata::MetricDescription::builder(
+                                    "heartbeat",
+                                    ::observed::metadata::InstrumentKind::Gauge,
+                                )
+                                .description("")
+                                .unit("")
+                                .value_kind(::observed::metadata::MetricValueKind::F64)
+                                .build(),
+                        ),
+                    ),
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

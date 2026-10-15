@@ -109,14 +109,7 @@ impl DynEvent for BridgedEvent<'_> {
     }
 
     fn description(&self) -> EventDescription {
-        EventDescription::new(
-            "bridge.event",
-            None,
-            Some(LogDescription::new("bridge.event", Severity::Info, None)),
-            None,
-            false,
-            false,
-        )
+        EventDescription::new("bridge.event").with_log(LogDescription::new("bridge.event", Severity::Info, None))
     }
 }
 

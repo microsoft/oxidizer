@@ -318,8 +318,7 @@ mod tests {
     struct Unidentified;
 
     impl Event for Unidentified {
-        const DESCRIPTION: EventDescription =
-            EventDescription::new("untyped", None, None, None, true, false).with_fields(Bound::DESCRIPTION.fields());
+        const DESCRIPTION: EventDescription = EventDescription::new("untyped").with_fields(Bound::DESCRIPTION.fields());
 
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())

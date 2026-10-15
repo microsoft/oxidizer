@@ -7,36 +7,32 @@ struct Wrapped {
 }
 const _: () = {
     impl ::observed::Event for Wrapped {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "wrapped",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
-                ::core::option::Option::None,
-                ::core::option::Option::None,
-                true,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "wrapped",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "v",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
                             "v",
-                            ::core::option::Option::None,
-                            ::core::option::Option::Some(
-                                ::observed::metadata::MetricFieldEntry::instrument(
-                                    "v",
-                                    ::observed::metadata::MetricDescription::builder(
-                                            "wrapped",
-                                            ::observed::metadata::InstrumentKind::Counter,
-                                        )
-                                        .description("")
-                                        .unit("")
-                                        .value_kind(::observed::metadata::MetricValueKind::U64)
-                                        .build(),
-                                ),
-                            ),
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+                            ::observed::metadata::MetricDescription::builder(
+                                    "wrapped",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                )
+                                .description("")
+                                .unit("")
+                                .value_kind(::observed::metadata::MetricValueKind::U64)
+                                .build(),
+                        ),
+                    ),
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

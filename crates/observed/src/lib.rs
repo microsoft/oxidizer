@@ -505,7 +505,7 @@ pub use sink::{Sink, SinkId};
 pub use text::Text;
 pub use value::Value;
 
-/// Hidden module re-exporting types that the `emit!` and `#[event(...)]` macros reference.
+/// Hidden construction helpers and reexports used by the event macros.
 ///
 /// This is **not public API** - it exists solely for macro-generated code.
 #[doc(hidden)]
@@ -514,4 +514,38 @@ pub mod __private {
     pub use ::data_privacy::{RedactedDisplay, RedactedToString, Sensitive};
 
     pub use crate::enrichment::EnrichmentEntry;
+
+    #[must_use]
+    pub const fn field_descriptor(
+        name: &'static str,
+        log: Option<crate::metadata::LogFieldEntry>,
+        metric: Option<crate::metadata::MetricFieldEntry>,
+    ) -> crate::metadata::FieldDescriptor {
+        crate::metadata::FieldDescriptor::new(name, log, metric)
+    }
+
+    #[must_use]
+    pub const fn event_fields<const N: usize>(mut fields: [crate::metadata::FieldDescriptor; N]) -> [crate::metadata::FieldDescriptor; N] {
+        // Copied descriptors take their new position rather than keeping stale indices.
+        let mut remaining = fields.as_mut_slice();
+        let mut index = 0;
+        while let [field, tail @ ..] = remaining {
+            *field = field.with_field_index(index);
+            index += 1;
+            remaining = tail;
+        }
+        fields
+    }
+
+    #[must_use]
+    pub const fn event_description(
+        name: &'static str,
+        type_id: Option<std::any::TypeId>,
+        log: Option<crate::metadata::LogDescription>,
+        metric: Option<crate::metadata::MetricDescription>,
+        disabled: bool,
+        fields: &'static [crate::metadata::FieldDescriptor],
+    ) -> crate::metadata::EventDescription {
+        crate::metadata::EventDescription::from_parts(name, type_id, log, metric, false, disabled).with_fields(fields)
+    }
 }

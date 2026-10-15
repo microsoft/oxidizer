@@ -599,7 +599,7 @@ mod tests {
             ControlFlow::Continue(())
         }
         fn description(&self) -> EventDescription {
-            EventDescription::new("dummy", None, None, None, false, false)
+            EventDescription::new("dummy")
         }
     }
 
@@ -615,7 +615,7 @@ mod tests {
         // `emit_impl` gates on `is_noop()`, so these no-op arms are only reachable
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
-        let description = EventDescription::new("dummy", None, None, None, false, false);
+        let description = EventDescription::new("dummy");
 
         assert!(!noop.is_interested_in(&description));
         noop.dispatch_to_processors(&DummyDyn, &description);
@@ -752,7 +752,7 @@ mod tests {
     }
 
     fn dummy_description() -> EventDescription {
-        EventDescription::new("dummy", None, None, None, false, false)
+        EventDescription::new("dummy")
     }
 
     #[test]

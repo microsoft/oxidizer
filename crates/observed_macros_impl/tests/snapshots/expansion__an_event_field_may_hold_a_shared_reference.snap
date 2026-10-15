@@ -9,50 +9,44 @@ struct SharedRefs<'a> {
 }
 const _: () = {
     impl<'a> ::observed::Event for SharedRefs<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shared.refs",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<SharedRefs<'static>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shared.refs",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<SharedRefs<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shared.refs",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shared.refs",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "plain",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("plain"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "plain",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("plain"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "nested",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("nested"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(1usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "optional",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("optional"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(2usize),
-                ],
-            );
+                ::observed::__private::field_descriptor(
+                    "nested",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("nested"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "optional",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("optional"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

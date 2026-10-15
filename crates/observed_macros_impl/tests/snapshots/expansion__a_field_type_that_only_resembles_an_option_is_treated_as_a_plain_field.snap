@@ -12,34 +12,30 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -65,34 +61,30 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -118,34 +110,30 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -171,34 +159,30 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -224,34 +208,30 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -281,34 +261,30 @@ const _: () = {
         [T; 4]: ::observed::__private::RedactedDisplay,
         [T; 4]: ::core::marker::Send + ::core::marker::Sync,
     {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -338,34 +314,30 @@ const _: () = {
         (T, u8): ::observed::__private::RedactedDisplay,
         (T, u8): ::core::marker::Send + ::core::marker::Sync,
     {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "shapes",
-                ::core::option::Option::Some(
-                    ::core::any::TypeId::of::<Shapes<'static, T>>(),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "shapes",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Shapes<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shapes",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "shapes",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::None,
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "field",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("field"),
                     ),
+                    ::core::option::Option::None,
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "field",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("field"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                ],
-            );
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

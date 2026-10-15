@@ -272,8 +272,13 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
 fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
     struct Malformed;
     impl Event for Malformed {
-        const DESCRIPTION: EventDescription = EventDescription::new("malformed", Some(TypeId::of::<Self>()), None, None, true, false)
-            .with_fields(&[observed::metadata::FieldDescriptor::new(
+        const DESCRIPTION: EventDescription = observed::__private::event_description(
+            "malformed",
+            Some(TypeId::of::<Self>()),
+            None,
+            None,
+            false,
+            &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
                 Some(observed::metadata::MetricFieldEntry::instrument(
@@ -282,8 +287,8 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
                         .value_kind(MetricValueKind::U64)
                         .build(),
                 )),
-            )
-            .with_field_index(0)]);
+            )]),
+        );
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

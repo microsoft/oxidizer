@@ -7,15 +7,14 @@ struct Silent {
 }
 const _: () = {
     impl ::observed::Event for Silent {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "silent",
-                ::core::option::Option::Some(::core::any::TypeId::of::<Silent>()),
-                ::core::option::Option::None,
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(&[]);
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "silent",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Silent>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

@@ -12,48 +12,42 @@ struct HttpRequest {
 }
 const _: () = {
     impl ::observed::Event for HttpRequest {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-                "http.request",
-                ::core::option::Option::Some(::core::any::TypeId::of::<HttpRequest>()),
-                ::core::option::Option::Some(
-                    ::observed::metadata::LogDescription::new(
-                        "http.request.log",
-                        ::observed::Severity::Info,
-                        ::core::option::Option::Some("{method} handled as {status}"),
-                    ),
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "http.request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<HttpRequest>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "http.request.log",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("{method} handled as {status}"),
                 ),
-                ::core::option::Option::None,
-                false,
-                false,
-            )
-            .with_fields(
-                &[
-                    ::observed::metadata::FieldDescriptor::new(
-                            "method",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("method"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(0usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "status",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("status"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(1usize),
-                    ::observed::metadata::FieldDescriptor::new(
-                            "user",
-                            ::core::option::Option::Some(
-                                ::observed::metadata::LogFieldEntry::new("user"),
-                            ),
-                            ::core::option::Option::None,
-                        )
-                        .with_field_index(2usize),
-                ],
-            );
+            ),
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "method",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("method"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "user",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("user"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
+        );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
