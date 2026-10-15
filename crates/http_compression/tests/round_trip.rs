@@ -575,6 +575,99 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
 }
 
 #[tokio::test]
+async fn decompressed_body_limit_can_be_raised_or_removed() {
+    const DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN: usize = 64 * 1024 * 1024;
+
+    let output_len = DOCUMENTED_DEFAULT_MAX_DECOMPRESSED_BODY_LEN + 1;
+    let compressed = compress(Format::Zstd, &vec![0_u8; output_len]);
+    let raised = DecompressorLimits::new().max_output_len(NonZeroU64::new(output_len as u64).unwrap());
+
+    for (limits, succeeds) in [
+        (None, false),
+        (Some(raised), true),
+        (Some(DecompressorLimits::new().unbounded_output_len()), true),
+    ] {
+        let layer = client().decompress_responses(&[Format::Zstd]);
+        let layer = match limits {
+            Some(limits) => layer.limits(limits),
+            None => layer,
+        };
+        let response_body = compressed.clone();
+        let handler = layer.layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("zstd"))
+                .bytes(response_body.clone())
+                .build()
+        }));
+
+        let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+        let result = response.into_body().into_bytes().await;
+
+        if succeeds {
+            assert_eq!(result.unwrap().len(), output_len);
+        } else {
+            assert_eq!(result.unwrap_err().label(), "compression_limit_exceeded");
+        }
+    }
+}
+
+#[tokio::test]
+async fn compressed_stream_limit_is_inclusive_and_can_be_raised_or_removed() {
+    const DEFAULT_STREAM_COUNT: usize = 1_024;
+    const FIRST_REJECTED_STREAM_COUNT: usize = DEFAULT_STREAM_COUNT + 1;
+
+    let member = compress(Format::Gzip, b"");
+    let at_limit = BytesView::from_views((0..DEFAULT_STREAM_COUNT).map(|_| member.clone()));
+    let over_limit = BytesView::from_views((0..FIRST_REJECTED_STREAM_COUNT).map(|_| member.clone()));
+    let raised = DecompressorLimits::new().max_streams(NonZeroU64::new(FIRST_REJECTED_STREAM_COUNT as u64).unwrap());
+
+    for (compressed, limits, succeeds) in [
+        (at_limit, None, true),
+        (over_limit.clone(), None, false),
+        (over_limit.clone(), Some(raised), true),
+        (over_limit, Some(DecompressorLimits::new().unbounded_streams()), true),
+    ] {
+        let layer = client().decompress_responses(&[Format::Gzip]);
+        let layer = match limits {
+            Some(limits) => layer.limits(limits),
+            None => layer,
+        };
+        let response_body = compressed.clone();
+        let handler = layer.layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+                .bytes(response_body.clone())
+                .build()
+        }));
+
+        let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+        let result = response.into_body().into_bytes().await;
+
+        if succeeds {
+            assert!(result.unwrap().is_empty());
+        } else {
+            assert_eq!(result.unwrap_err().label(), "compression_limit_exceeded");
+        }
+    }
+}
+
+#[tokio::test]
+async fn raw_deflate_is_not_used_as_an_http_content_coding() {
+    let handler = server().compress_responses(&[Format::Deflate]).layer(responds_with(|| {
+        HttpResponseBuilder::new_fake().status(StatusCode::OK).text("unchanged").build()
+    }));
+    let mut input = request(BytesView::default(), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("deflate"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert!(response.headers().get(CONTENT_ENCODING).is_none());
+    assert_eq!(response.into_body().into_text().await.unwrap(), "unchanged");
+}
+
+#[tokio::test]
 async fn a_no_content_response_is_never_given_a_body() {
     for status in [
         StatusCode::CONTINUE,

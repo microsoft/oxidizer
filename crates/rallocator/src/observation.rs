@@ -7,14 +7,18 @@
 use std::alloc::System;
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::UnsafeCell;
+#[cfg(not(target_os = "macos"))]
+use std::sync::Mutex;
+use std::sync::TryLockError;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
-use std::sync::{Mutex, TryLockError};
 
 use seismograph::recorder::{RecordingSession, SuppressionGuard};
 use seismograph_rallocator::native::{Observation, ObservationSource};
 
 #[cfg(test)]
 use self::tests::FailingSystem as System;
+#[cfg(target_os = "macos")]
+use crate::hal::Mutex;
 
 /// One visit budget bounds all slab, buddy and message walks in an observation.
 pub(crate) const WALK_BUDGET: usize = 4096;
@@ -343,10 +347,10 @@ mod tests {
     }
 
     fn poison_slot(slot: &Slot) {
-        let poisoned = std::panic::catch_unwind(|| {
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = slot.value.lock().unwrap();
             panic!("poison an exclusively owned publication slot");
-        });
+        }));
         assert!(poisoned.is_err());
         assert!(slot.value.is_poisoned());
     }

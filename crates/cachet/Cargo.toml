@@ -91,6 +91,7 @@ cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 dashmap = { workspace = true }
+future_assert = { path = "../future_assert" }
 layered = { path = "../layered" }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }

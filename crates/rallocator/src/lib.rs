@@ -6,12 +6,19 @@
 //! An owner-return allocator implemented in Rust.
 //!
 //! Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
-//! **x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**.
+//! **x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**, and
+//! **x86-64 and native ARM64 macOS 14.4 or later**.
 //! Linux hosts with larger kernel pages reject allocation requests rather than
-//! discarding neighboring live objects. Both backends use 4-KiB base pages. Windows uses `VirtualAlloc2`
+//! discarding neighboring live objects. Windows and Linux use 4-KiB base pages;
+//! macOS uses 4-KiB x86-64 pages and 16-KiB native ARM64 pages.
+//! Windows uses `VirtualAlloc2`
 //! reservations and commit/decommit; Linux uses aligned anonymous `mmap`
 //! reservations, `mprotect` for access and `madvise(MADV_DONTNEED)` to discard
-//! unused backing pages without revoking access. Neither uses another allocator.
+//! unused backing pages without revoking access. macOS uses aligned `mach_vm_map`
+//! reservations, `mprotect` for access and `MADV_FREE_REUSABLE` / `MADV_FREE_REUSE`
+//! for lazy reclamation. Recommitted macOS object ranges may retain retired
+//! contents; `alloc_zeroed` explicitly clears its allocations on every platform.
+//! None of the native backends allocates through another allocator.
 //! OS operations and CPU instructions are isolated under the internal HAL.
 //! It is intended for a single statically
 //! linked allocator instance; allocations must not cross independently linked
@@ -168,9 +175,9 @@
 
 #[cfg(not(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
-    any(target_os = "linux", all(target_os = "windows", target_env = "msvc"))
+    any(target_os = "linux", target_os = "macos", all(target_os = "windows", target_env = "msvc"))
 )))]
-compile_error!("rallocator supports x86_64 and aarch64 Linux and Windows MSVC");
+compile_error!("rallocator supports x86_64 and aarch64 Linux, macOS and Windows MSVC");
 
 mod abort;
 mod backend;
