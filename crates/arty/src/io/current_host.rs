@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use arty_io_core::IoContext;
 use arty_io_host::{DriverHost, IoRuntime};
-use observed::Sink;
 use thread_aware::Thread;
 
 use crate::io::fail_runtime;
@@ -28,12 +27,13 @@ pub(crate) struct RuntimeDriverHost {
 }
 
 impl RuntimeDriverHost {
-    pub(crate) fn new(runtime: IoRuntime, dispatcher: DispatcherClient, thread: Thread, owner_waker: Waker, sink: Sink) -> Rc<Self> {
+    pub(crate) fn new(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Rc<Self> {
+        let driver_host = runtime.driver_host(owner_waker);
         let host = Rc::new(Self {
-            runtime: runtime.clone(),
+            runtime: runtime.to_owned(),
             dispatcher,
-            thread: thread.clone(),
-            host: DriverHost::new(runtime, thread, owner_waker, sink),
+            thread: thread.to_owned(),
+            host: driver_host,
         });
         CURRENT.with_borrow_mut(|current| {
             assert!(

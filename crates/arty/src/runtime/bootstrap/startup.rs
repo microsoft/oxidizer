@@ -71,7 +71,7 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
-    let io_runtime = IoRuntime::default();
+    let io_runtime = IoRuntime::new(sink.clone());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
             &sink,
@@ -199,7 +199,7 @@ impl AsyncWorkerStartInfo {
             thread_builder,
             blocking_pools,
             shutdown_started,
-            io_runtime,
+            mut io_runtime,
             sink,
         } = self;
 
@@ -212,6 +212,7 @@ impl AsyncWorkerStartInfo {
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
+        io_runtime.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
         let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
@@ -235,13 +236,7 @@ impl AsyncWorkerStartInfo {
         let dispatcher = Rc::new(start_signal.dispatcher);
         let shutdown_signal = dispatcher.shutdown_signal();
         let io = Io::new(io_runtime.clone(), dispatcher.as_ref().clone(), current.clone());
-        let driver_host = RuntimeDriverHost::new(
-            io_runtime,
-            dispatcher.as_ref().clone(),
-            current.clone(),
-            WorkerSignal::waker(&signal),
-            sink.clone(),
-        );
+        let driver_host = RuntimeDriverHost::new(&io_runtime, dispatcher.as_ref().clone(), &current, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_host.waker());
 
         let thread_state_constructor = {
