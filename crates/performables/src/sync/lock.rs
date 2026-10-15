@@ -10,12 +10,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use super::mode::{Async, Mode, Sync};
+use super::{Async, Mode, Sync};
 
 mod native;
 
+use super::panic_poisoned;
 use super::wait_queue::{WaitQueue, Waiter, block_on};
-use super::{PoisonError, panic_poisoned};
+use crate::Error;
 use crate::telemetry::{self, EventKind};
 
 const WRITER: usize = 1 << (usize::BITS - 1);
@@ -94,8 +95,8 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn read_result(&self) -> Result<RwLockReadGuard<'_, T, M>, PoisonError<RwLockReadGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn read_result(&self) -> Result<RwLockReadGuard<'_, T, M>, Error<RwLockReadGuard<'_, T, M>>> {
         M::rwlock_read(self)
     }
 
@@ -116,8 +117,8 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn try_read_result(&self) -> Result<Option<RwLockReadGuard<'_, T, M>>, PoisonError<RwLockReadGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn try_read_result(&self) -> Result<Option<RwLockReadGuard<'_, T, M>>, Error<RwLockReadGuard<'_, T, M>>> {
         M::rwlock_try_read(self)
     }
 
@@ -139,8 +140,8 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn write_result(&self) -> Result<RwLockWriteGuard<'_, T, M>, PoisonError<RwLockWriteGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn write_result(&self) -> Result<RwLockWriteGuard<'_, T, M>, Error<RwLockWriteGuard<'_, T, M>>> {
         M::rwlock_write(self)
     }
 
@@ -161,8 +162,8 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn try_write_result(&self) -> Result<Option<RwLockWriteGuard<'_, T, M>>, PoisonError<RwLockWriteGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn try_write_result(&self) -> Result<Option<RwLockWriteGuard<'_, T, M>>, Error<RwLockWriteGuard<'_, T, M>>> {
         M::rwlock_try_write(self)
     }
 
@@ -205,17 +206,19 @@ impl<T: ?Sized> RwLock<T, Async> {
     /// poisoned it.
     pub fn read_async(&self) -> RwLockRead<'_, T> {
         RwLockRead {
-            result: self.read_async_result(),
+            result: RwLockReadFuture::new(self),
         }
     }
 
     /// Returns a future that acquires shared access and reports poisoning.
-    pub fn read_async_result(&self) -> RwLockReadResult<'_, T> {
-        RwLockReadResult {
-            lock: self,
-            waiter: None,
-            contention_recorded: false,
-        }
+    #[expect(
+        clippy::future_not_send,
+        reason = "local executors can use locks containing non-Send or non-Sync values"
+    )]
+    pub fn read_async_result(
+        &self,
+    ) -> impl Future<Output = Result<RwLockReadGuard<'_, T, Async>, Error<RwLockReadGuard<'_, T, Async>>>> + fmt::Debug {
+        RwLockReadFuture::new(self)
     }
 
     /// Returns a future that acquires exclusive access.
@@ -226,17 +229,19 @@ impl<T: ?Sized> RwLock<T, Async> {
     /// poisoned it.
     pub fn write_async(&self) -> RwLockWrite<'_, T> {
         RwLockWrite {
-            result: self.write_async_result(),
+            result: RwLockWriteFuture::new(self),
         }
     }
 
     /// Returns a future that acquires exclusive access and reports poisoning.
-    pub fn write_async_result(&self) -> RwLockWriteResult<'_, T> {
-        RwLockWriteResult {
-            lock: self,
-            waiter: None,
-            contention_recorded: false,
-        }
+    #[expect(
+        clippy::future_not_send,
+        reason = "local executors can use locks containing non-Send or non-Sync values"
+    )]
+    pub fn write_async_result(
+        &self,
+    ) -> impl Future<Output = Result<RwLockWriteGuard<'_, T, Async>, Error<RwLockWriteGuard<'_, T, Async>>>> + fmt::Debug {
+        RwLockWriteFuture::new(self)
     }
 
     /// Blocks until shared access is acquired and reports poisoning.
@@ -246,15 +251,15 @@ impl<T: ?Sized> RwLock<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired read guard if a writer
+    /// Returns [`Error`] with the acquired read guard if a writer
     /// poisoned the lock.
-    pub(super) fn read_result_inner(&self) -> Result<RwLockReadGuard<'_, T, Async>, PoisonError<RwLockReadGuard<'_, T, Async>>> {
+    pub(super) fn read_result_inner(&self) -> Result<RwLockReadGuard<'_, T, Async>, Error<RwLockReadGuard<'_, T, Async>>> {
         if self.try_acquire_read() {
             return self.acquired_read();
         }
 
         self.record(EventKind::RwLockReadContention);
-        block_on(RwLockReadResult {
+        block_on(RwLockReadFuture {
             lock: self,
             waiter: None,
             contention_recorded: true,
@@ -268,15 +273,15 @@ impl<T: ?Sized> RwLock<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired write guard if a writer
+    /// Returns [`Error`] with the acquired write guard if a writer
     /// poisoned the lock.
-    pub(super) fn write_result_inner(&self) -> Result<RwLockWriteGuard<'_, T, Async>, PoisonError<RwLockWriteGuard<'_, T, Async>>> {
+    pub(super) fn write_result_inner(&self) -> Result<RwLockWriteGuard<'_, T, Async>, Error<RwLockWriteGuard<'_, T, Async>>> {
         if self.try_acquire_write() {
             return self.acquired_write();
         }
 
         self.record(EventKind::RwLockWriteContention);
-        block_on(RwLockWriteResult {
+        block_on(RwLockWriteFuture {
             lock: self,
             waiter: None,
             contention_recorded: true,
@@ -287,11 +292,9 @@ impl<T: ?Sized> RwLock<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired read guard if the lock was
+    /// Returns [`Error`] with the acquired read guard if the lock was
     /// successfully acquired after a writer poisoned it.
-    pub(super) fn try_read_result_inner(
-        &self,
-    ) -> Result<Option<RwLockReadGuard<'_, T, Async>>, PoisonError<RwLockReadGuard<'_, T, Async>>> {
+    pub(super) fn try_read_result_inner(&self) -> Result<Option<RwLockReadGuard<'_, T, Async>>, Error<RwLockReadGuard<'_, T, Async>>> {
         if self.try_acquire_read() {
             self.acquired_read().map(Some)
         } else {
@@ -304,11 +307,9 @@ impl<T: ?Sized> RwLock<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired write guard if the lock was
+    /// Returns [`Error`] with the acquired write guard if the lock was
     /// successfully acquired after a writer poisoned it.
-    pub(super) fn try_write_result_inner(
-        &self,
-    ) -> Result<Option<RwLockWriteGuard<'_, T, Async>>, PoisonError<RwLockWriteGuard<'_, T, Async>>> {
+    pub(super) fn try_write_result_inner(&self) -> Result<Option<RwLockWriteGuard<'_, T, Async>>, Error<RwLockWriteGuard<'_, T, Async>>> {
         if self.try_acquire_write() {
             self.acquired_write().map(Some)
         } else {
@@ -359,7 +360,7 @@ impl<T: ?Sized> RwLock<T, Async> {
         }
     }
 
-    fn acquired_read(&self) -> Result<RwLockReadGuard<'_, T, Async>, PoisonError<RwLockReadGuard<'_, T, Async>>> {
+    fn acquired_read(&self) -> Result<RwLockReadGuard<'_, T, Async>, Error<RwLockReadGuard<'_, T, Async>>> {
         self.record(EventKind::RwLockReadAccess);
         let guard = RwLockReadGuard {
             lock: self,
@@ -368,13 +369,13 @@ impl<T: ?Sized> RwLock<T, Async> {
         };
         if self.is_poisoned() {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }
     }
 
-    fn acquired_write(&self) -> Result<RwLockWriteGuard<'_, T, Async>, PoisonError<RwLockWriteGuard<'_, T, Async>>> {
+    fn acquired_write(&self) -> Result<RwLockWriteGuard<'_, T, Async>, Error<RwLockWriteGuard<'_, T, Async>>> {
         self.record(EventKind::RwLockWriteAccess);
         let guard = RwLockWriteGuard {
             lock: self,
@@ -384,7 +385,7 @@ impl<T: ?Sized> RwLock<T, Async> {
         };
         if self.is_poisoned() {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }
@@ -448,7 +449,7 @@ impl<T: ?Sized + fmt::Debug, M: Mode> fmt::Debug for RwLock<T, M> {
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct RwLockRead<'a, T: ?Sized> {
-    result: RwLockReadResult<'a, T>,
+    result: RwLockReadFuture<'a, T>,
 }
 
 impl<'a, T: ?Sized> Future for RwLockRead<'a, T> {
@@ -463,17 +464,15 @@ impl<'a, T: ?Sized> Future for RwLockRead<'a, T> {
     }
 }
 
-/// A future that acquires shared access to an [`RwLock`] and reports poisoning.
-#[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
-pub struct RwLockReadResult<'a, T: ?Sized> {
+struct RwLockReadFuture<'a, T: ?Sized> {
     lock: &'a RwLock<T, Async>,
     waiter: Option<Arc<Waiter>>,
     contention_recorded: bool,
 }
 
-impl<'a, T: ?Sized> Future for RwLockReadResult<'a, T> {
-    type Output = Result<RwLockReadGuard<'a, T, Async>, PoisonError<RwLockReadGuard<'a, T, Async>>>;
+impl<'a, T: ?Sized> Future for RwLockReadFuture<'a, T> {
+    type Output = Result<RwLockReadGuard<'a, T, Async>, Error<RwLockReadGuard<'a, T, Async>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.lock.try_acquire_read() {
@@ -498,11 +497,16 @@ impl<'a, T: ?Sized> Future for RwLockReadResult<'a, T> {
     clippy::type_complexity,
     reason = "polling retains an acquired guard on both successful and poisoned acquisition"
 )]
-impl<'a, T: ?Sized> RwLockReadResult<'a, T> {
-    fn poll_registered(
-        &mut self,
-        cx: &Context<'_>,
-    ) -> Poll<Result<RwLockReadGuard<'a, T, Async>, PoisonError<RwLockReadGuard<'a, T, Async>>>> {
+impl<'a, T: ?Sized> RwLockReadFuture<'a, T> {
+    const fn new(lock: &'a RwLock<T, Async>) -> Self {
+        Self {
+            lock,
+            waiter: None,
+            contention_recorded: false,
+        }
+    }
+
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<RwLockReadGuard<'a, T, Async>, Error<RwLockReadGuard<'a, T, Async>>>> {
         let lock = self.lock;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -524,7 +528,13 @@ impl<'a, T: ?Sized> RwLockReadResult<'a, T> {
     }
 }
 
-impl<T: ?Sized> Drop for RwLockReadResult<'_, T> {
+impl<T: ?Sized> fmt::Debug for RwLockReadFuture<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RwLockReadFuture").finish_non_exhaustive()
+    }
+}
+
+impl<T: ?Sized> Drop for RwLockReadFuture<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = &self.waiter {
             self.lock.raw.waiters.cancel_marked(waiter, || {
@@ -538,7 +548,7 @@ impl<T: ?Sized> Drop for RwLockReadResult<'_, T> {
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct RwLockWrite<'a, T: ?Sized> {
-    result: RwLockWriteResult<'a, T>,
+    result: RwLockWriteFuture<'a, T>,
 }
 
 impl<'a, T: ?Sized> Future for RwLockWrite<'a, T> {
@@ -553,17 +563,15 @@ impl<'a, T: ?Sized> Future for RwLockWrite<'a, T> {
     }
 }
 
-/// A future that acquires exclusive access to an [`RwLock`] and reports poisoning.
-#[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
-pub struct RwLockWriteResult<'a, T: ?Sized> {
+struct RwLockWriteFuture<'a, T: ?Sized> {
     lock: &'a RwLock<T, Async>,
     waiter: Option<Arc<Waiter>>,
     contention_recorded: bool,
 }
 
-impl<'a, T: ?Sized> Future for RwLockWriteResult<'a, T> {
-    type Output = Result<RwLockWriteGuard<'a, T, Async>, PoisonError<RwLockWriteGuard<'a, T, Async>>>;
+impl<'a, T: ?Sized> Future for RwLockWriteFuture<'a, T> {
+    type Output = Result<RwLockWriteGuard<'a, T, Async>, Error<RwLockWriteGuard<'a, T, Async>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.lock.try_acquire_write() {
@@ -588,11 +596,16 @@ impl<'a, T: ?Sized> Future for RwLockWriteResult<'a, T> {
     clippy::type_complexity,
     reason = "polling retains an acquired guard on both successful and poisoned acquisition"
 )]
-impl<'a, T: ?Sized> RwLockWriteResult<'a, T> {
-    fn poll_registered(
-        &mut self,
-        cx: &Context<'_>,
-    ) -> Poll<Result<RwLockWriteGuard<'a, T, Async>, PoisonError<RwLockWriteGuard<'a, T, Async>>>> {
+impl<'a, T: ?Sized> RwLockWriteFuture<'a, T> {
+    const fn new(lock: &'a RwLock<T, Async>) -> Self {
+        Self {
+            lock,
+            waiter: None,
+            contention_recorded: false,
+        }
+    }
+
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<RwLockWriteGuard<'a, T, Async>, Error<RwLockWriteGuard<'a, T, Async>>>> {
         let lock = self.lock;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -614,7 +627,13 @@ impl<'a, T: ?Sized> RwLockWriteResult<'a, T> {
     }
 }
 
-impl<T: ?Sized> Drop for RwLockWriteResult<'_, T> {
+impl<T: ?Sized> fmt::Debug for RwLockWriteFuture<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RwLockWriteFuture").finish_non_exhaustive()
+    }
+}
+
+impl<T: ?Sized> Drop for RwLockWriteFuture<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = &self.waiter {
             self.lock.raw.waiters.cancel_marked(waiter, || {
@@ -649,7 +668,7 @@ impl<T: ?Sized> RwLockReadGuard<'_, T, Async> {
 
 impl<T: ?Sized, M: Mode> Drop for RwLockReadGuard<'_, T, M> {
     fn drop(&mut self) {
-        M::rwlock_release_read(self, super::mode::sealed::Release::new());
+        M::rwlock_release_read(self, super::sealed::Release::new());
     }
 }
 
@@ -702,7 +721,7 @@ impl<T: ?Sized> RwLockWriteGuard<'_, T, Async> {
 
 impl<T: ?Sized, M: Mode> Drop for RwLockWriteGuard<'_, T, M> {
     fn drop(&mut self) {
-        M::rwlock_release_write(self, super::mode::sealed::Release::new());
+        M::rwlock_release_write(self, super::sealed::Release::new());
     }
 }
 
@@ -815,14 +834,14 @@ mod tests {
     fn lock_release_during_waiter_registration_completes_acquisition() {
         let lock = RwLock::<_, Async>::new(());
         let context = Context::from_waker(Waker::noop());
-        let mut read = lock.read_async_result();
+        let mut read = RwLockReadFuture::new(&lock);
         let Poll::Ready(Ok(read_guard)) = read.poll_registered(&context) else {
             panic!("an unlocked rwlock must complete read registration immediately");
         };
         assert_eq!(lock.raw.state.load(Ordering::Relaxed), 1);
         drop(read_guard);
 
-        let mut write = lock.write_async_result();
+        let mut write = RwLockWriteFuture::new(&lock);
         let Poll::Ready(Ok(write_guard)) = write.poll_registered(&context) else {
             panic!("an unlocked rwlock must complete write registration immediately");
         };

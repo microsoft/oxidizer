@@ -4,7 +4,6 @@
 //! Channels with optional telemetry.
 
 use std::collections::VecDeque;
-use std::error::Error as StdError;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -16,81 +15,14 @@ use std::time::{Duration, Instant};
 // Channel state is already heap-shared; another lazy sidecar would not shrink
 // the endpoint handles and would add work to their notification path.
 use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_until};
+use crate::Error;
+use crate::error::ErrorKind;
 use crate::telemetry::{self, EventKind};
 
-const ERROR_FULL: u8 = 1;
-const ERROR_EMPTY: u8 = 2;
-const ERROR_CLOSED: u8 = 3;
-const ERROR_TIMEOUT: u8 = 4;
-
-/// An opaque channel operation error.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct Error<T = ()> {
-    code: u8,
-    value: Option<T>,
-}
-
-impl<T> Error<T> {
-    fn with_value(code: u8, value: T) -> Self {
-        Self { code, value: Some(value) }
-    }
-
-    /// Returns whether a bounded channel had no available capacity.
-    #[must_use]
-    pub const fn is_full(&self) -> bool {
-        self.code == ERROR_FULL
-    }
-
-    /// Returns whether a channel had no value available without waiting.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.code == ERROR_EMPTY
-    }
-
-    /// Returns whether the channel no longer accepts the operation.
-    #[must_use]
-    pub const fn is_closed(&self) -> bool {
-        self.code == ERROR_CLOSED
-    }
-
-    /// Returns whether a blocking operation reached its deadline.
-    #[must_use]
-    pub const fn is_timeout(&self) -> bool {
-        self.code == ERROR_TIMEOUT
-    }
-
-    /// Returns the value rejected by a send operation, if present.
-    #[must_use]
-    pub fn into_value(self) -> Option<T> {
-        self.value
-    }
-}
-
-impl Error {
-    const fn without_value(code: u8) -> Self {
-        Self { code, value: None }
-    }
-}
-
-impl<T> fmt::Display for Error<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self.code {
-            ERROR_FULL => "channel has no available capacity",
-            ERROR_EMPTY => "channel has no value available",
-            ERROR_CLOSED => "channel is closed",
-            ERROR_TIMEOUT => "channel operation timed out",
-            _ => "channel operation failed",
-        })
-    }
-}
-
-impl<T> fmt::Debug for Error<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Error").finish_non_exhaustive()
-    }
-}
-
-impl<T: 'static> StdError for Error<T> {}
+const ERROR_FULL: ErrorKind = ErrorKind::Full;
+const ERROR_EMPTY: ErrorKind = ErrorKind::Empty;
+const ERROR_CLOSED: ErrorKind = ErrorKind::Closed;
+const ERROR_TIMEOUT: ErrorKind = ErrorKind::Timeout;
 
 /// Creates a bounded multi-producer, multi-consumer queue channel.
 ///
@@ -171,7 +103,7 @@ impl<T> QueueShared<T> {
         telemetry::record(kind, std::ptr::from_ref(self).cast::<()>());
     }
 
-    fn try_send(&self, value: T) -> Result<(), (u8, T)> {
+    fn try_send(&self, value: T) -> Result<(), (ErrorKind, T)> {
         let mut state = self.state();
         if state.send_is_closed() {
             return Err((ERROR_CLOSED, value));
@@ -421,17 +353,17 @@ impl<T> Receiver<T> {
             assert_test_channel_progress(deadline, "queue receive must make progress");
             match self.shared.try_receive() {
                 Ok(value) => return Ok(value),
-                Err(error) => match error.code {
-                    ERROR_CLOSED => return Err(error),
-                    code => {
-                        debug_assert_eq!(code, ERROR_EMPTY, "queue receive reports only empty or closed");
-                        if matches!(contention_recording, ContentionRecording::Pending) {
-                            self.shared.record(EventKind::ChannelReceiveContention);
-                            contention_recording = ContentionRecording::Recorded;
-                        }
-                        QueueWait::receive(&self.shared).await;
+                Err(error) => {
+                    if error.is_closed() {
+                        return Err(error);
                     }
-                },
+                    debug_assert!(error.is_empty(), "queue receive reports only empty or closed");
+                    if matches!(contention_recording, ContentionRecording::Pending) {
+                        self.shared.record(EventKind::ChannelReceiveContention);
+                        contention_recording = ContentionRecording::Recorded;
+                    }
+                    QueueWait::receive(&self.shared).await;
+                }
             }
         }
     }
@@ -1439,16 +1371,6 @@ mod tests {
             let result = worker.join().unwrap().map_err(|error| error.is_closed());
             assert_eq!(result, if close { Err(true) } else { Ok(()) });
         }
-    }
-
-    #[test]
-    fn unknown_error_codes_use_the_defensive_message() {
-        let error = Error::<()> {
-            code: u8::MAX,
-            value: None,
-        };
-
-        assert_eq!(error.to_string(), "channel operation failed");
     }
 
     #[test]

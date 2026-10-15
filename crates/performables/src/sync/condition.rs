@@ -7,10 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use super::mode::{Async, Mode, Sync};
 use super::mutex::{MutexGuard, MutexLock};
-use super::panic_poisoned;
 use super::wait_queue::{WaitQueue, Waiter, block_on, block_on_timeout};
+use super::{Async, Mode, Sync, panic_poisoned};
 use crate::telemetry::{self, EventKind};
 
 /// A condition variable used with a [`super::mutex::Mutex`] of the same mode.
@@ -103,7 +102,7 @@ impl Condvar<Sync> {
         &self,
         guard: MutexGuard<'mutex, T>,
         timeout: Duration,
-    ) -> (MutexGuard<'mutex, T>, WaitTimeoutResult) {
+    ) -> (MutexGuard<'mutex, T>, WaitTimeoutOutcome) {
         let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
         let (result, outcome) = match self.raw.wait_timeout(guard.into_native(), timeout) {
@@ -122,7 +121,7 @@ impl Condvar<Sync> {
         }
         (
             guard,
-            WaitTimeoutResult {
+            WaitTimeoutOutcome {
                 timed_out: outcome.timed_out(),
             },
         )
@@ -204,11 +203,11 @@ impl Condvar<Async> {
         &self,
         guard: MutexGuard<'mutex, T, Async>,
         timeout: Duration,
-    ) -> (MutexGuard<'mutex, T, Async>, WaitTimeoutResult) {
+    ) -> (MutexGuard<'mutex, T, Async>, WaitTimeoutOutcome) {
         let mutex = guard.mutex();
         match block_on_timeout(self.wait_async(guard), timeout) {
-            Some(guard) => (guard, WaitTimeoutResult { timed_out: false }),
-            None => (mutex.lock(), WaitTimeoutResult { timed_out: true }),
+            Some(guard) => (guard, WaitTimeoutOutcome { timed_out: false }),
+            None => (mutex.lock(), WaitTimeoutOutcome { timed_out: true }),
         }
     }
 
@@ -303,11 +302,11 @@ impl<T: ?Sized> Drop for CondvarWait<'_, '_, T> {
 
 /// Indicates whether a timed condition-variable wait reached its deadline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WaitTimeoutResult {
+pub struct WaitTimeoutOutcome {
     timed_out: bool,
 }
 
-impl WaitTimeoutResult {
+impl WaitTimeoutOutcome {
     /// Returns whether the wait reached its deadline before observing a notification.
     #[must_use]
     pub const fn timed_out(self) -> bool {

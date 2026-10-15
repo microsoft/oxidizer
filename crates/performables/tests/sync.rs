@@ -22,7 +22,7 @@ use performables::arc::Arc;
 #[cfg(feature = "seismograph")]
 use performables::arc::PerThread;
 use performables::sync::once::{LazyLock, OnceLock};
-use performables::sync::{barrier, condition, lock, mode, mutex};
+use performables::sync::{self, barrier, condition, lock, mutex};
 #[cfg(feature = "seismograph")]
 use seismograph::recorder::Configuration;
 #[cfg(feature = "seismograph")]
@@ -37,10 +37,10 @@ use serializer_support::ValueSerializer;
 use thread_aware::Relocator;
 use waker_support::clone_hook_waker;
 
-type Mutex<T> = mutex::Mutex<T, mode::Async>;
-type RwLock<T> = lock::RwLock<T, mode::Async>;
-type Barrier = barrier::Barrier<mode::Async>;
-type Condvar = condition::Condvar<mode::Async>;
+type Mutex<T> = mutex::Mutex<T, sync::Async>;
+type RwLock<T> = lock::RwLock<T, sync::Async>;
+type Barrier = barrier::Barrier<sync::Async>;
+type Condvar = condition::Condvar<sync::Async>;
 
 #[cfg(miri)]
 const TEST_DEADLINE: Duration = Duration::from_secs(120);
@@ -283,7 +283,13 @@ fn mutex_result_acquisitions_retain_usable_guards() {
     let mutex = Mutex::new(0);
     poison_mutex(&mutex);
 
-    let mut sync_error = mutex.lock_result().unwrap_err();
+    let mut sync_error: performables::Error<_> = mutex.lock_result().unwrap_err();
+    assert!(sync_error.is_poisoned());
+    let standard_error: &dyn std::error::Error = &sync_error;
+    assert_eq!(
+        standard_error.to_string(),
+        "poisoned lock: another thread panicked while holding the lock"
+    );
     **sync_error.get_mut() += 2;
     drop(sync_error.into_inner());
 
@@ -297,6 +303,46 @@ fn mutex_result_acquisitions_retain_usable_guards() {
 
     assert_eq!(**mutex.lock_result().unwrap_err().get_ref(), 15);
     assert!(mutex.is_poisoned());
+}
+
+#[test]
+fn recoverable_lock_futures_support_send_unpin_and_debug_without_debug_payloads() {
+    struct Value(u64);
+
+    fn checked<F: Future + std::fmt::Debug + Send + Unpin>(future: F) -> F {
+        assert!(!format!("{future:?}").is_empty());
+        future
+    }
+
+    let mutex = Mutex::new(Value(7));
+    let lock = RwLock::new(Value(11));
+
+    let mut guard = block_on(checked(mutex.lock_async_result())).unwrap();
+    guard.0 += 1;
+    assert_eq!(guard.0, 8);
+    drop(guard);
+
+    let read = block_on(checked(lock.read_async_result())).unwrap();
+    assert_eq!(read.0, 11);
+    drop(read);
+
+    let mut write = block_on(checked(lock.write_async_result())).unwrap();
+    write.0 += 2;
+    assert_eq!(write.0, 13);
+}
+
+#[test]
+fn recoverable_rw_lock_futures_support_thread_local_values() {
+    let lock = RwLock::new(std::rc::Rc::new(7));
+    let read = block_on(lock.read_async_result()).unwrap();
+    assert_eq!(**read, 7);
+    drop(read);
+
+    let mut write = block_on(lock.write_async_result()).unwrap();
+    *write = std::rc::Rc::new(11);
+    drop(write);
+
+    assert_eq!(**block_on(lock.read_async_result()).unwrap(), 11);
 }
 
 #[test]

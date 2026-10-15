@@ -6,14 +6,14 @@ use std::sync::{LockResult, RwLockReadGuard as NativeReadGuard, RwLockWriteGuard
 use super::*;
 
 impl<T: ?Sized> RwLock<T, Sync> {
-    pub(in crate::sync) fn read_result_native(&self) -> Result<RwLockReadGuard<'_, T>, PoisonError<RwLockReadGuard<'_, T>>> {
+    pub(in crate::sync) fn read_result_native(&self) -> Result<RwLockReadGuard<'_, T>, Error<RwLockReadGuard<'_, T>>> {
         self.read_result_from_native(self.raw.try_read())
     }
 
     pub(in crate::sync) fn read_result_from_native<'a>(
         &'a self,
         result: TryLockResult<NativeReadGuard<'a, ()>>,
-    ) -> Result<RwLockReadGuard<'a, T>, PoisonError<RwLockReadGuard<'a, T>>> {
+    ) -> Result<RwLockReadGuard<'a, T>, Error<RwLockReadGuard<'a, T>>> {
         match result {
             Ok(raw) => self.acquired_read_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)),
@@ -21,12 +21,12 @@ impl<T: ?Sized> RwLock<T, Sync> {
         }
     }
 
-    pub(in crate::sync) fn wait_for_read_native(&self) -> Result<RwLockReadGuard<'_, T>, PoisonError<RwLockReadGuard<'_, T>>> {
+    pub(in crate::sync) fn wait_for_read_native(&self) -> Result<RwLockReadGuard<'_, T>, Error<RwLockReadGuard<'_, T>>> {
         self.record(EventKind::RwLockReadContention);
         self.acquired_read_native(self.raw.read())
     }
 
-    pub(in crate::sync) fn try_read_result_native(&self) -> Result<Option<RwLockReadGuard<'_, T>>, PoisonError<RwLockReadGuard<'_, T>>> {
+    pub(in crate::sync) fn try_read_result_native(&self) -> Result<Option<RwLockReadGuard<'_, T>>, Error<RwLockReadGuard<'_, T>>> {
         match self.raw.try_read() {
             Ok(raw) => self.acquired_read_native(Ok(raw)).map(Some),
             Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)).map(Some),
@@ -37,14 +37,14 @@ impl<T: ?Sized> RwLock<T, Sync> {
         }
     }
 
-    pub(in crate::sync) fn write_result_native(&self) -> Result<RwLockWriteGuard<'_, T>, PoisonError<RwLockWriteGuard<'_, T>>> {
+    pub(in crate::sync) fn write_result_native(&self) -> Result<RwLockWriteGuard<'_, T>, Error<RwLockWriteGuard<'_, T>>> {
         self.write_result_from_native(self.raw.try_write())
     }
 
     pub(in crate::sync) fn write_result_from_native<'a>(
         &'a self,
         result: TryLockResult<NativeWriteGuard<'a, ()>>,
-    ) -> Result<RwLockWriteGuard<'a, T>, PoisonError<RwLockWriteGuard<'a, T>>> {
+    ) -> Result<RwLockWriteGuard<'a, T>, Error<RwLockWriteGuard<'a, T>>> {
         match result {
             Ok(raw) => self.acquired_write_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_write_native(Err(error)),
@@ -55,7 +55,7 @@ impl<T: ?Sized> RwLock<T, Sync> {
         }
     }
 
-    pub(in crate::sync) fn try_write_result_native(&self) -> Result<Option<RwLockWriteGuard<'_, T>>, PoisonError<RwLockWriteGuard<'_, T>>> {
+    pub(in crate::sync) fn try_write_result_native(&self) -> Result<Option<RwLockWriteGuard<'_, T>>, Error<RwLockWriteGuard<'_, T>>> {
         match self.raw.try_write() {
             Ok(raw) => self.acquired_write_native(Ok(raw)).map(Some),
             Err(TryLockError::Poisoned(error)) => self.acquired_write_native(Err(error)).map(Some),
@@ -69,7 +69,7 @@ impl<T: ?Sized> RwLock<T, Sync> {
     fn acquired_read_native<'a>(
         &'a self,
         result: LockResult<NativeReadGuard<'a, ()>>,
-    ) -> Result<RwLockReadGuard<'a, T>, PoisonError<RwLockReadGuard<'a, T>>> {
+    ) -> Result<RwLockReadGuard<'a, T>, Error<RwLockReadGuard<'a, T>>> {
         let (raw, poisoned) = match result {
             Ok(raw) => (raw, false),
             Err(error) => (error.into_inner(), true),
@@ -82,7 +82,7 @@ impl<T: ?Sized> RwLock<T, Sync> {
         self.record(EventKind::RwLockReadAccess);
         if poisoned {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }
@@ -91,7 +91,7 @@ impl<T: ?Sized> RwLock<T, Sync> {
     fn acquired_write_native<'a>(
         &'a self,
         result: LockResult<NativeWriteGuard<'a, ()>>,
-    ) -> Result<RwLockWriteGuard<'a, T>, PoisonError<RwLockWriteGuard<'a, T>>> {
+    ) -> Result<RwLockWriteGuard<'a, T>, Error<RwLockWriteGuard<'a, T>>> {
         let (raw, poisoned) = match result {
             Ok(raw) => (raw, false),
             Err(error) => (error.into_inner(), true),
@@ -105,7 +105,7 @@ impl<T: ?Sized> RwLock<T, Sync> {
         self.record(EventKind::RwLockWriteAccess);
         if poisoned {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }

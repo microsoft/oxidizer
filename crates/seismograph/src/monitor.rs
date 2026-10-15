@@ -25,6 +25,7 @@ use seismograph_protocol::message::{
 };
 use seismograph_protocol::monitor::{AuthenticationToken, InstanceId, MonitorDescriptor};
 
+use crate::Error;
 use crate::recorder::SuppressionGuard;
 
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -116,10 +117,10 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when identity generation, binding, discovery publication,
-    /// or listener-thread creation fails.
+    /// Returns [`crate::Error`] when identity generation, binding, discovery
+    /// publication, or listener-thread creation fails.
     pub fn start(self) -> Result<Monitor, Error> {
-        self.start_with(spawn_listener_thread)
+        self.start_with(spawn_listener_thread).map_err(Error::monitor)
     }
 
     fn start_with(
@@ -131,21 +132,21 @@ impl Builder {
             Arc<ActiveClients>,
             Arc<Mutex<Option<String>>>,
             &Path,
-        ) -> Result<JoinHandle<()>, Error>,
-    ) -> Result<Monitor, Error> {
+        ) -> Result<JoinHandle<()>, StartupFailure>,
+    ) -> Result<Monitor, StartupFailure> {
         let name = self.name.unwrap_or_else(default_application_name);
         if name.is_empty() || self.instance.as_ref().is_some_and(String::is_empty) {
-            return Err(Error::InvalidIdentity);
+            return Err(StartupFailure::InvalidIdentity);
         }
 
-        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(Error::Bind)?;
-        listener.set_nonblocking(true).map_err(Error::ConfigureListener)?;
-        let port = listener.local_addr().map_err(Error::ReadAddress)?.port();
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(StartupFailure::Bind)?;
+        listener.set_nonblocking(true).map_err(StartupFailure::ConfigureListener)?;
+        let port = listener.local_addr().map_err(StartupFailure::ReadAddress)?.port();
 
         let mut instance_id = [0; 16];
-        getrandom::fill(&mut instance_id).map_err(Error::Random)?;
+        getrandom::fill(&mut instance_id).map_err(StartupFailure::Random)?;
         let mut authentication = [0; 32];
-        getrandom::fill(&mut authentication).map_err(Error::Random)?;
+        getrandom::fill(&mut authentication).map_err(StartupFailure::Random)?;
         let descriptor = MonitorDescriptor {
             name,
             instance: self.instance,
@@ -155,7 +156,7 @@ impl Builder {
             authentication: AuthenticationToken::from_bytes(authentication),
         };
 
-        let directory = seismograph_protocol::monitor_directory().map_err(Error::Protocol)?;
+        let directory = seismograph_protocol::monitor_directory().map_err(StartupFailure::Protocol)?;
         create_monitor_directory(&directory)?;
         let descriptor_path = publish_descriptor(&directory, &descriptor)?;
 
@@ -189,8 +190,8 @@ fn default_application_name() -> String {
         .unwrap_or_else(|| "application".into())
 }
 
-fn create_monitor_directory(path: &Path) -> Result<(), Error> {
-    fs::create_dir_all(path).map_err(|source| Error::CreateDirectory {
+fn create_monitor_directory(path: &Path) -> Result<(), StartupFailure> {
+    fs::create_dir_all(path).map_err(|source| StartupFailure::CreateDirectory {
         path: path.to_owned(),
         source,
     })?;
@@ -202,23 +203,23 @@ fn create_monitor_directory(path: &Path) -> Result<(), Error> {
 #[cfg(unix)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Portable tests cannot inject chmod failure.
 #[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Unix-only source that cannot execute there.
-fn restrict_monitor_directory(path: &Path) -> Result<(), Error> {
+fn restrict_monitor_directory(path: &Path) -> Result<(), StartupFailure> {
     use std::os::unix::fs::PermissionsExt as _;
 
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| Error::SetPermissions {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| StartupFailure::SetPermissions {
         path: path.to_owned(),
         source,
     })
 }
 
-fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, Error> {
+fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, StartupFailure> {
     let descriptor_path = directory.join(descriptor.file_name());
     let temporary_path = descriptor_path.with_extension("monitor.tmp");
-    descriptor.write_file(&temporary_path).map_err(|source| Error::Publish {
+    descriptor.write_file(&temporary_path).map_err(|source| StartupFailure::Publish {
         path: temporary_path.clone(),
         source,
     })?;
-    fs::rename(&temporary_path, &descriptor_path).map_err(|source| Error::Rename {
+    fs::rename(&temporary_path, &descriptor_path).map_err(|source| StartupFailure::Rename {
         from: temporary_path,
         to: descriptor_path.clone(),
         source,
@@ -348,7 +349,7 @@ fn spawn_listener_thread(
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
     descriptor_path: &Path,
-) -> Result<JoinHandle<()>, Error> {
+) -> Result<JoinHandle<()>, StartupFailure> {
     spawn_listener_thread_with(
         move || run_listener(&listener, &descriptor, &stop, &active_clients, &last_error),
         descriptor_path,
@@ -360,10 +361,10 @@ fn spawn_listener_thread_with(
     operation: impl FnOnce() + Send + 'static,
     descriptor_path: &Path,
     spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>,
-) -> Result<JoinHandle<()>, Error> {
+) -> Result<JoinHandle<()>, StartupFailure> {
     spawn(Box::new(operation)).map_err(|source| {
         let _ = fs::remove_file(descriptor_path);
-        Error::Spawn(source)
+        StartupFailure::Spawn(source)
     })
 }
 
@@ -844,7 +845,7 @@ impl fmt::Display for ClientError {
 
 /// Monitor startup failure.
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum StartupFailure {
     /// Application or instance name is empty.
     InvalidIdentity,
     /// Listener could not bind to localhost.
@@ -865,6 +866,7 @@ pub enum Error {
         source: io::Error,
     },
     /// Discovery directory permissions could not be restricted.
+    #[cfg(any(unix, test))]
     SetPermissions {
         /// Directory being secured.
         path: PathBuf,
@@ -891,7 +893,7 @@ pub enum Error {
     Spawn(io::Error),
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for StartupFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidIdentity => f.write_str("monitor application and instance names must not be empty"),
@@ -903,6 +905,7 @@ impl fmt::Display for Error {
             Self::CreateDirectory { path, source } => {
                 write!(f, "failed to create monitor directory {}: {source}", path.display())
             }
+            #[cfg(any(unix, test))]
             Self::SetPermissions { path, source } => {
                 write!(f, "failed to secure monitor directory {}: {source}", path.display())
             }
@@ -922,16 +925,17 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for StartupFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Bind(error)
             | Self::ConfigureListener(error)
             | Self::ReadAddress(error)
             | Self::CreateDirectory { source: error, .. }
-            | Self::SetPermissions { source: error, .. }
             | Self::Rename { source: error, .. }
             | Self::Spawn(error) => Some(error),
+            #[cfg(any(unix, test))]
+            Self::SetPermissions { source, .. } => Some(source),
             Self::Protocol(error) | Self::Publish { source: error, .. } => Some(error),
             Self::Random(_) | Self::InvalidIdentity => None,
         }
@@ -1408,11 +1412,11 @@ mod tests {
         let default = Builder::default();
         assert_eq!((&BUILDER.name, &BUILDER.instance), (&default.name, &default.instance));
 
-        assert!(matches!(Monitor::builder().name("").start(), Err(Error::InvalidIdentity)));
-        assert!(matches!(
-            Monitor::builder().name("valid").instance("").start(),
-            Err(Error::InvalidIdentity)
-        ));
+        for builder in [Monitor::builder().name(""), Monitor::builder().name("valid").instance("")] {
+            let error: crate::Error = builder.start().unwrap_err();
+            assert_eq!(error.to_string(), "monitor application and instance names must not be empty");
+            assert!(std::error::Error::source(&error).is_none());
+        }
         assert_eq!(
             default_application_name(),
             std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned()
@@ -1796,30 +1800,30 @@ mod tests {
 
         let path = PathBuf::from("monitor");
         let startup_cases = [
-            Error::InvalidIdentity,
-            Error::Bind(io_error()),
-            Error::ConfigureListener(io_error()),
-            Error::ReadAddress(io_error()),
-            Error::Random(getrandom::Error::UNSUPPORTED),
-            Error::Protocol(protocol_error()),
-            Error::CreateDirectory {
+            StartupFailure::InvalidIdentity,
+            StartupFailure::Bind(io_error()),
+            StartupFailure::ConfigureListener(io_error()),
+            StartupFailure::ReadAddress(io_error()),
+            StartupFailure::Random(getrandom::Error::UNSUPPORTED),
+            StartupFailure::Protocol(protocol_error()),
+            StartupFailure::CreateDirectory {
                 path: path.clone(),
                 source: io_error(),
             },
-            Error::SetPermissions {
+            StartupFailure::SetPermissions {
                 path: path.clone(),
                 source: io_error(),
             },
-            Error::Publish {
+            StartupFailure::Publish {
                 path: path.clone(),
                 source: protocol_error(),
             },
-            Error::Rename {
+            StartupFailure::Rename {
                 from: PathBuf::from("temporary"),
                 to: path,
                 source: io_error(),
             },
-            Error::Spawn(io_error()),
+            StartupFailure::Spawn(io_error()),
         ];
         let expected = [
             "monitor application and instance names must not be empty".to_owned(),
@@ -1834,10 +1838,27 @@ mod tests {
             "failed to publish monitor descriptor temporary as monitor: socket failed".to_owned(),
             "failed to start Seismograph monitor thread: socket failed".to_owned(),
         ];
-        for (error, expected) in startup_cases.into_iter().zip(expected) {
+        let expected_sources = [
+            None,
+            Some("socket failed"),
+            Some("socket failed"),
+            Some("socket failed"),
+            None,
+            Some("invalid Seismograph monitor message"),
+            Some("socket failed"),
+            Some("socket failed"),
+            Some("invalid Seismograph monitor message"),
+            Some("socket failed"),
+            Some("socket failed"),
+        ];
+        for ((failure, expected), expected_source) in startup_cases.into_iter().zip(expected).zip(expected_sources) {
+            let error = Error::monitor(failure);
             assert_eq!(error.to_string(), expected);
-            let expected_source = !matches!(error, Error::InvalidIdentity | Error::Random(_));
-            assert_eq!(std::error::Error::source(&error).is_some(), expected_source);
+            assert_eq!(format!("{error:?}"), format!("Error({expected})"));
+            assert_eq!(
+                std::error::Error::source(&error).map(ToString::to_string).as_deref(),
+                expected_source
+            );
         }
     }
 
@@ -1852,7 +1873,9 @@ mod tests {
         fs::write(&path, b"not a directory").unwrap();
         let error = create_monitor_directory(&path).unwrap_err();
         fs::remove_file(&path).unwrap();
-        assert!(matches!(error, Error::CreateDirectory { path: failed, .. } if failed == path));
+        let error = Error::monitor(error);
+        assert!(error.to_string().contains(&path.display().to_string()));
+        assert!(std::error::Error::source(&error).unwrap().downcast_ref::<io::Error>().is_some());
     }
 
     #[test]
@@ -1899,12 +1922,15 @@ mod tests {
             .join("target")
             .join(format!("seismograph-publish-{}", std::process::id()));
         let missing = base.join("missing");
-        assert!(matches!(publish_descriptor(&missing, &descriptor), Err(Error::Publish { .. })));
+        assert!(matches!(
+            publish_descriptor(&missing, &descriptor),
+            Err(StartupFailure::Publish { .. })
+        ));
 
         fs::create_dir_all(&base).unwrap();
         let destination = base.join(descriptor.file_name());
         fs::create_dir(&destination).unwrap();
-        assert!(matches!(publish_descriptor(&base, &descriptor), Err(Error::Rename { .. })));
+        assert!(matches!(publish_descriptor(&base, &descriptor), Err(StartupFailure::Rename { .. })));
         fs::remove_dir(destination).unwrap();
         let _ = fs::remove_file(base.join(descriptor.file_name()).with_extension("monitor.tmp"));
         fs::remove_dir(base).unwrap();
@@ -1921,7 +1947,7 @@ mod tests {
         fs::write(&path, b"descriptor").unwrap();
         assert!(matches!(
             spawn_listener_thread_with(|| {}, &path, |_operation| Err(io::Error::other("injected"))),
-            Err(Error::Spawn(_))
+            Err(StartupFailure::Spawn(_))
         ));
         assert!(!path.exists());
     }
@@ -1933,10 +1959,19 @@ mod tests {
             .name("spawn-failure")
             .start_with(|_listener, _descriptor, _stop, _client, _last_error, descriptor_path| {
                 fs::remove_file(descriptor_path).unwrap();
-                Err(Error::Spawn(io::Error::other("injected")))
+                Err(StartupFailure::Spawn(io::Error::other("injected")))
             })
+            .map_err(Error::monitor)
             .unwrap_err();
-        assert!(matches!(error, Error::Spawn(_)));
+        assert_eq!(error.to_string(), "failed to start Seismograph monitor thread: injected");
+        assert_eq!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<io::Error>()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::Other
+        );
     }
 
     #[cfg_attr(miri, ignore)]

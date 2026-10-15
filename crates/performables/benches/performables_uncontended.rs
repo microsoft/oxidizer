@@ -21,10 +21,10 @@ use std::time::Duration;
 
 use criterion::{BatchSize, Criterion};
 use performables::arc::Arc;
+use performables::sync;
 use performables::sync::barrier::Barrier;
 use performables::sync::channel::{self, OneshotReceiver, Receiver, Sender, WatchReceiver, WatchSender};
 use performables::sync::lock::RwLock;
-use performables::sync::mode;
 use performables::sync::mutex::Mutex;
 
 const ARC_NEW_DROP: &str = "performables_uncontended/arc_new_drop";
@@ -118,14 +118,14 @@ fn watch_changed(pair: &mut (WatchSender<u64>, WatchReceiver<u64>)) {
 }
 
 #[metabench::benchmark(BARRIER_SYNC, READY_BLOCKING, "barrier_sync")]
-#[bench::value(&Barrier::<mode::Sync>::new(1))]
+#[bench::value(&Barrier::<sync::Sync>::new(1))]
 fn barrier_sync(barrier: &Barrier) -> bool {
     black_box(barrier).wait().is_leader()
 }
 
 #[metabench::benchmark(BARRIER_ASYNC_BLOCKING, READY_BLOCKING, "barrier_async_blocking")]
-#[bench::value(&Barrier::<mode::Async>::new(1))]
-fn barrier_async_blocking(barrier: &Barrier<mode::Async>) -> bool {
+#[bench::value(&Barrier::<sync::Async>::new(1))]
+fn barrier_async_blocking(barrier: &Barrier<sync::Async>) -> bool {
     black_box(barrier).wait().is_leader()
 }
 
@@ -152,7 +152,7 @@ fn ready_blocking_benchmarks(criterion: &mut Criterion) {
         bencher.iter_batched_ref(ready_watch, watch_changed, READY_BATCH);
     });
     let sync_barrier = Barrier::new(1);
-    let async_barrier = Barrier::<mode::Async>::new(1);
+    let async_barrier = Barrier::<sync::Async>::new(1);
     group.bench_function(BARRIER_SYNC.benchmark_name(), |bencher| {
         bencher.iter(|| barrier_sync(&sync_barrier));
     });
@@ -211,14 +211,14 @@ fn mutex_lock_performables_sync(lock: &Mutex<u64>) -> u64 {
 }
 
 #[metabench::benchmark(MUTEX_LOCK_PERFORMABLES_ASYNC_BLOCKING, MUTEX_LOCK, "performables_async_blocking")]
-#[bench::lock(&Mutex::<u64, mode::Async>::new(7))]
-fn mutex_lock_performables_async_blocking(lock: &Mutex<u64, mode::Async>) -> u64 {
+#[bench::lock(&Mutex::<u64, sync::Async>::new(7))]
+fn mutex_lock_performables_async_blocking(lock: &Mutex<u64, sync::Async>) -> u64 {
     let guard = black_box(lock).lock();
     black_box(*guard)
 }
 
 struct AsyncMutexInput {
-    lock: Mutex<u64, mode::Async>,
+    lock: Mutex<u64, sync::Async>,
     context: Context<'static>,
 }
 
@@ -247,8 +247,8 @@ fn rw_lock_read_std(lock: &std::sync::RwLock<u64>) -> u64 {
 }
 
 #[metabench::benchmark(RW_LOCK_READ_PERFORMABLES_TRY, RW_LOCK_READ, "performables_try")]
-#[bench::lock(&RwLock::<u64, mode::Async>::new(7))]
-fn rw_lock_read_performables_try(lock: &RwLock<u64, mode::Async>) -> u64 {
+#[bench::lock(&RwLock::<u64, sync::Async>::new(7))]
+fn rw_lock_read_performables_try(lock: &RwLock<u64, sync::Async>) -> u64 {
     let guard = black_box(lock)
         .try_read()
         .unwrap_or_else(|| unreachable!("the benchmark has no competing lock holder"));
@@ -263,7 +263,7 @@ fn rw_lock_read_performables_sync(lock: &RwLock<u64>) -> u64 {
 }
 
 struct AsyncRwLockInput {
-    lock: RwLock<u64, mode::Async>,
+    lock: RwLock<u64, sync::Async>,
     context: Context<'static>,
 }
 
@@ -348,7 +348,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(MUTEX_LOCK);
     let standard = std::sync::Mutex::new(7_u64);
     let synchronous = Mutex::<u64>::new(7);
-    let performable = Mutex::<u64, mode::Async>::new(7);
+    let performable = Mutex::<u64, sync::Async>::new(7);
     let mut asynchronous = async_mutex_input();
 
     group.bench_function(MUTEX_LOCK_STD.benchmark_name(), |bencher| {
@@ -368,7 +368,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut read_group = criterion.benchmark_group(RW_LOCK_READ);
     let standard = std::sync::RwLock::new(7_u64);
     let synchronous = RwLock::<u64>::new(7);
-    let performable = RwLock::<u64, mode::Async>::new(7);
+    let performable = RwLock::<u64, sync::Async>::new(7);
     let mut asynchronous = async_rw_lock_input();
 
     read_group.bench_function(RW_LOCK_READ_STD.benchmark_name(), |bencher| {

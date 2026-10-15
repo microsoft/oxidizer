@@ -10,9 +10,9 @@
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
+use performables::sync;
 use performables::sync::barrier::Barrier;
 use performables::sync::channel::{bounded, oneshot, unbounded, watch};
-use performables::sync::mode;
 
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
@@ -100,7 +100,7 @@ fn ready_watch_change_and_closed_channels_do_not_allocate() {
 
 #[test]
 fn single_participant_async_barrier_wait_does_not_allocate() {
-    let barrier = Barrier::<mode::Async>::new(1);
+    let barrier = Barrier::<sync::Async>::new(1);
     let measured = measure_allocations(|| barrier.wait().is_leader());
 
     assert_eq!(measured, (true, 0));
