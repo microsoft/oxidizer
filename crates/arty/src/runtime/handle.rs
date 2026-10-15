@@ -257,6 +257,56 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_destructors_remain_worker_guarded() {
+        struct Probe {
+            block_on_runtime: Runtime,
+            stop_runtime: Option<Runtime>,
+            outcomes: std::sync::mpsc::Sender<(bool, bool)>,
+        }
+
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let block_on_rejected = self.block_on_runtime.scheduler().block_on(async |_| ()).is_err();
+                let stop_rejected = self.stop_runtime.take().unwrap().stop().is_err();
+                self.outcomes.send((block_on_rejected, stop_rejected)).unwrap();
+            }
+        }
+
+        let runtime = || {
+            Runtime::builder()
+                .workers(crate::runtime::WorkersPolicy::exactly(1))
+                .blocking_pool(crate::runtime::BlockingPoolPolicy::shared().max(1))
+                .build()
+                .unwrap()
+        };
+        let source = runtime();
+        let block_on_runtime = runtime();
+        let stop_runtime = runtime();
+        // Consuming an owner on a worker cannot wait. Public APIs expose no
+        // later join, so this regression needs private completion handles.
+        let block_on_dispatcher = block_on_runtime.scheduler.dispatcher.clone();
+        let stop_dispatcher = stop_runtime.scheduler.dispatcher.clone();
+        let (outcomes, received) = std::sync::mpsc::channel();
+        let pending_task = source.scheduler().spawn_anywhere(
+            Unaware(Probe {
+                block_on_runtime,
+                stop_runtime: Some(stop_runtime),
+                outcomes,
+            }),
+            |_, Unaware(probe)| async move {
+                let _probe = probe;
+                std::future::pending::<()>().await;
+            },
+        );
+
+        source.stop().unwrap();
+        block_on_dispatcher.wait().unwrap();
+        stop_dispatcher.wait().unwrap();
+        assert_eq!(received.recv_timeout(TEST_TIMEOUT).unwrap(), (true, true));
+        assert!(pending_task.join().unwrap_err().is_shutdown());
+    }
+
+    #[test]
     fn dropping_the_owner_on_its_async_worker_requests_shutdown_without_unwinding() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
