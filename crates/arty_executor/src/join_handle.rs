@@ -201,11 +201,19 @@ impl<R: Send + 'static> RemoteTaskSender<R> {
     }
 
     /// Sends a successfully completed result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a panic payload if notifying the result receiver panics.
     pub fn completed(self, result: R) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Completed(result))
     }
 
     /// Sends a captured task panic.
+    ///
+    /// # Errors
+    ///
+    /// Returns a panic payload if notifying the result receiver panics.
     pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Panicked(panic))
     }

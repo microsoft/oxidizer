@@ -503,6 +503,19 @@ impl ExecutorCore {
         self.reentrancy_safe.borrow_mut().shutting_down = true;
     }
 
+    pub(crate) fn owner_dropped(&self) {
+        self.request_shutdown();
+
+        let Ok(mut state_exclusive) = self.exclusive.try_borrow_mut() else {
+            // An active cycle observes `shutting_down` before it returns and performs cancellation.
+            return;
+        };
+        let mut state_reentrant = self.reentrancy_safe.borrow_mut();
+        let aborted_count = Self::prepare_task_abort(&self.wake, &mut state_exclusive, &mut state_reentrant);
+        drop(state_reentrant);
+        Self::abort_prepared_tasks(&state_exclusive, aborted_count);
+    }
+
     fn prepare_task_abort(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) -> usize {
         let mut awakened = wake.awakened.lock().expect(ERR_POISONED_LOCK);
         for &task_ref in awakened.iter() {

@@ -21,10 +21,18 @@ thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_SUBMISSION: RefCell<Option<(TaskSet, Rc<Cell<bool>>)>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_EXECUTOR: RefCell<Option<Rc<Executor>>> = const { RefCell::new(None) };
+    static OWNER_DROP_TELEMETRY: RefCell<Option<OwnerDropState>> = const { RefCell::new(None) };
 }
 
 struct ReentrantSubmissionProcessor;
 struct ReentrantCycleProcessor;
+struct OwnerDropProcessor;
+
+struct OwnerDropState {
+    owner: Executor,
+    tasks: TaskSet,
+    nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+}
 
 impl EventProcessor for ReentrantSubmissionProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
@@ -58,6 +66,25 @@ impl EventProcessor for ReentrantCycleProcessor {
             return;
         };
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    }
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
+}
+
+impl EventProcessor for OwnerDropProcessor {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() == "arty.rt.task.spawned"
+    }
+
+    fn process(&self, _event: &EventView<'_>) {
+        let Some(state) = OWNER_DROP_TELEMETRY.take() else {
+            return;
+        };
+        drop(state.owner);
+        let nested = state.tasks.add(async { 42 }, TaskOptions::default());
+        assert!(state.nested.replace(Some(nested)).is_none());
     }
 
     fn flush(&self) -> Result<(), observed::FlushError> {
@@ -300,6 +327,70 @@ fn into_future_conversion_may_submit_a_nested_task() {
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
     assert!(nested_completed.get());
+}
+
+struct DropOwnerDuringIntoFuture {
+    owner: Rc<RefCell<Option<Executor>>>,
+    tasks: TaskSet,
+    nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+}
+
+impl IntoFuture for DropOwnerDuringIntoFuture {
+    type Output = usize;
+    type IntoFuture = Ready<usize>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        drop(self.owner.borrow_mut().take());
+        let nested = self.tasks.add(async { 42 }, TaskOptions::default());
+        assert!(self.nested.replace(Some(nested)).is_none());
+        ready(7)
+    }
+}
+
+#[test]
+fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
+    let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
+    let tasks = owner.borrow().as_ref().unwrap().tasks();
+    let mut existing = tasks.add(pending::<()>(), TaskOptions::default());
+    let nested = Rc::new(RefCell::new(None));
+
+    let mut outer = tasks.add(
+        DropOwnerDuringIntoFuture {
+            owner: Rc::clone(&owner),
+            tasks: tasks.clone(),
+            nested: Rc::clone(&nested),
+        },
+        TaskOptions::default(),
+    );
+
+    assert!(owner.borrow().is_none());
+    assert!(matches!(poll_once(&mut existing), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(error)) if error.is_shutdown()));
+    let mut nested = nested.borrow_mut().take().unwrap();
+    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+#[test]
+fn owner_drop_during_spawn_telemetry_cancels_task_and_rejects_nested_submission() {
+    let sink = Sink::new(
+        "arty-executor-owner-drop",
+        vec![Arc::new(OwnerDropProcessor)],
+        tick::SimpleClock::new_frozen(),
+    );
+    let executor = Executor::builder().sink(sink).build();
+    let tasks = executor.tasks();
+    let nested = Rc::new(RefCell::new(None));
+    OWNER_DROP_TELEMETRY.set(Some(OwnerDropState {
+        owner: executor,
+        tasks: tasks.clone(),
+        nested: Rc::clone(&nested),
+    }));
+
+    let mut outer = tasks.add(pending::<()>(), TaskOptions::default());
+
+    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(error)) if error.is_shutdown()));
+    let mut nested = nested.borrow_mut().take().unwrap();
+    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(error)) if error.is_shutdown()));
 }
 
 struct ShutdownDuringIntoFuture {

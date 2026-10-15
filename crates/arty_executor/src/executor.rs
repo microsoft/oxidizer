@@ -128,6 +128,12 @@ impl Executor {
     }
 }
 
+impl Drop for Executor {
+    fn drop(&mut self) {
+        self.core.owner_dropped();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
