@@ -9,7 +9,7 @@ use std::task::Waker;
 use arty_io_core::{DriverRole, IoContext};
 use foldhash::HashMap;
 use observed::Sink;
-use thread_aware_core::Thread;
+use thread_aware_core::{Thread, ThreadAware};
 
 use crate::DriverHost;
 
@@ -55,6 +55,8 @@ struct Registry {
 #[derive(Clone)]
 pub struct IoRuntime {
     registry: Arc<Mutex<Registry>>,
+    sink: Sink,
+    thread: Option<Thread>,
 }
 
 impl fmt::Debug for IoRuntime {
@@ -71,25 +73,42 @@ impl PartialEq for IoRuntime {
 
 impl Eq for IoRuntime {}
 
+impl ThreadAware for IoRuntime {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.sink.relocate(source, destination);
+        self.thread = Some(destination.clone());
+    }
+}
+
 impl Default for IoRuntime {
     fn default() -> Self {
-        Self::new()
+        Self::new(Sink::noop())
     }
 }
 
 impl IoRuntime {
     /// Creates an empty runtime-wide I/O context registry.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(sink: Sink) -> Self {
         Self {
             registry: Arc::new(Mutex::new(Registry::default())),
+            sink,
+            thread: None,
         }
     }
 
     /// Creates a worker-local driver host for one Arty async worker.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this runtime clone has not been relocated onto its worker.
     #[must_use]
-    pub fn driver_host(&self, thread: Thread, owner_waker: Waker, sink: Sink) -> DriverHost {
-        DriverHost::new(self.clone(), thread, owner_waker, sink)
+    pub fn driver_host(&self, owner_waker: Waker) -> DriverHost {
+        let thread = self
+            .thread
+            .clone()
+            .expect("IoRuntime must be relocated onto its worker before creating a driver host");
+        DriverHost::new(self.clone(), thread, owner_waker, self.sink.clone())
     }
 
     pub(crate) fn get_context<C>(&self, options: &C::ContextOptions) -> Resolution<C>
