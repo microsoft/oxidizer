@@ -551,6 +551,7 @@ impl SingleSinkState {
     }
 
     fn dispatch(&self, event: &dyn DynEvent, bitmask: u64) {
+        // Clears the bits of later child Sinks, so no `EventView` is built when none of this Sink's processors want the event.
         let bitmask = bitmask & (u64::MAX >> (u64::BITS as usize - self.processors.len()));
         if bitmask == 0 {
             return;
@@ -582,6 +583,9 @@ mod tests {
     use ohno::assert_error_message;
 
     use super::*;
+
+    // These atomics are observation counters only. Assertions read them after the
+    // synchronous emission, so no ordering relative to other memory is required.
 
     #[test]
     fn noop_sink_is_noop() {

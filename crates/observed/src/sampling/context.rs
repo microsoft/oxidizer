@@ -50,6 +50,17 @@ impl<'a> EventSamplingContext<'a> {
     }
 }
 
+impl Debug for EventSamplingContext<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>())
+            .field("description", self.description)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Which of a Sink's processors want the event. Processors before
+/// `next_processor_index` have been asked, and bit `i` of `bitmask` is set
+/// when processor `i` wants the event.
 struct ProcessorInterest<'a> {
     processors: &'a [Arc<dyn EventProcessor>],
     next_processor_index: Cell<usize>,
@@ -81,14 +92,6 @@ impl ProcessorInterest<'_> {
     }
 }
 
-impl Debug for EventSamplingContext<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("description", self.description)
-            .finish_non_exhaustive()
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
@@ -98,6 +101,9 @@ mod tests {
     use super::*;
     use crate::FlushError;
     use crate::processing::EventView;
+
+    // These atomics are observation counters only. Assertions read them after the
+    // synchronous calls, so no ordering relative to other memory is required.
 
     /// A processor that wants every event or none, counting how often it is asked.
     struct CountingProcessor {

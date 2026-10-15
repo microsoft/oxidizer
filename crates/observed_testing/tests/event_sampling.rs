@@ -81,10 +81,12 @@ fn constant_sampler(decision: EventSamplingDecision) -> (impl EventSampler, Arc<
 /// A processor that wants every event or none, counting how often it is asked.
 fn counting_processor(wants: bool) -> (MockProcessor, Arc<AtomicUsize>) {
     let asked = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&asked);
-    let processor = MockProcessor::with_filter(move |_| {
-        _ = counter.fetch_add(1, Ordering::Relaxed);
-        wants
+    let processor = MockProcessor::with_filter({
+        let asked = Arc::clone(&asked);
+        move |_| {
+            _ = asked.fetch_add(1, Ordering::Relaxed);
+            wants
+        }
     });
     (processor, asked)
 }

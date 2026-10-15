@@ -331,6 +331,8 @@ fn reentrant_emit_from_is_interested_is_dropped() {
 
     impl EventProcessor for ReentrantInterestProcessor {
         fn is_interested(&self, _description: &EventDescription) -> bool {
+            // Taken, not cloned, so a missing guard fails the test with an extra event
+            // instead of recursing until the stack overflows.
             let own_sink = self.own_sink.lock().expect("lock is not poisoned").take();
             if let Some(own_sink) = own_sink {
                 emit!(own_sink, Heartbeat);

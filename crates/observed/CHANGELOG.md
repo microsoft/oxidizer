@@ -13,6 +13,7 @@
 - A Sink holds at most 64 processors, counting every leaf of a composite
   together. `Sink::new`, `Sink::new_isolated`, and `Sink::composite` panic past
   that.
+- `EventSamplingContext` is no longer `Sync` or `RefUnwindSafe`.
 
 ### Removed
 

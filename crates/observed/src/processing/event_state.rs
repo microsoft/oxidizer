@@ -36,6 +36,8 @@ impl<'a> IntermediateEvent<'a, fn() -> NoopEvent> {
 }
 
 impl<'a, T: Event, F: FnOnce() -> T> IntermediateEvent<'a, F> {
+    /// Returns the event description without building the event.
+    ///
     /// For typed variants this is the static `T::DESCRIPTION` (no allocation).
     /// For dynamic variants this delegates to `DynEvent::description()`.
     pub(crate) fn description(&self) -> EventDescription {
