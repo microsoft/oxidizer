@@ -56,7 +56,7 @@ impl Drop for InitializationGuard<'_> {
 
 #[derive(Default)]
 struct DriverInterrupt {
-    primary: Mutex<Option<Waker>>,
+    primary: Mutex<Option<Arc<Waker>>>,
 }
 
 impl DriverInterrupt {
@@ -65,7 +65,10 @@ impl DriverInterrupt {
             .primary
             .lock()
             .expect("a poisoned driver interrupt indicates a runtime invariant failure");
-        assert!(primary.replace(waker).is_none(), "a worker has at most one primary I/O driver");
+        assert!(
+            primary.replace(Arc::new(waker)).is_none(),
+            "a worker has at most one primary I/O driver"
+        );
     }
 
     fn clear(&self) {
@@ -84,7 +87,7 @@ impl DriverInterrupt {
             .expect("a poisoned driver interrupt indicates a runtime invariant failure")
             .clone();
         if let Some(waker) = waker {
-            waker.wake();
+            waker.wake_by_ref();
         }
     }
 }

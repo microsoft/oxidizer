@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Wake, Waker};
+use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
 use std::time::Duration;
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
@@ -118,6 +118,44 @@ impl Drop for WakeHostOnDrop {
         self.dropped.store(true, Ordering::SeqCst);
     }
 }
+
+struct CloneHostWake {
+    host_interrupt: Waker,
+    cloned: Arc<AtomicBool>,
+}
+
+fn clone_host_waker(host_interrupt: Waker, cloned: Arc<AtomicBool>) -> Waker {
+    let state = Arc::new(CloneHostWake { host_interrupt, cloned });
+    let raw = RawWaker::new(Arc::into_raw(state).cast(), &CLONE_HOST_VTABLE);
+    // SAFETY: CLONE_HOST_VTABLE maintains one Arc strong reference for every RawWaker.
+    unsafe { Waker::from_raw(raw) }
+}
+
+unsafe fn clone_host_waker_raw(data: *const ()) -> RawWaker {
+    // SAFETY: data was created by Arc::into_raw in clone_host_waker or this function.
+    let state = unsafe { &*data.cast::<CloneHostWake>() };
+    state.cloned.store(true, Ordering::SeqCst);
+    state.host_interrupt.wake_by_ref();
+    // SAFETY: the source RawWaker still owns a strong reference, and the new
+    // RawWaker takes ownership of the incremented reference.
+    unsafe { Arc::increment_strong_count(data.cast::<CloneHostWake>()) };
+    RawWaker::new(data, &CLONE_HOST_VTABLE)
+}
+
+unsafe fn wake_host_waker(data: *const ()) {
+    // SAFETY: consuming wake owns one Arc strong reference.
+    drop(unsafe { Arc::<CloneHostWake>::from_raw(data.cast()) });
+}
+
+unsafe fn wake_host_waker_by_ref(_data: *const ()) {}
+
+unsafe fn drop_host_waker(data: *const ()) {
+    // SAFETY: dropping the RawWaker releases its owned Arc strong reference.
+    drop(unsafe { Arc::<CloneHostWake>::from_raw(data.cast()) });
+}
+
+static CLONE_HOST_VTABLE: RawWakerVTable =
+    RawWakerVTable::new(clone_host_waker_raw, wake_host_waker, wake_host_waker_by_ref, drop_host_waker);
 
 fn host(runtime: &IoRuntime) -> DriverHost {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
@@ -230,6 +268,20 @@ fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
 
     assert!(dropped.load(Ordering::SeqCst));
     assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn waking_the_primary_does_not_clone_the_provider_waker() {
+    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let state = Arc::new(State::default());
+    let cloned = Arc::new(AtomicBool::new(false));
+    let driver_waker = clone_host_waker(host.waker(), Arc::clone(&cloned));
+    *state.driver_waker.lock().unwrap() = Some(driver_waker);
+    let _ = host.context::<Context<false>>(&state).unwrap();
+
+    host.waker().wake_by_ref();
+
+    assert!(!cloned.load(Ordering::SeqCst));
 }
 
 #[test]
