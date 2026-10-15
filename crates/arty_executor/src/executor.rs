@@ -137,7 +137,7 @@ impl Drop for Executor {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::future::poll_fn;
+    use std::future::{Ready, pending, poll_fn, ready};
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
@@ -164,6 +164,45 @@ mod tests {
         {
             self.add(future, TaskOptions::default())
         }
+    }
+
+    struct DropOwnerDuringConversion {
+        owner: Rc<RefCell<Option<Executor>>>,
+        tasks: TaskSet,
+        nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+    }
+
+    impl IntoFuture for DropOwnerDuringConversion {
+        type Output = usize;
+        type IntoFuture = Ready<usize>;
+
+        fn into_future(self) -> Self::IntoFuture {
+            drop(self.owner.borrow_mut().take());
+            let nested = self.tasks.add_test(async { 42 });
+            assert!(self.nested.replace(Some(nested)).is_none());
+            ready(7)
+        }
+    }
+
+    #[test]
+    fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
+        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
+        let tasks = owner.borrow().as_ref().unwrap().tasks();
+        let mut existing = tasks.add_test(pending::<()>());
+        let nested = Rc::new(RefCell::new(None));
+
+        let mut outer = tasks.add_test(DropOwnerDuringConversion {
+            owner: Rc::clone(&owner),
+            tasks: tasks.clone(),
+            nested: Rc::clone(&nested),
+        });
+
+        assert!(owner.borrow().is_none());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(Pin::new(&mut existing).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(Pin::new(&mut outer).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        let mut nested = nested.borrow_mut().take().unwrap();
+        assert!(matches!(Pin::new(&mut nested).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]

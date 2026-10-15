@@ -137,6 +137,7 @@ mod tests {
             Sink::noop(),
         )));
         let clone = client.clone();
+        assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
         assert!(!client.is_shutting_down());
         assert!(!clone.is_shutting_down());
 

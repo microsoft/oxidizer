@@ -405,7 +405,10 @@ impl AsRef<Self> for Scheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::future::Future as _;
+    use std::pin::pin;
     use std::sync::mpsc;
+    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
     use super::*;
@@ -425,6 +428,29 @@ mod tests {
             .unwrap();
 
         assert!(registered);
+        runtime.stop().unwrap();
+    }
+
+    #[test]
+    fn current_executor_shutdown_rejects_direct_submissions_immediately() {
+        let runtime = crate::runtime::Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let rejected = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher);
+                let mut task = pin!(cx.scheduler().spawn(async |_| 42));
+
+                matches!(
+                    task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                    Poll::Ready(Err(error)) if error.is_shutdown()
+                )
+            })
+            .unwrap();
+
+        assert!(rejected);
         runtime.stop().unwrap();
     }
 

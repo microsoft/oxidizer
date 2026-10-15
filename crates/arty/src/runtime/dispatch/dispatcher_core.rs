@@ -407,6 +407,7 @@ mod tests {
         let client = DispatcherClient::new(Arc::clone(&core));
         let signal = client.shutdown_signal();
 
+        assert!(std::ptr::eq(core.remote_results(), std::ptr::addr_of!(core.remote_results)));
         core.stop();
 
         assert!(signal.load(Ordering::Acquire));

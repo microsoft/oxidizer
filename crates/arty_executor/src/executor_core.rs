@@ -497,6 +497,10 @@ impl ExecutorCore {
         let aborted_count = Self::prepare_task_abort(&self.wake, &mut state_exclusive, &mut state_reentrant);
         drop(state_reentrant);
         Self::abort_prepared_tasks(&state_exclusive, aborted_count);
+        Self::drop_completed_tasks(&mut state_exclusive, false);
+        if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
+            // Executor cleanup must remain safe after metrics TLS has been destroyed.
+        }
     }
 
     pub(crate) fn request_shutdown(&self) {
@@ -585,6 +589,7 @@ impl ExecutorCore {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Executor::drop tests the same cleanup through owner_dropped().
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
         let state_exclusive = self.exclusive.get_mut();

@@ -23,10 +23,10 @@ enum TaskResult<R> {
 }
 
 impl<R> Debug for TaskResult<R> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Completed(_) => formatter.write_str("Completed(..)"),
-            Self::Panicked(_) => formatter.write_str("Panicked(..)"),
+            Self::Completed(_) => f.write_str("Completed(..)"),
+            Self::Panicked(_) => f.write_str("Panicked(..)"),
         }
     }
 }
@@ -65,8 +65,8 @@ impl Default for Pool {
 }
 
 impl Debug for Pool {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Pool").finish_non_exhaustive()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Pool").finish_non_exhaustive()
     }
 }
 
@@ -88,8 +88,8 @@ impl<R: Send + 'static> Future for JoinHandle<R> {
 }
 
 impl<R: Send + 'static> Debug for JoinHandle<R> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("JoinHandle").finish_non_exhaustive()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JoinHandle").finish_non_exhaustive()
     }
 }
 
@@ -124,8 +124,8 @@ impl<R: Send + 'static> Sender<R> {
 }
 
 impl<R: Send + 'static> Debug for Sender<R> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Sender").finish_non_exhaustive()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Sender").finish_non_exhaustive()
     }
 }
 
@@ -143,7 +143,6 @@ impl<R: Send + 'static> Drop for Sender<R> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::future::Future;
     use std::pin::pin;
     use std::task::{Context, Poll, Waker};
 
@@ -170,7 +169,7 @@ mod tests {
         let pool = Pool::new();
         let (sender, handle) = pool.channel();
 
-        assert!(sender.completed(42).is_ok());
+        sender.completed(42).unwrap();
 
         assert_eq!(poll_ready(handle), Ok(42));
     }

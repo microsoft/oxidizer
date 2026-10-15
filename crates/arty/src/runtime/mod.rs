@@ -65,6 +65,10 @@ pub mod __private {
     pub use crate::time::ClockControl;
 
     /// Preserves an entry point's return type while reporting root-task failure.
+    ///
+    /// # Panics
+    ///
+    /// Resumes a captured root-task panic or starts an unwind carrying the runtime failure.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) if error.is_panic() => {
