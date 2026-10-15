@@ -135,6 +135,7 @@ impl Drop for Executor {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::{Ready, poll_fn, ready};
