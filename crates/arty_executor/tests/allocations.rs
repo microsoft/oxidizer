@@ -37,7 +37,7 @@ fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), 
 
 fn spawn_remote_complete_once(executor: &Executor, tasks: &TaskSet, result_pool: &RemotePool) -> Poll<Result<(), JoinError>> {
     let (result_tx, mut handle) = result_pool.channel();
-    drop(tasks.add_with_remote_result(async {}, TaskOptions::default(), result_tx));
+    tasks.add_with_remote_result(async {}, TaskOptions::default(), result_tx);
     let _ = executor.execute_cycle();
     Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()))
 }

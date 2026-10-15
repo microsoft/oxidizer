@@ -57,16 +57,16 @@ impl TaskSet {
     /// concrete future at this call site lets the executor store it inline instead of behind a
     /// `Pin<Box<dyn Future>>`. Obtain `result_tx` from
     /// [`remote::Pool::channel`](crate::remote::Pool::channel).
-    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>) -> JoinHandle<R>
+    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>)
     where
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,
     {
         let Some(core) = self.core.upgrade() else {
-            return self.join_events.disconnected();
+            return;
         };
 
-        core.add_remote_task(future, options, result_tx)
+        core.add_remote_task(future, options, result_tx);
     }
 
     /// Begins executor shutdown without borrowing executor-owned polling state.

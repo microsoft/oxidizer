@@ -221,10 +221,9 @@ fn disconnected_remote_submission_contains_panicking_join_notification() {
     assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());
     drop(executor);
 
-    let mut local_join = tasks.add_with_remote_result(async { 42 }, TaskOptions::default(), result_tx);
+    tasks.add_with_remote_result(async { 42 }, TaskOptions::default(), result_tx);
 
     assert!(wake.0.load(Ordering::Acquire));
-    assert!(matches!(poll_once(&mut local_join), Poll::Ready(Err(error)) if error.is_shutdown()));
     assert!(matches!(
         Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
         Poll::Ready(Err(error)) if error.is_shutdown()

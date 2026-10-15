@@ -218,7 +218,7 @@ impl Scheduler {
             let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
             let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
-            drop(current.tasks.add_with_remote_result(inner, options, result_tx));
+            current.tasks.add_with_remote_result(inner, options, result_tx);
             Ok(JoinHandle::new(result_rx))
         })
     }

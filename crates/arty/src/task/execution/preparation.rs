@@ -130,7 +130,7 @@ where
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
         let options = TaskOptions::observed(parent_task_enrichment, placement);
-        drop(tasks.add_with_remote_result(inner, options, result_tx));
+        tasks.add_with_remote_result(inner, options, result_tx);
     });
     (future_factory, JoinHandle::new(result_rx))
 }

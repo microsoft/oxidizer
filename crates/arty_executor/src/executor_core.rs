@@ -156,25 +156,28 @@ impl ExecutorCore {
             return join_handle;
         }
         let future = future.into_future();
-        self.register_task(move |join_events, sink| {
-            let (result_tx, join_handle) = join_events.rent();
-            (Task::new_with_options(future, result_tx, options, sink), join_handle)
-        })
+        self.register_task(
+            move |join_events, sink| {
+                let (result_tx, join_handle) = join_events.rent();
+                (Task::new_with_options(future, result_tx, options, sink), join_handle)
+            },
+            JoinEventLake::disconnected,
+        )
     }
 
-    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>) -> JoinHandle<R>
+    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>)
     where
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,
     {
-        if let Some(join_handle) = self.rejected_submission() {
-            return join_handle;
+        if self.reentrancy_safe.borrow().shutting_down {
+            return;
         }
         let future = future.into_future();
-        self.register_task(move |join_events, sink| {
-            let join_handle = join_events.disconnected();
-            (Task::new_remote(future, options, sink, remote_result_tx), join_handle)
-        })
+        self.register_task(
+            move |_join_events, sink| (Task::new_remote(future, options, sink, remote_result_tx), ()),
+            |_join_events| (),
+        );
     }
 
     fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
@@ -182,17 +185,16 @@ impl ExecutorCore {
         state.shutting_down.then(|| state.join_events.disconnected())
     }
 
-    fn register_task<R, T>(&self, create: impl FnOnce(&JoinEventLake, Sink) -> (T, JoinHandle<R>)) -> JoinHandle<R>
+    fn register_task<O, T>(&self, create: impl FnOnce(&JoinEventLake, Sink) -> (T, O), reject: impl FnOnce(&JoinEventLake) -> O) -> O
     where
-        R: 'static,
         T: TypeErasedTask + 'static,
     {
-        let (reporter, join_handle) = {
+        let (reporter, output) = {
             let mut state = self.reentrancy_safe.borrow_mut();
             if state.shutting_down {
-                return state.join_events.disconnected();
+                return reject(&state.join_events);
             }
-            let (task, join_handle) = create(&state.join_events, self.sink.clone());
+            let (task, output) = create(&state.join_events, self.sink.clone());
 
             let task_ref = TaskRef::new(state.task_storage.alloc_box(task));
 
@@ -209,13 +211,13 @@ impl ExecutorCore {
             task.initialize(wake_signal);
             let reporter = task.created_reporter();
             state.new_tasks.push_back(task_ref);
-            (reporter, join_handle)
+            (reporter, output)
         };
 
         // Telemetry processors are external code and may submit another task. The state borrow
         // must be released before this call.
         reporter.report();
-        join_handle
+        output
     }
 
     #[must_use]
