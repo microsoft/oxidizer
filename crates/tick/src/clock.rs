@@ -280,12 +280,7 @@ impl Clock {
         }));
 
         let join_handle = tokio::spawn(async move {
-            loop {
-                let next_timer = match driver.advance_timers(Instant::now()) {
-                    Ok(next_timer) => next_timer,
-                    Err(_) => break,
-                };
-
+            while let Ok(next_timer) = driver.advance_timers(Instant::now()) {
                 match next_timer {
                     Some(deadline) => {
                         _ = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), notify.notified()).await;

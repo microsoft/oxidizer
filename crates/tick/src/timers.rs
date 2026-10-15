@@ -151,20 +151,9 @@ impl Timers {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
     use crate::Clock;
     use crate::state::ClockState;
-
-    struct CountingWake(AtomicUsize);
-
-    impl std::task::Wake for CountingWake {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
 
     #[test]
     fn two_timers_same_instant() {
@@ -274,18 +263,20 @@ mod tests {
     }
 
     #[test]
-    fn driver_wakes_only_when_the_earliest_deadline_changes() {
-        let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+    fn driver_waker_is_returned_only_when_the_earliest_deadline_changes() {
         let mut timers = Timers::default();
-        timers.set_driver_waker(Waker::from(Arc::clone(&wake_count)));
+        timers.set_driver_waker(Waker::noop().clone());
         let now = Instant::now();
 
-        let _ = timers.register(now + Duration::from_secs(2), Waker::noop().clone());
-        let _ = timers.register(now + Duration::from_secs(3), Waker::noop().clone());
-        let _ = timers.register(now + Duration::from_secs(2), Waker::noop().clone());
-        let _ = timers.register(now + Duration::from_secs(1), Waker::noop().clone());
+        let (_, first) = timers.register_and_driver_waker(now + Duration::from_secs(2), Waker::noop().clone());
+        let (_, later) = timers.register_and_driver_waker(now + Duration::from_secs(3), Waker::noop().clone());
+        let (_, same) = timers.register_and_driver_waker(now + Duration::from_secs(2), Waker::noop().clone());
+        let (_, earlier) = timers.register_and_driver_waker(now + Duration::from_secs(1), Waker::noop().clone());
 
-        assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            [first.is_some(), later.is_some(), same.is_some(), earlier.is_some()],
+            [true, false, false, true]
+        );
     }
 
     #[test]
