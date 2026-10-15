@@ -4,7 +4,8 @@
 //! Enrichment data model: [`EnrichmentEntry`] and redaction helpers.
 
 use std::fmt;
-use std::sync::Arc;
+
+use performables::arc::Arc;
 
 use crate::key::Key;
 use crate::sink::SinkId;
@@ -75,7 +76,7 @@ impl EnrichmentEntry {
     pub fn new(key: impl Into<Key>, value: impl data_privacy::RedactedDisplay + Send + Sync + 'static) -> Self {
         Self {
             key: key.into(),
-            stored: UnredactedValue::Unredacted(Arc::new(value)),
+            stored: UnredactedValue::Unredacted(Arc::new(value).coerce::<dyn data_privacy::RedactedDisplay + Send + Sync>(|value| value)),
             exclude_from_logs: false,
             metric_key: None,
             target: None,

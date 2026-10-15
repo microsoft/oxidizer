@@ -73,9 +73,12 @@ The following package-level exclusions are intentional:
 - `rest_over_grpc` keeps its runtime transcoding tests under Miri, but omits
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
-- `rallocator` uses v4 backends for Windows x64/ARM64 MSVC and Linux
-  x64/AArch64 with 4-KiB kernel pages. Its native
-  allocator and event-bridge suites run on both platforms, including Linux
+- `rallocator` uses v4 backends for Windows x64/ARM64 MSVC, Linux
+  x64/AArch64 with 4-KiB kernel pages, and macOS 14.4+ on x64/native ARM64
+  with 4/16-KiB pages respectively. Darwin reclamation is lazy; zeroed
+  allocations are explicitly cleared rather than relying on recommit.
+  Its native allocator and event-bridge suites run on all three platforms,
+  including Linux
   runtime analysis through `cargo careful`. Its manifest explicitly excludes
   Miri because native VM reservations and CPU prefetch instructions have no
   interpreter backend. Miri is not a supported allocator backend; the old v1

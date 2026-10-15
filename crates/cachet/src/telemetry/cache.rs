@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn nested_with_request_id_restores_outer_id() {
-        use testing_aids::FutureTestExt;
+        use future_assert::FutureTestExt;
 
         let outer_id = next_request_id();
         let inner_id = next_request_id();

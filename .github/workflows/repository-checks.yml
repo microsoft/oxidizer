@@ -103,6 +103,30 @@ jobs:
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
+  rallocator-macos:
+    name: "Rallocator macOS (${{ matrix.runner }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Check native macOS allocator and telemetry
+        run: |
+          rustup component add --toolchain 1.95 clippy
+          cargo +1.95 clippy --package rallocator --package seismograph --package seismograph_rallocator --all-targets --all-features --locked -- -D warnings
+          cargo +1.95 test --package rallocator --package seismograph --package seismograph_rallocator --all-features --locked
+          cargo +1.95 test --package rallocator --release --all-features --locked
+
   metabench-native-contracts:
     name: Metabench native contracts (Linux)
     runs-on: ubuntu-latest
@@ -137,7 +161,7 @@ jobs:
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, metabench-native-contracts]
+    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, rallocator-macos, metabench-native-contracts]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
@@ -147,6 +171,7 @@ jobs:
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
           INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
           INTERNITY_NO_STD_SERDE: ${{ needs.internity-no-std-serde.result }}
+          RALLOCATOR_MACOS: ${{ needs.rallocator-macos.result }}
           METABENCH_NATIVE_CONTRACTS: ${{ needs.metabench-native-contracts.result }}
         run: |
           if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
@@ -167,6 +192,10 @@ jobs:
           fi
           if [[ "$INTERNITY_NO_STD_SERDE" != "success" ]]; then
             echo "::error::internity-no-std-serde concluded $INTERNITY_NO_STD_SERDE"
+            exit 1
+          fi
+          if [[ "$RALLOCATOR_MACOS" != "success" ]]; then
+            echo "::error::rallocator-macos concluded $RALLOCATOR_MACOS"
             exit 1
           fi
           if [[ "$METABENCH_NATIVE_CONTRACTS" != "success" ]]; then

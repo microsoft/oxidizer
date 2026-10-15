@@ -8,6 +8,8 @@
 mod aarch64;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(target_os = "windows")]
 mod win64;
 #[cfg(target_arch = "x86_64")]
@@ -20,6 +22,10 @@ use std::cell::Cell;
 pub(crate) use aarch64::{pause, prefetch};
 #[cfg(target_os = "linux")]
 use linux as platform;
+#[cfg(target_os = "macos")]
+use macos as platform;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::{Mutex, MutexGuard};
 pub(crate) use platform::{PAGE, RESERVE_MIN, release, wait, wake_one};
 #[cfg(target_os = "windows")]
 use win64 as platform;
@@ -79,7 +85,8 @@ pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
 
 /// # Safety
 /// The page-aligned, caller-owned range has no live objects or remaining accesses.
-/// Success discards its backing pages; Linux retains writable virtual mappings.
+/// Success requests backing-page reclamation; Linux and macOS retain writable
+/// mappings. macOS reclamation is lazy and does not promise zero on recommit.
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
     if should_fail(Failure::Decommit) {
@@ -115,13 +122,15 @@ mod tests {
     }
 
     #[test]
-    fn reserve_commit_decommit_recommit_zero() {
+    fn reserve_commit_decommit_recommit() {
         let size = 2 * RESERVE_MIN;
         let ptr = reserve(size, size);
         assert!(!ptr.is_null());
         assert_eq!(ptr.addr() % size, 0);
         // SAFETY: The test exclusively owns the reservation through its release.
         assert!(unsafe { commit(ptr, PAGE) });
+        // SAFETY: Fresh anonymous memory is initialized to zero.
+        assert!(unsafe { std::slice::from_raw_parts(ptr, PAGE) }.iter().all(|&b| b == 0));
         // SAFETY: The committed page is exclusively writable.
         unsafe { ptr.write_bytes(0x5a, PAGE) };
         // SAFETY: Idempotent commit preserves this owned page.
@@ -132,8 +141,13 @@ mod tests {
         assert!(unsafe { decommit(ptr, PAGE) });
         // SAFETY: The reservation still belongs to the test.
         assert!(unsafe { commit(ptr, PAGE) });
+        #[cfg(not(target_os = "macos"))]
         // SAFETY: The entire recommitted page is readable.
         assert!(unsafe { std::slice::from_raw_parts(ptr, PAGE) }.iter().all(|&b| b == 0));
+        // SAFETY: Recommitted memory is writable even when reclamation is lazy.
+        unsafe { ptr.write_bytes(0x3c, PAGE) };
+        // SAFETY: The complete page was explicitly initialized above.
+        assert!(unsafe { std::slice::from_raw_parts(ptr, PAGE) }.iter().all(|&b| b == 0x3c));
         // SAFETY: The test has finished accessing its complete reservation.
         unsafe { release(ptr, size) };
     }
@@ -172,6 +186,12 @@ mod tests {
         assert!(unsafe { decommit(middle, PAGE) });
         // SAFETY: Committing the whole range must preserve the two live neighbors.
         assert!(unsafe { commit(ptr, 3 * PAGE) });
+        #[cfg(target_os = "macos")]
+        // SAFETY: Darwin may retain retired contents; initialize only the middle
+        // page so the two neighboring live pages still test commit preservation.
+        unsafe {
+            middle.write_bytes(0, PAGE);
+        }
         // SAFETY: All three pages are accessible and initialized.
         let contents = unsafe { std::slice::from_raw_parts(ptr, 3 * PAGE) };
         assert!(contents[..PAGE].iter().all(|&b| b == 0x5a));

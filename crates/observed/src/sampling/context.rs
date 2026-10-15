@@ -6,7 +6,8 @@
 use std::any::type_name;
 use std::cell::Cell;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::Arc;
+
+use performables::arc::Arc;
 
 use crate::metadata::EventDescription;
 use crate::processing::EventProcessor;
@@ -90,6 +91,7 @@ impl Debug for EventSamplingContext<'_> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -115,11 +117,11 @@ mod tests {
         }
     }
 
-    fn counting_processors(wants: &[bool]) -> Vec<Arc<CountingProcessor>> {
+    fn counting_processors(wants: &[bool]) -> Vec<StdArc<CountingProcessor>> {
         wants
             .iter()
             .map(|&wants| {
-                Arc::new(CountingProcessor {
+                StdArc::new(CountingProcessor {
                     wants,
                     asked: AtomicUsize::new(0),
                 })
@@ -127,14 +129,14 @@ mod tests {
             .collect()
     }
 
-    fn as_event_processors(processors: &[Arc<CountingProcessor>]) -> Vec<Arc<dyn EventProcessor>> {
+    fn as_event_processors(processors: &[StdArc<CountingProcessor>]) -> Vec<Arc<dyn EventProcessor>> {
         processors
             .iter()
-            .map(|processor| Arc::clone(processor) as Arc<dyn EventProcessor>)
+            .map(|processor| Arc::from_std(StdArc::clone(processor) as StdArc<dyn EventProcessor>))
             .collect()
     }
 
-    fn asked(processors: &[Arc<CountingProcessor>]) -> Vec<usize> {
+    fn asked(processors: &[StdArc<CountingProcessor>]) -> Vec<usize> {
         processors.iter().map(|processor| processor.asked.load(Ordering::Relaxed)).collect()
     }
 
