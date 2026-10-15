@@ -30,6 +30,10 @@ fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
 }
 
+fn can_suspend(cycle_outcome: CycleOutcome, batch_exhausted: bool) -> bool {
+    matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted
+}
+
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
 /// woken by local or remote futures, incoming commands, and timers.
@@ -177,8 +181,8 @@ impl AsyncWorker {
 
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
-        let can_suspend = matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted;
-        let max_wait = if can_suspend {
+        let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
+        let max_wait = if should_suspend {
             next_timer
                 .map(|deadline| suspend_wait(deadline, self.time.instant()))
                 .unwrap_or(IO_IDLE_WAIT)
@@ -197,7 +201,7 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
 
-        if can_suspend {
+        if should_suspend {
             // A notification arriving before this wait is retained by WorkerSignal.
             self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed()));
         }
@@ -302,6 +306,16 @@ mod tests {
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::BoxedRemoteFutureFactory;
+
+    #[test]
+    fn suspend_budget_requires_suspend_outcome_and_non_exhausted_batch() {
+        assert!(can_suspend(CycleOutcome::Suspend, false));
+        assert!(!can_suspend(CycleOutcome::Suspend, true));
+        assert!(!can_suspend(CycleOutcome::Continue, false));
+        assert!(!can_suspend(CycleOutcome::Continue, true));
+        assert!(!can_suspend(CycleOutcome::Shutdown, false));
+        assert!(!can_suspend(CycleOutcome::Shutdown, true));
+    }
 
     #[test]
     fn private_suspend_wait_uses_the_exact_timer_deadline() {

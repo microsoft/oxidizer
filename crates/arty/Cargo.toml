@@ -76,7 +76,8 @@ thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
-arty_executor = { path = "../arty_executor" }
+arty_executor = { path = "../arty_executor", features = ["test-util"] }
+arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
