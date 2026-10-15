@@ -27,9 +27,9 @@ const NOOP_ID: SinkId = SinkId::new("noop");
 /// child's id, not this one. Used only for `Debug` output.
 const COMPOSITE_ID: SinkId = SinkId::new("<composite>");
 
-/// Interested processors are tracked in a `u32` bitmask, one bit per
+/// Interested processors are tracked in a `u64` bitmask, one bit per
 /// processor across every child Sink of a composite.
-const MAX_PROCESSORS: usize = u32::BITS as usize;
+const MAX_PROCESSORS: usize = u64::BITS as usize;
 
 /// Dispatches events to one or more [`EventProcessor`]s.
 ///
@@ -99,7 +99,7 @@ impl Sink {
     ///
     /// # Panics
     ///
-    /// Panics if `processors` holds more than 32 processors.
+    /// Panics if `processors` holds more than 64 processors.
     #[must_use]
     pub fn new(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
         Self::build_single(id.into(), false, processors, clock)
@@ -114,7 +114,7 @@ impl Sink {
     ///
     /// # Panics
     ///
-    /// Panics if `processors` holds more than 32 processors.
+    /// Panics if `processors` holds more than 64 processors.
     #[must_use]
     pub fn new_isolated(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
         Self::build_single(id.into(), true, processors, clock)
@@ -152,7 +152,7 @@ impl Sink {
     /// wherever `&Sink` is expected, cloned cheaply, or itself included
     /// in another composite (nesting flattens into a single list of leaves
     /// at construction time). Each leaf must appear exactly once, and the
-    /// leaves together hold at most 32 processors - see [Panics](#panics).
+    /// leaves together hold at most 64 processors - see [Panics](#panics).
     ///
     /// # Flush
     ///
@@ -177,7 +177,7 @@ impl Sink {
     /// than once. There is no case where that is what the caller wanted, so it
     /// fails loudly at construction rather than silently at emit time.
     ///
-    /// Also panics if the leaves hold more than 32 processors in total.
+    /// Also panics if the leaves hold more than 64 processors in total.
     #[must_use]
     pub fn composite(children: impl IntoIterator<Item = Self>) -> Self {
         fn push(states: &mut Vec<SingleSinkState>, state: SingleSinkState) {
@@ -540,7 +540,7 @@ impl SingleSinkState {
         self
     }
 
-    fn sample_and_ask_processors(&self, description: &EventDescription) -> u32 {
+    fn sample_and_ask_processors(&self, description: &EventDescription) -> u64 {
         let context = EventSamplingContext::new(description, &self.processors);
         if let Some(sampler) = &self.sampler
             && sampler.sample(&context) == EventSamplingDecision::Drop
@@ -550,8 +550,8 @@ impl SingleSinkState {
         context.ask_all_processors()
     }
 
-    fn dispatch(&self, event: &dyn DynEvent, bitmask: u32) {
-        let bitmask = bitmask & (u32::MAX >> (u32::BITS as usize - self.processors.len()));
+    fn dispatch(&self, event: &dyn DynEvent, bitmask: u64) {
+        let bitmask = bitmask & (u64::MAX >> (u64::BITS as usize - self.processors.len()));
         if bitmask == 0 {
             return;
         }
@@ -986,18 +986,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "at most 32 processors")]
-    fn new_panics_past_32_processors() {
-        let processors: [_; 33] = std::array::from_fn(|_| CountingProcessor::new(true));
+    #[should_panic(expected = "at most 64 processors")]
+    fn new_panics_past_64_processors() {
+        let processors: [_; 65] = std::array::from_fn(|_| CountingProcessor::new(true));
 
         let _sink = counting_leaf("crowded", &processors.each_ref());
     }
 
     #[test]
-    #[should_panic(expected = "at most 32 processors")]
-    fn composite_panics_past_32_processors_across_leaves() {
-        let first: [_; 16] = std::array::from_fn(|_| CountingProcessor::new(true));
-        let second: [_; 17] = std::array::from_fn(|_| CountingProcessor::new(true));
+    #[should_panic(expected = "at most 64 processors")]
+    fn composite_panics_past_64_processors_across_leaves() {
+        let first: [_; 32] = std::array::from_fn(|_| CountingProcessor::new(true));
+        let second: [_; 33] = std::array::from_fn(|_| CountingProcessor::new(true));
 
         let _sink = Sink::composite([
             counting_leaf("first", &first.each_ref()),
@@ -1006,13 +1006,13 @@ mod tests {
     }
 
     #[test]
-    fn last_of_32_processors_receives_event() {
-        let processors: [_; 32] = std::array::from_fn(|index| CountingProcessor::new(index == 31));
+    fn last_of_64_processors_receives_event() {
+        let processors: [_; 64] = std::array::from_fn(|index| CountingProcessor::new(index == 63));
         let sink = counting_leaf("full", &processors.each_ref());
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
-        let expected: [usize; 32] = std::array::from_fn(|index| usize::from(index == 31));
+        let expected: [usize; 64] = std::array::from_fn(|index| usize::from(index == 63));
         assert_eq!(processors.each_ref().map(|processor| processor.processed()), expected);
     }
 
@@ -1032,8 +1032,8 @@ mod tests {
     }
 
     #[test]
-    fn composite_of_32_processors_delivers_to_last_processor() {
-        let declining: [_; 31] = std::array::from_fn(|_| CountingProcessor::new(false));
+    fn composite_of_64_processors_delivers_to_last_processor() {
+        let declining: [_; 63] = std::array::from_fn(|_| CountingProcessor::new(false));
         let accepting = CountingProcessor::new(true);
         let sink = Sink::composite([
             counting_leaf("declining", &declining.each_ref()),
@@ -1043,7 +1043,7 @@ mod tests {
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
-        assert_eq!(declining.each_ref().map(|processor| processor.processed()), [0; 31]);
+        assert_eq!(declining.each_ref().map(|processor| processor.processed()), [0; 63]);
         assert_eq!(accepting.processed(), 1);
     }
 

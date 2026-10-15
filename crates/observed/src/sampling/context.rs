@@ -30,7 +30,7 @@ impl<'a> EventSamplingContext<'a> {
         }
     }
 
-    pub(crate) fn ask_all_processors(self) -> u32 {
+    pub(crate) fn ask_all_processors(self) -> u64 {
         self.processors.ask_all(self.description)
     }
 
@@ -53,11 +53,11 @@ impl<'a> EventSamplingContext<'a> {
 struct ProcessorInterest<'a> {
     processors: &'a [Arc<dyn EventProcessor>],
     next_processor_index: Cell<usize>,
-    bitmask: Cell<u32>,
+    bitmask: Cell<u64>,
 }
 
 impl ProcessorInterest<'_> {
-    fn ask_all(&self, description: &EventDescription) -> u32 {
+    fn ask_all(&self, description: &EventDescription) -> u64 {
         while self.next_processor_index.get() < self.processors.len() {
             self.ask_next_processor(description);
         }
