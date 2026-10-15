@@ -117,11 +117,22 @@ fn first_context_is_primary_and_later_contexts_are_secondary() {
 }
 
 #[test]
+fn runtime_identity_is_shared_only_by_clones() {
+    let runtime = IoRuntime::new();
+
+    assert_eq!(runtime, runtime.clone());
+    assert_ne!(runtime, IoRuntime::new());
+}
+
+#[test]
 fn worker_local_drivers_are_created_lazily() {
     let runtime = IoRuntime::new();
     let first = host(runtime.clone());
     let second = host(runtime);
     let state = Arc::new(State::default());
+
+    let _ = first.context::<Context<false>>(&state).unwrap();
+    assert_eq!(state.roles.lock().unwrap().len(), 1);
 
     let _ = first.context::<Context<false>>(&state).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 1);
@@ -169,9 +180,13 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     interrupt.wake_by_ref();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
 
+    let owned_interrupt = interrupt.clone();
+    owned_interrupt.wake();
+    assert_eq!(state.interrupts.load(Ordering::SeqCst), 2);
+
     drop(host);
     interrupt.wake();
-    assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
+    assert_eq!(state.interrupts.load(Ordering::SeqCst), 2);
 }
 
 #[test]
