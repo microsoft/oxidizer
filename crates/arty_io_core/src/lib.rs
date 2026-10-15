@@ -78,8 +78,8 @@
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime stores the thread-neutral context returned by [`IoContext::context`], relocates a
-//! clone to each worker as needed, and supplies its assigned role through [`DriverOptions`].
+//! The runtime clones and relocates contexts to its async workers and supplies the assigned role
+//! through [`DriverOptions`]. Driver creation completes all setup before the context is published.
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 //! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
