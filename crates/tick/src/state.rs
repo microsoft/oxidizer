@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::task::Waker;
 use std::time::Instant;
 
 use performables::arc::{Arc, PerThread};
@@ -55,6 +56,14 @@ impl ClockState {
             #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(_) => true,
             Self::System(timers) => timers.with_timers(|t| t.alive()),
+        }
+    }
+
+    pub(crate) fn set_driver_waker(&self, waker: Waker) {
+        match self {
+            Self::System(timers) => timers.with_timers(|timers| timers.set_driver_waker(waker)),
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(_) => {}
         }
     }
 
@@ -121,6 +130,14 @@ impl SynchronizedTimers {
             Self::Isolated(timers) => timers.lock(),
         };
         f(&mut timers)
+    }
+
+    pub(crate) fn register_timer(&self, when: Instant, waker: Waker) -> crate::timers::TimerKey {
+        let (key, driver_waker) = self.with_timers(|timers| timers.register_and_driver_waker(when, waker));
+        if let Some(driver_waker) = driver_waker {
+            driver_waker.wake();
+        }
+        key
     }
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.

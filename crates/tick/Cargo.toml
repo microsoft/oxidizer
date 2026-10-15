@@ -53,7 +53,7 @@ performables = { workspace = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
-tokio = { workspace = true, optional = true, features = ["time", "rt"] }
+tokio = { workspace = true, optional = true, features = ["sync", "time", "rt"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true, optional = true }
@@ -79,7 +79,7 @@ serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
-tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = { workspace = true }

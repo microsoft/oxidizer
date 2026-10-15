@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+use std::task::Waker;
 
 use thread_aware::{Thread, ThreadAware};
 
@@ -129,6 +130,17 @@ impl<S> InactiveClock<S> {
     /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
     #[must_use]
     pub fn activate(self) -> (Clock, ClockDriver) {
+        self.activate_core(None)
+    }
+
+    pub(crate) fn activate_with_driver_waker(self, driver_waker: Waker) -> (Clock, ClockDriver) {
+        self.activate_core(Some(driver_waker))
+    }
+
+    fn activate_core(self, driver_waker: Option<Waker>) -> (Clock, ClockDriver) {
+        if let Some(driver_waker) = driver_waker {
+            self.state.set_driver_waker(driver_waker);
+        }
         let state = self.state;
         let clock = Clock::new(state.clone());
         let driver = ClockDriver::new(state);

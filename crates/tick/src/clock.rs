@@ -1,10 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(any(feature = "tokio", test))]
+use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
 use thread_aware::{Thread, ThreadAware};
+#[cfg(any(feature = "tokio", test))]
+use tokio::sync::Notify;
 
 use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
@@ -184,6 +188,38 @@ use crate::timers::TimerKey;
 pub struct Clock {
     state: ClockState,
     time: SimpleClock,
+    // This field must remain after `state`: the final clone releases its timer state before
+    // notifying the driver to re-check whether any clock owners remain.
+    #[cfg(any(feature = "tokio", test))]
+    tokio_driver: Option<Arc<TokioDriverLifecycle>>,
+}
+
+#[cfg(any(feature = "tokio", test))]
+#[derive(Debug)]
+struct TokioDriverWake(Arc<Notify>);
+
+#[cfg(any(feature = "tokio", test))]
+impl std::task::Wake for TokioDriverWake {
+    fn wake(self: Arc<Self>) {
+        self.0.notify_one();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.notify_one();
+    }
+}
+
+#[cfg(any(feature = "tokio", test))]
+#[derive(Debug)]
+struct TokioDriverLifecycle {
+    notify: Arc<Notify>,
+}
+
+#[cfg(any(feature = "tokio", test))]
+impl Drop for TokioDriverLifecycle {
+    fn drop(&mut self) {
+        self.notify.notify_one();
+    }
 }
 
 impl std::fmt::Debug for Clock {
@@ -225,29 +261,36 @@ impl Clock {
         Self {
             time: SimpleClock::from_state(&state),
             state,
+            #[cfg(any(feature = "tokio", test))]
+            tokio_driver: None,
         }
     }
 
     #[cfg(any(feature = "tokio", test))]
     fn new_tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
-        /// How often the Tokio clock driver advances timers.
-        ///
-        /// A 10ms resolution balances precision with runtime overhead for the
-        /// background task that drives timer advancement in Tokio.
-        const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
-
         // The Tokio clock is driven by a single background task that advances a shared timer
         // set. We use the `Shared` inactive-clock variant which intentionally does not support
         // cloning or per-core relocation, since both would create configurations the single
         // background driver could not advance correctly.
-        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate();
+        let notify = Arc::new(Notify::new());
+        let driver_waker = Waker::from(Arc::new(TokioDriverWake(Arc::clone(&notify))));
+        let (mut clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate_with_driver_waker(driver_waker);
+        clock.tokio_driver = Some(Arc::new(TokioDriverLifecycle {
+            notify: Arc::clone(&notify),
+        }));
 
         let join_handle = tokio::spawn(async move {
             loop {
-                tokio::time::sleep(TIMER_RESOLUTION).await;
+                let next_timer = match driver.advance_timers(Instant::now()) {
+                    Ok(next_timer) => next_timer,
+                    Err(_) => break,
+                };
 
-                if driver.advance_timers(Instant::now()).is_err() {
-                    break;
+                match next_timer {
+                    Some(deadline) => {
+                        _ = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), notify.notified()).await;
+                    }
+                    None => notify.notified().await,
                 }
             }
         });
@@ -514,7 +557,7 @@ impl Clock {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.register_timer(when, waker),
-            ClockState::System(timers) => timers.with_timers(|t| t.register(when, waker)),
+            ClockState::System(timers) => timers.register_timer(when, waker),
         }
     }
 

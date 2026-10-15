@@ -45,6 +45,7 @@ pub(crate) struct Timers {
     /// The [`Waker`] represents the task awaiting the timer.
     wakers: BTreeMap<TimerKey, Waker>,
     last_discriminator: u32,
+    driver_waker: Option<Waker>,
 
     // Determines whether the timers are currently being advanced.
     // This value is `false` if timers have not yet been advanced.
@@ -68,7 +69,14 @@ impl Timers {
     /// Registers a new timer that will fire at the specified instant.
     ///
     /// Returns a unique [`TimerKey`] that can be used to unregister the timer.
+    #[cfg(any(feature = "test-util", test))]
     pub(crate) fn register(&mut self, when: Instant, waker: Waker) -> TimerKey {
+        self.register_and_driver_waker(when, waker).0
+    }
+
+    pub(crate) fn register_and_driver_waker(&mut self, when: Instant, waker: Waker) -> (TimerKey, Option<Waker>) {
+        let previous_next = self.driver_waker.is_some().then(|| self.next_timer()).flatten();
+
         // We can wrap the discriminator because it's only used to distinguish timers with the same instant,
         // and the actual value can start from 0 again.
         self.last_discriminator = self.last_discriminator.wrapping_add(1);
@@ -76,7 +84,17 @@ impl Timers {
 
         self.wakers.insert(key, waker);
 
-        key
+        let driver_waker = self
+            .driver_waker
+            .as_ref()
+            .filter(|_| previous_next.is_none_or(|previous| when < previous))
+            .cloned();
+
+        (key, driver_waker)
+    }
+
+    pub(crate) fn set_driver_waker(&mut self, waker: Waker) {
+        self.driver_waker = Some(waker);
     }
 
     /// Unregisters a timer with the given key.
@@ -133,10 +151,20 @@ impl Timers {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::Clock;
     use crate::state::ClockState;
+
+    struct CountingWake(AtomicUsize);
+
+    impl std::task::Wake for CountingWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn two_timers_same_instant() {
@@ -243,6 +271,21 @@ mod tests {
         let _ = timers.register(now.checked_add(Duration::from_secs(1)).unwrap(), Waker::noop().clone());
 
         assert_eq!(timers.next_timer(), Some(now));
+    }
+
+    #[test]
+    fn driver_wakes_only_when_the_earliest_deadline_changes() {
+        let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+        let mut timers = Timers::default();
+        timers.set_driver_waker(Waker::from(Arc::clone(&wake_count)));
+        let now = Instant::now();
+
+        let _ = timers.register(now + Duration::from_secs(2), Waker::noop().clone());
+        let _ = timers.register(now + Duration::from_secs(3), Waker::noop().clone());
+        let _ = timers.register(now + Duration::from_secs(2), Waker::noop().clone());
+        let _ = timers.register(now + Duration::from_secs(1), Waker::noop().clone());
+
+        assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
     }
 
     #[test]
