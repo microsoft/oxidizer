@@ -1,42 +1,26 @@
 # Panic policy
 
-Arty catches panics from code it explicitly runs for the user:
+When unwinding is enabled, Arty catches panics raised while it:
 
-- async task polling;
-- task factories;
-- blocking callbacks.
+- creates an async task from its task factory;
+- polls an async task;
+- runs a blocking callback.
 
-When unwinding is enabled, Arty reports these panics through `JoinError` when
-possible. With `panic = "abort"`, the process aborts instead.
+Arty reports these panics through `JoinError` when possible. Receiving that
+error does not repair application state changed before the panic. A contained
+task panic does not by itself shut down the runtime.
 
-Arty does not promise recovery from panics in destructors, custom wakers, join
-notifications, telemetry processors, or other cleanup and notification hooks.
-These panics may unwind the worker thread or abort if another panic is already
-in progress. User-provided destructors, custom wakers, join notifications,
-telemetry processors, and other cleanup or notification hooks must not panic.
-This is a supported-behavior requirement, not an unsafe contract. If they do
-panic, Arty may abort the process, leak resources, or stop making progress, but
-must not cause undefined behavior.
+With `panic = "abort"`, any panic aborts the process instead.
 
-Arty catches cleanup panics only when needed to protect memory safety or release
-runtime-owned task storage exactly once. These catches must be narrow. A panic
-that escapes while the runtime still owns live task storage stops the process
-rather than risking memory corruption.
+User-provided destructors, custom wakers, join notifications, telemetry
+processors, and other cleanup or notification hooks must not panic. Arty does
+not promise continued operation or complete cleanup if they do. The process may
+abort, resources may leak, or affected tasks and runtime operations may stop
+making progress. Arty must remain memory-safe.
+
+A second panic while unwinding may abort the process.
 
 Failed runtime invariants, poisoned runtime state, and unsafe-contract
-violations are bugs, not recoverable task failures. Arty does not add dedicated
-recovery for them. If one panics while already inside a task or callback panic
-boundary, the outer boundary may still report that panic through `JoinError`.
-
-After a contained task panic, shutdown is best effort. Panic handling must not
-introduce a deadlock, wait for the current callback to finish itself, or
-continue with corrupted state.
-
-Async and blocking tasks share one guarantee: a panic in the task or callback
-body becomes a task or join failure. Their destructor and waker behavior may
-differ when their execution models cannot support the same containment safely.
-
-Add a new `catch_unwind` only when there is a realistic safe-Rust path, a sound
-state to continue from, and useful behavior the caller can observe. Tests should
-cover public guarantees and catches required for storage safety, not every
-technically possible panicking `Drop` or `Waker`.
+violations are bugs. Arty provides no dedicated recovery guarantee for them. If
+such a panic occurs inside an existing task or callback boundary, it may still
+be reported through that boundary's `JoinError`.

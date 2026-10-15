@@ -18,9 +18,12 @@
 
 ## Panic handling
 
-- Follow the contract in `docs/PANICS.md`.
+- Preserve the caller-facing contract in `docs/PANICS.md`. Keep implementation
+  rules in this file rather than exposing them as public guarantees.
 - Catch panics from code Arty explicitly runs for the user: async task polling,
   task factories, and blocking callbacks.
+- A contained task or callback panic should become `JoinError`, leave the
+  scheduler usable, and not initiate runtime shutdown.
 - Add cleanup containment only when needed for memory safety or exact-once
   release of runtime-owned task storage. Keep the catch as narrow as possible.
 - Do not add recovery guarantees for panicking destructors, custom wakers,
@@ -29,9 +32,15 @@
 - Treat no-panic requirements as supported-behavior contracts, not unsafe
   preconditions. Unsupported panics may abort, leak, or stop progress, but must
   not cause undefined behavior.
+- Do not add dedicated recovery for failed runtime invariants, poisoned state,
+  or unsafe-contract violations. An existing outer task boundary may still
+  report such a panic through `JoinError`.
 - Before adding `catch_unwind`, identify a realistic safe-Rust path, the sound
   state that remains after the panic, and the useful behavior visible to the
   caller.
+- Test public panic guarantees and catches required for storage safety. Do not
+  add production containment only because a test can construct a panicking
+  `Drop` or `Waker`.
 
 ## Generated documentation
 
