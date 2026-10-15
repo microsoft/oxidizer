@@ -114,8 +114,9 @@ unsafe fn reallocate_core(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut
 ///
 /// # Deployment requirements
 ///
-/// Supports x86-64 and ARM64 on Linux with 4-KiB kernel pages, and Windows 10
-/// version 1809 or later with MSVC. This allocator is non-hardened.
+/// Supports x86-64 and ARM64 on Linux with 4-KiB kernel pages and Windows 10
+/// version 1809 or later with MSVC, plus macOS 14.4 or later on x86-64
+/// (4-KiB pages) or native ARM64 (16-KiB pages). This allocator is non-hardened.
 ///
 /// Use a single statically linked allocator instance. Allocations must be freed
 /// by the instance that created them, not by independently linked copies in other DLLs.
