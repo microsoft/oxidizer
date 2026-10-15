@@ -95,8 +95,9 @@ where
     }
 }
 
-// The platform TLS handshake is exercised by native-tls itself. Covering this
-// forwarding shim would require platform-specific trust-store manipulation.
+// The scripted-peer test covers forwarding the selected server name into a
+// real ClientHello. A successful platform certificate-validation path remains
+// out of scope because it would require platform-specific trust-store changes.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 async fn connect_https<S: HyperIo + Unpin>(
