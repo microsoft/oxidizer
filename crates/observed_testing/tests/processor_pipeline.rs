@@ -17,7 +17,9 @@ use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use observed::{Severity, Sink, emit, event};
+use observed::metadata::EventDescription;
+use observed::processing::{EventProcessor, EventView};
+use observed::{FlushError, Severity, Sink, emit, event};
 use observed_testing::events::ProbeEvent;
 use observed_testing::types::{PublicBool, PublicI64, PublicString};
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID};
@@ -316,10 +318,6 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
 
 #[test]
 fn reentrant_emit_from_is_interested_is_dropped() {
-    use observed::FlushError;
-    use observed::metadata::EventDescription;
-    use observed::processing::{EventProcessor, EventView};
-
     #[event("internal.heartbeat")]
     #[trace]
     struct Heartbeat;

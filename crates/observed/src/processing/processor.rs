@@ -42,11 +42,9 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// # Nested telemetry is not supported
     ///
-    /// Emitting from inside `is_interested()` is silently dropped, including
-    /// to a different [`Sink`](crate::Sink): a thread-wide reentrancy guard
-    /// skips any nested `emit!` for the duration of the outer emission.
-    /// Report processor-internal failures through a non-`observed` channel
-    /// instead.
+    /// Do not emit from inside `is_interested()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn is_interested(&self, description: &EventDescription) -> bool;
 
     /// Processes an event by pulling fields and enrichments from the view.
@@ -56,10 +54,9 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// # Nested telemetry is not supported
     ///
-    /// Emitting from inside `process()` is silently dropped, including to a
-    /// different [`Sink`](crate::Sink): a thread-wide reentrancy guard skips
-    /// any nested `emit!` for the duration of the outer emission. Report
-    /// processor-internal failures through a non-`observed` channel instead.
+    /// Do not emit from inside `process()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn process(&self, event: &EventView<'_>);
 
     /// Forces any buffered telemetry produced by this processor out to its

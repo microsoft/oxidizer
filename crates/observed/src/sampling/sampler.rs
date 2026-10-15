@@ -3,7 +3,7 @@
 
 //! The event sampler and its decision.
 
-use crate::sampling::EventSamplingContext;
+use crate::EventSamplingContext;
 
 /// What a Sink does with an event offered to its [`EventSampler`].
 #[expect(
