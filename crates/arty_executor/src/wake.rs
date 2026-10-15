@@ -389,6 +389,7 @@ impl WakerState {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Test-only synchronization hook.
     fn retire_with(&self, after_deactivate: impl FnOnce(bool)) {
         // Release publishes retirement before queue removal. Acquire wake checks that observe
         // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
@@ -753,6 +754,36 @@ mod tests {
         waker.wake_by_ref();
         assert!(awakened_queue.lock().unwrap().is_empty());
         assert!(!probe_embedded_wake_signals.load(atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn retirement_without_state_removes_its_notification() {
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+        let awakened_queue = Arc::new(Mutex::new(VecDeque::from([fake_task_ref])));
+        let signal = pin!(WakeSignal::new_with_parts(
+            Arc::clone(&awakened_queue),
+            Arc::new(AtomicBool::new(false)),
+            Waker::noop().clone(),
+            fake_task_ref,
+        ));
+        signal.queued.store(true, atomic::Ordering::Release);
+
+        signal.retire();
+
+        assert!(awakened_queue.lock().unwrap().is_empty());
+        assert!(!signal.queued.load(atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn waker_state_retirement_tolerates_dropped_shared_state() {
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+        let state = WakerState::new(Weak::new(), fake_task_ref);
+
+        state.retire();
+
+        assert!(!state.active.load(atomic::Ordering::Acquire));
     }
 
     #[test]
