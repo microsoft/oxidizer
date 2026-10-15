@@ -314,6 +314,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "arty_io_host"
+version = "0.1.0"
+dependencies = [
+ "arty_io_core",
+ "data_privacy",
+ "foldhash 0.2.0",
+ "observed",
+ "static_assertions",
+ "thread_aware",
+ "thread_aware_core",
+]
+
+[[package]]
 name = "arty_macros"
 version = "0.4.0"
 dependencies = [

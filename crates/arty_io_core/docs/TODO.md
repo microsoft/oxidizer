@@ -35,7 +35,7 @@ types and their relocation contract before stabilizing `arty_io_core`.
 
 Decide which public value types should promise `UnwindSafe` and
 `RefUnwindSafe` before stabilization. Add contract assertions for the intended
-markers, including the conditional behavior of `DriverInstance<D>`.
+markers.
 
 `DriverError` currently accepts any `Error + Send + Sync` source, so it does not
 promise unwind-safety markers. Keep broad source acceptance unless there is a

@@ -14,13 +14,13 @@ use std::task::{Wake, Waker};
 use std::time::Duration;
 use std::{fmt, thread};
 
-use arty_io_core::{Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverRole, IoContext};
+use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware_core::{Thread, ThreadAware};
 
 assert_impl_all!(DriverOptions: Send, Sync, fmt::Debug);
 assert_not_impl_any!(Cycle: Send, Sync);
-assert_impl_all!(DriverRole: Copy, Send, Sync, fmt::Debug, Eq);
+assert_impl_all!(DriverRole: Copy, Send, Sync, fmt::Debug, fmt::Display, Eq);
 assert_impl_all!(DriverError: Send, Sync, fmt::Debug, fmt::Display, Error);
 
 #[derive(Default)]
@@ -37,13 +37,13 @@ fn driver_options_preserve_runtime_inputs() {
     let worker = worker_thread();
     let wake_counter = Arc::new(WakeCounter::default());
     let owner_waker = Waker::from(Arc::clone(&wake_counter));
-    let options = DriverOptions::new(worker.clone(), owner_waker, vec![DriverRole::Primary, DriverRole::Secondary]);
+    let options = DriverOptions::new(worker.clone(), owner_waker, DriverRole::Primary);
 
     options.owner_waker().wake_by_ref();
 
     assert_eq!(
-        (options.thread(), options.allowed_roles(), wake_counter.0.load(Ordering::Relaxed),),
-        (&worker, [DriverRole::Primary, DriverRole::Secondary].as_slice(), 1,)
+        (options.thread(), options.role(), wake_counter.0.load(Ordering::Relaxed),),
+        (&worker, DriverRole::Primary, 1,)
     );
 }
 
@@ -65,11 +65,19 @@ fn cycle_preserves_max_wait() {
 }
 
 #[test]
+fn driver_roles_have_stable_labels() {
+    assert_eq!(
+        (DriverRole::Primary.to_string(), DriverRole::Secondary.to_string()),
+        ("primary".to_owned(), "secondary".to_owned())
+    );
+}
+
+#[test]
 fn context_creates_driver_with_selected_role() {
     let mut context = TestContext::context(7);
-    let instance = context.driver(driver_options()).unwrap();
+    let _driver = context.driver(driver_options()).unwrap();
 
-    assert_eq!((context, instance.role), (TestContext(7), DriverRole::Primary));
+    assert_eq!(context, TestContext(7));
 }
 
 #[test]
@@ -141,17 +149,13 @@ impl IoContext for TestContext {
         Self(options)
     }
 
-    fn driver(&mut self, _options: DriverOptions) -> Result<DriverInstance<Self::Driver>, DriverError> {
-        Ok(DriverInstance::new(LocalDriver::default(), DriverRole::Primary))
+    fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        Ok(LocalDriver::default())
     }
 }
 
 fn driver_options() -> DriverOptions {
-    DriverOptions::new(
-        worker_thread(),
-        Waker::noop().clone(),
-        vec![DriverRole::Primary, DriverRole::Secondary],
-    )
+    DriverOptions::new(worker_thread(), Waker::noop().clone(), DriverRole::Primary)
 }
 
 fn worker_thread() -> Thread {
