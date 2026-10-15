@@ -15,12 +15,17 @@
 
 Async task executor for the Arty Runtime.
 
+`arty_executor` is an internal implementation detail of the [`arty`][__link0]
+crate. It is responsible for every stage of task execution, including registration, polling,
+wake processing, cancellation, completion, telemetry, and panic handling. Applications should
+use `arty` instead of depending on this crate directly.
+
 The purpose of the executor is to ensure that async tasks registered with the executor make
 progress, quickly and efficiently reacting to `await` statements that complete.
 
 The executor is a building block for an application runtime that provides foundational
 capabilities like task execution, multithreaded task management, I/O, timers, and more.
-Application logic may encounter [`JoinHandle`][__link0]s but otherwise has no direct interaction
+Application logic may encounter [`JoinHandle`][__link1]s but otherwise has no direct interaction
 with the executor.
 
 ## Design tenets
@@ -40,7 +45,7 @@ reused for new tasks when old ones complete.
 Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
 remains callable but becomes an inert no-op and cannot delay executor shutdown.
 
-Join handles may outlive the executor and report shutdown cancellation through [`JoinError`][__link1].
+Join handles may outlive the executor and report shutdown cancellation through [`JoinError`][__link2].
 A panic in a directly registered executor task remains fail-fast.
 
 
@@ -49,6 +54,7 @@ A panic in a directly registered executor task remains fail-fast.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbBfXzINc-MZAbDjUE83-SHrgbIzk9IpmzO-8buEaC75mo2jJhZIKCaUpvaW5FcnJvcvaCakpvaW5IYW5kbGX2
- [__link0]: https://crates.io/crates/JoinHandle
- [__link1]: https://crates.io/crates/JoinError
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbDdTNwDFF77YbVUCh67MeNGUbMZI-nJuFM6EbobfOPNAGBzVhZIKCaUpvaW5FcnJvcvaCakpvaW5IYW5kbGX2
+ [__link0]: https://docs.rs/arty
+ [__link1]: https://crates.io/crates/JoinHandle
+ [__link2]: https://crates.io/crates/JoinError

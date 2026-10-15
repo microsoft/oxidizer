@@ -7,6 +7,11 @@
 
 //! Async task executor for the Arty Runtime.
 //!
+//! `arty_executor` is an internal implementation detail of the [`arty`](https://docs.rs/arty)
+//! crate. It is responsible for every stage of task execution, including registration, polling,
+//! wake processing, cancellation, completion, telemetry, and panic handling. Applications should
+//! use `arty` instead of depending on this crate directly.
+//!
 //! The purpose of the executor is to ensure that async tasks registered with the executor make
 //! progress, quickly and efficiently reacting to `await` statements that complete.
 //!
