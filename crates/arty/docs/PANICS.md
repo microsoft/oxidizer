@@ -9,9 +9,9 @@ When unwinding is enabled, Arty catches panics raised while it:
 Arty reports these panics through `JoinError` when possible. Receiving that
 error does not by itself shut down the runtime.
 
-Arty does not catch panics from destructors, custom wakers, join notifications,
-telemetry processors, or other cleanup and notification hooks unless a catch is
-required to maintain memory safety. If one of these panics, Arty does not
-guarantee continued operation or complete cleanup. The process may abort,
-resources may leak, or affected tasks and runtime operations may stop making
-progress. Arty remains memory-safe under all panic conditions.
+Arty does not guarantee recovery from panics raised by destructors, custom
+wakers, join notifications, telemetry processors, or other cleanup and
+notification hooks. Arty may catch some of these panics to maintain memory
+safety, but callers cannot rely on continued operation or complete cleanup. The
+process may abort, resources may leak, or affected tasks and runtime operations
+may stop making progress. Arty remains memory-safe under all panic conditions.
