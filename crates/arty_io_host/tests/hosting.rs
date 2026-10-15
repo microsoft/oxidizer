@@ -24,6 +24,7 @@ enum Kind {
 struct State {
     roles: Mutex<Vec<(Kind, DriverRole)>>,
     cycles: Mutex<Vec<(Kind, Duration)>>,
+    driver_waker: Mutex<Option<Waker>>,
     shutdowns: AtomicUsize,
     fail_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
@@ -66,7 +67,12 @@ struct TestDriver {
 
 impl Driver for TestDriver {
     fn waker(&self) -> Waker {
-        Waker::from(Arc::new(InterruptWake(Arc::clone(&self.state))))
+        self.state
+            .driver_waker
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| Waker::from(Arc::new(InterruptWake(Arc::clone(&self.state)))))
     }
 
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
@@ -93,6 +99,23 @@ struct InterruptWake(Arc<State>);
 impl Wake for InterruptWake {
     fn wake(self: Arc<Self>) {
         self.0.interrupts.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+struct WakeHostOnDrop {
+    host_interrupt: Waker,
+    dropped: Arc<AtomicBool>,
+}
+
+#[expect(clippy::manual_noop_waker, reason = "custom Wake drop behavior is the contract under test")]
+impl Wake for WakeHostOnDrop {
+    fn wake(self: Arc<Self>) {}
+}
+
+impl Drop for WakeHostOnDrop {
+    fn drop(&mut self) {
+        self.host_interrupt.wake_by_ref();
+        self.dropped.store(true, Ordering::SeqCst);
     }
 }
 
@@ -187,6 +210,24 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     drop(host);
     interrupt.wake();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
+    let host = host(IoRuntime::new());
+    let state = Arc::new(State::default());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let driver_waker = Waker::from(Arc::new(WakeHostOnDrop {
+        host_interrupt: host.waker(),
+        dropped: Arc::clone(&dropped),
+    }));
+    *state.driver_waker.lock().unwrap() = Some(driver_waker);
+    let _ = host.context::<Context<false>>(&state).unwrap();
+
+    drop(host);
+
+    assert!(dropped.load(Ordering::SeqCst));
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]

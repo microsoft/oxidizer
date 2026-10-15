@@ -69,10 +69,12 @@ impl DriverInterrupt {
     }
 
     fn clear(&self) {
-        *self
+        let waker = self
             .primary
             .lock()
-            .expect("a poisoned driver interrupt indicates a runtime invariant failure") = None;
+            .expect("a poisoned driver interrupt indicates a runtime invariant failure")
+            .take();
+        drop(waker);
     }
 
     fn wake_primary(&self) {
