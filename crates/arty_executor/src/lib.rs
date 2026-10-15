@@ -15,10 +15,9 @@
 //! The purpose of the executor is to ensure that async tasks registered with the executor make
 //! progress, quickly and efficiently reacting to `await` statements that complete.
 //!
-//! The executor is a building block for an application runtime that provides foundational
-//! capabilities like task execution, multithreaded task management, I/O, timers, and more.
-//! Application logic may encounter [`JoinHandle`]s but otherwise has no direct interaction
-//! with the executor.
+//! The executor is the internal building block through which `arty` implements task execution.
+//! Application code interacts with `arty`'s own task and join APIs and has no direct interaction
+//! with this crate.
 //!
 //! # Design tenets
 //!
