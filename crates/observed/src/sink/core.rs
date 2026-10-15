@@ -42,6 +42,7 @@ const COMPOSITE_ID: SinkId = SinkId::new("<composite>");
 /// for a usage example.
 #[derive(Clone, thread_aware::ThreadAware)]
 pub struct Sink {
+    #[thread_aware(skip)] // Sink state intentionally stays shared across all threads.
     inner: PerformableArc<SinkInner, PerProcess>,
 }
 
@@ -90,6 +91,8 @@ impl Sink {
     ///
     /// This is the fundamental primitive: supply the [`EventProcessor`]s that
     /// the sink fans each event out to.
+    /// Standard `Arc`s are wrapped in `performables::arc::Arc` internally without
+    /// copying their values, preserving compatibility with existing processors.
     #[must_use]
     pub fn new(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
         Self::build_single(id.into(), false, processors, clock)
@@ -115,7 +118,7 @@ impl Sink {
         Self {
             inner: PerformableArc::from_unaware(SinkInner::Single(SingleSinkState {
                 id,
-                processors: processors.into(),
+                processors: processors.into_iter().map(PerformableArc::from_std).collect(),
                 isolated_enrichment,
                 enrichment: Slot::new(),
                 clock: clock.as_ref().clone(),
@@ -259,14 +262,14 @@ impl Sink {
     #[must_use]
     pub fn with_event_sampler(self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
         let inner = match &*self.inner {
-            SinkInner::Single(state) => SinkInner::Single(state.clone().with_sampler(Arc::from(sampler.into()))),
+            SinkInner::Single(state) => SinkInner::Single(state.clone().with_sampler(PerformableArc::from(sampler.into()))),
             SinkInner::Composite { children } => {
-                let sampler: Arc<dyn EventSampler> = Arc::from(sampler.into());
+                let sampler: PerformableArc<dyn EventSampler> = PerformableArc::from(sampler.into());
                 SinkInner::Composite {
                     children: children
                         .iter()
                         .cloned()
-                        .map(|state| state.with_sampler(Arc::clone(&sampler)))
+                        .map(|state| state.with_sampler(PerformableArc::clone(&sampler)))
                         .collect(),
                 }
             }
@@ -365,14 +368,14 @@ impl Sink {
     /// An empty layer returns early, which spares composite fan-out and every
     /// downstream slot write. The entry slice is built by the caller, so this
     /// does not avoid the slice's own allocation.
-    pub(crate) fn push_enrichment(&self, entries: Arc<[EnrichmentEntry]>) -> Guard {
+    pub(crate) fn push_enrichment(&self, entries: PerformableArc<[EnrichmentEntry]>) -> Guard {
         if entries.is_empty() {
             return Guard::empty();
         }
 
         match &*self.inner {
             SinkInner::Single(state) => state.enrichment.push(entries),
-            SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(Arc::clone(&entries)))),
+            SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(PerformableArc::clone(&entries)))),
             SinkInner::Noop { enrichment } => enrichment.push(entries),
         }
     }
@@ -566,7 +569,7 @@ enum SinkInner {
 
 /// Flushes every processor, collecting all failures rather than stopping at the
 /// first, so a partial failure is reported in full.
-fn flush_failures<'a>(processors: impl Iterator<Item = &'a Arc<dyn EventProcessor>>) -> Vec<FlushError> {
+fn flush_failures<'a>(processors: impl Iterator<Item = &'a PerformableArc<dyn EventProcessor>>) -> Vec<FlushError> {
     processors.filter_map(|p| p.flush().err()).collect()
 }
 
@@ -576,15 +579,15 @@ fn flush_failures<'a>(processors: impl Iterator<Item = &'a Arc<dyn EventProcesso
 #[derive(Clone)]
 struct SingleSinkState {
     id: SinkId,
-    processors: Arc<[Arc<dyn EventProcessor>]>,
+    processors: PerformableArc<[PerformableArc<dyn EventProcessor>]>,
     isolated_enrichment: bool,
     enrichment: Slot,
     clock: SimpleClock,
-    sampler: Option<Arc<dyn EventSampler>>,
+    sampler: Option<PerformableArc<dyn EventSampler>>,
 }
 
 impl SingleSinkState {
-    fn with_sampler(mut self, sampler: Arc<dyn EventSampler>) -> Self {
+    fn with_sampler(mut self, sampler: PerformableArc<dyn EventSampler>) -> Self {
         self.sampler = Some(sampler);
         self
     }
@@ -633,7 +636,12 @@ impl SingleSinkState {
     }
 
     /// Shares one leaf's context among lazily selected recipients.
-    fn deliver<'p>(&self, event: &dyn DynEvent, timestamp: SystemTime, recipients: impl Iterator<Item = &'p Arc<dyn EventProcessor>>) {
+    fn deliver<'p>(
+        &self,
+        event: &dyn DynEvent,
+        timestamp: SystemTime,
+        recipients: impl Iterator<Item = &'p PerformableArc<dyn EventProcessor>>,
+    ) {
         let view = EventView::new(event, self.enrichment.current(), self.isolated_enrichment, self.id, timestamp);
         // Keep selection lazy so preceding processors can affect later interest checks.
         for processor in recipients {
@@ -725,6 +733,20 @@ mod tests {
             vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>],
             SimpleClock::new_frozen(),
         )
+    }
+
+    #[test]
+    fn standard_processor_pointer_is_wrapped_without_copying() {
+        let processor: Arc<dyn EventProcessor> = Arc::new(FailingFlushProcessor);
+        let sink = Sink::new("shared", vec![Arc::clone(&processor)], SimpleClock::new_frozen());
+        let SinkInner::Single(state) = &*sink.inner else {
+            panic!("expected a single sink");
+        };
+
+        assert!(std::ptr::eq(Arc::as_ptr(&processor), PerformableArc::as_ptr(&state.processors[0]),));
+        assert_eq!(Arc::strong_count(&processor), 2);
+        drop(sink);
+        assert_eq!(Arc::strong_count(&processor), 1);
     }
 
     #[test]
@@ -877,7 +899,7 @@ mod tests {
     #[test]
     fn current_enrichments_reports_the_pushed_entries() {
         let sink = Sink::noop();
-        let _guard = sink.push_enrichment(Arc::from(vec![
+        let _guard = sink.push_enrichment(PerformableArc::from(vec![
             EnrichmentEntry::unclassified("outer", 1_i64),
             EnrichmentEntry::unclassified("inner", 2_i64),
         ]));

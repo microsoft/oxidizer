@@ -9,7 +9,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Expr, ExprLit, Ident, Lit, LitBool, MetaNameValue, Path, Result, Token, braced, bracketed, parse2, token};
 
-use crate::shared::{metabench_path, parse_ident_value, reject_if_too_complex, support_ident};
+use crate::shared::{metabench_path, native_ident, parse_ident_value, reject_if_too_complex, support_ident};
 
 fn expect_field(input: ParseStream<'_>, expected: &str) -> Result<()> {
     let field = input.parse::<Ident>()?;
@@ -167,6 +167,9 @@ impl Parse for Target {
             }
             benchmarks.into_iter().map(Group::simple).collect()
         } else {
+            if next_field_is(input, "allocator") {
+                return Err(input.error("`allocator` must follow `benchmarks` or `groups` in metabench::main!"));
+            }
             expect_field(input, "groups")?;
             input.parse::<Token![=]>()?;
             let groups;
@@ -233,12 +236,12 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
     let group_declarations = groups.iter().map(|group| {
         let name = &group.name;
         let logical_group = name.to_string();
-        let group_name = support_ident("group", &logical_group);
+        let group_name = native_ident("group", &logical_group);
         let group_module = support_ident("group_module", &logical_group);
         let adapter_names = group
             .benchmarks
             .iter()
-            .map(|identity| support_ident("benchmark", &identity.to_string()))
+            .map(|identity| native_ident("benchmark", &identity.to_string()))
             .collect::<Vec<_>>();
         let adapter_imports = group.benchmarks.iter().zip(&adapter_names).map(|(identity, adapter_name)| {
             let adapter_module = support_ident("native", &identity.to_string());
@@ -270,9 +273,9 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
             use #group_module::#group_name;
         }
     });
-    let group_names = groups.iter().map(|group| support_ident("group", &group.name.to_string()));
+    let group_names = groups.iter().map(|group| native_ident("group", &group.name.to_string()));
     let identities = groups.iter().flat_map(|group| {
-        let native_group = support_ident("group", &group.name.to_string());
+        let native_group = native_ident("group", &group.name.to_string());
         group
             .benchmarks
             .iter()
@@ -287,6 +290,8 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
         .join(":");
     let identities_name = support_ident("identities", &target_key);
     let target_module = support_ident("target", &target_key);
+    let probe_groups = groups.iter().map(|group| expand_probe_group(group, metabench));
+    let probes_name = support_ident("probes", &target_key);
 
     quote! {
         #(#group_declarations)*
@@ -294,6 +299,7 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
         const #identities_name: &[#metabench::BenchmarkIdentity] = &[
             #(#identities),*
         ];
+        const #probes_name: &[#metabench::__private::ProbeGroup] = &[#(#probe_groups),*];
 
         mod #target_module {
             use super::*;
@@ -305,6 +311,7 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
                     library_benchmark_groups = #(#group_names),*
                 },
                 identities = #identities_name
+                , probes = #probes_name
                 #allocator
             );
 
@@ -317,6 +324,23 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
             #target_module::run();
         }
     }
+}
+
+fn expand_probe_group(group: &Group, metabench: &TokenStream2) -> TokenStream2 {
+    let native_group = native_ident("group", &group.name.to_string());
+    let benchmarks = group.benchmarks.iter().map(|identity| {
+        let module = support_ident("probe", &identity.to_string());
+        let adapter = native_ident("benchmark", &identity.to_string());
+        quote!(#metabench::__private::ProbeBenchmark {
+            identity: #identity.__in_gungraun_group(stringify!(#native_group)),
+            cases: #module::#adapter::__BENCHES,
+        })
+    });
+    quote!(#metabench::__private::ProbeGroup {
+        benchmarks: &[#(#benchmarks),*],
+        setup: #native_group::__run_setup,
+        teardown: #native_group::__run_teardown,
+    })
 }
 
 /// Generates private native Gungraun groups and the target entry point.
@@ -354,6 +378,13 @@ mod tests {
         assert!(simple.contains("allocator=std::alloc::System"));
         assert!(simple.contains("ONE.__in_gungraun_group"));
         assert!(simple.contains("TWO.__in_gungraun_group"));
+        assert!(simple.contains("ProbeGroup{benchmarks:&["));
+        let probe = super::support_ident("probe", "ONE");
+        let benchmark = super::native_ident("benchmark", "ONE");
+        let group = super::native_ident("group", "ONE");
+        assert!(simple.contains(&format!("cases:{probe}::{benchmark}::__BENCHES")));
+        assert!(simple.contains(&format!("setup:{group}::__run_setup")));
+        assert!(simple.contains(&format!("teardown:{group}::__run_teardown")));
 
         let configured = expand(quote! {
             criterion = {
@@ -391,6 +422,12 @@ mod tests {
         assert!(output.contains("use::metabench::__private::gungraun"));
         assert!(output.contains("::metabench::__private::gungraun::library_benchmark_group!"));
         assert!(!output.contains("::metabench::gungraun"));
+    }
+
+    #[test]
+    fn misplaced_allocator_has_an_actionable_order_diagnostic() {
+        let error = expand(quote!(criterion = benches, allocator = std::alloc::System, benchmarks = [ONE],)).unwrap_err();
+        assert!(error.to_string().contains("`allocator` must follow `benchmarks` or `groups`"));
     }
 
     #[test]

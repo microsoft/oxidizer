@@ -17,6 +17,12 @@ treated as a distinct row.
 > predate cached hashes and reusable shared snapshots; do not treat them as
 > measurements of the current implementation.
 
+The historical timing data has not been rerun for the metabench schema 9
+migration. Current report scripts read Criterion's primary estimates from
+`criterion/time`; those estimates are distinct from these historical medians.
+A median across independent runs, where used, is a separate aggregation of
+per-run estimates.
+
 ---
 
 ## 1. Master comparison table

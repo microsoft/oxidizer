@@ -186,7 +186,7 @@
 #[doc(hidden)]
 pub mod __private;
 #[cfg(any(doc, test))]
-pub mod _documentation;
+pub mod documentation;
 
 mod base_path;
 mod base_uri;

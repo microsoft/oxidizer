@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph"
-version = "0.1.0"
+version = "0.2.0"
 description = "High-performance process telemetry with extensible snapshot sources."
 readme = "README.md"
 keywords = ["telemetry", "diagnostics", "profiling", "performance"]
@@ -17,7 +17,7 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 
 [package.metadata.cargo_check_external_types]

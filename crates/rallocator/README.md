@@ -13,221 +13,172 @@
 
 </div>
 
-A pure-Rust, high-performance allocator with scoped heaps and telemetry.
+An owner-return allocator implemented in Rust.
 
-## Supported platforms
+Supported: **x86-64 and `AArch64` Linux with 4-KiB kernel pages**, and
+**x86-64 and ARM64 Windows 10 version 1809 or later, MSVC**, and
+**x86-64 and native ARM64 macOS 14.4 or later**.
+Linux hosts with larger kernel pages reject allocation requests rather than
+discarding neighboring live objects. Windows and Linux use 4-KiB base pages;
+macOS uses 4-KiB x86-64 pages and 16-KiB native ARM64 pages.
+Windows uses `VirtualAlloc2`
+reservations and commit/decommit; Linux uses aligned anonymous `mmap`
+reservations, `mprotect` for access and `madvise(MADV_DONTNEED)` to discard
+unused backing pages without revoking access. macOS uses aligned `mach_vm_map`
+reservations, `mprotect` for access and `MADV_FREE_REUSABLE` / `MADV_FREE_REUSE`
+for lazy reclamation. Recommitted macOS object ranges may retain retired
+contents; `alloc_zeroed` explicitly clears its allocations on every platform.
+None of the native backends allocates through another allocator.
+OS operations and CPU instructions are isolated under the internal HAL.
+It is intended for a single statically
+linked allocator instance; allocations must not cross independently linked
+instances in DLLs.
 
-`rallocator` currently supports Windows and Linux. Other operating systems
-are outside the crate’s public support contract and intentionally fail to
-compile. Miri uses an internal test backend and is not a production support
-target.
+Small allocations use 16-byte-minimum, two-bit mantissa size classes through
+64 KiB. Large allocations use power-of-two ranges. Owner-local allocation
+lists and slab-return queues are unsynchronized; remote frees are grouped
+into same-slab rings and sent through batched owner queues. Persistent
+endpoints are reused after thread exit, so outstanding allocations may
+outlive their allocating thread.
+Allocation ownership may be transferred solely for deallocation through a
+relaxed atomic pointer handoff: prepared allocation lists use release
+fences, and pointer-consuming allocator operations use acquire fences.
+These internal fences do not publish application payload writes. A receiving
+thread that reads or modifies allocation contents still requires the normal
+application-level synchronization that makes those contents visible.
 
-## Usage
+The core is deterministic and non-hardened: no randomized reuse, freelist
+encryption, optional security mitigations, or built-in allocator counters.
+The separate Seismograph bridge provides opt-in allocation lifecycle events.
+Virtual address reservations and the sparse pagemap are process-lifetime;
+unused committed object memory is returned through the backend caches.
 
-### General use
+The allocation policy follows snmalloc’s non-hardened `StandardLocalState`
+core at revision `511e91a`. This is not a binary-compatible translation:
+intrusive structures use Rust-specific representations and TLS teardown
+uses reusable endpoint leases. Normal flushing and owner release retain the
+incoming queue’s final user message, as native snmalloc does: a later real
+message makes that tail reclaimable. Its slab or large range remains live.
+Teardown always returns the endpoint to its pool, but flushes only for
+teardown counts below 128 or at powers of two, including the first normal
+teardown. Other late-TLS returns retain local and outgoing caches until a
+later flush. Allocator-internal explicit flushing is not throttled.
 
-Install the standard configuration as the process-global allocator:
+Owner storage preserves the measured snmalloc `511e91a` MSVC 14.51 x64,
+C++20, non-hardened envelope: a 9,216-byte logical prefix in 16-KiB backing.
+This is a configuration-specific policy constant, not a universal native
+type size. The smaller Rust owner and its realloc lookup sidecar occupy the
+logical prefix; the remaining gap is permanently withheld. The 7,168-byte
+suffix supplies 112 initial 64-byte metadata cells. Backing size and remote
+routing derive from the logical prefix, not Rust’s type size. Pool reuse
+neither reinitializes nor redonates this storage, and the containing backing
+is never returned.
+
+Local backend ranges grow geometrically up to 2 MiB; global refill growth
+is capped at 16 MiB, unless a request itself is larger. Global cached ranges
+attempt to discard backing pages; failed OS discard leaves them committed.
+Local cached ranges remain committed. The 16-KiB-granularity pagemap reserves 256 GiB of
+virtual address space but commits only the pages it uses. Individual range
+requests above 64 TiB fail. No fixed-heap or dynamic memory-pressure policy
+is provided. Allocation failure returns null; failure to obtain metadata
+needed to complete a deallocation terminates the process.
 
 ```rust
 rallocator::rallocator!();
+let value = Box::new([42u8; 1024]);
+assert_eq!(value[0], 42);
 ```
 
-The macro declares the required `#[global_allocator]` static and contains
-the unsafe call to [`Rallocator::new`][__link0], whose process-wide
-same-configuration invariant it establishes by construction.
-
-Ordinary allocations then use each thread’s implicit general heap. To group
-related allocations, use an [`allocation_hints`][__link1] prospective heap. These
-handles publish only a thread-local request. Rallocator lazily realizes the
-request and retains a bounded per-thread cache for later reattachment:
-
-```rust
-use allocation_hints::heaps::{Heap, bump};
-use allocation_hints::with_hint;
-
-rallocator::rallocator!();
-
-let heap = Heap::bump(bump::Options::new());
-let values = with_hint(&heap, || vec![1, 2, 3]);
-assert_eq!(values.len(), 3);
-```
-
-If another global allocator is installed, the same code remains valid and
-the hint may be ignored.
-
-### Telemetry
-
-Telemetry is opt-in at compile time through [`rallocator!`][__link2]:
+## Allocation recording
 
 ```rust
 use seismograph::recorder::{Configuration, RecordingPolicy};
-
 rallocator::rallocator!();
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(true),
-        ..Default::default()
-    });
-    let mut values = vec![1, 2, 3];
-    values[0] += 1;
-    std::hint::black_box(&values);
-    drop(values);
-    seismograph::recorder(Configuration::default());
-
-    seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
-        .expect("telemetry snapshot capture succeeds")
-        .write_file("snapshot.seismograph")?;
-
-    Ok(())
-}
+seismograph::recorder(Configuration {
+    allocations: RecordingPolicy::all(true),
+    ..Default::default()
+});
+let value = Box::new([42_u8; 1024]);
+drop(value);
+seismograph::recorder(Configuration::default());
+let snapshot = seismograph::snapshot(Default::default()).unwrap();
 ```
 
-Convert the snapshot to HTML with `seismograph snapshot html snapshot.seismograph`.
+The existing Seismograph recorder owns event policies, bounded buffers,
+timestamps, stack capture, sampling and suppression. This allocator emits
+the unchanged allocation/deallocation payload inside the lazy `record()`
+closure, using only the address and the caller’s layout. There is no lifetime
+registry, allocator-specific thread identity or per-allocation lifetime
+bookkeeping while recording is stopped. The address is the sampling and correlation key, not a globally
+unique allocation identity. The container supplies the actual recorder
+thread; allocator-specific thread and heap IDs are zero (unavailable).
+The general heap never sets the event contract’s bump-only
+`freed_after_heap_release` flag.
 
-Process-wide byte and operation counters remain active for the process
-lifetime. Threads publish these counters in batches of 256 operations;
-snapshots flush the capturing thread, while other active threads can lag by
-at most one batch. Per-size histograms, allocation events, and backtraces
-require Seismograph recording, which can be enabled only around the interval
-of interest to limit its overhead.
-The default `caller-symbolization` feature resolves captured instruction
-pointers through the optional `backtrace` dependency. Disabling default
-features retains caller tracking and raw addresses without in-process symbol
-resolution.
+Frees are eligible for recording even when the allocation was made while
+recording was stopped or suppressed, but an event is emitted only when the
+current recorder policy accepts it. Address reuse, recording
+gaps, concurrent operation completion, sampling, recorder TLS teardown and
+bounded-buffer overwrites prevent definitive lifetime reconstruction. The
+plugin pairs retained events by timestamp, recorder thread and sequence,
+and assigns view-local identities;
+unmatched records are not a live-memory census. Sampling uses the address,
+so repeated reuse of the same address receives the same sampling decision.
+Recorder-internal allocations and snapshot source storage remain suppressed.
 
-## Design guide
+Recording preserves native realloc pointer and payload behavior: same-class
+resizing keeps the pointer, and different-class resizing allocates a
+replacement and copies the retained payload. On the recorded path, the old
+free event precedes release of the old span so its address cannot be reused
+before its timestamp is recorded.
+A successful size change emits a free with the old layout and an allocation
+with the new layout, including in-place resizing. An unchanged size or failed
+replacement emits neither; failure leaves the original pointer and bytes intact.
 
-Use the implicit thread-local general heap for ordinary allocations.
-Introduce prospective general heaps when you want locality boundaries without
-changing the mixed-size allocation model. Use bump heaps for phase-bounded
-work where individual frees are rare and bulk reclamation matters more than
-per-allocation reuse. Use [`allocation_hints::heaps::thread_heap`][__link3] when another
-thread should allocate into the current thread’s allocator-preferred heap.
+## Native state observations
 
-## Implementation guide
+The allocator source uses `seismograph_rallocator` schema 3. It inventories
+persistent owner endpoints, including owners created before recording.
+Inventory linkage and lease generations change only on owner lifecycle
+paths; ordinary recording-off allocation/free paths do no observation work.
+No public allocator inspection methods or internal structures are exposed.
 
-1. Install and configure [`rallocator!`][__link4] exactly once as the process-global
-   allocator.
-1. Route special-purpose allocations with [`allocation_hints::with_hint`][__link5]
-   and [`allocation_hints::heaps::Heap`][__link6].
-1. Enable Seismograph recording only when you need allocation events and
-   backtraces; lifetime aggregate counters remain active.
+With allocation recording enabled, owners can publish bounded native state
+after accepted events, outside the native core’s mutable borrow. Enable or
+disable this through
+[`seismograph_rallocator::native::set_publication_enabled`][__link0]. Snapshot polling
+requests subsequent observation rounds; an application can also call
+[`seismograph_rallocator::native::request_observation`][__link1]. No background sampler
+or per-operation clock read is required.
 
-Invalid tunables fail early when [`Rallocator::new`][__link7] is instantiated: the
-size-class layout must be well-formed and the partial-slab scan limit must
-be non-zero.
+Published state includes small classes, native outstanding large ranges,
+local range/metadata caches and remote-return state. The collector inspects
+returned owners under the pool lock, but never reads another thread’s leased
+core. Quiet leased owners retain older publications or explicitly unknown
+state; unavailable denotes telemetry storage failure. Every observation
+identifies its recording session, round, lease generation and capture time.
+Walks and inventory collection are bounded and explicitly report truncation.
+Idle-owner inspection shares one traversal budget across the inventory while
+the pool lock is held; omitted walks remain explicitly partial.
+Failed telemetry storage is unavailable, not fabricated zero state.
 
-## Internals
+Native outstanding ranges are not application-live allocations; incoming
+queue addresses do not provide a queue-depth census. Physical residency is
+unknown, including when OS discard fails. Global backend state is collected
+separately under its existing lock. v1 snapshot compatibility is not provided.
 
-Rallocator is organized as a hierarchy:
+## Migration from v1
 
-* An internal allocation domain owns one or more 1 GiB virtual-memory
-  **regions**, divided into 64 KiB **slices**.
-* A domain can serve multiple allocator-native heap realizations.
-  Each heap keeps its own allocation state while drawing backing memory from
-  its domain.
-* General heaps use slices for **locality segments** containing 32 KiB
-  **slabs**, and for **medium spans** covering one or more slices. Bump heaps
-  use slices as **bump chunks**.
-* Slabs contain same-sized **blocks**, which are the allocation slots returned
-  for small requests. Large or highly aligned requests bypass this hierarchy
-  and use direct operating-system mappings.
-
-<div style="overflow-x: auto">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 680"
-     role="img" aria-labelledby="allocator-layout-title"
-     style="width: 100%; min-width: 820px; max-width: 1100px">
-  <title id="allocator-layout-title">Allocator memory layout</title>
-  <g fill="none" stroke="currentColor" stroke-width="2">
-    <rect x="15" y="15" width="1070" height="650" rx="10"/>
-    <rect x="40" y="60" width="775" height="410" rx="8"/>
-    <rect x="840" y="60" width="220" height="160" rx="8"/>
-    <rect x="840" y="245" width="220" height="160" rx="8"/>
-    <rect x="65" y="110" width="725" height="75" rx="5"/>
-    <line x1="246" y1="110" x2="246" y2="185"/>
-    <line x1="427" y1="110" x2="427" y2="185"/>
-    <line x1="608" y1="110" x2="608" y2="185"/>
-    <rect x="65" y="220" width="350" height="120" rx="5"/>
-    <rect x="80" y="280" width="150" height="45" rx="4"/>
-    <rect x="250" y="280" width="150" height="45" rx="4"/>
-    <rect x="440" y="220" width="350" height="120" rx="5"/>
-    <line x1="615" y1="275" x2="615" y2="340"/>
-    <rect x="65" y="370" width="725" height="70" rx="5"/>
-    <line x1="427.5" y1="370" x2="427.5" y2="440"/>
-    <rect x="65" y="495" width="725" height="150" rx="8"/>
-    <rect x="85" y="550" width="95" height="50" rx="3"/>
-    <rect x="180" y="550" width="95" height="50" rx="3"/>
-    <rect x="275" y="550" width="95" height="50" rx="3"/>
-    <rect x="370" y="550" width="95" height="50" rx="3"/>
-    <rect x="465" y="550" width="95" height="50" rx="3"/>
-    <rect x="560" y="550" width="95" height="50" rx="3"/>
-    <rect x="655" y="550" width="115" height="50" rx="3"/>
-  </g>
-  <g fill="currentColor" font-family="sans-serif">
-    <text x="35" y="43" font-size="18" font-weight="bold">Domain-owned physical backing</text>
-    <text x="60" y="88" font-size="17" font-weight="bold">Process region: 1 GiB</text>
-    <text x="75" y="138" font-size="14">64 KiB slice</text>
-    <text x="256" y="138" font-size="14">64 KiB slice</text>
-    <text x="437" y="138" font-size="14">64 KiB slice</text>
-    <text x="618" y="138" font-size="14">64 KiB slice</text>
-    <text x="65" y="205" font-size="12">A bitmap records which slices are owned.</text>
-    <text x="80" y="246" font-size="16" font-weight="bold">Locality segment</text>
-    <text x="80" y="267" font-size="12">Consecutive slices owned by one general heap</text>
-    <text x="115" y="308" font-size="14">32 KiB slab</text>
-    <text x="285" y="308" font-size="14">32 KiB slab</text>
-    <text x="455" y="246" font-size="16" font-weight="bold">Medium span</text>
-    <text x="455" y="267" font-size="12">One or more consecutive slices</text>
-    <text x="500" y="310" font-size="14">slice 1</text>
-    <text x="675" y="310" font-size="14">slice 2</text>
-    <text x="80" y="397" font-size="16" font-weight="bold">Bump chunk</text>
-    <text x="80" y="420" font-size="12">One 64 KiB slice</text>
-    <text x="250" y="412" font-size="14">32 KiB segment</text>
-    <text x="520" y="412" font-size="14">32 KiB segment</text>
-    <text x="860" y="88" font-size="16" font-weight="bold">Direct mapping</text>
-    <text x="860" y="118" font-size="12">One large or highly</text>
-    <text x="860" y="137" font-size="12">aligned allocation.</text>
-    <text x="860" y="170" font-size="12">Managed independently</text>
-    <text x="860" y="189" font-size="12">by the operating system.</text>
-    <text x="860" y="273" font-size="16" font-weight="bold">Additional region</text>
-    <text x="860" y="303" font-size="12">Created when existing</text>
-    <text x="860" y="322" font-size="12">regions cannot provide</text>
-    <text x="860" y="341" font-size="12">a large enough free run.</text>
-    <text x="860" y="374" font-size="12">Uses the same layout.</text>
-    <text x="80" y="522" font-size="16" font-weight="bold">A slab contains blocks from one size class</text>
-    <text x="110" y="580" font-size="12">header</text>
-    <text x="208" y="580" font-size="12">block</text>
-    <text x="303" y="580" font-size="12">block</text>
-    <text x="398" y="580" font-size="12">block</text>
-    <text x="493" y="580" font-size="12">block</text>
-    <text x="588" y="580" font-size="12">block</text>
-    <text x="690" y="580" font-size="12">...</text>
-    <text x="85" y="625" font-size="12">Example: every block in this slab is the selected 64-byte size class.</text>
-    <text x="930" y="642" font-size="11">Not to scale</text>
-  </g>
-</svg>
-</div>
-
-Each thread has an implicit general heap. [`allocation_hints::with_hint`][__link8]
-can temporarily route allocations to a prospective general, bump, or
-thread-target heap; leaving the scope restores the previous request. This
-keeps the common allocation path thread-local while allowing runtimes and
-data structures to choose allocation topology deliberately.
-
-General heaps route requests by size and alignment:
-
-|Category|Size|Maximum alignment|Backing|
-|--------|----|-----------------|-------|
-|**Small**|Up to 16 KiB|4 KiB|One block in a 32 KiB slab|
-|**Medium**|Up to 1 GiB, when no small class fits|64 KiB|One or more 64 KiB slices|
-|**Large/direct**|Above 1 GiB, or alignment above 64 KiB|Operating-system limit|Dedicated mapping|
-
-Small frees normally return to the owning heap’s caches; cross-thread frees
-are queued for that owner. Medium spans are cached or returned to domain
-free lists, while direct mappings go back to the operating system. Detached
-prospective realizations remain in a bounded per-thread cache; eviction
-releases empty backing while preserving metadata needed by escaped
-allocations.
+`rallocator!()` remains the installation entrypoint. [`Rallocator`][__link2] is
+a stateless unit struct without generic configuration. `GlobalRallocator`,
+`config::{Config, Tunables, SizeClassLayout, Standard, StandardSizeClasses}`,
+configured macro arguments, `caller-symbolization`, `loom` and
+`tuning-telemetry` are removed. v1 medium-cache/purge, slab-scan and bitmap
+tunables have no v4 counterparts. `allocation_hints` remains an independent
+crate, but v4 ignores prospective general/bump/thread-heap hints. There is
+no second active v1 allocator or compatibility backend. v1-specific tests,
+examples and benchmark targets are retired; benchmark source files are
+untouched and are not build targets. Miri is not a v4 backend.
 
 
 <hr/>
@@ -235,13 +186,7 @@ allocations.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbypoMx1WbAVobE3PgdRcrEt8bP9EGMsbHO_QbJf2ng-VTcMRhZIKCcGFsbG9jYXRpb25faGludHNlMC4xLjCCanJhbGxvY2F0b3JlMC4xLjA
- [__link0]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link1]: https://crates.io/crates/allocation_hints/0.1.0
- [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link3]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::thread_heap
- [__link4]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link5]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
- [__link6]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::Heap
- [__link7]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link8]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblW44u_Utc2kbP7uwjGMCQB8b3w8NSthn5pIbBQNxifsd7TJhZIKCanJhbGxvY2F0b3JlMC4yLjCCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC4yLjA
+ [__link0]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::set_publication_enabled
+ [__link1]: https://docs.rs/seismograph_rallocator/0.2.0/seismograph_rallocator/?search=native::request_observation
+ [__link2]: https://docs.rs/rallocator/0.2.0/rallocator/struct.Rallocator.html

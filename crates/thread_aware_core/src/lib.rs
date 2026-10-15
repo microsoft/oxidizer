@@ -13,12 +13,12 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
 )]
 
-//! Support for values that adapt when a runtime moves them to another thread.
+//! Support for values that adapt after arriving on a different thread.
 //!
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] is the trait for values that adapt after a move; its
-//!   [`relocate`](ThreadAware::relocate) callback reports the destination.
+//!   [`relocate`](ThreadAware::relocate) callback reports the current destination.
 //! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
 //!   nearest-memory identifiers.
 //!
@@ -38,13 +38,14 @@
 //!   agree on before either can relocate a value defined by the other. It evolves
 //!   conservatively, reducing how much public APIs couple to changes in the utility crate.
 //! - **[`thread_aware`]** — the utilities that make relocation convenient: a
-//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types,
-//!   runtime coordinate construction, and strategy-partitioned [`Arc`][arc] storage. Free to
-//!   evolve, and not meant to appear in a public API.
+//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types, and
+//!   runtime coordinate construction. Free to evolve, and not meant to appear in a public API. Its
+//!   [authoring guide] is the how-to for making your own types thread-aware.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
-//! [arc]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+//! [arc]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
+//! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
 //!
 //! Depend on this crate directly when all you need is the trait. It has no normal dependencies
 //! and works without `std`: with default features turned off, [`Thread`] loses its thread id
@@ -97,6 +98,12 @@
 //!
 //! After moving a value, the runtime calls [`relocate`](ThreadAware::relocate), passing where
 //! the value came from and where it now runs.
+//! The call must execute on the thread that now owns the value: `destination` describes the
+//! current thread, rather than requesting that work be performed on another thread. A runtime
+//! must move or schedule the value to its destination first, then let that destination thread
+//! invoke `relocate`; a coordinator must not invoke it on the destination's behalf. This ordering
+//! matters because relocation may release, allocate, or initialize thread- and NUMA-local state,
+//! and those operations must happen on the thread whose locality they are intended to use.
 //!
 //! # Performance, not correctness
 //!
@@ -122,8 +129,8 @@
 //!
 //! # Relation to `Send`
 //!
-//! [`ThreadAware`] requires [`Send`], and in that order: a value is sent to another thread
-//! first, then told where it landed. [`Send`] is what makes the move safe, and
+//! [`ThreadAware`] requires [`Send`], and in that order: a value is sent to its destination thread
+//! first, then told where it landed on that same thread. [`Send`] is what makes the move safe, and
 //! [`ThreadAware`] adds nothing to it.
 //!
 //! # Provided implementations
@@ -134,8 +141,8 @@
 //! General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
 //! ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
 //! immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
-//! [`thread_aware`] provides wrappers for cases that need an explicit policy, including its
-//! strategy-partitioned [`Arc`][arc].
+//! [`thread_aware`] provides wrappers for cases that need an explicit policy, and the companion
+//! `performables` crate adds a strategy-partitioned [`Arc`][arc].
 //!
 //! # Features
 //!

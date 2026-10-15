@@ -5,7 +5,7 @@
 
 use crate::Thread;
 
-/// A type that adapts when it is moved to a different [`Thread`].
+/// A type that adapts after it arrives on a different [`Thread`].
 ///
 /// Implement this trait when part of a type depends on where it runs: memory near a
 /// particular node, a handle to a thread-local driver, a shard index, a cached thread id.
@@ -84,10 +84,12 @@ use crate::Thread;
 /// A [`Thread`] may be cloned and retained. Its thread id remains unique after the OS thread exits,
 /// but retaining the coordinate does not keep that thread or its runtime operational.
 ///
-/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
-/// the value has actually moved, pass `None` when no previous [`Thread`] is known, build one
-/// [`Owner`](crate::Owner) per runtime, and never rely on the call for correctness. Nothing
-/// enforces any of this.
+/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) from the thread
+/// that now owns the value, only after the value has actually moved, pass `None` when no previous
+/// [`Thread`] is known, build one [`Owner`](crate::Owner) per runtime, and never rely on the call
+/// for correctness. `destination` describes the thread executing the callback rather than a remote
+/// target for it; this lets locality-sensitive implementations release or rebuild state on the
+/// thread whose allocator and NUMA locality they are intended to use. Nothing enforces any of this.
 ///
 /// # Examples
 ///
@@ -115,7 +117,9 @@ use crate::Thread;
 ///         // Record the node and drop the buffer allocated near the old one. `Vec` cannot
 ///         // choose a node itself, so placement comes from the allocator the application
 ///         // installs; releasing here is what gives it the chance to allocate near
-///         // `numa_node` on the next use.
+///         // `numa_node` on the next use. Since this callback runs on the destination thread,
+///         // that allocation can use the destination thread's locality when the allocator
+///         // supports it.
 ///         self.numa_node = Some(destination.numa_node().clone());
 ///         self.scratch = Vec::new();
 ///     }
@@ -149,10 +153,11 @@ pub trait ThreadAware: Send {
     /// Implementors provide this method but do not normally call it. A runtime calls it
     /// after moving the value.
     ///
-    /// `destination` is where the value runs from now on. `source` is where it ran before,
-    /// or `None` when that is unknown, which is normal for a first placement or for a value
-    /// arriving from outside the runtime. `None` means the implementation can assume nothing
-    /// about the previous [`Thread`]; it does not indicate an error.
+    /// `destination` describes the thread where the value runs from now on and where this method
+    /// is executing. It is not a request to relocate the value from another thread. `source` is
+    /// where it ran before, or `None` when that is unknown, which is normal for a first placement
+    /// or for a value arriving from outside the runtime. `None` means the implementation can
+    /// assume nothing about the previous [`Thread`]; it does not indicate an error.
     ///
     /// This method cannot fail, must not panic, and is safe to call more than once,
     /// including with `source` equal to `destination`. See the

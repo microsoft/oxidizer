@@ -3,6 +3,8 @@
 
 use std::collections::VecDeque;
 use std::marker::{PhantomData, PhantomPinned};
+use std::mem::ManuallyDrop;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr;
 use std::sync::atomic::{self, AtomicBool, AtomicUsize};
@@ -12,6 +14,8 @@ use std::task::{RawWaker, RawWakerVTable, Waker};
 use pin_project::{pin_project, pinned_drop};
 
 use crate::TaskRef;
+
+const MAX_WAKER_COUNT: usize = usize::MAX / 2;
 
 /// A wake signal intended to be allocated inline as part of the task to be woken up.
 ///
@@ -29,6 +33,11 @@ use crate::TaskRef;
 /// Creating `&mut` exclusive references to a `WakeSignal` may cause a violation of Miri stacked
 /// borrowing rules at minimum. The entire API surface of this type is designed to be used via
 /// shared references.
+///
+/// The borrowed polling waker is scoped to a shared borrow of the pinned signal and does not
+/// contribute to `waker_count`. Cloning it creates an independently owned, counted waker that may
+/// outlive the poll. The signal must remain pinned until the borrow and all owned wakers are
+/// released; `is_inert()` only reports the absence of owned wakers.
 ///
 /// # Thread safety
 ///
@@ -51,8 +60,9 @@ pub(crate) struct WakeSignal {
     /// that it needs to read each task's wake signal to identify what has woken up.
     probe_embedded_wake_signals: Arc<AtomicBool>,
 
-    /// Counts each waker we have created (both the initial one and any clones). The instance cannot
-    /// be dropped until the clones are all gone because each clone holds a reference to the signal.
+    /// Counts owned wakers cloned from the borrowed polling waker. The instance cannot be dropped
+    /// until the clones are all gone because each clone holds a reference to the signal.
+    /// Cloning aborts at a conservative limit rather than allowing this count to wrap.
     waker_count: AtomicUsize,
 
     /// Whether the waker has been awakened in signal-probing mode. If the wake signal can be sent
@@ -73,7 +83,7 @@ pub(crate) struct WakeSignal {
     /// see the cross-thread access so will not complain about this marker.
     _single_threaded: PhantomData<*const ()>,
 
-    /// This type cannot be unpinned once it has been pinned (latest when calling `waker()`).
+    /// This type cannot be unpinned once it has been pinned (latest when calling `waker_ref()`).
     _requires_pin: PhantomPinned,
 }
 
@@ -131,8 +141,8 @@ impl WakeSignal {
         }
     }
 
-    /// Returns whether the signal is inert, meaning that no wakers are currently active and it is
-    /// safe to drop the signal.
+    /// Returns whether the signal is inert, meaning that no owned wakers are currently active.
+    /// Any borrowed waker must also be released before dropping the signal.
     #[cfg_attr(test, mutants::skip)] // Mutation causes infinite loops as executor will never shut down.
     pub(crate) fn is_inert(&self) -> bool {
         // We use Acquire ordering to ensure we see all writes to the waker before we declare it
@@ -143,25 +153,36 @@ impl WakeSignal {
         self.waker_count.load(atomic::Ordering::Acquire) == 0
     }
 
-    /// Returns a reference to the waker associated with this signal.
+    /// Borrows a waker associated with this signal without incrementing its reference count.
     ///
     /// # Safety
     ///
-    /// After calling this, the owner of the wake signal must query `is_inert()` for permission
-    /// to drop the object. Until `is_inert()` signals `false`, the wake signal must not be dropped.
-    pub(crate) unsafe fn waker(self: Pin<&Self>) -> Waker {
-        // Reference count increment is independent of state transitions, so Relaxed is enough.
-        self.waker_count.fetch_add(1, atomic::Ordering::Relaxed);
-
+    /// After this borrow ends, the owner must keep the signal pinned until `is_inert()` returns
+    /// true, because callers may have cloned the borrowed waker into independently owned wakers.
+    pub(crate) unsafe fn waker_ref(self: Pin<&Self>) -> impl Deref<Target = Waker> + '_ {
         let signal_ptr: *const Self = ptr::from_ref(self.get_ref());
 
+        // Like a borrowed Arc waker, this borrow keeps the signal alive without an owned count.
+        // Only Waker::clone creates an owned reference. Hide ManuallyDrop behind Deref so callers
+        // cannot extract or consume the uncounted Waker; its lifetime stays tied to this borrow.
         // SAFETY: We are required to correctly implement the waker API contract, which we do.
         // This includes being thread-safe, etc. The `WakeSignal` is thread-safe and all the
         // methods use interior mutability, so we are only using shared references, thereby
         // ensuring we do not violate Rust aliasing rules (as long as the owner of the `WakeSignal`
         // does not create any mutable references - though given that all methods are `&self` that
         // might still be relatively harmless and anyway likely detected by Miri as a bug.
-        unsafe { Waker::from_raw(RawWaker::new(signal_ptr.cast(), &WAKER_VTABLE)) }
+        ManuallyDrop::new(unsafe { Waker::from_raw(RawWaker::new(signal_ptr.cast(), &WAKER_VTABLE)) })
+    }
+
+    /// Creates an owned waker for tests of the reference-counting protocol.
+    ///
+    /// # Safety
+    ///
+    /// The signal must remain pinned until `is_inert()` returns true.
+    #[cfg(test)]
+    pub(crate) unsafe fn waker(self: Pin<&Self>) -> Waker {
+        // SAFETY: The caller keeps the signal alive until all owned wakers are released.
+        unsafe { self.waker_ref() }.clone()
     }
 
     fn wake(&self) {
@@ -207,10 +228,20 @@ fn waker_clone_waker(ptr: *const ()) -> RawWaker {
     let signal = resurrect_signal_ref(ptr);
 
     // Cloning just increments the ref count, that's all. There is no "object" for the waker.
-    // Reference count increment is independent of state transitions, so Relaxed is enough.
-    signal.waker_count.fetch_add(1, atomic::Ordering::Relaxed);
+    increment_waker_count(&signal.waker_count, std::process::abort);
 
     RawWaker::new(ptr, &WAKER_VTABLE)
+}
+
+fn increment_waker_count(waker_count: &AtomicUsize, on_overflow: fn() -> !) {
+    // Reference count increment is independent of state transitions, so Relaxed is enough.
+    let previous = waker_count.fetch_add(1, atomic::Ordering::Relaxed);
+
+    // Like Arc, leave half the range for concurrent increments before aborting.
+    // Unwinding instead would let repeated clone attempts keep growing the count.
+    if previous >= MAX_WAKER_COUNT {
+        on_overflow();
+    }
 }
 
 #[cfg_attr(test, mutants::skip)] // If tasks do not wake up, tests tend to infinite loop.
@@ -282,6 +313,50 @@ mod tests {
         ));
 
         assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn borrowed_waker_reference_count() {
+        let signal = pin!(WakeSignal::fake());
+        let signal = signal.as_ref();
+
+        {
+            // SAFETY: The signal stays pinned until the borrowed waker and its clone are dropped.
+            let waker = unsafe { signal.waker_ref() };
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+
+            waker.wake_by_ref();
+            assert!(signal.consume_awakened());
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+
+            let clone = waker.clone();
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 1);
+            drop(clone);
+            assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+        }
+
+        assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+        assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn waker_count_reaches_limit() {
+        let count = AtomicUsize::new(MAX_WAKER_COUNT - 1);
+
+        increment_waker_count(&count, || panic!("unexpected waker count overflow"));
+
+        assert_eq!(count.load(atomic::Ordering::Relaxed), MAX_WAKER_COUNT);
+    }
+
+    #[test]
+    fn waker_count_overflow_is_rejected() {
+        for initial in [MAX_WAKER_COUNT, MAX_WAKER_COUNT + 1] {
+            let count = AtomicUsize::new(initial);
+
+            testing_aids::assert_panic!(increment_waker_count(&count, || panic!("waker count overflow")));
+
+            assert_eq!(count.load(atomic::Ordering::Relaxed), initial + 1);
+        }
     }
 
     #[test]

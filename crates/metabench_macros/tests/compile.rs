@@ -8,7 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
@@ -48,11 +47,9 @@ const FAIL_CASES: &[(&str, &str)] = &[
     ("target_unsupported_option", "unsupported group option"),
 ];
 
-fn compile_case(name: &str) -> Output {
-    let fixture = compile_fixture();
-
+fn compile_case(name: &str, fixture: &CompileFixture) -> Output {
     Command::new(env!("CARGO"))
-        .args(["check", "--offline", "--quiet", "--manifest-path"])
+        .args(["check", "--offline", "--quiet", "--jobs", "2", "--manifest-path"])
         .arg(&fixture.manifest)
         .args(["--bin", name])
         .env("CARGO_TARGET_DIR", &fixture.target)
@@ -66,24 +63,23 @@ struct CompileFixture {
     target: PathBuf,
 }
 
-fn compile_fixture() -> &'static CompileFixture {
-    static FIXTURE: OnceLock<CompileFixture> = OnceLock::new();
-
-    FIXTURE.get_or_init(|| {
-        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let workspace_root = crate_root.parent().and_then(Path::parent).unwrap();
-        let workspace_root = workspace_root.to_string_lossy().replace('\\', "\\\\");
-        let directory = tempfile::tempdir().unwrap();
-        let manifest = directory.path().join("Cargo.toml");
-        let contents = include_str!("compile_cases.toml").replace("../../../crates", &format!("{workspace_root}/crates"));
-        fs::write(&manifest, contents).unwrap();
-        let target = directory.path().join("target");
-        CompileFixture {
-            _directory: directory,
-            manifest,
-            target,
-        }
-    })
+fn compile_fixture() -> CompileFixture {
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = crate_root.parent().and_then(Path::parent).unwrap();
+    let target = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| workspace_root.join("target"), PathBuf::from);
+    let workspace_root = workspace_root.to_string_lossy().replace('\\', "\\\\");
+    let directory = tempfile::Builder::new()
+        .prefix("metabench-compile-")
+        .tempdir_in(crate_root)
+        .unwrap();
+    let manifest = directory.path().join("Cargo.toml");
+    let contents = include_str!("compile_cases.toml").replace("../../../crates", &format!("{workspace_root}/crates"));
+    fs::write(&manifest, contents).unwrap();
+    CompileFixture {
+        _directory: directory,
+        manifest,
+        target,
+    }
 }
 
 fn display_output(output: &Output) -> String {
@@ -98,8 +94,9 @@ fn display_output(output: &Output) -> String {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn compile_pass_contracts() {
+    let fixture = compile_fixture();
     for name in PASS_CASES {
-        let output = compile_case(name);
+        let output = compile_case(name, &fixture);
         assert!(output.status.success(), "{name} failed to compile:\n{}", display_output(&output));
     }
 }
@@ -107,8 +104,9 @@ fn compile_pass_contracts() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn compile_fail_contracts() {
+    let fixture = compile_fixture();
     for (name, expected) in FAIL_CASES {
-        let output = compile_case(name);
+        let output = compile_case(name, &fixture);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{name} unexpectedly compiled");
         assert!(

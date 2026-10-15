@@ -3,7 +3,7 @@
 
 [package]
 name = "allocation_hints"
-version = "0.1.0"
+version = "0.2.0"
 description = "Passive allocator-independent scoped allocation hints."
 readme = "README.md"
 keywords = ["allocator", "heap", "memory", "bump"]

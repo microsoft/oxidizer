@@ -5,7 +5,7 @@ is not a promise of current timing on different hardware or dependency
 versions; use the repository's metabench targets to measure the current
 checkout.
 
-Each cell reports metabench's median wall-clock time, Callgrind instruction
+Each cell reports the historical Criterion median wall-clock time, Callgrind instruction
 count, allocation count, and total allocated bytes for one typed decode and
 read. Benchmarks consume the decoded value and force comparable semantic work
 when `headers 0.4.1` defers parsing. Setup uses a prebuilt `HeaderMap` outside
@@ -13,6 +13,11 @@ the measured operation. Criterion uses a 1 s warm-up, 3 s measurement period,
 and 60 samples per arm. Each cell is formatted as time, instructions, then
 allocation count / allocated bytes. `n/a` means `headers 0.4.1` does not
 provide that typed header.
+
+These measurements have not been rerun for the metabench schema 9 migration.
+Current `scripts/perf_report.rs` output reads Criterion's primary estimate from
+`criterion/time`, not the historical median metric. A median across independent
+runs, where used, is a separate aggregation of per-run estimates.
 
 | Header | `headers 0.4.1` | `http_headers` (owned) | `http_headers` (borrowed) |
 |---|---:|---:|---:|

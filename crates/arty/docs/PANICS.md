@@ -1,5 +1,17 @@
-# Panics
+# Panic policy
 
-Arty types must be unwind-safe unless documented otherwise. The runtime catches task panics and
-re-raises them when the task result is awaited. Unobserved task panics are reported to a runtime
-panic handler. Foundational I/O contracts in `arty_io_core` must also be panic-safe.
+When unwinding is enabled, Arty catches panics raised while it:
+
+- creates an async task from its task factory;
+- polls an async task;
+- runs a blocking callback.
+
+Arty reports these panics through `JoinError` when possible. Receiving that
+error does not by itself shut down the runtime.
+
+Arty does not guarantee recovery from panics raised by destructors, custom
+wakers, join notifications, telemetry processors, or other cleanup and
+notification hooks. Arty may catch some of these panics to maintain memory
+safety, but callers cannot rely on continued operation or complete cleanup. The
+process may abort, resources may leak, or affected tasks and runtime operations
+may stop making progress. Arty remains memory-safe under all panic conditions.

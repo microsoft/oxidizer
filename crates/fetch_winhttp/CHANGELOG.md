@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.3.0` of `fetch_winhttp_impl`
+
+- 🐛 Bug Fixes
+
+  - exclude inactive platform mutants ([#777](https://github.com/microsoft/oxidizer/pull/777))
+
 ## [0.2.1] - 2026-09-16
 
 - 🔧 Maintenance

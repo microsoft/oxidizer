@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "Process-wide multi-runtime telemetry source for seismograph."
 readme = "README.md"
 keywords = ["runtime", "telemetry", "diagnostics", "profiling"]

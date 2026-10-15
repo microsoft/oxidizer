@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.11.1"
+version = "0.12.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -16,7 +16,7 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
-# `uuid` is used only by a doctest in `src/_documentation/recipes.rs`, which
+# `uuid` is used only by a doctest in `src/documentation/recipes.rs`, which
 # cargo-machete does not scan; ignore it to avoid a false positive.
 [package.metadata.cargo-machete]
 ignored = ["uuid"]

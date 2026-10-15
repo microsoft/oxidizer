@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.11.0` of `bytesbuf`
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.10.0] - 2026-09-10
 
 ### Breaking

@@ -28,13 +28,13 @@ serde_json = "1"
 //!   `scripts/perf_report.rs`          — full run
 //!   `scripts/perf_report.rs --fast`   — quick, lower-fidelity criterion settings
 
-use std::collections::{BTreeMap, btree_map::Entry};
-use std::env;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::{env, fs};
 
 use serde::Deserialize;
 
@@ -68,8 +68,6 @@ const COMPARISON_OPS: &[(&str, &str)] = &[
     ("pool_comparison/churn/object_pool_pull", "object-pool"),
     ("pool_comparison/churn/opool_get", "opool"),
     ("pool_comparison/churn/deadpool_get", "deadpool"),
-    ("pool_comparison/churn/infinity_pinned", "infinity-pool — `PinnedPool`"),
-    ("pool_comparison/churn/infinity_raw", "infinity-pool — `RawPinnedPool`"),
 ];
 
 const DYN_BOX_OPS: &[(&str, &str)] = &[
@@ -77,22 +75,6 @@ const DYN_BOX_OPS: &[(&str, &str)] = &[
     (
         "dyn_box/plurality_multi_box",
         "plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_pinned",
-        "infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_local_pinned",
-        "infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>`",
-    ),
-    (
-        "dyn_box/infinity_blind",
-        "infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous)",
-    ),
-    (
-        "dyn_box/infinity_local_blind",
-        "infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous)",
     ),
     ("dyn_box/std_box", "standard library — `Box<dyn Trait>`"),
 ];
@@ -194,25 +176,14 @@ fn run(fast: bool) -> Result<(), String> {
         OsString::from("--export-md"),
         markdown_path.as_os_str().to_owned(),
     ];
-    for forwarded in [
-        "--warm-up-time",
-        warm,
-        "--measurement-time",
-        meas,
-        "--sample-size",
-        samples,
-    ] {
+    for forwarded in ["--warm-up-time", warm, "--measurement-time", meas, "--sample-size", samples] {
         args.push(OsString::from("--criterion-arg"));
         args.push(OsString::from(forwarded));
     }
 
     println!("==> Running cargo bench --bench plurality");
     let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.current_dir(&crate_dir)
-        .arg("bench")
-        .arg("--bench")
-        .arg("plurality")
-        .args(&args);
+    cmd.current_dir(&crate_dir).arg("bench").arg("--bench").arg("plurality").args(&args);
     let output = cmd
         .output()
         .map_err(|e| format!("failed to spawn cargo bench --bench plurality: {e}"))?;
@@ -276,7 +247,7 @@ fn index_report(report: JsonReport) -> Result<ReportIndex, String> {
 }
 
 fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
-    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("time")?;
     let value = metric.value.as_f64();
     match metric.unit.as_deref()? {
         "ps" => Some(value * 1e-3),
@@ -290,6 +261,40 @@ fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
 
 fn crit_per_op(report: &ReportIndex, key: &str) -> Option<f64> {
     criterion_time_ns(report, key).map(|ns| ns / N)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{criterion_time_ns, index_report, JsonReport};
+
+    #[test]
+    fn schema_nine_primary_estimate_and_units() {
+        for (value, unit, expected) in [
+            (serde_json::json!(1250), "ps", 1.25),
+            (serde_json::json!(1.25), "ns", 1.25),
+            (serde_json::json!(1.25), "µs", 1250.0),
+            (serde_json::json!(1.25), "us", 1250.0),
+            (serde_json::json!(1.25), "ms", 1_250_000.0),
+            (serde_json::json!(1.25), "s", 1_250_000_000.0),
+        ] {
+            let fixture = serde_json::json!({
+                "schema_version": 9,
+                "entries": [{
+                    "identity": "example",
+                    "results": {"criterion": {"metrics": {
+                        "time": {"value": value, "unit": unit}
+                    }}}
+                }]
+            });
+            let report: JsonReport = serde_json::from_value(fixture).unwrap();
+            let mut report = index_report(report).unwrap();
+            assert_eq!(criterion_time_ns(&report, "example"), Some(expected));
+            let metrics = &mut report.get_mut("example").unwrap().results.get_mut("criterion").unwrap().metrics;
+            let time = metrics.remove("time").unwrap();
+            metrics.insert("median".to_string(), time);
+            assert_eq!(criterion_time_ns(&report, "example"), None);
+        }
+    }
 }
 
 fn fmt_ns(ns: Option<f64>) -> String {
@@ -312,7 +317,7 @@ fn build_report(report: &ReportIndex) -> String {
     let mut out = String::new();
     out.push_str("# Plurality Performance Report\n\n");
     out.push_str("Generated by [`scripts/perf_report.rs`](../scripts/perf_report.rs). Re-run it to refresh these numbers.\n\n");
-    out.push_str("All figures are wall-clock medians measured by Criterion. They are machine-dependent: the ratios between rows are the durable signal, not the absolute values.\n\n");
+    out.push_str("All figures are primary wall-clock estimates measured by Criterion. They are machine-dependent: the ratios between rows are the durable signal, not the absolute values.\n\n");
     out.push_str("This report is a curated set of customer-facing scenarios. The crate also carries a larger suite of internal micro-benchmarks, including Callgrind instruction-count suites inside the consolidated `plurality` bench target, which are used for optimization work and are not published here; run them with `cargo bench --bench plurality` in this crate.\n\n");
     out.push_str("Every measured body allocates one ~32-byte, `Drop`-free value and releases it again. Each pool is pre-warmed with 1,024 slots and every slot is released before measurement starts, so the timed region only ever reuses a slot and never grows the pool. Payload construction is inside the timed region for every implementation, including the guard-returning pools, which write the payload through their guard.\n\n");
 
@@ -346,7 +351,7 @@ fn emit_handle_costs(out: &mut String, report: &ReportIndex) {
 fn emit_type_erasure(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, TYPE_ERASURE_OPS[0].0);
     out.push_str("## Cost of serving many types from one pool\n\n");
-    out.push_str("What dropping the element type costs. [`MultiPool`] accepts values of any type, and finds the right slot size by looking the value's layout up in a directory of the layouts it has seen; a `Pool<T>` knows its slot size at compile time and looks nothing up. The lookup is a linear scan, so the rows below hold the number of distinct layouts at one and at sixteen, the latter with the measured layout registered last so the scan runs its full length. Price type erasure at the step from the first row to either of the others, not at the difference between them: the longer scan executes materially more instructions, but the processor overlaps it with the pool's own pointer chasing, and what remains is smaller than the effect of heap and code placement, which this benchmark does not control. `cargo bench --bench plurality`.\n\n");
+    out.push_str("What dropping the element type from the pool costs. [`MultiPool`] accepts values of any type, and finds the right slot size by looking the value's layout up in a directory of the layouts it has seen; a `Pool<T>` knows its slot size at compile time and looks nothing up. The lookup is a linear scan, so the rows below hold the number of distinct layouts at one and at sixteen, the latter with the measured layout registered last so the scan runs its full length. Price runtime pool routing at the step from the first row to either of the others, not at the difference between them: the longer scan executes materially more instructions, but the processor overlaps it with the pool's own pointer chasing, and what remains is smaller than the effect of heap and code placement, which this benchmark does not control. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Pool | Allocate + free | Δ vs `Pool<T>` |\n|---|---:|---:|\n");
     for (key, label) in TYPE_ERASURE_OPS {
         let time = crit_per_op(report, key);
@@ -359,7 +364,7 @@ fn emit_type_erasure(out: &mut String, report: &ReportIndex) {
 fn emit_comparison(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, COMPARISON_OPS[0].0);
     out.push_str("## Against other pooling crates\n\n");
-    out.push_str("The same allocate-and-free workload run against every pooling crate we found with a comparable model. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the key-based pools offer. `cargo bench --bench plurality`.\n\n");
+    out.push_str("The same allocate-and-free workload run against the comparable pooling implementations retained in this report. This ranks raw single-thread cost, not capability: `slab` and `slotmap` are single-threaded and hand back keys rather than pointers, `sharded-slab` and `deadpool` pay for concurrency and async readiness, and the guard-returning pools (`object-pool`, `opool`) borrow from the pool rather than owning. `plurality — Alloc` is the fair analogue to the guard-returning pools; `plurality — Box` is the owned, `Send` handle that none of the retained key-based pools offer. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Pool | Allocate + free | Δ vs plurality `Box` |\n|---|---:|---:|\n");
     for (key, label) in COMPARISON_OPS {
         let time = crit_per_op(report, key);
@@ -408,7 +413,7 @@ fn emit_dyn_box(out: &mut String, report: &ReportIndex) {
     let baseline = crit_per_op(report, DYN_BOX_OPS[0].0);
     out.push_str("## Owning `dyn Trait` handles\n\n");
     out.push_str("Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.\n\n");
-    out.push_str("infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The rows marked heterogeneous accept values of any type in one pool and therefore pay for more capability; each row here also unsizes a handle and makes a virtual call, so the cost of type erasure alone is the one measured above rather than the difference between these rows. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
+    out.push_str("The heterogeneous row accepts values of any type in one pool and therefore pays for the layout lookup described above. Both plurality rows perform the same handle unsizing and virtual call, so their difference isolates the pool-routing cost. The other implementations retained in this report return keys or pool-borrowing guards rather than reusable owning fat-pointer handles. `cargo bench --bench plurality`.\n\n");
     out.push_str("| Handle | Allocate, call, free | Δ vs plurality |\n|---|---:|---:|\n");
     for (key, label) in DYN_BOX_OPS {
         let time = crit_per_op(report, key);

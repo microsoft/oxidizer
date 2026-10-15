@@ -117,8 +117,8 @@ impl SynchronizedTimers {
     {
         let mut timers = match self {
             #[cfg(any(feature = "rt-shared", test))]
-            Self::Shared(timers) => timers.lock_sync(),
-            Self::Isolated(timers) => timers.lock_sync(),
+            Self::Shared(timers) => timers.lock(),
+            Self::Isolated(timers) => timers.lock(),
         };
         f(&mut timers)
     }

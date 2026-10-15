@@ -3,7 +3,7 @@
 
 #![expect(clippy::panic, reason = "poisoning semantics require controlled panics caught by these tests")]
 
-//! Integration tests for executor-independent synchronization.
+//! Integration tests for executor-independent, async-capable synchronization.
 
 #[cfg(feature = "serde")]
 #[path = "support/serializer.rs"]
@@ -21,11 +21,8 @@ use std::time::{Duration, Instant};
 use performables::arc::Arc;
 #[cfg(feature = "seismograph")]
 use performables::arc::PerThread;
-use performables::sync::barrier::Barrier;
-use performables::sync::condition::Condvar;
-use performables::sync::lock::RwLock;
-use performables::sync::mutex::Mutex;
 use performables::sync::once::{LazyLock, OnceLock};
+use performables::sync::{barrier, condition, lock, mode, mutex};
 #[cfg(feature = "seismograph")]
 use seismograph::recorder::Configuration;
 #[cfg(feature = "seismograph")]
@@ -39,6 +36,11 @@ use serializer_support::ValueSerializer;
 #[cfg(feature = "seismograph")]
 use thread_aware::Relocator;
 use waker_support::clone_hook_waker;
+
+type Mutex<T> = mutex::Mutex<T, mode::Async>;
+type RwLock<T> = lock::RwLock<T, mode::Async>;
+type Barrier = barrier::Barrier<mode::Async>;
+type Condvar = condition::Condvar<mode::Async>;
 
 #[cfg(miri)]
 const TEST_DEADLINE: Duration = Duration::from_secs(120);
@@ -129,7 +131,7 @@ fn mutex_uncontended_future_is_immediately_ready() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut future = pin!(mutex.lock());
+    let mut future = pin!(mutex.lock_async());
 
     let Poll::Ready(mut guard) = future.as_mut().poll(&mut context) else {
         panic!("an uncontended mutex must be immediately ready");
@@ -148,7 +150,7 @@ fn mutex_release_wakes_a_contender() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut future = pin!(mutex.lock());
+    let mut future = pin!(mutex.lock_async());
 
     assert!(future.as_mut().poll(&mut context).is_pending());
     drop(held);
@@ -163,14 +165,14 @@ fn mutex_sync_lock_waits_for_release() {
     let held = mutex.try_lock().unwrap();
     let contender = Arc::clone(&mutex);
     let thread = std::thread::spawn(move || {
-        *contender.lock_sync() = 7;
+        *contender.lock() = 7;
     });
 
     std::thread::yield_now();
     drop(held);
     join_with_timeout(thread);
 
-    assert_eq!(*mutex.lock_sync(), 7);
+    assert_eq!(*mutex.lock(), 7);
 }
 
 #[test]
@@ -179,7 +181,7 @@ fn mutex_supports_owned_access_defaults_and_formatting() {
     mutex.get_mut().push('!');
     assert_eq!(format!("{mutex:?}"), "Mutex { value: \"value!\", poisoned: false }");
 
-    let guard = mutex.lock_sync();
+    let guard = mutex.lock();
     assert_eq!(
         (format!("{guard:?}"), format!("{guard}"), format!("{mutex:?}")),
         (
@@ -227,7 +229,7 @@ fn mutex_sync_result_waits_for_release() {
     let (started_sender, started_receiver) = std::sync::mpsc::channel();
     let thread = std::thread::spawn(move || {
         started_sender.send(()).unwrap();
-        *contender.lock_sync_result().unwrap() = 9;
+        *contender.lock_result().unwrap() = 9;
     });
     started_receiver.recv().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -236,7 +238,7 @@ fn mutex_sync_result_waits_for_release() {
     drop(held);
     join_with_timeout(thread);
 
-    assert_eq!(*mutex.lock_sync(), 9);
+    assert_eq!(*mutex.lock(), 9);
 }
 
 #[test]
@@ -248,7 +250,7 @@ fn cancelled_mutex_waiter_does_not_consume_the_lock() {
     let mut context = Context::from_waker(&waker);
 
     {
-        let mut future = pin!(mutex.lock());
+        let mut future = pin!(mutex.lock_async());
         assert!(future.as_mut().poll(&mut context).is_pending());
     }
     drop(held);
@@ -258,7 +260,7 @@ fn cancelled_mutex_waiter_does_not_consume_the_lock() {
 
 fn poison_mutex(mutex: &Mutex<usize>) {
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        let mut guard = mutex.lock_sync();
+        let mut guard = mutex.lock();
         *guard += 1;
         panic!("poison mutex");
     }));
@@ -271,8 +273,8 @@ fn mutex_default_acquisitions_panic_on_poison() {
     let mutex = Mutex::new(0);
     poison_mutex(&mutex);
 
-    catch_unwind(AssertUnwindSafe(|| mutex.lock_sync())).unwrap_err();
-    catch_unwind(AssertUnwindSafe(|| block_on(mutex.lock()))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| mutex.lock())).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| block_on(mutex.lock_async()))).unwrap_err();
     catch_unwind(AssertUnwindSafe(|| mutex.try_lock())).unwrap_err();
 }
 
@@ -281,11 +283,11 @@ fn mutex_result_acquisitions_retain_usable_guards() {
     let mutex = Mutex::new(0);
     poison_mutex(&mutex);
 
-    let mut sync_error = mutex.lock_sync_result().unwrap_err();
+    let mut sync_error = mutex.lock_result().unwrap_err();
     **sync_error.get_mut() += 2;
     drop(sync_error.into_inner());
 
-    let mut async_guard = block_on(mutex.lock_result()).unwrap_err().into_inner();
+    let mut async_guard = block_on(mutex.lock_async_result()).unwrap_err().into_inner();
     *async_guard += 4;
     drop(async_guard);
 
@@ -293,7 +295,7 @@ fn mutex_result_acquisitions_retain_usable_guards() {
     *try_guard += 8;
     drop(try_guard);
 
-    assert_eq!(**mutex.lock_sync_result().unwrap_err().get_ref(), 15);
+    assert_eq!(**mutex.lock_result().unwrap_err().get_ref(), 15);
     assert!(mutex.is_poisoned());
 }
 
@@ -301,12 +303,12 @@ fn mutex_result_acquisitions_retain_usable_guards() {
 fn clearing_mutex_poison_restores_default_acquisition() {
     let mutex = Mutex::new(0);
     poison_mutex(&mutex);
-    drop(mutex.lock_sync_result().unwrap_err().into_inner());
+    drop(mutex.lock_result().unwrap_err().into_inner());
 
     mutex.clear_poison();
 
     assert!(!mutex.is_poisoned());
-    assert_eq!(*mutex.lock_sync(), 1);
+    assert_eq!(*mutex.lock(), 1);
 }
 
 #[test]
@@ -315,7 +317,7 @@ fn guard_acquired_during_an_existing_unwind_does_not_poison_mutex() {
 
     impl Drop for AcquireOnDrop<'_> {
         fn drop(&mut self) {
-            drop(self.0.lock_sync_result().unwrap());
+            drop(self.0.lock_result().unwrap());
         }
     }
 
@@ -339,8 +341,8 @@ fn cancelling_a_selected_mutex_waiter_wakes_the_next_waiter() {
     let second_counter = StdArc::new(WakeCounter::default());
     let second_waker = waker(&second_counter);
     let mut second_context = Context::from_waker(&second_waker);
-    let mut first = Box::pin(mutex.lock());
-    let mut second = Box::pin(mutex.lock());
+    let mut first = Box::pin(mutex.lock_async());
+    let mut second = Box::pin(mutex.lock_async());
     assert!(first.as_mut().poll(&mut first_context).is_pending());
     assert!(second.as_mut().poll(&mut second_context).is_pending());
 
@@ -374,7 +376,7 @@ fn rw_lock_release_wakes_waiting_writer() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut future = pin!(lock.write());
+    let mut future = pin!(lock.write_async());
 
     assert!(future.as_mut().poll(&mut context).is_pending());
     drop(held);
@@ -386,17 +388,17 @@ fn rw_lock_release_wakes_waiting_writer() {
 #[test]
 fn rw_lock_sync_access_waits_for_conflicting_guards() {
     let lock = Arc::new(RwLock::new(0));
-    let reader = lock.read_sync();
+    let reader = lock.read();
     let contender = Arc::clone(&lock);
     let thread = std::thread::spawn(move || {
-        *contender.write_sync() = 11;
+        *contender.write() = 11;
     });
 
     std::thread::yield_now();
     drop(reader);
     join_with_timeout(thread);
 
-    assert_eq!(*lock.read_sync(), 11);
+    assert_eq!(*lock.read(), 11);
 }
 
 #[test]
@@ -405,14 +407,14 @@ fn rw_lock_supports_owned_access_defaults_and_formatting() {
     lock.get_mut().push('!');
     assert_eq!(format!("{lock:?}"), "RwLock { value: \"value!\", poisoned: false }");
 
-    let read = lock.read_sync();
+    let read = lock.read();
     assert_eq!(
         (format!("{read:?}"), format!("{read}")),
         ("\"value!\"".to_owned(), "value!".to_owned())
     );
     drop(read);
 
-    let write = lock.write_sync();
+    let write = lock.write();
     assert_eq!(
         (format!("{write:?}"), format!("{write}"), format!("{lock:?}")),
         (
@@ -431,7 +433,7 @@ fn rw_lock_supports_owned_access_defaults_and_formatting() {
 fn rw_lock_debug_reports_poisoned_values() {
     let lock = RwLock::new(7);
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        let mut guard = lock.write_sync();
+        let mut guard = lock.write();
         *guard += 1;
         panic!("poison writer");
     }));
@@ -443,12 +445,12 @@ fn rw_lock_debug_reports_poisoned_values() {
 #[test]
 fn rw_lock_sync_results_wait_for_conflicting_guards() {
     let lock = Arc::new(RwLock::new(0));
-    let writer = lock.write_sync();
+    let writer = lock.write();
     let read_lock = Arc::clone(&lock);
     let (read_started_sender, read_started_receiver) = std::sync::mpsc::channel();
     let reader = std::thread::spawn(move || {
         read_started_sender.send(()).unwrap();
-        *read_lock.read_sync_result().unwrap()
+        *read_lock.read_result().unwrap()
     });
     read_started_receiver.recv().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -456,12 +458,12 @@ fn rw_lock_sync_results_wait_for_conflicting_guards() {
     drop(writer);
     assert_eq!(join_with_timeout(reader), 0);
 
-    let reader = lock.read_sync();
+    let reader = lock.read();
     let write_lock = Arc::clone(&lock);
     let (write_started_sender, write_started_receiver) = std::sync::mpsc::channel();
     let writer = std::thread::spawn(move || {
         write_started_sender.send(()).unwrap();
-        *write_lock.write_sync_result().unwrap() = 12;
+        *write_lock.write_result().unwrap() = 12;
     });
     write_started_receiver.recv().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -469,30 +471,30 @@ fn rw_lock_sync_results_wait_for_conflicting_guards() {
     drop(reader);
     join_with_timeout(writer);
 
-    assert_eq!(*lock.read_sync(), 12);
+    assert_eq!(*lock.read(), 12);
 }
 
 #[test]
 fn cancelled_rw_lock_waiters_leave_the_lock_available() {
     let lock = RwLock::new(());
-    let writer = lock.write_sync();
+    let writer = lock.write();
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
     {
-        let mut read = pin!(lock.read());
+        let mut read = pin!(lock.read_async());
         assert!(read.as_mut().poll(&mut context).is_pending());
     }
     {
-        let mut read = pin!(lock.read_result());
+        let mut read = pin!(lock.read_async_result());
         assert!(read.as_mut().poll(&mut context).is_pending());
     }
     drop(writer);
     assert!(lock.try_read().is_some());
 
-    let reader = lock.read_sync();
+    let reader = lock.read();
     {
-        let mut write = pin!(lock.write_result());
+        let mut write = pin!(lock.write_async_result());
         assert!(write.as_mut().poll(&mut context).is_pending());
     }
     drop(reader);
@@ -503,7 +505,7 @@ fn cancelled_rw_lock_waiters_leave_the_lock_available() {
 fn rw_lock_writer_panic_poisons_but_reader_panic_does_not() {
     let reader_lock = RwLock::new(0);
     let reader_panic = catch_unwind(AssertUnwindSafe(|| {
-        let _guard = reader_lock.read_sync();
+        let _guard = reader_lock.read();
         panic!("reader panic");
     }));
     assert!(reader_panic.is_err());
@@ -511,34 +513,34 @@ fn rw_lock_writer_panic_poisons_but_reader_panic_does_not() {
 
     let writer_lock = RwLock::new(0);
     let writer_panic = catch_unwind(AssertUnwindSafe(|| {
-        let mut guard = writer_lock.write_sync();
+        let mut guard = writer_lock.write();
         *guard = 7;
         panic!("writer panic");
     }));
     assert!(writer_panic.is_err());
     assert!(writer_lock.is_poisoned());
-    assert_eq!(**writer_lock.read_sync_result().unwrap_err().get_ref(), 7);
+    assert_eq!(**writer_lock.read_result().unwrap_err().get_ref(), 7);
 }
 
 #[test]
 fn rw_lock_result_acquisitions_recover_without_clearing_poison() {
     let lock = RwLock::new(0);
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        let mut guard = lock.write_sync();
+        let mut guard = lock.write();
         *guard = 1;
         panic!("poison writer");
     }));
     assert!(panic.is_err());
 
-    let read = block_on(lock.read_result()).unwrap_err().into_inner();
+    let read = block_on(lock.read_async_result()).unwrap_err().into_inner();
     assert_eq!(*read, 1);
     drop(read);
 
-    let mut sync_write = lock.write_sync_result().unwrap_err().into_inner();
+    let mut sync_write = lock.write_result().unwrap_err().into_inner();
     *sync_write = 2;
     drop(sync_write);
 
-    let mut write = block_on(lock.write_result()).unwrap_err().into_inner();
+    let mut write = block_on(lock.write_async_result()).unwrap_err().into_inner();
     *write = 3;
     drop(write);
 
@@ -547,22 +549,22 @@ fn rw_lock_result_acquisitions_recover_without_clearing_poison() {
     assert!(lock.is_poisoned());
 
     lock.clear_poison();
-    assert_eq!(*lock.read_sync(), 3);
+    assert_eq!(*lock.read(), 3);
 }
 
 #[test]
 fn rw_lock_default_acquisitions_panic_on_poison() {
     let lock = RwLock::new(());
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        let _guard = lock.write_sync();
+        let _guard = lock.write();
         panic!("poison writer");
     }));
     assert!(panic.is_err());
 
-    catch_unwind(AssertUnwindSafe(|| lock.read_sync())).unwrap_err();
-    catch_unwind(AssertUnwindSafe(|| lock.write_sync())).unwrap_err();
-    catch_unwind(AssertUnwindSafe(|| block_on(lock.read()))).unwrap_err();
-    catch_unwind(AssertUnwindSafe(|| block_on(lock.write()))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| lock.read())).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| lock.write())).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| block_on(lock.read_async()))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| block_on(lock.write_async()))).unwrap_err();
     catch_unwind(AssertUnwindSafe(|| lock.try_read())).unwrap_err();
     catch_unwind(AssertUnwindSafe(|| lock.try_write())).unwrap_err();
 }
@@ -576,7 +578,7 @@ fn mutex_coordinates_executor_threads_under_contention() {
             scope.spawn(move || {
                 block_on(async move {
                     for _ in 0..CONTENTION_ITERATIONS {
-                        *lock.lock().await += 1;
+                        *lock.lock_async().await += 1;
                     }
                 });
             });
@@ -595,7 +597,7 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
             scope.spawn(move || {
                 block_on(async move {
                     for _ in 0..CONTENTION_ITERATIONS {
-                        *lock.write().await += 1;
+                        *lock.write_async().await += 1;
                     }
                 });
             });
@@ -605,7 +607,7 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
             scope.spawn(move || {
                 block_on(async move {
                     for _ in 0..CONTENTION_ITERATIONS {
-                        std::hint::black_box(*lock.read().await);
+                        std::hint::black_box(*lock.read_async().await);
                     }
                 });
             });
@@ -619,11 +621,11 @@ fn rw_lock_coordinates_executor_threads_under_contention() {
 fn barrier_supports_async_and_blocking_waiters() {
     let barrier = Arc::new(Barrier::new(3));
     let async_barrier = Arc::clone(&barrier);
-    let async_thread = std::thread::spawn(move || block_on(async_barrier.wait()));
+    let async_thread = std::thread::spawn(move || block_on(async_barrier.wait_async()));
     let blocking_barrier = Arc::clone(&barrier);
-    let blocking_thread = std::thread::spawn(move || blocking_barrier.wait_sync());
+    let blocking_thread = std::thread::spawn(move || blocking_barrier.wait());
 
-    let result = block_on(barrier.wait());
+    let result = block_on(barrier.wait_async());
     let results = [result, join_with_timeout(async_thread), join_with_timeout(blocking_thread)];
 
     assert_eq!(results.iter().filter(|result| result.is_leader()).count(), 1);
@@ -635,13 +637,13 @@ fn dropping_a_released_barrier_waiter_observes_the_new_generation() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut waiter = Box::pin(barrier.wait());
+    let mut waiter = Box::pin(barrier.wait_async());
     assert!(waiter.as_mut().poll(&mut context).is_pending());
 
-    assert!(block_on(barrier.wait()).is_leader());
+    assert!(block_on(barrier.wait_async()).is_leader());
     drop(waiter);
 
-    let mut next = pin!(barrier.wait());
+    let mut next = pin!(barrier.wait_async());
     assert!(next.as_mut().poll(&mut context).is_pending());
 }
 
@@ -653,7 +655,7 @@ fn barrier_handles_heavy_concurrent_arrival_and_cancellation() {
             let barrier = StdArc::clone(&barrier);
             scope.spawn(move || {
                 for _ in 0..BARRIER_ROUNDS {
-                    block_on(barrier.wait());
+                    block_on(barrier.wait_async());
                 }
             });
         }
@@ -665,7 +667,7 @@ fn barrier_handles_heavy_concurrent_arrival_and_cancellation() {
     let mut context = Context::from_waker(&waker);
     let waiters = (0..CANCELLED_BARRIER_WAITERS)
         .map(|_| {
-            let mut waiter = Box::pin(barrier.wait());
+            let mut waiter = Box::pin(barrier.wait_async());
             assert!(waiter.as_mut().poll(&mut context).is_pending());
             waiter
         })
@@ -685,13 +687,13 @@ fn cancelled_barrier_waiter_withdraws_its_arrival() {
     let mut context = Context::from_waker(&waker);
 
     {
-        let mut cancelled = pin!(barrier.wait());
+        let mut cancelled = pin!(barrier.wait_async());
         assert!(cancelled.as_mut().poll(&mut context).is_pending());
     }
 
-    let mut replacement = pin!(barrier.wait());
+    let mut replacement = pin!(barrier.wait_async());
     assert!(replacement.as_mut().poll(&mut context).is_pending());
-    assert!(block_on(barrier.wait()).is_leader());
+    assert!(block_on(barrier.wait_async()).is_leader());
     assert!(replacement.as_mut().poll(&mut context).is_ready());
 }
 
@@ -702,13 +704,13 @@ fn condvar_supports_async_and_blocking_waiters() {
     let waiter = std::thread::spawn(move || {
         block_on(async {
             let (mutex, condition) = &*waiter_pair;
-            let guard = mutex.lock().await;
-            drop(condition.wait_while(guard, |ready| !*ready).await);
+            let guard = mutex.lock_async().await;
+            drop(condition.wait_while_async(guard, |ready| !*ready).await);
         });
     });
 
     let (mutex, condition) = &*pair;
-    *mutex.lock_sync() = true;
+    *mutex.lock() = true;
     condition.notify_one();
     join_with_timeout(waiter);
 }
@@ -720,10 +722,10 @@ fn condvar_wait_while_async_rechecks_the_predicate() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut wait = pin!(condition.wait_while(mutex.lock_sync(), |ready| !*ready));
+    let mut wait = pin!(condition.wait_while_async(mutex.lock(), |ready| !*ready));
     assert!(wait.as_mut().poll(&mut context).is_pending());
 
-    *mutex.lock_sync() = true;
+    *mutex.lock() = true;
     condition.notify_one();
 
     assert!(wait.as_mut().poll(&mut context).is_ready());
@@ -736,7 +738,7 @@ fn condvar_observes_notifications_during_waiter_registration() {
     let notify_condition = StdArc::clone(&condition);
     let waker = clone_hook_waker(move || notify_condition.notify_one());
     let mut context = Context::from_waker(&waker);
-    let mut wait = pin!(condition.wait(mutex.lock_sync()));
+    let mut wait = pin!(condition.wait_async(mutex.lock()));
 
     assert!(wait.as_mut().poll(&mut context).is_ready());
 }
@@ -748,9 +750,9 @@ fn condvar_direct_waits_support_blocking_and_async_notification() {
     let (started_sender, started_receiver) = std::sync::mpsc::channel();
     let waiter = std::thread::spawn(move || {
         let (mutex, condition) = &*waiter_pair;
-        let guard = mutex.lock_sync();
+        let guard = mutex.lock();
         started_sender.send(()).unwrap();
-        drop(condition.wait_sync(guard));
+        drop(condition.wait(guard));
     });
     started_receiver.recv().unwrap();
     while !waiter.is_finished() {
@@ -764,7 +766,7 @@ fn condvar_direct_waits_support_blocking_and_async_notification() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut wait = pin!(condition.wait(mutex.lock_sync()));
+    let mut wait = pin!(condition.wait_async(mutex.lock()));
     assert!(wait.as_mut().poll(&mut context).is_pending());
     condition.notify_one();
     assert!(wait.as_mut().poll(&mut context).is_ready());
@@ -778,13 +780,13 @@ fn condvar_wait_while_sync_rechecks_the_predicate() {
     let (started_sender, started_receiver) = std::sync::mpsc::channel();
     let waiter = std::thread::spawn(move || {
         let (mutex, condition) = &*waiter_pair;
-        let guard = mutex.lock_sync();
+        let guard = mutex.lock();
         started_sender.send(()).unwrap();
-        drop(condition.wait_while_sync(guard, |ready| !*ready));
+        drop(condition.wait_while(guard, |ready| !*ready));
     });
     started_receiver.recv().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
-    *pair.0.lock_sync() = true;
+    *pair.0.lock() = true;
     pair.1.notify_one();
 
     join_with_timeout(waiter);
@@ -800,9 +802,9 @@ fn condvar_notify_all_wakes_every_waiter() {
     let second_counter = StdArc::new(WakeCounter::default());
     let second_waker = waker(&second_counter);
     let mut second_context = Context::from_waker(&second_waker);
-    let mut first = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut first = Box::pin(condition.wait_async(mutex.lock()));
     assert!(first.as_mut().poll(&mut first_context).is_pending());
-    let mut second = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut second = Box::pin(condition.wait_async(mutex.lock()));
     assert!(second.as_mut().poll(&mut second_context).is_pending());
 
     condition.notify_all();
@@ -832,9 +834,9 @@ fn condvar_cancelled_notified_waiter_forwards_notification() {
     let second_counter = StdArc::new(WakeCounter::default());
     let second_waker = waker(&second_counter);
     let mut second_context = Context::from_waker(&second_waker);
-    let mut first = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut first = Box::pin(condition.wait_async(mutex.lock()));
     assert!(first.as_mut().poll(&mut first_context).is_pending());
-    let mut second = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut second = Box::pin(condition.wait_async(mutex.lock()));
     assert!(second.as_mut().poll(&mut second_context).is_pending());
 
     condition.notify_one();
@@ -856,9 +858,9 @@ fn condvar_completed_notified_waiter_does_not_forward_notification() {
     let second_counter = StdArc::new(WakeCounter::default());
     let second_waker = waker(&second_counter);
     let mut second_context = Context::from_waker(&second_waker);
-    let mut first = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut first = Box::pin(condition.wait_async(mutex.lock()));
     assert!(first.as_mut().poll(&mut first_context).is_pending());
-    let mut second = Box::pin(condition.wait(mutex.lock_sync()));
+    let mut second = Box::pin(condition.wait_async(mutex.lock()));
     assert!(second.as_mut().poll(&mut second_context).is_pending());
 
     condition.notify_one();
@@ -878,10 +880,10 @@ fn condvar_wait_reacquires_after_lock_contention() {
     let counter = StdArc::new(WakeCounter::default());
     let waker = waker(&counter);
     let mut context = Context::from_waker(&waker);
-    let mut wait = pin!(condition.wait(mutex.lock_sync()));
+    let mut wait = pin!(condition.wait_async(mutex.lock()));
     assert!(wait.as_mut().poll(&mut context).is_pending());
 
-    let held = mutex.lock_sync();
+    let held = mutex.lock();
     condition.notify_one();
     assert!(wait.as_mut().poll(&mut context).is_pending());
     drop(held);
@@ -898,7 +900,7 @@ fn condvar_timeout_can_observe_notification() {
         notifier.1.notify_one();
     });
 
-    let (_guard, result) = pair.1.wait_timeout_sync(pair.0.lock_sync(), std::time::Duration::from_secs(1));
+    let (_guard, result) = pair.1.wait_timeout(pair.0.lock(), std::time::Duration::from_secs(1));
     join_with_timeout(thread);
 
     assert!(!result.timed_out());
@@ -909,12 +911,12 @@ fn condvar_timeout_reacquires_the_mutex() {
     let mutex = Mutex::new(7);
     let condition = Condvar::new();
 
-    let (mut guard, result) = condition.wait_timeout_sync(mutex.lock_sync(), std::time::Duration::from_millis(1));
+    let (mut guard, result) = condition.wait_timeout(mutex.lock(), std::time::Duration::from_millis(1));
     *guard = 9;
 
     assert!(result.timed_out());
     drop(guard);
-    assert_eq!(*mutex.lock_sync(), 9);
+    assert_eq!(*mutex.lock(), 9);
 }
 
 #[test]
@@ -1019,6 +1021,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
             capture_backtraces: true,
             ..Default::default()
         },
+        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096).unwrap(),
         ..Default::default()
     });
 
@@ -1041,11 +1044,11 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     assert!(mutex.try_lock().is_none());
     drop(mutex_guard);
     let poison_panic = catch_unwind(AssertUnwindSafe(|| {
-        let _guard = mutex.lock_sync();
+        let _guard = mutex.lock();
         panic!("poison telemetry mutex");
     }));
     assert!(poison_panic.is_err());
-    drop(mutex.lock_sync_result().unwrap_err().into_inner());
+    drop(mutex.lock_result().unwrap_err().into_inner());
     mutex.clear_poison();
     mutex.clear_poison();
 
@@ -1061,8 +1064,8 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     let barrier = Arc::new(Barrier::new(2));
     let barrier_id = recorder::ObjectId::from_ptr(std::ptr::from_ref(&*barrier).cast::<()>());
     let other_barrier = Arc::clone(&barrier);
-    let barrier_thread = std::thread::spawn(move || other_barrier.wait_sync());
-    let barrier_result = barrier.wait_sync();
+    let barrier_thread = std::thread::spawn(move || other_barrier.wait());
+    let barrier_result = barrier.wait();
     let other_barrier_result = join_with_timeout(barrier_thread);
     assert_ne!(barrier_result.is_leader(), other_barrier_result.is_leader());
 
@@ -1072,7 +1075,7 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
     let counter = StdArc::new(WakeCounter::default());
     let condition_waker = waker(&counter);
     let mut condition_context = Context::from_waker(&condition_waker);
-    let mut condition_wait = pin!(condition.wait(condition_mutex.lock_sync()));
+    let mut condition_wait = pin!(condition.wait_async(condition_mutex.lock()));
     assert!(condition_wait.as_mut().poll(&mut condition_context).is_pending());
     condition.notify_one();
     assert!(condition_wait.as_mut().poll(&mut condition_context).is_ready());

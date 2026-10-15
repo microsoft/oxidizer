@@ -27,7 +27,8 @@ syn = { version = "2", features = ["full", "parsing"] }
 //!
 //! Criterion and Gungraun variants are paired through shared metabench identities.
 
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -254,7 +255,7 @@ fn index_report(report: JsonReport) -> Result<ReportIndex, AppError> {
 }
 
 fn criterion_time_ns(report: &ReportIndex, identity: &str) -> Option<f64> {
-    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("median")?;
+    let metric = report.get(identity)?.results.get("criterion")?.metrics.get("time")?;
     let value = metric.value.as_f64();
     match metric.unit.as_deref()? {
         "ps" => Some(value * 1e-3),
@@ -277,6 +278,40 @@ fn callgrind_metric(report: &ReportIndex, identity: &str, key: &str) -> Option<u
                 .find(|(name, result)| name.starts_with("gungraun.") && result.metrics.contains_key(key))?;
             engine.1.metrics.get(key)?.value.as_u64()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonReport, criterion_time_ns, index_report};
+
+    #[test]
+    fn schema_nine_primary_estimate_and_units() {
+        for (value, unit, expected) in [
+            (serde_json::json!(1250), "ps", 1.25),
+            (serde_json::json!(1.25), "ns", 1.25),
+            (serde_json::json!(1.25), "µs", 1250.0),
+            (serde_json::json!(1.25), "us", 1250.0),
+            (serde_json::json!(1.25), "ms", 1_250_000.0),
+            (serde_json::json!(1.25), "s", 1_250_000_000.0),
+        ] {
+            let fixture = serde_json::json!({
+                "schema_version": 9,
+                "entries": [{
+                    "identity": "example",
+                    "results": {"criterion": {"metrics": {
+                        "time": {"value": value, "unit": unit}
+                    }}}
+                }]
+            });
+            let report: JsonReport = serde_json::from_value(fixture).unwrap();
+            let mut report = index_report(report).unwrap();
+            assert_eq!(criterion_time_ns(&report, "example"), Some(expected));
+            let metrics = &mut report.get_mut("example").unwrap().results.get_mut("criterion").unwrap().metrics;
+            let time = metrics.remove("time").unwrap();
+            metrics.insert("median".to_string(), time);
+            assert_eq!(criterion_time_ns(&report, "example"), None);
+        }
+    }
 }
 
 fn fmt_ns(ns: Option<f64>) -> String {
@@ -390,7 +425,7 @@ fn build_report(report: &ReportIndex) -> String {
          for a regex-based router reaching the same end state.  \n",
     );
     out.push_str(
-        "Criterion median is reported (default 30 samples, 1 s warm-up, 2 s \
+        "Criterion's primary wall-clock estimate is reported (default 30 samples, 1 s warm-up, 2 s \
          measurement; override with `--samples` / `--measurement-time` / \
          `--warm-up-time`).  \n",
     );
@@ -401,7 +436,9 @@ fn build_report(report: &ReportIndex) -> String {
     out.push_str("| Resolver | Time (criterion) | Instructions | Branch misses | Mem accesses |\n");
     out.push_str("|---|---:|---:|---:|---:|\n");
     for identity in VARIANTS {
-        let variant = identity.strip_prefix("compare_routers/").expect("variant identity stays within compare_routers");
+        let variant = identity
+            .strip_prefix("compare_routers/")
+            .expect("variant identity stays within compare_routers");
         let time = criterion_time_ns(report, identity);
         let instructions = callgrind_metric(report, identity, "Ir");
         let branch_misses = callgrind_metric(report, identity, "Bcm");
@@ -549,8 +586,7 @@ fn regenerate_router(crate_dir: &Path) -> Result<(), AppError> {
     let body = prettyplease::unparse(&file);
 
     let out_path = crate_dir.join("benches").join("common").join("bench_router.rs");
-    fs::write(&out_path, format!("{ROUTER_HEADER}{body}"))
-        .map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
+    fs::write(&out_path, format!("{ROUTER_HEADER}{body}")).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
     println!("Regenerated {}", out_path.display());
     Ok(())
 }
@@ -648,10 +684,11 @@ fn run(args: &Args) -> Result<(), AppError> {
     let report: JsonReport = serde_json::from_str(&json).map_err(|e| app_err!("parsing {}: {e}", json_path.display()))?;
     let report = index_report(report)?;
 
-    let expected = VARIANTS
-        .iter()
-        .copied()
-        .chain(QUERY_GROUPS.iter().flat_map(|group| group.variants.iter().map(|variant| variant.identity)));
+    let expected = VARIANTS.iter().copied().chain(
+        QUERY_GROUPS
+            .iter()
+            .flat_map(|group| group.variants.iter().map(|variant| variant.identity)),
+    );
     let missing: Vec<&str> = expected.filter(|key| criterion_time_ns(&report, key).is_none()).collect();
     if !missing.is_empty() {
         bail!(
@@ -665,11 +702,7 @@ fn run(args: &Args) -> Result<(), AppError> {
     let out_path = crate_dir.join("docs").join("PERF.md");
     fs::write(&out_path, &markdown).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
 
-    println!(
-        "Wrote {} ({} metabench identities)",
-        out_path.display(),
-        report.len(),
-    );
+    println!("Wrote {} ({} metabench identities)", out_path.display(), report.len(),);
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())
 }

@@ -13,12 +13,12 @@
 
 </div>
 
-Support for values that adapt when a runtime moves them to another thread.
+Support for values that adapt after arriving on a different thread.
 
 This crate contains the small API shared by thread-aware libraries:
 
 * [`ThreadAware`][__link0] is the trait for values that adapt after a move; its
-  [`relocate`][__link1] callback reports the destination.
+  [`relocate`][__link1] callback reports the current destination.
 * [`Thread`][__link2] is the coordinate where a value now runs, composed of runtime, OS-thread, and
   nearest-memory identifiers.
 
@@ -38,9 +38,9 @@ the larger utility surface evolves independently.
   agree on before either can relocate a value defined by the other. It evolves
   conservatively, reducing how much public APIs couple to changes in the utility crate.
 * **[`thread_aware`][__link5]** — the utilities that make relocation convenient: a
-  [`#[derive(ThreadAware)]`][__link6] macro, closure adapters, wrappers for foreign types,
-  runtime coordinate construction, and strategy-partitioned [`Arc`][__link7] storage. Free to
-  evolve, and not meant to appear in a public API.
+  [`#[derive(ThreadAware)]`][__link6] macro, closure adapters, wrappers for foreign types, and
+  runtime coordinate construction. Free to evolve, and not meant to appear in a public API. Its
+  [authoring guide][__link7] is the how-to for making your own types thread-aware.
 
 Depend on this crate directly when all you need is the trait. It has no normal dependencies
 and works without `std`: with default features turned off, [`Thread`][__link8] loses its thread id
@@ -93,6 +93,12 @@ consumers.
 
 After moving a value, the runtime calls [`relocate`][__link22], passing where
 the value came from and where it now runs.
+The call must execute on the thread that now owns the value: `destination` describes the
+current thread, rather than requesting that work be performed on another thread. A runtime
+must move or schedule the value to its destination first, then let that destination thread
+invoke `relocate`; a coordinator must not invoke it on the destination’s behalf. This ordering
+matters because relocation may release, allocate, or initialize thread- and NUMA-local state,
+and those operations must happen on the thread whose locality they are intended to use.
 
 ## Performance, not correctness
 
@@ -118,8 +124,8 @@ depends on, and store keyed state in a map rather than an indexed array.
 
 ## Relation to `Send`
 
-[`ThreadAware`][__link26] requires [`Send`][__link27], and in that order: a value is sent to another thread
-first, then told where it landed. [`Send`][__link28] is what makes the move safe, and
+[`ThreadAware`][__link26] requires [`Send`][__link27], and in that order: a value is sent to its destination thread
+first, then told where it landed on that same thread. [`Send`][__link28] is what makes the move safe, and
 [`ThreadAware`][__link29] adds nothing to it.
 
 ## Provided implementations
@@ -130,8 +136,8 @@ relocation to their values, while map keys remain unchanged.
 General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
 ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
 immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
-[`thread_aware`][__link30] provides wrappers for cases that need an explicit policy, including its
-strategy-partitioned [`Arc`][__link31].
+[`thread_aware`][__link30] provides wrappers for cases that need an explicit policy, and the companion
+`performables` crate adds a strategy-partitioned [`Arc`][__link31].
 
 ## Features
 
@@ -146,7 +152,7 @@ strategy-partitioned [`Arc`][__link31].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaud81CVbfjgbWXnplkiWVocb2M0ryv2Vh08bO8ENADRtsdlhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb02KPCr_dauobWtqourwGm6IbktohTIJUrMYbofBgvlnEBolhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4x
  [__link0]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=NumaNode
@@ -172,13 +178,13 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link29]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
  [__link30]: https://docs.rs/thread_aware
- [__link31]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+ [__link31]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
  [__link32]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread::id
  [__link33]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
  [__link34]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
  [__link4]: https://doc.rust-lang.org/stable/std/?search=thread::Thread
  [__link5]: https://docs.rs/thread_aware
  [__link6]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
- [__link7]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+ [__link7]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
  [__link8]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Thread
  [__link9]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=Owner

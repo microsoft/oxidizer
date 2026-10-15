@@ -3,7 +3,7 @@
 
 [package]
 name = "performables"
-version = "0.1.0"
+version = "0.2.0"
 description = "Performance-oriented ownership and asynchronous synchronization primitives."
 readme = "README.md"
 keywords = ["async", "concurrency", "synchronization", "telemetry"]
@@ -44,11 +44,17 @@ loom = { workspace = true }
 
 [dev-dependencies]
 criterion.workspace = true
+metabench.workspace = true
+mutants.workspace = true
 serde = { workspace = true, features = ["std"] }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 
 [[bench]]
 name = "performables_uncontended"
+harness = false
+
+[[bench]]
+name = "performables_arc_clone"
 harness = false
 
 [[bench]]

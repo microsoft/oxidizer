@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1] - 2026-10-05
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.0` of `performables`
+
+- ⚡ Performance
+
+  - consolidate v1 and Seismograph improvements ([#764](https://github.com/microsoft/oxidizer/pull/764))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.7.0] - 2026-09-10
 
 ### Maintenance

@@ -76,6 +76,100 @@ fn acquire_flag(lock: &AtomicBool) {
     }
 }
 
+// OnceLock's release/acquire publication is represented by `published`; Loom
+// cannot instrument std::sync::OnceLock. The initialization gate is the same
+// gate used by the production lazy queue's empty-notification path.
+struct LazyRegistration {
+    published: AtomicBool,
+    initialization: Mutex<()>,
+    registration: Registration,
+}
+
+impl LazyRegistration {
+    fn new() -> Self {
+        Self {
+            published: AtomicBool::new(false),
+            initialization: Mutex::new(()),
+            registration: Registration::new(),
+        }
+    }
+
+    fn publish(&self) -> &Registration {
+        if !self.published.load(Ordering::Acquire) {
+            let _initialization = self.initialization.lock().unwrap();
+            self.published.store(true, Ordering::Release);
+        }
+        &self.registration
+    }
+
+    fn wake_marked(&self, clear_waiting: impl FnOnce()) {
+        if self.published.load(Ordering::Acquire) {
+            self.registration.wake_marked(clear_waiting);
+            return;
+        }
+        let initialization = self.initialization.lock().unwrap();
+        if self.published.load(Ordering::Acquire) {
+            drop(initialization);
+            self.registration.wake_marked(clear_waiting);
+        } else {
+            clear_waiting();
+        }
+    }
+}
+
+#[test]
+fn lazy_queue_publication_cannot_lose_a_notification() {
+    loom::model(|| {
+        let queue = Arc::new(LazyRegistration::new());
+        let ready = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let queue = Arc::clone(&queue);
+            let ready = Arc::clone(&ready);
+            thread::spawn(move || queue.publish().park_if_not_ready(|| ready.load(Ordering::Acquire)))
+        };
+        let notifier = {
+            let queue = Arc::clone(&queue);
+            let ready = Arc::clone(&ready);
+            thread::spawn(move || {
+                ready.store(true, Ordering::Release);
+                queue.wake_marked(|| {});
+            })
+        };
+        let parked = waiter.join().unwrap();
+        notifier.join().unwrap();
+
+        assert!(!parked || queue.registration.was_woken());
+    });
+}
+
+#[test]
+fn lazy_queue_empty_clear_cannot_erase_a_new_waiter_marker() {
+    loom::model(|| {
+        let queue = Arc::new(LazyRegistration::new());
+        let marked = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let queue = Arc::clone(&queue);
+            let marked = Arc::clone(&marked);
+            thread::spawn(move || {
+                queue.publish().park_if_not_ready_marked(
+                    || marked.store(true, Ordering::Release),
+                    || false,
+                    || marked.store(false, Ordering::Release),
+                )
+            })
+        };
+        let notifier = {
+            let queue = Arc::clone(&queue);
+            let marked = Arc::clone(&marked);
+            thread::spawn(move || queue.wake_marked(|| marked.store(false, Ordering::Release)))
+        };
+        assert!(waiter.join().unwrap());
+        notifier.join().unwrap();
+
+        assert_ne!(queue.registration.was_woken(), marked.load(Ordering::Acquire));
+    });
+}
+
 #[test]
 fn mutex_never_admits_two_owners() {
     loom::model(|| {

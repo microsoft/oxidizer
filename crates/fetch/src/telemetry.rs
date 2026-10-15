@@ -10,7 +10,7 @@
 //! served a response.
 //!
 //! For the full list of emitted metrics and their attributes, see the
-//! [telemetry reference](crate::_documentation::telemetry).
+//! [telemetry reference](crate::documentation::telemetry).
 
 use std::borrow::Cow;
 use std::fmt;

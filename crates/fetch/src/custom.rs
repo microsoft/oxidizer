@@ -20,7 +20,7 @@ use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
 use performables::arc::{Arc, PerThread};
-use thread_aware::ThreadAware;
+use thread_aware::{ThreadAware, unaware};
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -207,7 +207,7 @@ impl HttpClient {
         // The factory is shared across threads via `performables::Arc`. The original `CustomDeps` is
         // carried alongside it so its `extras` are cloned into a fresh `CustomContext`
         // for every handler the per-thread transport builds.
-        let factory = Arc::new(factory);
+        let factory = unaware(Arc::new(factory));
 
         let transport = Transport {
             runtime_name: runtime.into(),

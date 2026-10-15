@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, PoisonError
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use super::wait_queue::{WaitQueue, Waiter, block_on, block_on_timeout};
+// Channel state is already heap-shared; another lazy sidecar would not shrink
+// the endpoint handles and would add work to their notification path.
+use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_timeout};
 use crate::telemetry::{self, EventKind};
 
 const ERROR_FULL: u8 = 1;
@@ -229,8 +231,8 @@ impl<T> QueueShared<T> {
         };
         if closed {
             self.record(EventKind::ChannelClose);
-            self.send_waiters.wake_all_marked(|| {});
-            self.receive_waiters.wake_all_marked(|| {});
+            self.send_waiters.wake_all();
+            self.receive_waiters.wake_all();
         }
         closed
     }
@@ -257,7 +259,7 @@ impl<T> Sender<T> {
     ///
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
-    pub async fn send(&self, value: T) -> Result<(), Error<T>> {
+    pub async fn send_async(&self, value: T) -> Result<(), Error<T>> {
         let mut value = value;
         let mut contention_recording = ContentionRecording::Pending;
         #[cfg(test)]
@@ -289,8 +291,8 @@ impl<T> Sender<T> {
     ///
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
-    pub fn send_sync(&self, value: T) -> Result<(), Error<T>> {
-        block_on(self.send(value))
+    pub fn send(&self, value: T) -> Result<(), Error<T>> {
+        block_on(self.send_async(value))
     }
 
     /// Attempts to send `value` without waiting.
@@ -359,7 +361,7 @@ impl<T> Drop for Sender<T> {
         };
         if final_sender {
             self.shared.record(EventKind::ChannelClose);
-            self.shared.receive_waiters.wake_all_marked(|| {});
+            self.shared.receive_waiters.wake_all();
         }
     }
 }
@@ -390,7 +392,7 @@ impl<T> Receiver<T> {
     ///
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
-    pub async fn recv(&self) -> Result<T, Error> {
+    pub async fn recv_async(&self) -> Result<T, Error> {
         let mut contention_recording = ContentionRecording::Pending;
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -423,8 +425,8 @@ impl<T> Receiver<T> {
     ///
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
-    pub fn recv_sync(&self) -> Result<T, Error> {
-        block_on(self.recv())
+    pub fn recv(&self) -> Result<T, Error> {
+        block_on(self.recv_async())
     }
 
     /// Receives the next value, blocking for at most `timeout`.
@@ -433,8 +435,8 @@ impl<T> Receiver<T> {
     ///
     /// Returns an error if the deadline expires or the channel closes while
     /// drained.
-    pub fn recv_timeout_sync(&self, timeout: Duration) -> Result<T, Error> {
-        match block_on_timeout(self.recv(), timeout) {
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, Error> {
+        match block_on_timeout(self.recv_async(), timeout) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -511,7 +513,7 @@ impl<T> Drop for Receiver<T> {
         };
         if final_receiver {
             self.shared.record(EventKind::ChannelClose);
-            self.shared.send_waiters.wake_all_marked(|| {});
+            self.shared.send_waiters.wake_all();
             drop(buffered);
         }
     }
@@ -676,7 +678,7 @@ impl<T> OneshotSender<T> {
         state.value = Some(value);
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
-        self.shared.receiver_waiters.wake_all_marked(|| {});
+        self.shared.receiver_waiters.wake_all();
         Ok(())
     }
 
@@ -694,7 +696,7 @@ impl<T> Drop for OneshotSender<T> {
         }
         self.shared.state().sender_alive = false;
         telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
-        self.shared.receiver_waiters.wake_all_marked(|| {});
+        self.shared.receiver_waiters.wake_all();
     }
 }
 
@@ -724,7 +726,7 @@ impl<T> OneshotReceiver<T> {
     /// # Errors
     ///
     /// Returns [`Error`] if the sender is dropped without sending.
-    pub fn recv_sync(mut self) -> Result<T, Error> {
+    pub fn recv(mut self) -> Result<T, Error> {
         block_on(&mut self)
     }
 
@@ -734,7 +736,7 @@ impl<T> OneshotReceiver<T> {
     ///
     /// Returns an error if the deadline expires or the sender drops without
     /// sending.
-    pub fn recv_timeout_sync(mut self, timeout: Duration) -> Result<T, Error> {
+    pub fn recv_timeout(mut self, timeout: Duration) -> Result<T, Error> {
         match block_on_timeout(&mut self, timeout) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
@@ -918,7 +920,7 @@ impl<T> WatchSender<T> {
         state.version = state.version.wrapping_add(1);
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
-        self.shared.receiver_waiters.wake_all_marked(|| {});
+        self.shared.receiver_waiters.wake_all();
         drop(previous);
         Ok(())
     }
@@ -930,7 +932,7 @@ impl<T> WatchSender<T> {
         state.version = state.version.wrapping_add(1);
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
-        self.shared.receiver_waiters.wake_all_marked(|| {});
+        self.shared.receiver_waiters.wake_all();
         previous
     }
 
@@ -944,7 +946,7 @@ impl<T> WatchSender<T> {
         state.version = state.version.wrapping_add(1);
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
-        self.shared.receiver_waiters.wake_all_marked(|| {});
+        self.shared.receiver_waiters.wake_all();
     }
 
     /// Borrows the latest value.
@@ -997,7 +999,7 @@ impl<T> Drop for WatchSender<T> {
         };
         if final_sender {
             telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
-            self.shared.receiver_waiters.wake_all_marked(|| {});
+            self.shared.receiver_waiters.wake_all();
         }
     }
 }
@@ -1068,7 +1070,7 @@ impl<T> WatchReceiver<T> {
     ///
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
-    pub async fn changed(&self) -> Result<(), Error> {
+    pub async fn changed_async(&self) -> Result<(), Error> {
         let mut contention_recording = ContentionRecording::Pending;
         #[cfg(test)]
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -1095,7 +1097,7 @@ impl<T> WatchReceiver<T> {
         }
     }
 
-    /// Waits until `predicate` accepts the latest value and returns it borrowed.
+    /// Waits asynchronously until `predicate` accepts the latest value and returns it borrowed.
     ///
     /// Every value examined by the predicate is considered observed. The
     /// predicate executes while the value is locked and must not re-enter
@@ -1105,7 +1107,7 @@ impl<T> WatchReceiver<T> {
     ///
     /// Returns [`Error`] when all senders are gone and the final value
     /// does not satisfy `predicate`.
-    pub async fn wait_for(&self, mut predicate: impl FnMut(&T) -> bool) -> Result<WatchRef<'_, T>, Error> {
+    pub async fn wait_for_async(&self, mut predicate: impl FnMut(&T) -> bool) -> Result<WatchRef<'_, T>, Error> {
         loop {
             {
                 let state = self.shared.state();
@@ -1118,7 +1120,7 @@ impl<T> WatchReceiver<T> {
                     return Err(Error::without_value(ERROR_CLOSED));
                 }
             }
-            self.changed().await?;
+            self.changed_async().await?;
         }
     }
 
@@ -1128,8 +1130,8 @@ impl<T> WatchReceiver<T> {
     ///
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
-    pub fn changed_sync(&self) -> Result<(), Error> {
-        block_on(self.changed())
+    pub fn changed(&self) -> Result<(), Error> {
+        block_on(self.changed_async())
     }
 
     /// Returns whether all senders have been dropped.
@@ -1397,10 +1399,10 @@ mod tests {
         let counter = Arc::new(WakeCounter::default());
         let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
-        let mut send = Box::pin(sender.send(2));
+        let mut send = Box::pin(sender.send_async(2));
         assert!(send.as_mut().poll(&mut context).is_pending());
 
-        sender.shared.send_waiters.wake_one_marked(|| {});
+        sender.shared.send_waiters.wake_one();
         assert!(send.as_mut().poll(&mut context).is_pending());
         assert_eq!(receiver.try_recv(), Ok(1));
         assert!(send.as_mut().poll(&mut context).is_ready());
@@ -1413,10 +1415,10 @@ mod tests {
         let counter = Arc::new(WakeCounter::default());
         let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
-        let mut receive = Box::pin(receiver.recv());
+        let mut receive = Box::pin(receiver.recv_async());
         assert!(receive.as_mut().poll(&mut context).is_pending());
 
-        receiver.shared.receive_waiters.wake_one_marked(|| {});
+        receiver.shared.receive_waiters.wake_one();
         assert!(receive.as_mut().poll(&mut context).is_pending());
         sender.try_send(1).unwrap();
         assert_eq!(receive.as_mut().poll(&mut context), Poll::Ready(Ok(1)));
@@ -1578,10 +1580,10 @@ mod tests {
         let counter = Arc::new(WakeCounter::default());
         let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
-        let mut changed = Box::pin(receiver.changed());
+        let mut changed = Box::pin(receiver.changed_async());
         assert!(changed.as_mut().poll(&mut context).is_pending());
 
-        receiver.shared.receiver_waiters.wake_all_marked(|| {});
+        receiver.shared.receiver_waiters.wake_all();
         assert!(changed.as_mut().poll(&mut context).is_pending());
         sender.send(2).unwrap();
         assert!(changed.as_mut().poll(&mut context).is_ready());

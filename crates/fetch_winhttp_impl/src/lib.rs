@@ -63,9 +63,9 @@ mod session;
 mod telemetry;
 // Fixtures for the integration tests, benchmarks and examples that `fetch_winhttp`
 // hosts. Scaffolding rather than transport code, so it is exempt from the coverage
-// and mutation obligations the rest of the crate carries. Mutation exclusion is
-// declared in `.cargo/mutants.toml` `exclude_globs` (the PR mutants CLI layers
-// platform-specific excludes on top of that list).
+// and mutation obligations the rest of the crate carries. Keep the fixture path
+// in `exclude_globs` in `.cargo/mutants.toml` and every complete host configuration.
+// Cargo-mutants reads only the selected configuration; exclusions are not merged.
 #[cfg(all(windows, feature = "private-test-util"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod testing;
