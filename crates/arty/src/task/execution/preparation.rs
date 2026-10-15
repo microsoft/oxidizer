@@ -1,16 +1,66 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::future::pending;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 
 use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
 use performables::arc::Arc;
+use pin_project::pin_project;
 
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
+
+#[pin_project]
+pub(crate) struct DeferredTask<FF, F> {
+    factory: Option<(FF, Builtins)>,
+    #[pin]
+    future: Option<F>,
+    shutdown_signal: Arc<AtomicBool>,
+    cancelled: bool,
+}
+
+impl<FF, F> DeferredTask<FF, F> {
+    pub(crate) fn new(factory: FF, builtins: Builtins, shutdown_signal: Arc<AtomicBool>) -> Self {
+        Self {
+            factory: Some((factory, builtins)),
+            future: None,
+            shutdown_signal,
+            cancelled: false,
+        }
+    }
+}
+
+impl<FF, F> Future for DeferredTask<FF, F>
+where
+    FF: FnOnce(Builtins) -> F,
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        if *this.cancelled {
+            return Poll::Pending;
+        }
+        if this.future.as_ref().get_ref().is_none() {
+            if this.shutdown_signal.load(Ordering::Acquire) {
+                *this.cancelled = true;
+                return Poll::Pending;
+            }
+            let (factory, builtins) = this.factory.take().expect("a deferred task factory is invoked exactly once");
+            this.future.set(Some(factory(builtins)));
+        }
+        this.future
+            .as_mut()
+            .as_pin_mut()
+            .expect("the deferred future is initialized above")
+            .poll(cx)
+    }
+}
 
 struct TaskFactory<F> {
     pending: Option<(F, Transfer)>,
@@ -73,12 +123,7 @@ where
     let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let inner = async move {
-            if shutdown_signal.load(Ordering::Acquire) {
-                return pending().await;
-            }
-            future_factory(cx).await
-        };
+        let inner = DeferredTask::new(future_factory, cx, shutdown_signal);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
@@ -138,7 +183,7 @@ mod tests {
     use std::pin::pin;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Wake, Waker};
 
     use arty_executor::{CycleOutcome, Executor};
     use futures::executor::block_on;

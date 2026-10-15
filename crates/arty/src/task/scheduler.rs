@@ -10,6 +10,7 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
+use crate::task::execution::DeferredTask;
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -214,12 +215,7 @@ impl Scheduler {
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = RemoteJoinHandle::channel();
             let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
-            let inner = async move {
-                if shutdown_signal.load(std::sync::atomic::Ordering::Acquire) {
-                    return std::future::pending().await;
-                }
-                future_factory(builtins).await
-            };
+            let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             drop(current.tasks.add_with_remote_result(inner, options, result_tx));
             Ok(JoinHandle::new(result_rx))

@@ -8,4 +8,4 @@
 
 mod preparation;
 
-pub(crate) use preparation::{BoxedRemoteFutureFactory, prepare_blocking, prepare_remote};
+pub(crate) use preparation::{BoxedRemoteFutureFactory, DeferredTask, prepare_blocking, prepare_remote};
