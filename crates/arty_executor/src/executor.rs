@@ -132,7 +132,6 @@ impl Executor {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::poll_fn;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
