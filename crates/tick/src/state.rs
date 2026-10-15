@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::ops::Deref;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Waker;
 use std::time::Instant;
 
@@ -12,9 +14,72 @@ use crate::timers::Timers;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ClockState {
-    System(SynchronizedTimers),
+    System(SystemClockState),
     #[cfg(any(feature = "test-util", test))]
     ClockControl(crate::ClockControl),
+}
+
+#[derive(Debug)]
+pub(crate) struct SystemClockState {
+    timers: SynchronizedTimers,
+    clock_owner: bool,
+}
+
+impl SystemClockState {
+    fn new(timers: SynchronizedTimers) -> Self {
+        Self {
+            timers,
+            clock_owner: false,
+        }
+    }
+
+    fn activate_clock_owner(&mut self) {
+        debug_assert!(!self.clock_owner, "clock state can become an owner only once");
+        self.timers.add_clock_owner();
+        self.clock_owner = true;
+    }
+}
+
+impl Clone for SystemClockState {
+    fn clone(&self) -> Self {
+        if self.clock_owner {
+            self.timers.add_clock_owner();
+        }
+        Self {
+            timers: self.timers.clone(),
+            clock_owner: self.clock_owner,
+        }
+    }
+}
+
+impl Drop for SystemClockState {
+    fn drop(&mut self) {
+        if self.clock_owner {
+            self.timers.remove_clock_owner();
+        }
+    }
+}
+
+impl Deref for SystemClockState {
+    type Target = SynchronizedTimers;
+
+    fn deref(&self) -> &Self::Target {
+        &self.timers
+    }
+}
+
+impl ThreadAware for SystemClockState {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        if !self.clock_owner {
+            self.timers.relocate(source, destination);
+            return;
+        }
+
+        let previous_timers = self.timers.clone();
+        self.timers.relocate(source, destination);
+        self.timers.add_clock_owner();
+        previous_timers.remove_clock_owner();
+    }
 }
 
 impl ThreadAware for ClockState {
@@ -29,7 +94,7 @@ impl ThreadAware for ClockState {
 
 impl ClockState {
     pub(crate) fn new_system() -> Self {
-        Self::System(SynchronizedTimers::new_isolated())
+        Self::System(SystemClockState::new(SynchronizedTimers::new_isolated()))
     }
 
     /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
@@ -38,7 +103,15 @@ impl ClockState {
     /// this variant.
     #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_system_shared() -> Self {
-        Self::System(SynchronizedTimers::new_shared())
+        Self::System(SystemClockState::new(SynchronizedTimers::new_shared()))
+    }
+
+    pub(crate) fn activate_clock_owner(&mut self) {
+        match self {
+            Self::System(state) => state.activate_clock_owner(),
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(_) => {}
+        }
     }
 }
 
@@ -61,16 +134,16 @@ impl ClockState {
 
     pub(crate) fn set_driver_waker(&self, waker: Waker) {
         match self {
-            Self::System(timers) => timers.with_timers(|timers| timers.set_driver_waker(waker)),
+            Self::System(timers) => timers.set_driver_waker(waker),
             #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(_) => {}
         }
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    pub(crate) fn is_unique(&self) -> bool {
+    pub(crate) fn driver_is_finished(&self) -> bool {
         match self {
-            Self::System(timers) => timers.is_unique(),
+            Self::System(timers) => timers.has_no_clock_owners(),
             #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(control) => control.is_unique(),
         }
@@ -90,14 +163,21 @@ pub(crate) enum SynchronizedTimers {
     /// the same timers regardless of thread coordinate. Used by clocks driven by a single global
     /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
     #[cfg(any(feature = "rt-shared", test))]
-    Shared(std::sync::Arc<Mutex<Timers>>),
+    Shared(std::sync::Arc<TimerState>),
 
     /// Per-thread isolated timer storage. Within one runtime owner,
     /// [`ThreadAware::relocate`] creates a fresh timer set on the destination
     /// thread, enabling thread-isolated runtimes to operate on independent
     /// timers with no cross-thread lock contention. A cross-owner move retains
     /// the current set instead.
-    Isolated(Arc<Mutex<Timers>, PerThread>),
+    Isolated(Arc<TimerState, PerThread>),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct TimerState {
+    timers: Mutex<Timers>,
+    driver_waker: Mutex<Option<Waker>>,
+    clock_owners: AtomicUsize,
 }
 
 impl ThreadAware for SynchronizedTimers {
@@ -112,30 +192,65 @@ impl ThreadAware for SynchronizedTimers {
 
 impl SynchronizedTimers {
     pub(crate) fn new_isolated() -> Self {
-        Self::Isolated(Arc::new_with(|| Mutex::new(Timers::default())))
+        Self::Isolated(Arc::new_with(TimerState::default))
     }
 
     #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_shared() -> Self {
-        Self::Shared(std::sync::Arc::new(Mutex::new(Timers::default())))
+        Self::Shared(std::sync::Arc::new(TimerState::default()))
+    }
+
+    fn state(&self) -> &TimerState {
+        match self {
+            #[cfg(any(feature = "rt-shared", test))]
+            Self::Shared(state) => state,
+            Self::Isolated(state) => state,
+        }
     }
 
     pub(super) fn with_timers<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Timers) -> R,
     {
-        let mut timers = match self {
-            #[cfg(any(feature = "rt-shared", test))]
-            Self::Shared(timers) => timers.lock(),
-            Self::Isolated(timers) => timers.lock(),
-        };
+        let mut timers = self.state().timers.lock();
         f(&mut timers)
     }
 
-    pub(crate) fn register_timer(&self, when: Instant, waker: Waker) -> crate::timers::TimerKey {
-        let (key, driver_waker) = self.with_timers(|timers| timers.register_and_driver_waker(when, waker));
+    pub(crate) fn set_driver_waker(&self, waker: Waker) {
+        *self.state().driver_waker.lock() = Some(waker);
+    }
+
+    pub(crate) fn add_clock_owner(&self) {
+        self.state().clock_owners.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn remove_clock_owner(&self) {
+        let previous = self.state().clock_owners.fetch_sub(1, Ordering::AcqRel);
+        assert!(previous > 0, "clock owner count must not underflow");
+        if previous == 1 {
+            self.wake_driver();
+        }
+    }
+
+    pub(crate) fn has_no_clock_owners(&self) -> bool {
+        self.state().clock_owners.load(Ordering::Acquire) == 0
+    }
+
+    fn wake_driver(&self) {
+        let driver_waker = self.state().driver_waker.lock().clone();
         if let Some(driver_waker) = driver_waker {
             driver_waker.wake();
+        }
+    }
+
+    pub(crate) fn register_timer(&self, when: Instant, waker: Waker) -> crate::timers::TimerKey {
+        let (key, became_earliest) = self.with_timers(|timers| {
+            let previous_next = timers.next_timer();
+            let key = timers.register(when, waker);
+            (key, previous_next.is_none_or(|previous| when < previous))
+        });
+        if became_earliest {
+            self.wake_driver();
         }
         key
     }
@@ -145,7 +260,7 @@ impl SynchronizedTimers {
         self.with_timers(|timers| timers.advance_timers(now))
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
+    #[cfg(test)]
     pub(crate) fn is_unique(&self) -> bool {
         match self {
             #[cfg(any(feature = "rt-shared", test))]

@@ -10,17 +10,6 @@ use ::tokio::sync::Notify;
 use crate::Clock;
 
 #[derive(Debug)]
-pub(crate) struct DriverLifecycle {
-    notify: Arc<Notify>,
-}
-
-impl Drop for DriverLifecycle {
-    fn drop(&mut self) {
-        self.notify.notify_one();
-    }
-}
-
-#[derive(Debug)]
 struct DriverWake(Arc<Notify>);
 
 impl Wake for DriverWake {
@@ -51,10 +40,7 @@ impl Clock {
         // timers registered by clones on any Tokio worker.
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
-        let (mut clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
-        clock.set_tokio_driver(Arc::new(DriverLifecycle {
-            notify: Arc::clone(&notify),
-        }));
+        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
 
         let join_handle = ::tokio::spawn(async move {
             while let Ok(next_timer) = driver.advance_timers(Instant::now()) {

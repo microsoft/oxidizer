@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(any(feature = "tokio", test))]
-use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -186,10 +184,6 @@ use crate::timers::TimerKey;
 pub struct Clock {
     state: ClockState,
     time: SimpleClock,
-    // This field must remain after `state`: the final clone releases its timer state before
-    // notifying the driver to re-check whether any clock owners remain.
-    #[cfg(any(feature = "tokio", test))]
-    tokio_driver: Option<Arc<crate::tokio::DriverLifecycle>>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -215,18 +209,10 @@ impl ThreadAware for Clock {
 }
 
 impl Clock {
-    pub(crate) fn new(state: ClockState) -> Self {
-        Self {
-            time: SimpleClock::from_state(&state),
-            state,
-            #[cfg(any(feature = "tokio", test))]
-            tokio_driver: None,
-        }
-    }
-
-    #[cfg(any(feature = "tokio", test))]
-    pub(crate) fn set_tokio_driver(&mut self, driver: Arc<crate::tokio::DriverLifecycle>) {
-        self.tokio_driver = Some(driver);
+    pub(crate) fn new(mut state: ClockState) -> Self {
+        let time = SimpleClock::from_state(&state);
+        state.activate_clock_owner();
+        Self { state, time }
     }
 
     /// Used for testing. For this clock, timers do not advance.
@@ -693,18 +679,18 @@ mod tests {
     fn owners_count() {
         let (clock, driver) = InactiveClock::default().activate(Waker::noop().clone());
 
-        assert!(!clock.state.is_unique());
+        assert!(!clock.state.driver_is_finished());
         drop(clock);
-        assert!(driver.state.is_unique());
+        assert!(driver.state.driver_is_finished());
     }
 
     #[test]
     fn owners_count_clock_control() {
         let (clock, driver) = InactiveClock::from(ClockControl::default()).activate(Waker::noop().clone());
 
-        assert!(!driver.state.is_unique());
+        assert!(!driver.state.driver_is_finished());
         drop(clock);
-        assert!(driver.state.is_unique());
+        assert!(driver.state.driver_is_finished());
     }
 
     #[test]

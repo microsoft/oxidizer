@@ -3,9 +3,10 @@
 
 //! Public custom-runtime driver behavior.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
 use std::task::{Context, Wake, Waker};
+use std::thread;
 use std::time::Duration;
 
 use tick::runtime::InactiveClock;
@@ -48,4 +49,43 @@ fn activation_waker_fires_only_when_the_earliest_deadline_changes() {
     wake_counts[3] = wake_count.0.load(Ordering::Relaxed);
 
     assert_eq!(wake_counts, [1, 1, 1, 2]);
+}
+
+#[test]
+fn dropping_the_final_clock_owner_wakes_the_driver() {
+    let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+    let driver_waker = Waker::from(Arc::clone(&wake_count));
+    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+
+    drop(clock);
+
+    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn concurrent_final_owner_drops_wake_the_driver_once() {
+    const OWNER_COUNT: usize = 8;
+    let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+    let driver_waker = Waker::from(Arc::clone(&wake_count));
+    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+    let release = Arc::new(Barrier::new(OWNER_COUNT + 1));
+    let owners: [_; OWNER_COUNT] = std::array::from_fn(|_| clock.clone());
+    drop(clock);
+    let threads: Vec<_> = owners
+        .into_iter()
+        .map(|clock| {
+            let release = Arc::clone(&release);
+            thread::spawn(move || {
+                release.wait();
+                drop(clock);
+            })
+        })
+        .collect();
+
+    release.wait();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
 }

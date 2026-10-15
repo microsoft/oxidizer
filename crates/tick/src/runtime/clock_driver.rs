@@ -47,8 +47,7 @@ impl ClockDriver {
 
         match next_timer {
             Some(next) => Ok(Some(next)),
-            // Check if this is the last reference to the clock state
-            None if self.state.is_unique() => Err(ClockGone::new()),
+            None if self.state.driver_is_finished() => Err(ClockGone::new()),
             None => Ok(None),
         }
     }
@@ -65,7 +64,6 @@ mod tests {
     use super::*;
     use crate::clock_control::ClockControl;
     use crate::runtime::InactiveClock;
-    use crate::state::SynchronizedTimers;
 
     #[test]
     fn assert_types() {
@@ -75,13 +73,14 @@ mod tests {
 
     #[test]
     fn advance_timers_ok() {
-        let timers = SynchronizedTimers::new_isolated();
+        let clock_state = ClockState::new_system();
         let when = Instant::now();
+        let ClockState::System(timers) = &clock_state else {
+            panic!("the system constructor must create system timer state");
+        };
         timers.with_timers::<_, ()>(|timers| {
-            timers.register(when, Waker::noop().clone());
+            _ = timers.register(when, Waker::noop().clone());
         });
-
-        let clock_state = ClockState::System(timers);
         let mut driver = ClockDriver::new(clock_state.clone());
 
         _ = driver.advance_timers(Instant::now() - Duration::from_secs(1));
