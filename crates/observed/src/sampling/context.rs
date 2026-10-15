@@ -4,31 +4,33 @@
 //! Inputs an event sampler decides from.
 
 use std::any::type_name;
-use std::cell::OnceCell;
+use std::cell::Cell;
 use std::fmt::{self, Debug, Formatter};
+use std::sync::Arc;
 
 use crate::metadata::EventDescription;
+use crate::processing::EventProcessor;
 
 /// Read-only inputs for one [`EventSampler`](crate::EventSampler) decision.
 pub struct EventSamplingContext<'a> {
     description: &'a EventDescription,
-    get_first_interested_processor: &'a dyn Fn() -> Option<usize>,
-    first_interested_processor: OnceCell<Option<usize>>,
+    processors: ProcessorInterest<'a>,
 }
 
 impl<'a> EventSamplingContext<'a> {
-    pub(crate) const fn new(description: &'a EventDescription, get_first_interested_processor: &'a dyn Fn() -> Option<usize>) -> Self {
+    pub(crate) const fn new(description: &'a EventDescription, processors: &'a [Arc<dyn EventProcessor>]) -> Self {
         Self {
             description,
-            get_first_interested_processor,
-            first_interested_processor: OnceCell::new(),
+            processors: ProcessorInterest {
+                processors,
+                next_processor_index: Cell::new(0),
+                bitmask: Cell::new(0),
+            },
         }
     }
 
-    pub(crate) fn into_first_interested_processor(self) -> Option<usize> {
-        self.first_interested_processor
-            .into_inner()
-            .unwrap_or_else(self.get_first_interested_processor)
+    pub(crate) fn ask_all_processors(self) -> u32 {
+        self.processors.ask_all(self.description)
     }
 
     /// Returns the event's type-level description.
@@ -43,9 +45,37 @@ impl<'a> EventSamplingContext<'a> {
     /// processor is asked at most once per event, however often this is called.
     #[must_use]
     pub fn processors_interested(&self) -> bool {
-        self.first_interested_processor
-            .get_or_init(self.get_first_interested_processor)
-            .is_some()
+        self.processors.ask_until_one_interested(self.description)
+    }
+}
+
+struct ProcessorInterest<'a> {
+    processors: &'a [Arc<dyn EventProcessor>],
+    next_processor_index: Cell<usize>,
+    bitmask: Cell<u32>,
+}
+
+impl ProcessorInterest<'_> {
+    fn ask_all(&self, description: &EventDescription) -> u32 {
+        while self.next_processor_index.get() < self.processors.len() {
+            self.ask_next_processor(description);
+        }
+        self.bitmask.get()
+    }
+
+    fn ask_until_one_interested(&self, description: &EventDescription) -> bool {
+        while self.bitmask.get() == 0 && self.next_processor_index.get() < self.processors.len() {
+            self.ask_next_processor(description);
+        }
+        self.bitmask.get() != 0
+    }
+
+    fn ask_next_processor(&self, description: &EventDescription) {
+        let index = self.next_processor_index.get();
+        self.next_processor_index.set(index + 1);
+        if self.processors[index].is_interested(description) {
+            self.bitmask.set(self.bitmask.get() | 1 << index);
+        }
     }
 }
 
@@ -60,57 +90,108 @@ impl Debug for EventSamplingContext<'_> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use crate::FlushError;
+    use crate::processing::EventView;
+
+    /// A processor that wants every event or none, counting how often it is asked.
+    struct CountingProcessor {
+        wants: bool,
+        asked: AtomicUsize,
+    }
+
+    impl EventProcessor for CountingProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            self.asked.fetch_add(1, Ordering::Relaxed);
+            self.wants
+        }
+
+        fn process(&self, _event: &EventView<'_>) {}
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    fn counting_processors(wants: &[bool]) -> Vec<Arc<CountingProcessor>> {
+        wants
+            .iter()
+            .map(|&wants| {
+                Arc::new(CountingProcessor {
+                    wants,
+                    asked: AtomicUsize::new(0),
+                })
+            })
+            .collect()
+    }
+
+    fn as_event_processors(processors: &[Arc<CountingProcessor>]) -> Vec<Arc<dyn EventProcessor>> {
+        processors
+            .iter()
+            .map(|processor| Arc::clone(processor) as Arc<dyn EventProcessor>)
+            .collect()
+    }
+
+    fn asked(processors: &[Arc<CountingProcessor>]) -> Vec<usize> {
+        processors.iter().map(|processor| processor.asked.load(Ordering::Relaxed)).collect()
+    }
 
     fn description() -> EventDescription {
         EventDescription::new("probe.event", None, None, None, false, false)
     }
 
     #[test]
-    fn processors_interested_asks_processors_once() {
-        let asked = Cell::new(0);
-        let get_first_interested_processor = || {
-            asked.set(asked.get() + 1);
-            Some(1)
-        };
+    fn processors_interested_stops_at_first_interested_processor() {
+        let processors = counting_processors(&[false, true, true]);
+        let event_processors = as_event_processors(&processors);
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+        let context = EventSamplingContext::new(&description, &event_processors);
 
         assert!(context.processors_interested());
-        assert!(context.processors_interested());
-        assert_eq!(context.into_first_interested_processor(), Some(1));
-        assert_eq!(asked.get(), 1);
+        assert_eq!(asked(&processors), [1, 1, 0]);
     }
 
     #[test]
-    fn processors_interested_is_false_when_no_processor_wants_event() {
-        let get_first_interested_processor = || None;
+    fn processors_interested_asks_each_processor_once() {
+        let processors = counting_processors(&[false, false]);
+        let event_processors = as_event_processors(&processors);
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+        let context = EventSamplingContext::new(&description, &event_processors);
 
         assert!(!context.processors_interested());
+        assert!(!context.processors_interested());
+        assert_eq!(asked(&processors), [1, 1]);
     }
 
     #[test]
-    fn into_first_interested_processor_asks_processors_when_sampler_did_not() {
-        let asked = Cell::new(0);
-        let get_first_interested_processor = || {
-            asked.set(asked.get() + 1);
-            Some(0)
-        };
+    fn ask_all_processors_returns_bitmask_of_interested_processors() {
+        let processors = counting_processors(&[false, true, false, true]);
+        let event_processors = as_event_processors(&processors);
         let description = description();
-        let context = EventSamplingContext::new(&description, &get_first_interested_processor);
+        let context = EventSamplingContext::new(&description, &event_processors);
 
-        assert_eq!(context.into_first_interested_processor(), Some(0));
-        assert_eq!(asked.get(), 1);
+        assert_eq!(context.ask_all_processors(), 0b1010);
+        assert_eq!(asked(&processors), [1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn ask_all_processors_skips_processors_already_asked() {
+        let processors = counting_processors(&[true, false, true]);
+        let event_processors = as_event_processors(&processors);
+        let description = description();
+        let context = EventSamplingContext::new(&description, &event_processors);
+
+        assert!(context.processors_interested());
+        assert_eq!(context.ask_all_processors(), 0b101);
+        assert_eq!(asked(&processors), [1, 1, 1]);
     }
 
     #[test]
     fn debug_shows_description() {
         let description = description();
-        let context = EventSamplingContext::new(&description, &|| None);
+        let context = EventSamplingContext::new(&description, &[]);
 
         let debug = format!("{context:?}");
 

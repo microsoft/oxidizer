@@ -302,7 +302,7 @@ independently declared `static APP: SinkId = SinkId::new("app")`, which is what 
 
 A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the unit of telemetry configuration - each sink independently controls:
 
-- **Processors** - a sink holds one or more `EventProcessor` values (there is no upper limit).
+- **Processors** - a sink holds one or more `EventProcessor` values, at most 32, counting every leaf of a composite together.
   When an event is emitted, every processor that declared interest handles it independently. This allows a single sink
   to send telemetry to multiple destinations simultaneously (e.g. stdout for development, ETW for production, an in-memory buffer for testing).
   Each processor owns its own `RedactionEngine`, so the same value can be redacted differently per destination.
@@ -378,21 +378,25 @@ flowchart TD
 
     emit --> sample
 
-    subgraph sink ["For each sink with processors"]
+    subgraph decide ["For each sink with processors"]
         sample{"<b>EventSampler::sample</b><br/>Skipped when no sampler is attached"}
         interest{"<b>EventProcessor::is_interested</b><br/>Each processor asked once, unless the sampler already asked"}
-        dropped["<b>Stop this sink</b><br/>Run no processor"]
-        construct["<b>Construct event</b><br/>Evaluate the event expression, at most once per emit"]
+        skipped["<b>Skip this sink</b><br/>Run no processor"]
+
+        sample -- "Drop" --> skipped
+        sample -- "Continue" --> interest
+        interest -- "No processor wants it" --> skipped
+    end
+
+    interest -- "Some processors want it" --> construct
+    construct["<b>Construct event</b><br/>Evaluate the event expression once, before any sink delivers it"]
+    construct --> timestamp
+
+    subgraph deliver ["For each sink with an interested processor"]
         timestamp["<b>Read timestamp</b><br/>Use this sink's clock"]
         view["<b>Build EventView</b><br/>Capture this sink's visible enrichment"]
 
-        sample -- "Drop" --> dropped
-        sample -- "Continue" --> interest
-        interest -- "No processor wants it" --> dropped
-        interest -- "Some processors want it" --> construct
-        construct --> timestamp
         timestamp --> view
-
         view --> loop
 
         subgraph loop ["For each interested processor"]
