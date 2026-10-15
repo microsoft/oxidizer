@@ -95,6 +95,10 @@ impl BlockingWorker {
         let shutdown = Arc::clone(&self.is_shutting_down);
         let runtime_shutdown = Arc::clone(&self.runtime_shutdown);
         let (task, join_handle) = prepare_blocking(&self.remote_results, body);
+        if shutdown.load(Ordering::Acquire) || runtime_shutdown.load(Ordering::Acquire) {
+            drop(task);
+            return join_handle;
+        }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);

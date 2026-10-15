@@ -292,6 +292,23 @@ fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
 }
 
 #[test]
+fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
+    let runtime = runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let nested_scheduler = scheduler.clone();
+    let operations = RuntimeOperations::from(&runtime);
+    let callback = scheduler.spawn_blocking(move || {
+        operations.request_stop();
+        nested_scheduler.spawn_blocking(|| 7).join()
+    });
+
+    let rejected = callback.join().unwrap().unwrap_err();
+
+    assert!(rejected.is_shutdown());
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
     let runtime = runtime();
     assert!(
