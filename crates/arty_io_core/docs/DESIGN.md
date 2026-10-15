@@ -89,9 +89,10 @@ When the runtime shuts down an async worker, it stops calling
 `execute_cycle` and synchronously calls `Driver::shutdown` for every driver
 owned by that worker.
 
-Each driver closes its context to new operations and waits for started
-operations to finish, using a finite limit. The runtime reports returned errors
-and attempts to shut down the remaining drivers.
+Each driver closes its context to new operations and may cancel or disrupt
+operations still in flight. Cleanup must make progress independently and use a
+finite limit. The runtime reports returned errors and attempts to shut down the
+remaining drivers.
 
 ## Scope
 
