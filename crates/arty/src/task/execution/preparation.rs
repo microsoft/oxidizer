@@ -73,10 +73,8 @@ where
     let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let tasks_for_shutdown = tasks.clone();
         let inner = async move {
             if shutdown_signal.load(Ordering::Acquire) {
-                tasks_for_shutdown.begin_shutdown();
                 return pending().await;
             }
             future_factory(cx).await

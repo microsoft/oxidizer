@@ -214,10 +214,8 @@ impl Scheduler {
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = RemoteJoinHandle::channel();
             let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
-            let tasks_for_shutdown = current.tasks.clone();
             let inner = async move {
                 if shutdown_signal.load(std::sync::atomic::Ordering::Acquire) {
-                    tasks_for_shutdown.begin_shutdown();
                     return std::future::pending().await;
                 }
                 future_factory(builtins).await
