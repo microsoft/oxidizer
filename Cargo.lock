@@ -4254,8 +4254,10 @@ dependencies = [
  "mutants",
  "seismograph",
  "serde",
+ "static_assertions",
  "thread_aware",
  "thread_aware_core",
+ "trybuild",
 ]
 
 [[package]]
