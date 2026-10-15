@@ -33,7 +33,7 @@ app-err = []
 test-util = []
 
 [dependencies]
-ohno_macros = { workspace = true }
+ohno_macros = { path = "../ohno_macros", default-features = false, version = "=0.5.2" }
 typeid = { workspace = true }
 
 [dev-dependencies]

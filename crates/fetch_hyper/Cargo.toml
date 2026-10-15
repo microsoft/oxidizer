@@ -103,7 +103,7 @@ hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", 
 insta = { workspace = true }
 mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
-ohno = { path = "../ohno", features = ["test-util"] }
+ohno = { workspace = true, features = ["test-util"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"], default-features = false }
 rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"] }
 testing_aids = { path = "../testing_aids" }
