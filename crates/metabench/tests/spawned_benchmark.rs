@@ -155,7 +155,9 @@ fn gungraun_runner_available() -> bool {
 #[test]
 fn fresh_consumer_resolves_and_compiles_without_the_workspace_lockfile() {
     with_cargo_lock(|| {
-        let directory = tempfile::tempdir().unwrap();
+        // Keep the isolated workspace below the repository so Cargo inherits
+        // source replacement configuration used by offline CI builds.
+        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
         let dependency = serde_json::to_string(env!("CARGO_MANIFEST_DIR")).unwrap();
         std::fs::write(
             directory.path().join("Cargo.toml"),
