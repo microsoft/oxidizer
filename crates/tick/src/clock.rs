@@ -7,8 +7,6 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
 use thread_aware::{Thread, ThreadAware};
-#[cfg(any(feature = "tokio", test))]
-use tokio::sync::Notify;
 
 use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
@@ -191,35 +189,7 @@ pub struct Clock {
     // This field must remain after `state`: the final clone releases its timer state before
     // notifying the driver to re-check whether any clock owners remain.
     #[cfg(any(feature = "tokio", test))]
-    tokio_driver: Option<Arc<TokioDriverLifecycle>>,
-}
-
-#[cfg(any(feature = "tokio", test))]
-#[derive(Debug)]
-struct TokioDriverWake(Arc<Notify>);
-
-#[cfg(any(feature = "tokio", test))]
-impl std::task::Wake for TokioDriverWake {
-    fn wake(self: Arc<Self>) {
-        self.0.notify_one();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.0.notify_one();
-    }
-}
-
-#[cfg(any(feature = "tokio", test))]
-#[derive(Debug)]
-struct TokioDriverLifecycle {
-    notify: Arc<Notify>,
-}
-
-#[cfg(any(feature = "tokio", test))]
-impl Drop for TokioDriverLifecycle {
-    fn drop(&mut self) {
-        self.notify.notify_one();
-    }
+    tokio_driver: Option<Arc<crate::tokio::DriverLifecycle>>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -245,18 +215,6 @@ impl ThreadAware for Clock {
 }
 
 impl Clock {
-    /// Creates a new clock driven by the Tokio runtime.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called outside of a Tokio runtime context.
-    #[cfg(any(feature = "tokio", test))]
-    #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub fn new_tokio() -> Self {
-        Self::new_tokio_core().0
-    }
-
     pub(crate) fn new(state: ClockState) -> Self {
         Self {
             time: SimpleClock::from_state(&state),
@@ -267,30 +225,8 @@ impl Clock {
     }
 
     #[cfg(any(feature = "tokio", test))]
-    fn new_tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
-        // The Tokio clock is driven by a single background task that advances a shared timer
-        // set. We use the `Shared` inactive-clock variant which intentionally does not support
-        // cloning or per-core relocation, since both would create configurations the single
-        // background driver could not advance correctly.
-        let notify = Arc::new(Notify::new());
-        let driver_waker = Waker::from(Arc::new(TokioDriverWake(Arc::clone(&notify))));
-        let (mut clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate_with_driver_waker(driver_waker);
-        clock.tokio_driver = Some(Arc::new(TokioDriverLifecycle {
-            notify: Arc::clone(&notify),
-        }));
-
-        let join_handle = tokio::spawn(async move {
-            while let Ok(next_timer) = driver.advance_timers(Instant::now()) {
-                match next_timer {
-                    Some(deadline) => {
-                        _ = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), notify.notified()).await;
-                    }
-                    None => notify.notified().await,
-                }
-            }
-        });
-
-        (clock, join_handle)
+    pub(crate) fn set_tokio_driver(&mut self, driver: Arc<crate::tokio::DriverLifecycle>) {
+        self.tokio_driver = Some(driver);
     }
 
     /// Used for testing. For this clock, timers do not advance.
@@ -699,36 +635,6 @@ mod tests {
         assert_eq!(clock.system_time(), control.system_time());
     }
 
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_timers_advancing() {
-        let clock = Clock::new_tokio();
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_timers_advancing_after_relocate() {
-        // Relocation must be a no-op for Tokio clocks: the background driver task drives a
-        // shared timer set, so a relocated clone must still observe timers being advanced.
-        let clock = Clock::new_tokio();
-        let mut clock = clock;
-        _ = Relocator::between_numa_nodes().relocate(&mut clock);
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_future_finished_when_clock_dropped() {
-        let (clock, handle) = Clock::new_tokio_core();
-
-        clock.delay(Duration::from_millis(15)).await;
-
-        drop(clock);
-
-        handle.await.unwrap();
-    }
-
     #[test]
     fn new_frozen_ok() {
         let clock = Clock::new_frozen();
@@ -785,7 +691,7 @@ mod tests {
 
     #[test]
     fn owners_count() {
-        let (clock, driver) = InactiveClock::default().activate();
+        let (clock, driver) = InactiveClock::default().activate(Waker::noop().clone());
 
         assert!(!clock.state.is_unique());
         drop(clock);
@@ -794,7 +700,7 @@ mod tests {
 
     #[test]
     fn owners_count_clock_control() {
-        let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
+        let (clock, driver) = InactiveClock::from(ClockControl::default()).activate(Waker::noop().clone());
 
         assert!(!driver.state.is_unique());
         drop(clock);
@@ -813,8 +719,8 @@ mod tests {
         let thread_1 = source.as_ref().unwrap();
         inactive_1.relocate(source.as_ref(), thread_1);
 
-        let (clock_1, mut driver_1) = inactive_1.activate();
-        let (clock_2, mut driver_2) = inactive_2.activate();
+        let (clock_1, mut driver_1) = inactive_1.activate(Waker::noop().clone());
+        let (clock_2, mut driver_2) = inactive_2.activate(Waker::noop().clone());
 
         // register the timer on clock 1
         let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
@@ -866,8 +772,8 @@ mod tests {
         let thread_1 = source.as_ref().unwrap();
         inactive_1.relocate(source.as_ref(), thread_1);
 
-        let (clock_1, driver_1) = inactive_1.activate();
-        let (clock_2, driver_2) = inactive_2.activate();
+        let (clock_1, driver_1) = inactive_1.activate(Waker::noop().clone());
+        let (clock_2, driver_2) = inactive_2.activate(Waker::noop().clone());
 
         // register the timer on clock 1 also affects clock 2 because clock control is shared
         let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));

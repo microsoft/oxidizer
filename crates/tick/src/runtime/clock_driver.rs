@@ -9,8 +9,9 @@ use crate::state::ClockState;
 /// Drives timer advancement for the clock.
 ///
 /// The `ClockDriver` is responsible for advancing and firing timers associated with
-/// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
-/// ensure timers fire at the correct time.
+/// the clock. The runtime advances it, parks until the returned deadline, and uses the
+/// waker passed to [`InactiveClock::activate`](crate::runtime::InactiveClock::activate)
+/// to interrupt that wait when an earlier timer is registered.
 ///
 /// In thread-isolated runtime architectures using one coordinate owner, each
 /// worker owns its own `ClockDriver` that advances only the timers registered
@@ -92,7 +93,7 @@ mod tests {
 
     #[test]
     fn clock_gone_error_reported() {
-        let (clock, mut driver) = InactiveClock::default().activate();
+        let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
 
         driver.advance_timers(Instant::now()).unwrap();
         drop(clock);
@@ -104,7 +105,7 @@ mod tests {
     #[test]
     fn clock_gone_but_timers_left_not_dropped() {
         let now = Instant::now();
-        let (clock, mut driver) = InactiveClock::default().activate();
+        let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
         driver.advance_timers(now).unwrap();
         let mut future = Box::pin(clock.delay(Duration::from_secs(1)));
         let mut context = Context::from_waker(Waker::noop());

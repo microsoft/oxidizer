@@ -226,7 +226,7 @@ mod tests {
         let clock_control = ClockControl::new();
         let builder = Runtime::builder().clock(clock_control.clone());
 
-        let (clock, _) = builder.clock.activate();
+        let (clock, _) = builder.clock.activate(std::task::Waker::noop().clone());
         let now = clock.system_time();
 
         clock_control.advance(Duration::from_secs(1));

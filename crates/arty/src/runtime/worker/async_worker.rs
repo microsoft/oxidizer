@@ -122,13 +122,14 @@ where
         TSFF: FnOnce(TaskSet, Clock) -> TSF + 'static,
         TSF: Future<Output = TS>,
     {
-        let (clock, clock_driver) = clock.activate();
+        let worker_waker = WorkerSignal::waker(&signal);
+        let (clock, clock_driver) = clock.activate(worker_waker.clone());
 
         // SAFETY: We must go through the proper shutdown process before dropping this.
         // We guarantee this via our own safety requirement (it happens in `run()`). We know that
         // the caller has the chance to fulfill their safety guarantee because none of the code
         // between this point and end of the current function can panic.
-        let executor = unsafe { Executor::builder().owner_waker(WorkerSignal::waker(&signal)).build() };
+        let executor = unsafe { Executor::builder().owner_waker(worker_waker).build() };
         let tasks = executor.tasks();
 
         let thread_state = Rc::new(OnceCell::new());

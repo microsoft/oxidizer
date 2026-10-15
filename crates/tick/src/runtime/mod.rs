@@ -7,8 +7,8 @@
 //! with async runtime execution. The primary workflow involves:
 //!
 //! 1. Start with an [`InactiveClock`] that can be safely moved across threads
-//! 2. Activate it using [`InactiveClock::activate`] to get a [`Clock`] and [`ClockDriver`]
-//! 3. Use the [`ClockDriver`] to periodically advance timers in your runtime loop
+//! 2. Activate it with the runtime's driver waker to get a [`Clock`] and [`ClockDriver`]
+//! 3. Advance the [`ClockDriver`] and park until its next deadline or driver notification
 //! 4. Use the [`Clock`] for time operations like creating timers and measuring time
 //!
 //! # Integration with Runtimes
@@ -45,7 +45,7 @@
 //!         inactive.relocate(Some(&source), &destination);
 //!
 //!         // Keep both values on this worker in a real runtime loop.
-//!         let (_clock, _driver) = inactive.activate();
+//!         let (_clock, _driver) = inactive.activate(std::task::Waker::noop().clone());
 //!     })
 //! };
 //! let second = {
@@ -58,7 +58,7 @@
 //!         inactive.relocate(Some(&source), &destination);
 //!
 //!         // Keep both values on this worker in a real runtime loop.
-//!         let (_clock, _driver) = inactive.activate();
+//!         let (_clock, _driver) = inactive.activate(std::task::Waker::noop().clone());
 //!     })
 //! };
 //!
@@ -83,7 +83,7 @@
 //!
 //! ```rust
 //! # use tick::runtime::InactiveClock;
-//! let (clock, driver) = InactiveClock::default().activate();
+//! let (clock, driver) = InactiveClock::default().activate(std::task::Waker::noop().clone());
 //!
 //! // Share `clock` across threads (it is Clone + Send + Sync)
 //! // Keep `driver` on a single thread to advance timers
