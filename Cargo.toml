@@ -234,7 +234,7 @@ prost-reflect = { version = "0.16.4", default-features = false }
 prost-types = { version = "0.14.4", default-features = false }
 protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
-quinn = { version = "0.11.11", default-features = false }
+quinn = { version = "0.11.12", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rallocator = { path = "crates/rallocator", default-features = false, version = "0.2.0" }
 rapidhash = { version = "4.1.1", default-features = false }
@@ -249,7 +249,7 @@ routerama_build = { path = "crates/routerama_build", default-features = false, v
 routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "=0.1.1" }
 rstest = { version = "0.27.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
-rustls = { version = "0.23.40", default-features = false }
+rustls = { version = "0.23.46", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
 same-file = { version = "1.0.6", default-features = false }
