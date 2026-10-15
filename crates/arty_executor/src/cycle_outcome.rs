@@ -32,6 +32,6 @@ pub enum CycleOutcome {
     /// The executor has completed graceful shutdown and owns no tasks.
     ///
     /// Additional processing cycles are unnecessary but harmless and continue returning
-    /// `Shutdown`. Retained join handles may remain alive and report task cancellation.
+    /// `Shutdown`. Join handles that outlive the executor may report task cancellation.
     Shutdown,
 }
