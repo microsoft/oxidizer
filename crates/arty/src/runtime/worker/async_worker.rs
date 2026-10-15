@@ -194,7 +194,7 @@ impl AsyncWorker {
             match command_rx.try_recv() {
                 Ok(command) => match command {
                     AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                        future_factory.register(builtins.clone(), &self.tasks);
+                        future_factory.into_inner()(builtins.clone(), &self.tasks);
                     }
                     AsyncWorkerCommand::Shutdown => {
                         self.begin_shutdown();

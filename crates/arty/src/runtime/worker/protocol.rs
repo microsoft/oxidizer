@@ -4,9 +4,8 @@
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{TaskSet, discard_task_panic_payload};
+use arty_executor::discard_task_panic_payload;
 
-use crate::task::Builtins;
 use crate::task::execution::BoxedRemoteFutureFactory;
 
 pub(crate) struct QueuedTaskFactory {
@@ -18,9 +17,8 @@ impl QueuedTaskFactory {
         Self { inner: Some(inner) }
     }
 
-    pub(crate) fn register(mut self, builtins: Builtins, tasks: &TaskSet) {
-        let factory = self.inner.take().expect("a queued task factory is consumed exactly once");
-        factory(builtins, tasks);
+    pub(crate) fn into_inner(mut self) -> BoxedRemoteFutureFactory {
+        self.inner.take().expect("a queued task factory is consumed exactly once")
     }
 }
 
@@ -71,7 +69,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
-    use arty_executor::TaskPlacement;
+    use arty_executor::{Executor, TaskPlacement};
     use observed::Sink;
 
     use super::*;
@@ -93,6 +91,26 @@ mod tests {
             self.0.fetch_add(1, Ordering::Relaxed);
             panic!("captured factory destructor panic");
         }
+    }
+
+    #[test]
+    fn queued_factory_into_inner_returns_the_factory() {
+        let runtime = crate::runtime::Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
+        let executor = Executor::builder().build();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let factory_invoked = Arc::clone(&invoked);
+        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+            factory_invoked.store(true, Ordering::Release);
+        });
+
+        QueuedTaskFactory::new(factory).into_inner()(builtins, &executor.tasks());
+
+        assert!(invoked.load(Ordering::Acquire));
+        runtime.stop().unwrap();
     }
 
     #[test]
