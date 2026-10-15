@@ -102,7 +102,8 @@ impl Scheduler {
     }
 
     pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient) {
-        CURRENT_WORKER.with_borrow(|current| {
+        _ = CURRENT_WORKER.try_with(|current| {
+            let current = current.borrow();
             let Some(current) = current.as_ref() else {
                 return;
             };
