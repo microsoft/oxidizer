@@ -71,6 +71,7 @@ impl ProcessorInterest<'_> {
         self.bitmask.get() != 0
     }
 
+    #[cfg_attr(test, mutants::skip)] // Each bit is set once, so `^` equals `|`, and not advancing the index hangs the asking loops.
     fn ask_next_processor(&self, description: &EventDescription) {
         let index = self.next_processor_index.get();
         self.next_processor_index.set(index + 1);

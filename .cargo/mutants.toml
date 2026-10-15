@@ -150,12 +150,6 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:52: replace \|\| with && in reject_crossing_polls$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:43: replace == with != in reject_crossing_polls$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
-    # Each processor's bit is set at most once and the bits of a composite's
-    # child Sinks never overlap, so OR and XOR are identical.
-    'crates/observed/src/sampling/context.rs:\d+:\d+: replace \| with \^ in ProcessorInterest<._>::ask_next_processor$',
+    # The bits of a composite's child Sinks never overlap, so OR and XOR are identical.
     'crates/observed/src/sink/core.rs:\d+:\d+: replace \| with \^ in Sink::emit_impl$',
-    # Not advancing the next processor index makes the asking loops spin
-    # forever, so these mutants exceed the test timeout instead of failing a test.
-    'crates/observed/src/sampling/context.rs:\d+:\d+: replace ProcessorInterest<._>::ask_next_processor with \(\)$',
-    'crates/observed/src/sampling/context.rs:\d+:\d+: replace \+ with \* in ProcessorInterest<._>::ask_next_processor$',
 ]
