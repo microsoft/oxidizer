@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(any(test, feature = "seismograph"))]
+use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +14,9 @@ use observed::{Sink, emit};
 use performables::arc::Arc;
 use pin_project::{pin_project, pinned_drop};
 
+use super::instrumentation::TaskInstrumentation;
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::{TaskDescription, describe_task, inspection_identity};
 use crate::runtime::telemetry::events::{TaskPanicked, TaskSucceeded};
 use crate::task::execution::TaskResult;
 use crate::task::execution::storage::{TaskStorage, discard_panic};
@@ -20,7 +25,7 @@ use crate::task::execution::storage::{TaskStorage, discard_panic};
 ///
 /// We use this wrapper to add standard functionality to all tasks (e.g. panic handling).
 #[pin_project(PinnedDrop)]
-pub(super) struct RemoteTaskFuture<F, R>
+pub(super) struct RemoteTaskFuture<F, R, I: TaskInstrumentation = ()>
 where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
@@ -38,6 +43,10 @@ where
 
     /// Task wrappers check shutdown again before invoking their deferred factory.
     shutdown_signal: Option<Arc<AtomicBool>>,
+
+    telemetry: I,
+    #[cfg(any(test, feature = "seismograph"))]
+    inspection_id: Cell<Option<seismograph::recorder::runtime::TaskId>>,
 }
 
 fn dispose_sender<F>(drop_sender: F)
@@ -49,14 +58,29 @@ where
     }
 }
 
-impl<F, R> RemoteTaskFuture<F, R>
+impl<F, R, I: TaskInstrumentation> RemoteTaskFuture<F, R, I>
 where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    #[cfg(test)]
-    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
-        Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None)
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(super) fn inspect<Body: 'static>(&self, state: arty_executor::TaskState) -> Option<TaskDescription> {
+        self.result_tx.as_ref()?;
+        if state == arty_executor::TaskState::Running {
+            let id = self
+                .telemetry
+                .identity()
+                .unwrap_or_else(|| inspection_identity(&self.inspection_id));
+            self.inspection_id.set(Some(id));
+            return Some(TaskDescription::Identity(id));
+        }
+        Some(self.telemetry.snapshot(state).map_or_else(
+            || describe_task::<Body>(&self.inspection_id, state),
+            |task| {
+                self.inspection_id.set(Some(task.id));
+                TaskDescription::Snapshot(Box::new(task))
+            },
+        ))
     }
 
     pub(super) fn new_with_shutdown(
@@ -65,6 +89,7 @@ where
         parent_task_enrichment: Transfer,
         sink: Sink,
         shutdown_signal: Option<Arc<AtomicBool>>,
+        telemetry: I,
     ) -> Self {
         Self {
             inner: TaskStorage::new(inner),
@@ -72,12 +97,26 @@ where
             sink,
             result_tx: Some(result_tx),
             shutdown_signal,
+            telemetry,
+            #[cfg(any(test, feature = "seismograph"))]
+            inspection_id: Cell::new(None),
         }
     }
 }
 
+#[cfg(test)]
+impl<F, R> RemoteTaskFuture<F, R>
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    pub(super) fn new(inner: F, result_tx: BoxedSender<TaskResult<R>>, parent_task_enrichment: Transfer, sink: Sink) -> Self {
+        Self::new_with_shutdown(inner, result_tx, parent_task_enrichment, sink, None, ())
+    }
+}
+
 #[pinned_drop]
-impl<F, R> PinnedDrop for RemoteTaskFuture<F, R>
+impl<F, R, I: TaskInstrumentation> PinnedDrop for RemoteTaskFuture<F, R, I>
 where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
@@ -87,9 +126,15 @@ where
         let result_tx = this.result_tx.take();
         if this.inner.is_live() {
             let _guard = this.parent_task_enrichment.apply_current_thread();
-            if let Err(panic) = this.inner.destroy_pinned() {
-                emit!(this.sink, TaskPanicked);
-                discard_panic(panic);
+            match this.inner.destroy_pinned() {
+                Ok(()) => {
+                    this.telemetry.canceled();
+                }
+                Err(panic) => {
+                    this.telemetry.panicked();
+                    emit!(this.sink, TaskPanicked);
+                    discard_panic(panic);
+                }
             }
         }
         if let Some(sender) = result_tx {
@@ -98,7 +143,7 @@ where
     }
 }
 
-impl<F, R> Future for RemoteTaskFuture<F, R>
+impl<F, R, I: TaskInstrumentation> Future for RemoteTaskFuture<F, R, I>
 where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
@@ -110,7 +155,17 @@ where
         let _guard = this.parent_task_enrichment.apply_current_thread();
 
         if this.shutdown_signal.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) {
-            let _ = this.result_tx.take().map(|sender| dispose_sender(|| drop(sender)));
+            match this.inner.as_mut().destroy_pinned() {
+                Ok(()) => {
+                    this.telemetry.canceled();
+                }
+                Err(panic) => {
+                    this.telemetry.panicked();
+                    emit!(this.sink, TaskPanicked);
+                    discard_panic(panic);
+                }
+            }
+            dispose_sender(|| drop(this.result_tx.take()));
             return Poll::Ready(());
         }
 
@@ -124,6 +179,7 @@ where
             Ok(Poll::Ready(result)) => {
                 // An abandoned join destroys the result here, on the task's worker.
                 let sender = this.result_tx.take().expect("future polled after completion");
+                this.telemetry.completed();
                 if let Err(panic) = catch_unwind(AssertUnwindSafe(|| sender.send(TaskResult::Completed(result)))) {
                     // The task completed successfully; a receiver notification panic must not
                     // change that outcome or its telemetry classification.
@@ -137,6 +193,7 @@ where
                 if let Err(disposal) = this.inner.as_mut().destroy_pinned() {
                     discard_panic(disposal);
                 }
+                this.telemetry.panicked();
                 if let Err(disposal) = catch_unwind(AssertUnwindSafe(|| {
                     if let Some(sender) = this.result_tx.take() {
                         sender.send(TaskResult::Panicked(panic));
@@ -156,7 +213,6 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::cell::Cell;
     use std::pin::pin;
     use std::sync::Arc as StdArc;
     use std::task::{Context, Wake, Waker};
@@ -164,6 +220,7 @@ mod tests {
     use events_once::Event;
 
     use super::*;
+    use crate::runtime::seismograph::RuntimeTelemetry;
 
     struct PanicOnPoll {
         dropped: StdArc<AtomicBool>,
@@ -230,15 +287,43 @@ mod tests {
         let sink = Sink::noop();
         let (sender, _receiver) = Event::<TaskResult<u32>>::boxed();
         let signal = Arc::new(AtomicBool::new(true));
+        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
+        let task_telemetry = runtime_telemetry.register_task::<std::future::Ready<u32>>(0);
+        let task_telemetry = task_telemetry.materialized();
         let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
             std::future::ready(42),
             sender,
             sink.transfer_context(),
             sink,
             Some(signal),
+            task_telemetry,
         ));
 
         assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+    }
+
+    #[test]
+    fn shutdown_signal_contains_task_destructor_panic() {
+        let sink = Sink::noop();
+        let dropped = StdArc::new(AtomicBool::new(false));
+        let (sender, _receiver) = Event::<TaskResult<()>>::boxed();
+        let signal = Arc::new(AtomicBool::new(true));
+        let (runtime_telemetry, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
+        let task_telemetry = runtime_telemetry.register_task::<PanicOnPollAndDrop>(0);
+        let task_telemetry = task_telemetry.materialized();
+        let mut task = pin!(RemoteTaskFuture::new_with_shutdown(
+            PanicOnPollAndDrop {
+                dropped: StdArc::clone(&dropped),
+            },
+            sender,
+            sink.transfer_context(),
+            sink,
+            Some(signal),
+            task_telemetry,
+        ));
+
+        assert_eq!(task.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+        assert!(dropped.load(Ordering::Acquire));
     }
 
     #[test]

@@ -7,6 +7,8 @@ use observed::Sink;
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::MonitorOptions;
 use crate::runtime::bootstrap;
 use crate::runtime::config::{BlockingPoolPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
@@ -19,7 +21,8 @@ use crate::runtime::handle::Runtime;
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
+/// a shared blocking pool, a real-time clock, a no-op telemetry sink, and
+/// no local monitoring endpoint.
 ///
 /// # Examples
 ///
@@ -38,9 +41,48 @@ pub struct RuntimeBuilder {
     processor_config: RuntimeConfig,
     clock: InactiveClock,
     sink: Sink,
+    #[cfg(any(test, feature = "seismograph"))]
+    monitor: Option<MonitorOptions>,
 }
 
 impl RuntimeBuilder {
+    /// Opts this runtime into locally accessible diagnostics.
+    ///
+    /// Starts an authenticated localhost endpoint during [`build`](Self::build)
+    /// and registers the runtime/task diagnostic providers. Endpoint ownership
+    /// follows the runtime owner; no process-wide endpoint owner is installed.
+    ///
+    /// This does not enable or reset recording policies or install an allocator.
+    /// Recorder settings, buffers and allocator data remain process-wide.
+    /// Background endpoint failures are reported to the configured telemetry sink.
+    ///
+    /// Available with `rt` and `seismograph`. Without this call the runtime/task
+    /// integration is inactive even when diagnostic support is compiled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() {
+    /// # #[cfg(all(feature = "rt", feature = "seismograph"))] {
+    /// # (|| {
+    /// use arty::runtime::{MonitorOptions, Runtime};
+    ///
+    /// let runtime = Runtime::builder()
+    ///     .monitor(MonitorOptions::default().name("my-runtime"))
+    ///     .build()?;
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
+    /// ```
+    #[must_use]
+    #[cfg(any(test, feature = "seismograph"))]
+    pub fn monitor(mut self, options: MonitorOptions) -> Self {
+        self.monitor = Some(options);
+        self
+    }
+
     /// Sets the worker-count policy.
     ///
     /// The runtime starts one async worker per selected processor.
@@ -181,6 +223,8 @@ impl RuntimeBuilder {
     /// Returns [`Error`] if the worker count or shared blocking-pool limit is
     /// zero, or if the worker policy cannot be satisfied, such as an
     /// [`exactly`](WorkersPolicy::exactly) request exceeding available processors.
+    /// Also returns an error if a configured local monitoring endpoint cannot
+    /// be bound, published for discovery, or started.
     ///
     /// # Panics
     ///
@@ -197,7 +241,14 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
+        bootstrap::build(
+            self.processor_config,
+            &self.clock,
+            self.sink,
+            &ThreadBuilder::default(),
+            #[cfg(any(test, feature = "seismograph"))]
+            self.monitor,
+        )
     }
 }
 
@@ -208,6 +259,8 @@ impl RuntimeBuilder {
             clock: InactiveClock::default(),
             processor_config: RuntimeConfig::default(),
             sink: Sink::noop(),
+            #[cfg(any(test, feature = "seismograph"))]
+            monitor: None,
         }
     }
 }

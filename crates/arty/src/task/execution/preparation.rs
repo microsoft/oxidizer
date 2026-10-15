@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicBool;
 
@@ -10,6 +11,9 @@ use observed::Sink;
 use observed::context::Transfer;
 use performables::arc::Arc;
 
+use super::instrumentation::PendingInstrumentation;
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::TaskDescription;
 use crate::task::Builtins;
 use crate::task::execution::discard_panic;
 use crate::task::execution::remote::RemoteTaskFuture;
@@ -30,12 +34,119 @@ use crate::task::join::JoinHandle;
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
 pub(crate) type BoxedRemoteFutureFactory<FgArg> = Box<dyn FnOnce(FgArg, &TaskSet) + Send + 'static>;
 
-pub(crate) fn prepare_remote<C, FF, F, R>(
+// Scoped calls preserve the original size across erasure. Ordinary submissions
+// use () so their queued factories do not grow for optional metadata.
+pub(crate) trait FutureSize: Copy + Send + 'static {
+    #[cfg(any(test, feature = "seismograph"))]
+    fn get(self) -> Option<usize>;
+}
+
+impl FutureSize for () {
+    #[cfg(any(test, feature = "seismograph"))]
+    fn get(self) -> Option<usize> {
+        None
+    }
+}
+
+#[cfg(any(test, feature = "seismograph"))]
+impl FutureSize for usize {
+    fn get(self) -> Option<usize> {
+        Some(self)
+    }
+}
+
+pub(crate) struct PreparedRemote<C, FF, F, R, I: PendingInstrumentation, S: FutureSize = ()>
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    future_factory: TaskFactory<FF, I>,
+    result_tx: BoxedSender<TaskResult<R>>,
+    join_handle: JoinHandle<R>,
+    shutdown_signal: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "seismograph"))]
+    future_size: S,
+    _marker: PhantomData<fn(C, S) -> F>,
+}
+
+impl<C, FF, F, R, I: PendingInstrumentation, S: FutureSize> PreparedRemote<C, FF, F, R, I, S>
+where
+    C: 'static,
+    FF: FnOnce(C) -> F + Send + 'static,
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    pub(crate) fn into_enqueued_parts(self) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>) {
+        self.future_factory.enqueued();
+        let Self {
+            future_factory,
+            result_tx,
+            join_handle,
+            shutdown_signal,
+            #[cfg(any(test, feature = "seismograph"))]
+            future_size,
+            ..
+        } = self;
+        let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
+            // Factory invocation belongs inside the same panic boundary as polling.
+            let (future_factory, parent_task_enrichment, sink, task_telemetry) = future_factory.into_parts();
+            let task_telemetry = task_telemetry.materialized();
+            let inner = async move { future_factory(cx).await };
+
+            // The executor join handle is not used - the task delivers its result through the
+            // channel above, which unlike the executor's join handle can cross thread boundaries.
+            let future = RemoteTaskFuture::new_with_shutdown(
+                inner,
+                result_tx,
+                parent_task_enrichment,
+                sink,
+                Some(shutdown_signal),
+                task_telemetry,
+            );
+            #[cfg(any(test, feature = "seismograph"))]
+            drop(tasks.add_with_inspection(future, move |future, state| {
+                let mut description = RemoteTaskFuture::inspect::<F>(future, state)?;
+                if let TaskDescription::Snapshot(task) = &mut description
+                    && let Some(size) = future_size.get()
+                {
+                    task.future_size_bytes = Some(size as u64);
+                }
+                Some(description)
+            }));
+            #[cfg(not(any(test, feature = "seismograph")))]
+            {
+                drop(tasks.add(future));
+            }
+        });
+        (future_factory, join_handle)
+    }
+}
+
+impl<C, FF, F, R, I: PendingInstrumentation> PreparedRemote<C, FF, F, R, I>
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(crate) fn with_future_size(self, size: usize) -> PreparedRemote<C, FF, F, R, I, usize> {
+        PreparedRemote {
+            future_factory: self.future_factory,
+            result_tx: self.result_tx,
+            join_handle: self.join_handle,
+            shutdown_signal: self.shutdown_signal,
+            future_size: size,
+            _marker: PhantomData,
+        }
+    }
+}
+
+pub(crate) fn prepare_remote<C, FF, F, R, I: PendingInstrumentation>(
     future_factory: FF,
     parent_task_enrichment: Transfer,
     sink: Sink,
     shutdown_signal: Arc<AtomicBool>,
-) -> (BoxedRemoteFutureFactory<C>, JoinHandle<R>)
+    task_telemetry: I,
+) -> PreparedRemote<C, FF, F, R, I>
 where
     C: 'static,
     FF: FnOnce(C) -> F + Send + 'static,
@@ -43,47 +154,48 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
-    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink);
-    let future_factory: BoxedRemoteFutureFactory<C> = Box::new(move |cx, tasks| {
-        // Factory invocation belongs inside the same panic boundary as polling.
-        let (future_factory, parent_task_enrichment, sink) = future_factory.into_parts();
-        let inner = async move { future_factory(cx).await };
-
-        // The executor join handle is not used - the task delivers its result through the
-        // channel above, which unlike the executor's join handle can cross thread boundaries.
-        drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
-            inner,
-            result_tx,
-            parent_task_enrichment,
-            sink,
-            Some(shutdown_signal),
-        )));
-    });
-    (future_factory, JoinHandle::new(result_rx))
+    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment, sink, task_telemetry);
+    PreparedRemote {
+        future_factory,
+        result_tx,
+        join_handle: JoinHandle::new(result_rx),
+        shutdown_signal,
+        #[cfg(any(test, feature = "seismograph"))]
+        future_size: (),
+        _marker: PhantomData,
+    }
 }
 
-pub(crate) fn prepare_remote_on_worker<FF, F, R>(
+pub(crate) fn prepare_remote_on_worker<FF, F, R, I: PendingInstrumentation>(
     future_factory: FF,
     builtins: Builtins,
     parent_task_enrichment: Transfer,
     sink: Sink,
     shutdown_signal: Arc<AtomicBool>,
     tasks: &TaskSet,
+    task_telemetry: I,
 ) -> JoinHandle<R>
 where
     FF: FnOnce(Builtins) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
+    task_telemetry.enqueued();
+    let task_telemetry = task_telemetry.materialized();
     let (result_tx, result_rx) = Event::<TaskResult<R>>::boxed();
     let inner = async move { future_factory(builtins).await };
-    drop(tasks.add(RemoteTaskFuture::new_with_shutdown(
+    let future = RemoteTaskFuture::new_with_shutdown(
         inner,
         result_tx,
         parent_task_enrichment,
         sink,
         Some(shutdown_signal),
-    )));
+        task_telemetry,
+    );
+    #[cfg(any(test, feature = "seismograph"))]
+    drop(tasks.add_with_inspection(future, RemoteTaskFuture::inspect::<F>));
+    #[cfg(not(any(test, feature = "seismograph")))]
+    drop(tasks.add(future));
     JoinHandle::new(result_rx)
 }
 
@@ -165,6 +277,50 @@ mod tests {
     use performables::arc::Arc as PArc;
 
     use super::*;
+    use crate::runtime::seismograph::{RuntimeTelemetry, TaskTelemetryPlacement};
+
+    #[test]
+    fn ordinary_remote_factories_preserve_body_size_when_no_override_was_requested() {
+        let executor = new_guarded_executor(Waker::noop().clone());
+        let tasks = executor.tasks();
+        let future = async {
+            let bytes = [1_u8; 129];
+            std::future::pending::<()>().await;
+            std::hint::black_box(bytes);
+        };
+        let expected = size_of_val(&future) as u64;
+        assert!(expected > 1);
+        let sink = Sink::noop();
+        let (factory, handle) = prepare_remote(
+            move |()| future,
+            sink.transfer_context(),
+            sink,
+            PArc::new(AtomicBool::new(false)),
+            (),
+        )
+        .into_enqueued_parts();
+        factory((), &tasks);
+        let mut size = None;
+        tasks
+            .inspect(
+                std::num::NonZeroUsize::new(1).unwrap(),
+                |description: &crate::runtime::seismograph::TaskDescription| {
+                    let crate::runtime::seismograph::TaskDescription::Snapshot(task) = description else {
+                        panic!("inspection returns a snapshot rather than a poll token");
+                    };
+                    size = task.future_size_bytes;
+                },
+            )
+            .unwrap();
+        assert_eq!(size, Some(expected));
+        drop(handle);
+    }
+
+    fn telemetry() -> (RuntimeTelemetry, TaskTelemetryPlacement) {
+        let (runtime, _workers) = RuntimeTelemetry::register(0..1, Sink::noop());
+        let task = runtime.register_task::<()>(0);
+        (runtime, task)
+    }
 
     #[test]
     fn remote_factory_remains_deferred_until_poll() {
@@ -172,6 +328,7 @@ mod tests {
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
         let shutdown_signal = PArc::new(AtomicBool::new(false));
+        let (_telemetry, task_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             move |()| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
@@ -186,7 +343,9 @@ mod tests {
             sink.transfer_context(),
             sink,
             shutdown_signal,
-        );
+            task_telemetry,
+        )
+        .into_enqueued_parts();
 
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
@@ -202,6 +361,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let shutdown_signal = PArc::new(AtomicBool::new(false));
         let sink = Sink::noop();
+        let (_telemetry, task_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             {
                 let invoked = Arc::clone(&invoked);
@@ -213,7 +373,9 @@ mod tests {
             sink.transfer_context(),
             sink,
             PArc::clone(&shutdown_signal),
-        );
+            task_telemetry,
+        )
+        .into_enqueued_parts();
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
 
@@ -260,12 +422,15 @@ mod tests {
 
         let sink = Sink::noop();
         let shutdown_signal = PArc::new(AtomicBool::new(false));
+        let (_telemetry, task_telemetry) = telemetry();
         let (factory, handle) = prepare_remote(
             |()| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             sink,
             shutdown_signal,
-        );
+            task_telemetry,
+        )
+        .into_enqueued_parts();
         let executor = new_guarded_executor(Waker::noop().clone());
         factory((), &executor.tasks());
         run_to_completion(&executor);

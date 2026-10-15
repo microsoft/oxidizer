@@ -6,6 +6,9 @@ use std::backtrace::Backtrace;
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
+use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,7 +19,50 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use plurality::MultiPool;
 use tick::SimpleClock;
 
-use crate::{BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal};
+use crate::inspection::Inspector;
+use crate::{
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, InspectionError, InspectionStatus, JoinHandle, PollObserver,
+    ShutdownTimeoutBehavior, Task, TaskRef, TaskState, TypeErasedTask, WakeSignal,
+};
+
+trait ObservePoll: Copy {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()>;
+}
+
+impl ObservePoll for () {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()> {
+        task.poll()
+    }
+}
+
+impl ObservePoll for &dyn PollObserver {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>) -> task::Poll<()> {
+        let mut observed = false;
+        let mut in_callback = false;
+        let description = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task.inspect(TaskState::Running, &mut |description| {
+                in_callback = true;
+                self.poll_started(description);
+                in_callback = false;
+                observed = true;
+            });
+        }));
+        let has_description = match description {
+            Ok(()) => observed,
+            // Runtime-owned observer callbacks retain their must-not-panic contract.
+            Err(panic) if in_callback => std::panic::resume_unwind(panic),
+            Err(_panic) => {
+                self.inspection_failed(InspectionError::Panicked);
+                false
+            }
+        };
+        let outcome = task.poll();
+        if has_description {
+            self.poll_finished(outcome.is_ready());
+        }
+        outcome
+    }
+}
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
 ///
@@ -30,6 +76,7 @@ pub(crate) struct ExecutorCore {
     reentrancy_safe: RefCell<ReentrancySafeState>,
     exclusive: RefCell<ExclusiveState>,
     shared: SharedState,
+    poll_observer: RefCell<Option<Rc<dyn PollObserver>>>,
 
     _single_threaded: PhantomData<*const ()>,
 }
@@ -193,6 +240,7 @@ impl ExecutorCore {
                 shutdown_timeout,
                 shutdown_timeout_behavior,
             },
+            poll_observer: RefCell::new(None),
             _single_threaded: PhantomData,
         }
     }
@@ -202,8 +250,15 @@ impl ExecutorCore {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        let future = future.into_future();
+        self.add_inspected_task(future.into_future(), ())
+    }
 
+    pub(crate) fn add_inspected_task<F, R, I>(&self, future: F, inspector: I) -> JoinHandle<R>
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        I: Inspector<F> + 'static,
+    {
         let mut state = self.reentrancy_safe.borrow_mut();
 
         assert!(
@@ -217,7 +272,7 @@ impl ExecutorCore {
         // have been dropped.
         let (result_tx, result_rx) = unsafe { state.result_events.rent::<R>() };
 
-        let task = state.task_storage.alloc_box(Task::new(future, result_tx));
+        let task = state.task_storage.alloc_box(Task::new_with_inspector(future, result_tx, inspector));
         let task_ref = TaskRef::new(task);
 
         let wake_signal = WakeSignal::new(
@@ -243,6 +298,44 @@ impl ExecutorCore {
         state.new_tasks.push_back(task_ref);
 
         JoinHandle::new(result_rx)
+    }
+
+    pub(crate) fn inspect(
+        &self,
+        limit: NonZeroUsize,
+        visitor: &mut dyn FnMut(&dyn std::any::Any),
+    ) -> Result<InspectionStatus, InspectionError> {
+        let exclusive = self.exclusive.try_borrow_mut().map_err(|_error| InspectionError::Busy)?;
+        let reentrant = self.reentrancy_safe.try_borrow().map_err(|_error| InspectionError::Busy)?;
+        let awakened = self.shared.awakened.try_lock().map_err(|_error| InspectionError::Busy)?;
+        let notified = awakened.iter().copied().collect::<HashSet<_, BuildPointerHasher>>();
+        drop(awakened);
+        let tasks = reentrant
+            .new_tasks
+            .iter()
+            .chain(&exclusive.active)
+            .map(|task| (task, TaskState::Ready))
+            .chain(exclusive.inactive.iter().map(|task| (task, TaskState::Waiting)));
+        for (count, (task_ref, state)) in tasks.enumerate() {
+            if count == limit.get() {
+                return Ok(InspectionStatus::Truncated);
+            }
+            // SAFETY: the queues own these live tasks; both state borrows prevent polling or retirement.
+            let task = unsafe { task_ref.as_task() };
+            let state = if notified.contains(task_ref) || task.is_awakened() {
+                TaskState::Ready
+            } else {
+                state
+            };
+            task.inspect(state, visitor);
+        }
+        Ok(InspectionStatus::Complete)
+    }
+
+    pub(crate) fn set_poll_observer(&self, observer: Rc<dyn PollObserver>) -> Result<(), InspectionError> {
+        let _exclusive = self.exclusive.try_borrow_mut().map_err(|_error| InspectionError::Busy)?;
+        *self.poll_observer.borrow_mut() = Some(observer);
+        Ok(())
     }
 
     #[must_use]
@@ -388,7 +481,34 @@ impl ExecutorCore {
     fn poll_active_tasks(&self, state_exclusive: &mut ExclusiveState) {
         let completed_before = state_exclusive.completed.len();
         let inactive_before = state_exclusive.inactive.len();
+        let observer = self
+            .poll_observer
+            .borrow()
+            .as_ref()
+            .filter(|observer| observer.enabled())
+            .map(Rc::clone);
 
+        // Select once per cycle. The () specialization has no per-poll
+        // observation branches or callbacks while the observer is disabled.
+        if let Some(observer) = observer {
+            self.poll_tasks(state_exclusive, observer.as_ref());
+        } else {
+            self.poll_tasks(state_exclusive, ());
+        }
+        let completed_diff = state_exclusive
+            .completed
+            .len()
+            .checked_sub(completed_before)
+            .expect("completed tasks set cannot decrease when completing more tasks");
+        let inactive_diff = state_exclusive
+            .inactive
+            .len()
+            .checked_sub(inactive_before)
+            .expect("inactive tasks set cannot decrease when moving more tasks to inactive state");
+        self.record_poll_metrics(inactive_diff, completed_diff);
+    }
+
+    fn poll_tasks(&self, state_exclusive: &mut ExclusiveState, observer: impl ObservePoll) {
         while let Some(task_ref) = state_exclusive.active.pop_front() {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
@@ -398,7 +518,8 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
-            match task.poll() {
+            let outcome = observer.poll(task);
+            match outcome {
                 task::Poll::Ready(()) => {
                     // The task has completed, so we can move it to the completed list.
                     // It will sit there until it signals `is_inert()` at which point it is dropped.
@@ -414,19 +535,6 @@ impl ExecutorCore {
                 }
             }
         }
-
-        let completed_diff = state_exclusive
-            .completed
-            .len()
-            .checked_sub(completed_before)
-            .expect("completed tasks set cannot decrease when completing more tasks");
-        let inactive_diff = state_exclusive
-            .inactive
-            .len()
-            .checked_sub(inactive_before)
-            .expect("inactive tasks set cannot decrease when moving more tasks to inactive state");
-
-        self.record_poll_metrics(inactive_diff, completed_diff);
     }
 
     #[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
@@ -797,16 +905,14 @@ thread_local! {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::pin::Pin;
-    use std::rc::Rc;
 
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::TypeErasedTask;
 
     #[derive(Clone, Copy)]
     enum TaskLocation {
@@ -840,6 +946,45 @@ mod tests {
     struct DirtyDropTask {
         _signal: SetSignalOnDrop,
         inert: bool,
+    }
+
+    #[test]
+    fn tasks_without_custom_inspection_or_wake_observation_use_the_declared_defaults() {
+        let task = DirtyDropTask {
+            _signal: SetSignalOnDrop(Rc::new(Cell::new(false))),
+            inert: false,
+        };
+        let mut callbacks = 0;
+        task.inspect(TaskState::Waiting, &mut |_description| callbacks += 1);
+        assert_eq!(callbacks, 0);
+        assert!(!task.is_awakened());
+    }
+
+    #[derive(Debug)]
+    struct BrokenObserver;
+
+    impl PollObserver for BrokenObserver {
+        fn enabled(&self) -> bool {
+            true
+        }
+        fn poll_started(&self, _description: &dyn std::any::Any) {
+            panic!("observer bug");
+        }
+        fn poll_finished(&self, _completed: bool) {}
+        fn inspection_failed(&self, _error: InspectionError) {
+            panic!("an observer bug must not be translated into an inspector error");
+        }
+    }
+
+    #[test]
+    fn observer_bugs_are_not_reclassified_as_description_failures() {
+        let mut task = crate::MockTypeErasedTask::new();
+        task.expect_inspect().times(1).returning(|state, visitor| visitor(&state));
+        let pinned = Pin::new(&task);
+        let task: Pin<&dyn TypeErasedTask> = pinned;
+        let observer: &dyn PollObserver = &BrokenObserver;
+        let panic = std::panic::catch_unwind(AssertUnwindSafe(|| ObservePoll::poll(observer, task))).unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"observer bug"));
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

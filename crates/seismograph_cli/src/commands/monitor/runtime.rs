@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime rows aggregate retained events, never the source's lifetime counters.
+//! Worker rows aggregate retained events; live task rows also expose declared source-window counters.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -35,6 +35,7 @@ pub(super) struct RuntimeWorkerSummary {
     pub(super) state: String,
     pub(super) thread_id: Option<u64>,
     pub(super) current_task: Option<u64>,
+    pub(super) task_collection: Option<seismograph_runtime::live::TaskCollection>,
     pub(super) observed_tasks: usize,
     pub(super) metrics: ExecutionMetrics,
     pub(super) window: Option<TimeWindow>,
@@ -53,6 +54,7 @@ pub(super) struct RuntimeTaskSummary {
     pub(super) spawn_stack: Vec<String>,
     pub(super) metrics: ExecutionMetrics,
     pub(super) activity: TaskActivitySummary,
+    pub(super) metrics_scope: Option<seismograph_runtime::snapshot::TaskMetricsScope>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -126,11 +128,15 @@ impl RuntimeWorkerSummary {
         let mut tasks = self.tasks.iter().collect::<Vec<_>>();
         tasks.sort_unstable_by(|left, right| {
             let missing = |task: &RuntimeTaskSummary| match sort {
+                RuntimeTaskSort::Polls => {
+                    task.metrics_scope == Some(seismograph_runtime::snapshot::TaskMetricsScope::Uncollected)
+                        && task.metrics.poll_samples.is_empty()
+                }
                 RuntimeTaskSort::FutureSize => task.future_size_bytes.is_none(),
                 RuntimeTaskSort::Executing => task.metrics.executing_fraction.is_none(),
                 RuntimeTaskSort::MedianPoll => task.metrics.median_poll_nanos.is_none(),
                 RuntimeTaskSort::MaximumPoll => task.metrics.max_poll_nanos.is_none(),
-                _ => false,
+                RuntimeTaskSort::Task => false,
             };
             let availability = missing(left).cmp(&missing(right));
             if !availability.is_eq() {
@@ -325,9 +331,14 @@ fn distribute_tasks(workers: &mut Workers, tasks: BTreeMap<(u64, u64), TaskBuild
             let worker = workers
                 .entry((runtime_id, worker_id))
                 .or_insert_with(|| worker_row(runtime_id, worker_id));
-            worker.observed_tasks += usize::from(task.executed.contains(&worker_id));
+            worker.observed_tasks += if worker.task_collection.is_some() {
+                usize::from(task.row.metrics_scope.is_some())
+            } else {
+                usize::from(task.executed.contains(&worker_id))
+            };
             let mut row = task.row.clone();
             row.metrics = task.metrics.remove(&worker_id).unwrap_or_default();
+            row.metrics.source_polls = task.row.metrics.source_polls;
             row.metrics.ready = Arc::clone(&ready);
             row.metrics.ready_samples = Arc::clone(&ready_samples);
             row.metrics.wake_samples = Arc::clone(&wake_samples);
@@ -368,6 +379,8 @@ fn import_source(
                     state: format!("{:?}", worker.state),
                     thread_id: worker.thread_id.map(seismograph::recorder::thread::ThreadId::get),
                     current_task: worker.current_task.map(seismograph::recorder::runtime::TaskId::get),
+                    task_collection: (runtime.task_source == seismograph_runtime::snapshot::TaskSource::Live)
+                        .then_some(worker.task_collection),
                     ..RuntimeWorkerSummary::default()
                 },
             );
@@ -382,6 +395,14 @@ fn import_source(
                 type_descriptor_id: Some(source_task.type_descriptor.get()),
                 future_size_bytes: source_task.future_size_bytes,
                 spawn_stack: primitive_stack(&stack, lookups, AllocationStackFilter::All),
+                metrics_scope: (runtime.task_source == seismograph_runtime::snapshot::TaskSource::Live)
+                    .then_some(source_task.metrics_scope),
+                metrics: ExecutionMetrics {
+                    source_polls: (runtime.task_source == seismograph_runtime::snapshot::TaskSource::Live
+                        && source_task.metrics_scope != seismograph_runtime::snapshot::TaskMetricsScope::Uncollected)
+                        .then_some(source_task.metrics),
+                    ..ExecutionMetrics::default()
+                },
                 ..RuntimeTaskSummary::default()
             };
             if let Some(worker) = source_task.last_worker_id {
@@ -455,34 +476,7 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
             }
         }
         TaskActivityState::Ready => {
-            let (Some(ready_at), Some(queued_at)) = (
-                activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-                activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-            ) else {
-                return;
-            };
-            if activity.poll_started_at.is_some() {
-                return;
-            }
-            if activity.poll_worker_id.is_some() {
-                return;
-            }
-            if ready_at > queued_at {
-                return;
-            }
-            if queued_at > observed {
-                return;
-            }
-            let ready_for = observed - queued_at;
-            task.row.activity = TaskActivitySummary {
-                state: "Ready".into(),
-                ready_for: Some(ready_for),
-                ..TaskActivitySummary::default()
-            };
-            task.ready.push(Interval {
-                start: queued_at,
-                end: observed,
-            });
+            apply_ready_activity(task, activity);
         }
         TaskActivityState::Waiting => {
             if matches!(
@@ -500,6 +494,40 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
         _ => {}
     }
     task.row.state.clone_from(&task.row.activity.state);
+}
+
+fn apply_ready_activity(task: &mut TaskBuilder, activity: TaskActivity) {
+    if matches!(
+        (
+            activity.ready_since,
+            activity.queued_since,
+            activity.poll_started_at,
+            activity.poll_worker_id
+        ),
+        (None, None, None, None)
+    ) {
+        task.row.activity.state = "Ready".into();
+        return;
+    }
+    let (Some(ready_at), Some(queued_at)) = (
+        activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+        activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+    ) else {
+        return;
+    };
+    let observed = activity.observed_at.ticks();
+    if activity.poll_started_at.is_some() || activity.poll_worker_id.is_some() || ready_at > queued_at || queued_at > observed {
+        return;
+    }
+    task.row.activity = TaskActivitySummary {
+        state: "Ready".into(),
+        ready_for: Some(observed - queued_at),
+        ..TaskActivitySummary::default()
+    };
+    task.ready.push(Interval {
+        start: queued_at,
+        end: observed,
+    });
 }
 
 pub(super) fn display_windows(events: &Events, source: Option<&Snapshot>) -> BTreeMap<u64, TimeWindow> {
@@ -598,6 +626,8 @@ mod tests {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
                 name: "executor".into(),
+                task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 configured_workers: 1,
                 lifecycle_backtraces: BacktraceCapture::Never,
                 state: RuntimeState::Running,
@@ -605,6 +635,7 @@ mod tests {
                 retired_at: None,
                 counters: Counters::default(),
                 workers: vec![Worker {
+                    task_collection: seismograph_runtime::live::TaskCollection::Retained,
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
                     state: WorkerState::Running,
@@ -613,6 +644,7 @@ mod tests {
                     current_task: Some(TaskId::from_raw(1).unwrap()),
                 }],
                 tasks: vec![Task {
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     id: TaskId::from_raw(1).unwrap(),
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
@@ -644,6 +676,155 @@ mod tests {
             RuntimeMonitorSnapshot::from_events(&events, None, &[]).workers[0].tasks[0].future_size_bytes
         });
         assert_eq!(sizes, [None, Some(0), Some(16_384)]);
+    }
+
+    #[test]
+    fn live_ready_state_does_not_invent_waiting_time_or_measurement_history() {
+        let mut source = source(Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(20),
+            state: TaskActivityState::Ready,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        }));
+        source.runtimes[0].task_source = seismograph_runtime::snapshot::TaskSource::Live;
+        source.runtimes[0].workers[0].task_collection = seismograph_runtime::live::TaskCollection::Complete;
+        source.runtimes[0].tasks[0].metrics_scope = seismograph_runtime::snapshot::TaskMetricsScope::Uncollected;
+        let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+        let task = &snapshot.workers[0].tasks[0];
+        assert_eq!(
+            (
+                task.state.as_str(),
+                task.activity.ready_for,
+                task.metrics_scope,
+                snapshot.workers[0].task_collection
+            ),
+            (
+                "Ready",
+                None,
+                Some(seismograph_runtime::snapshot::TaskMetricsScope::Uncollected),
+                Some(seismograph_runtime::live::TaskCollection::Complete),
+            )
+        );
+        assert_eq!(snapshot.workers[0].observed_tasks, 1);
+    }
+
+    #[test]
+    fn live_window_counters_survive_without_retained_poll_events() {
+        let mut source = source(None);
+        let runtime = &mut source.runtimes[0];
+        runtime.task_source = seismograph_runtime::snapshot::TaskSource::Live;
+        runtime.tasks[0].metrics_scope = seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(10));
+        runtime.tasks[0].metrics = TaskMetrics {
+            poll_count: 7,
+            poll_duration_nanos: 140,
+            max_poll_duration_nanos: 40,
+            ..TaskMetrics::default()
+        };
+        let expected = runtime.tasks[0].metrics;
+        let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+        let metrics = &snapshot.workers[0].tasks[0].metrics;
+        assert_eq!(
+            (
+                metrics.poll_count,
+                metrics.max_poll_nanos,
+                metrics.median_poll_nanos,
+                metrics.source_polls
+            ),
+            (7, Some(40), None, Some(expected))
+        );
+        assert!(metrics.poll_samples.is_empty());
+        assert_eq!(snapshot.workers[0].metrics.poll_count, 0);
+    }
+
+    #[test]
+    fn retained_samples_do_not_replace_or_double_count_live_window_aggregates() {
+        let mut source = source(None);
+        let runtime = &mut source.runtimes[0];
+        runtime.task_source = seismograph_runtime::snapshot::TaskSource::Live;
+        runtime.tasks[0].metrics_scope = seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(10));
+        runtime.tasks[0].metrics = TaskMetrics {
+            poll_count: 7,
+            poll_duration_nanos: 140,
+            max_poll_duration_nanos: 40,
+            ..TaskMetrics::default()
+        };
+        let events = Events {
+            events: vec![event(EventKind::TaskPollFinished, Some(1), 20, 10, 0)],
+            ..Events::default()
+        };
+        let snapshot = RuntimeMonitorSnapshot::from_events(&events, Some(&source), &[]);
+        let task = &snapshot.workers[0].tasks[0];
+        assert_eq!(
+            (task.metrics.poll_count, task.metrics.max_poll_nanos, task.metrics.median_poll_nanos),
+            (7, Some(40), Some(10))
+        );
+        assert_eq!(snapshot.workers[0].metrics.poll_count, 1);
+    }
+
+    #[test]
+    fn collected_zero_poll_counts_sort_before_uncollected_live_tasks() {
+        let mut source = source(None);
+        let runtime = &mut source.runtimes[0];
+        runtime.task_source = seismograph_runtime::snapshot::TaskSource::Live;
+        let mut uncollected = runtime.tasks[0].clone();
+        uncollected.id = TaskId::from_raw(2).unwrap();
+        uncollected.metrics_scope = seismograph_runtime::snapshot::TaskMetricsScope::Uncollected;
+        runtime.tasks[0].metrics = TaskMetrics::default();
+        runtime.tasks[0].metrics_scope = seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(10));
+        runtime.tasks.push(uncollected);
+        let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
+        for descending in [false, true] {
+            let sorted = snapshot.workers[0].sorted_tasks(RuntimeTaskSort::Polls, descending);
+            assert_eq!(sorted.iter().map(|task| task.task_id).collect::<Vec<_>>(), [1, 2]);
+        }
+    }
+
+    #[test]
+    fn collected_window_counts_without_samples_sort_with_available_retained_evidence() {
+        let worker = RuntimeWorkerSummary {
+            tasks: vec![
+                RuntimeTaskSummary {
+                    task_id: 1,
+                    metrics_scope: Some(seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(
+                        EventTimestamp::from_ticks(10),
+                    )),
+                    metrics: ExecutionMetrics {
+                        source_polls: Some(TaskMetrics::default()),
+                        ..ExecutionMetrics::default()
+                    },
+                    ..RuntimeTaskSummary::default()
+                },
+                RuntimeTaskSummary {
+                    task_id: 2,
+                    metrics_scope: Some(seismograph_runtime::snapshot::TaskMetricsScope::Lifetime),
+                    metrics: ExecutionMetrics {
+                        poll_count: 1,
+                        poll_samples: vec![10],
+                        ..ExecutionMetrics::default()
+                    },
+                    ..RuntimeTaskSummary::default()
+                },
+            ],
+            ..RuntimeWorkerSummary::default()
+        };
+        assert_eq!(
+            worker
+                .sorted_tasks(RuntimeTaskSort::Polls, false)
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(
+            worker
+                .sorted_tasks(RuntimeTaskSort::Polls, true)
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            [2, 1]
+        );
     }
 
     #[test]

@@ -50,6 +50,8 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// ```
 #[derive(Debug)]
 pub struct Runtime {
+    #[cfg(any(test, feature = "seismograph"))]
+    monitor: Option<seismograph::monitor::Monitor>,
     scheduler: RuntimeScheduler,
     shutdown_on_drop: bool,
 }
@@ -181,11 +183,19 @@ impl Runtime {
         self.scheduler.dispatcher.wait()
     }
 
-    pub(in crate::runtime) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
+    pub(in crate::runtime) fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
         Self {
+            #[cfg(any(test, feature = "seismograph"))]
+            monitor: None,
             scheduler: RuntimeScheduler::new(dispatcher),
             shutdown_on_drop: true,
         }
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn with_monitor(mut self, monitor: Option<seismograph::monitor::Monitor>) -> Self {
+        self.monitor = monitor;
+        self
     }
 }
 

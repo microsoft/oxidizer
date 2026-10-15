@@ -23,6 +23,12 @@ pub(in crate::runtime) enum AsyncWorkerCommand<TS = Builtins> {
         future_factory: Option<BoxedRemoteFutureFactory<TS>>,
     },
 
+    /// Inspects native task storage between polls; the box is allocated only by a diagnostic request.
+    #[cfg(any(test, feature = "seismograph"))]
+    InspectTasks {
+        request: Option<Box<seismograph_runtime::live::TaskRequest>>,
+    },
+
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
     /// not yet know about the shutdown).
@@ -51,6 +57,8 @@ impl<TS> fmt::Debug for AsyncWorkerCommand<TS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
+            #[cfg(any(test, feature = "seismograph"))]
+            Self::InspectTasks { .. } => write!(f, "InspectTasks"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }

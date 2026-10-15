@@ -201,6 +201,30 @@ impl Scheduler {
             }
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
+            #[cfg(any(test, feature = "seismograph"))]
+            let join_handle = if self.dispatcher.is_monitored() && crate::runtime::seismograph::recording_requested() {
+                let task_telemetry = self.dispatcher.register_task::<F>(self.binding.worker_index);
+                prepare_remote_on_worker(
+                    future_factory,
+                    current.builtins.clone(),
+                    parent_task_enrichment,
+                    sink.clone(),
+                    self.dispatcher.shutdown_signal(),
+                    &current.tasks,
+                    task_telemetry,
+                )
+            } else {
+                prepare_remote_on_worker(
+                    future_factory,
+                    current.builtins.clone(),
+                    parent_task_enrichment,
+                    sink.clone(),
+                    self.dispatcher.shutdown_signal(),
+                    &current.tasks,
+                    (),
+                )
+            };
+            #[cfg(not(any(test, feature = "seismograph")))]
             let join_handle = prepare_remote_on_worker(
                 future_factory,
                 current.builtins.clone(),
@@ -208,6 +232,7 @@ impl Scheduler {
                 sink.clone(),
                 self.dispatcher.shutdown_signal(),
                 &current.tasks,
+                (),
             );
             observed::emit!(
                 &sink,

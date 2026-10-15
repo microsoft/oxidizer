@@ -14,7 +14,9 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
+#[cfg(any(test, feature = "seismograph"))]
+use crate::runtime::seismograph::{RuntimeTelemetry, TaskDescriptor, TaskTelemetryPlacement, recording_requested};
+use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopping, TaskSpawned};
 use crate::runtime::thread::waiter::WaitForShutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::task::Builtins;
@@ -57,7 +59,9 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
-    stopped_reported: AtomicBool,
+    #[cfg(any(test, feature = "seismograph"))]
+    runtime_telemetry: Option<RuntimeTelemetry>,
+    observed_stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
 
@@ -76,7 +80,15 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
 impl<WFS> DispatcherCore<WFS> {
     #[cfg(test)]
     pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
+        let worker_count = u32::try_from(worker_endpoints.len()).expect("test dispatchers cannot configure more than u32::MAX workers");
+        let (runtime_telemetry, _worker_telemetries) = RuntimeTelemetry::register(0..worker_count, sink.clone());
+        Self::new_with_shutdown(
+            wait_for_shutdown,
+            worker_endpoints,
+            sink,
+            Arc::new(AtomicBool::new(false)),
+            Some(runtime_telemetry),
+        )
     }
 
     pub(in crate::runtime) fn new_with_shutdown(
@@ -84,6 +96,7 @@ impl<WFS> DispatcherCore<WFS> {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
+        #[cfg(any(test, feature = "seismograph"))] runtime_telemetry: Option<RuntimeTelemetry>,
     ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -100,10 +113,31 @@ impl<WFS> DispatcherCore<WFS> {
             worker_endpoints.len(),
             "each runtime worker must have a distinct thread ID"
         );
+        #[cfg(any(test, feature = "seismograph"))]
+        if let Some(runtime_telemetry) = &runtime_telemetry {
+            for (index, endpoint) in worker_endpoints.iter().enumerate() {
+                let sender = endpoint.command_tx.clone();
+                let waker = endpoint.waker.clone();
+                runtime_telemetry.register_task_provider(index, move |request| {
+                    if sender
+                        .send(AsyncWorkerCommand::InspectTasks {
+                            request: Some(Box::new(request)),
+                        })
+                        .is_ok()
+                    {
+                        waker.wake_by_ref();
+                    }
+                    // A closed command channel drops the request. Its caller reports
+                    // unavailable data rather than a complete empty task list.
+                });
+            }
+        }
         Self {
             wait_for_shutdown,
             shutdown_started,
-            stopped_reported: AtomicBool::new(false),
+            #[cfg(any(test, feature = "seismograph"))]
+            runtime_telemetry,
+            observed_stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
@@ -119,6 +153,10 @@ impl<WFS> DispatcherCore<WFS> {
             return;
         }
 
+        #[cfg(any(test, feature = "seismograph"))]
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.stopping();
+        }
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
@@ -142,7 +180,23 @@ impl<WFS> DispatcherCore<WFS> {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), "any", future_factory)
+        self.enqueue(
+            self.next_worker_index(),
+            "any",
+            #[cfg(any(test, feature = "seismograph"))]
+            None,
+            future_factory,
+        )
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn spawn_with_descriptor<FF, F, R>(&self, descriptor: TaskDescriptor, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue(self.next_worker_index(), "any", Some(descriptor), future_factory)
     }
 
     pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -157,12 +211,25 @@ impl<WFS> DispatcherCore<WFS> {
         R: Send + 'static,
     {
         (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
+            .map(|index| {
+                self.enqueue(
+                    WorkerIndex(index),
+                    "any",
+                    #[cfg(any(test, feature = "seismograph"))]
+                    None,
+                    make_factory(),
+                )
+            })
             .collect()
     }
 
     pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
+    }
+
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn is_monitored(&self) -> bool {
+        self.runtime_telemetry.is_some()
     }
 
     pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
@@ -193,16 +260,36 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
+    #[cfg(any(test, feature = "seismograph"))]
+    pub(in crate::runtime) fn register_task<F: 'static>(&self, worker_index: WorkerIndex) -> TaskTelemetryPlacement {
+        self.runtime_telemetry
+            .as_ref()
+            .expect("submission checks that runtime monitoring is enabled")
+            .register_task::<F>(usize::from(worker_index))
+    }
+
     pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, "same_thread", future_factory)
+        self.enqueue(
+            worker_index,
+            "same_thread",
+            #[cfg(any(test, feature = "seismograph"))]
+            None,
+            future_factory,
+        )
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: &'static str, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: &'static str,
+        #[cfg(any(test, feature = "seismograph"))] descriptor: Option<TaskDescriptor>,
+        future_factory: FF,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -217,12 +304,44 @@ impl<WFS> DispatcherCore<WFS> {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
+        #[cfg(any(test, feature = "seismograph"))]
+        let (future_factory, join_handle) = if self.is_monitored() && recording_requested() {
+            let task_telemetry = self
+                .runtime_telemetry
+                .as_ref()
+                .expect("runtime monitoring was checked above")
+                .register_task_with_descriptor(usize::from(worker_index), descriptor.unwrap_or_else(TaskDescriptor::of::<F>));
+            prepare_remote(
+                future_factory,
+                parent_task_enrichment,
+                self.sink.clone(),
+                Arc::clone(&self.shutdown_started),
+                task_telemetry,
+            )
+            .into_enqueued_parts()
+        } else {
+            let prepared = prepare_remote(
+                future_factory,
+                parent_task_enrichment,
+                self.sink.clone(),
+                Arc::clone(&self.shutdown_started),
+                (),
+            );
+            if let Some(descriptor) = descriptor {
+                prepared.with_future_size(descriptor.future_size_bytes()).into_enqueued_parts()
+            } else {
+                prepared.into_enqueued_parts()
+            }
+        };
+        #[cfg(not(any(test, feature = "seismograph")))]
         let (future_factory, join_handle) = prepare_remote(
             future_factory,
             parent_task_enrichment,
             self.sink.clone(),
             Arc::clone(&self.shutdown_started),
-        );
+            (),
+        )
+        .into_enqueued_parts();
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
@@ -253,9 +372,14 @@ where
     /// Safe to call multiple times.
     pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
-        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
+        #[cfg(any(test, feature = "seismograph"))]
+        if let Some(telemetry) = &self.runtime_telemetry {
+            telemetry.stopped();
+        } else {
+            crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
         }
+        #[cfg(not(any(test, feature = "seismograph")))]
+        crate::runtime::telemetry::report_stopped(&self.sink, &self.observed_stopped_reported);
         outcome
     }
 }
@@ -267,6 +391,10 @@ mod tests {
     use std::task;
     use std::task::Poll;
 
+    use observed_testing::{TEST_ID, test_emitter};
+    use seismograph::recorder::event::EventKind;
+    use seismograph::recorder::{Configuration, RecordingPolicy};
+    use seismograph::snapshot::SnapshotOptions;
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
@@ -427,6 +555,34 @@ mod tests {
     }
 
     #[test]
+    fn observed_runtime_stopped_follows_worker_join() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let before_join = processor.clone();
+        let mut wait_for_shutdown = MockWaitForShutdown::new();
+        wait_for_shutdown.expect_wait().returning(move || {
+            assert_eq!(
+                before_join
+                    .events()
+                    .iter()
+                    .filter(|event| event.name() == "arty.rt.stopped")
+                    .count(),
+                0
+            );
+            Ok(())
+        });
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(wait_for_shutdown, NonEmpty::new(endpoint(worker_tx, &threads[0])), sink);
+
+        dispatcher.join().unwrap();
+
+        assert_eq!(
+            processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
+            1
+        );
+    }
+
+    #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // Once the worker has closed the command channel (e.g. because it is shutting down)
         // we ignore any further spawn requests (they simply return disconnected join handles).
@@ -457,6 +613,65 @@ mod tests {
             panic!("a disconnected join must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    #[test]
+    fn failed_dispatch_reports_enqueue_readiness_and_cancellation() {
+        struct RecorderReset;
+
+        impl Drop for RecorderReset {
+            fn drop(&mut self) {
+                seismograph::recorder(Configuration::default());
+            }
+        }
+
+        let _recording = crate::runtime::seismograph::RECORDER_TEST_LOCK.lock().unwrap();
+        let _reset = RecorderReset;
+        seismograph::recorder(Configuration {
+            runtime_tasks: RecordingPolicy::all(false),
+            ..Configuration::default()
+        });
+        let (worker_tx, worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(
+            MockWaitForShutdown::new(),
+            NonEmpty::new(endpoint(worker_tx, &threads[0])),
+            observed::Sink::noop(),
+        );
+        let runtime_id = dispatcher.runtime_telemetry.as_ref().unwrap().id();
+        drop(worker_rx);
+
+        let mut task = pin!(dispatcher.spawn(|_| async {}));
+        let Poll::Ready(Err(error)) = task.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
+            panic!("a failed dispatch must report shutdown");
+        };
+        assert!(error.is_shutdown());
+
+        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let task_kinds: Vec<_> = decoded
+            .events
+            .events
+            .iter()
+            .filter_map(|event| {
+                let payload = event.runtime()?;
+                (payload.runtime_id == runtime_id
+                    && matches!(
+                        event.kind,
+                        EventKind::TaskSpawned | EventKind::TaskEnqueued | EventKind::TaskReady | EventKind::TaskCanceled
+                    ))
+                .then_some(event.kind)
+            })
+            .collect();
+        assert_eq!(
+            task_kinds,
+            [
+                EventKind::TaskSpawned,
+                EventKind::TaskEnqueued,
+                EventKind::TaskReady,
+                EventKind::TaskCanceled,
+            ]
+        );
     }
 
     #[cfg_attr(test, mutants::skip)]

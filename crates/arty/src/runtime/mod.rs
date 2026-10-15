@@ -43,7 +43,14 @@ pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+#[cfg(all(test, miri, feature = "seismograph"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod monitor_miri_tests;
+#[cfg(any(test, feature = "seismograph"))]
+mod monitor_options;
 mod operations;
+#[cfg(any(test, feature = "seismograph"))]
+pub(crate) mod seismograph;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -56,6 +63,9 @@ pub use config::{BlockingPoolPolicy, WorkersPolicy};
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
+#[doc(inline)]
+#[cfg(any(test, feature = "seismograph"))]
+pub use monitor_options::MonitorOptions;
 #[doc(inline)]
 pub use operations::RuntimeOperations;
 

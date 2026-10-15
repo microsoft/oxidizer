@@ -687,6 +687,8 @@ mod tests {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
                 name: "executor".into(),
+                task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 configured_workers: 2,
                 lifecycle_backtraces: BacktraceCapture::Never,
                 state: RuntimeState::Running,
@@ -697,6 +699,7 @@ mod tests {
                     .into_iter()
                     .enumerate()
                     .map(|(index, current_task)| Worker {
+                        task_collection: seismograph_runtime::live::TaskCollection::Retained,
                         id: WorkerId::from_raw(u64::try_from(index).unwrap() + 1).unwrap(),
                         role: WorkerRole::Core,
                         state: WorkerState::Running,
@@ -707,6 +710,7 @@ mod tests {
                     .collect(),
                 tasks: vec![Task {
                     id: TaskId::from_raw(1).unwrap(),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
@@ -871,6 +875,8 @@ mod tests {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
                 name: "executor".into(),
+                task_source: seismograph_runtime::snapshot::TaskSource::Retained,
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 configured_workers: 1,
                 lifecycle_backtraces: BacktraceCapture::Never,
                 state: RuntimeState::Running,
@@ -878,6 +884,7 @@ mod tests {
                 retired_at: None,
                 counters: Counters::default(),
                 workers: vec![Worker {
+                    task_collection: seismograph_runtime::live::TaskCollection::Retained,
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
                     state: WorkerState::Running,
@@ -888,6 +895,7 @@ mod tests {
                 tasks: [1, 2]
                     .into_iter()
                     .map(|id| Task {
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         id: TaskId::from_raw(id).unwrap(),
                         parent: None,
                         type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),

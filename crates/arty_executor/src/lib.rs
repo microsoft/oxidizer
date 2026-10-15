@@ -28,12 +28,24 @@
 //!
 //! In a steady state, the executor is allocation-free, as all memory used by the executor is
 //! reused for new tasks when old ones complete.
+//!
+//! # Live inspection
+//!
+//! [`TaskSet::add_with_inspection`] attaches an on-demand description to native task
+//! storage. [`TaskSet::inspect`] visits bounded descriptions between execution cycles;
+//! it never polls futures, consumes wake notifications, or maintains a second task list.
+//! Description construction and any allocations it needs happen only when requested.
+//! [`TaskSet::set_poll_observer`] optionally attaches a worker-owned observer.
+//! Disabled observers are checked once per execution cycle and never describe
+//! or instrument individual polls. Enabling one also describes tasks that were
+//! submitted before observation started.
 
 mod builder;
 mod constants;
 mod cycle_outcome;
 mod executor;
 mod executor_core;
+mod inspection;
 mod join_handle;
 mod ptr_hash;
 mod shutdown_timeout;
@@ -47,6 +59,7 @@ pub(crate) use constants::*;
 pub use cycle_outcome::*;
 pub use executor::*;
 pub(crate) use executor_core::*;
+pub use inspection::{InspectionError, InspectionStatus, PollObserver, TaskState};
 pub use join_handle::*;
 pub(crate) use ptr_hash::*;
 pub(crate) use shutdown_timeout::*;

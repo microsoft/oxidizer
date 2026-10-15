@@ -19,6 +19,8 @@ pub(super) struct Interval {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ExecutionMetrics {
+    /// Task-global source-window aggregates, not per-worker retained samples.
+    pub(super) source_polls: Option<seismograph_runtime::snapshot::TaskMetrics>,
     pub(super) poll_count: u64,
     pub(super) median_poll_nanos: Option<u64>,
     pub(super) max_poll_nanos: Option<u64>,
@@ -32,8 +34,14 @@ pub(super) struct ExecutionMetrics {
 
 impl ExecutionMetrics {
     pub(super) fn finish(&mut self, window: Option<TimeWindow>) {
-        self.poll_count = u64::try_from(self.poll_samples.len()).unwrap_or(u64::MAX);
-        self.max_poll_nanos = self.poll_samples.iter().copied().max();
+        self.poll_count = self.source_polls.map_or_else(
+            || u64::try_from(self.poll_samples.len()).unwrap_or(u64::MAX),
+            |source| source.poll_count,
+        );
+        self.max_poll_nanos = self.source_polls.map_or_else(
+            || self.poll_samples.iter().copied().max(),
+            |source| (source.poll_count != 0).then_some(source.max_poll_duration_nanos),
+        );
         self.median_poll_nanos = median_nanos(&mut self.poll_samples);
         self.polls = union(&self.polls);
         self.executing_fraction = window.and_then(|window| occupancy(&self.polls, window));

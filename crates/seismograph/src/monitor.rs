@@ -42,7 +42,7 @@ pub struct Monitor {
     descriptor_path: PathBuf,
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
-    last_error: Arc<Mutex<Option<String>>>,
+    last_error: Arc<ErrorState>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -53,6 +53,7 @@ impl Monitor {
         Builder {
             name: None,
             instance: None,
+            error_handler: None,
         }
     }
 
@@ -65,7 +66,11 @@ impl Monitor {
     /// Returns the most recent background connection error.
     #[must_use]
     pub fn last_error(&self) -> Option<String> {
-        self.last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+        self.last_error
+            .message
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -95,9 +100,35 @@ impl Drop for Monitor {
 pub struct Builder {
     name: Option<String>,
     instance: Option<String>,
+    error_handler: Option<ErrorHandler>,
+}
+
+#[derive(Clone)]
+struct ErrorHandler(Arc<dyn Fn(&str) + Send + Sync>);
+
+impl fmt::Debug for ErrorHandler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ErrorHandler")
+    }
+}
+
+#[derive(Debug, Default)]
+struct ErrorState {
+    message: Mutex<Option<String>>,
+    handler: Option<ErrorHandler>,
 }
 
 impl Builder {
+    /// Reports background connection/listener failures without polling the monitor.
+    ///
+    /// The callback runs on a monitor thread after its error-state lock is released.
+    /// It must return promptly and must not panic. It does not replace [`Monitor::last_error`].
+    #[must_use]
+    pub fn error_handler(mut self, handler: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.error_handler = Some(ErrorHandler(Arc::new(handler)));
+        self
+    }
+
     /// Sets the human-readable application name.
     #[must_use]
     pub fn name(mut self, name: impl Into<String>) -> Self {
@@ -129,7 +160,7 @@ impl Builder {
             MonitorDescriptor,
             Arc<AtomicBool>,
             Arc<ActiveClients>,
-            Arc<Mutex<Option<String>>>,
+            Arc<ErrorState>,
             &Path,
         ) -> Result<JoinHandle<()>, Error>,
     ) -> Result<Monitor, Error> {
@@ -161,7 +192,10 @@ impl Builder {
 
         let stop = Arc::new(AtomicBool::new(false));
         let active_clients = Arc::new(ActiveClients::new());
-        let last_error = Arc::new(Mutex::new(None));
+        let last_error = Arc::new(ErrorState {
+            message: Mutex::new(None),
+            handler: self.error_handler,
+        });
         let thread = spawn(
             listener,
             descriptor.clone(),
@@ -299,7 +333,7 @@ fn run_listener(
     descriptor: &MonitorDescriptor,
     stop: &Arc<AtomicBool>,
     active_clients: &Arc<ActiveClients>,
-    last_error: &Arc<Mutex<Option<String>>>,
+    last_error: &Arc<ErrorState>,
 ) {
     let _suppression = SuppressionGuard::enter();
     loop {
@@ -346,7 +380,7 @@ fn spawn_listener_thread(
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
-    last_error: Arc<Mutex<Option<String>>>,
+    last_error: Arc<ErrorState>,
     descriptor_path: &Path,
 ) -> Result<JoinHandle<()>, Error> {
     spawn_listener_thread_with(
@@ -372,7 +406,7 @@ fn spawn_client_thread(
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     registration: ActiveClient,
-    last_error: &Arc<Mutex<Option<String>>>,
+    last_error: &Arc<ErrorState>,
 ) {
     spawn_client_thread_with(stream, descriptor, stop, registration, last_error, |operation| {
         thread::Builder::new().name("seismograph-monitor-client".into()).spawn(operation)
@@ -384,7 +418,7 @@ fn spawn_client_thread_with(
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     registration: ActiveClient,
-    last_error: &Arc<Mutex<Option<String>>>,
+    last_error: &Arc<ErrorState>,
     spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>,
 ) {
     let worker_last_error = Arc::clone(last_error);
@@ -400,8 +434,12 @@ fn spawn_client_thread_with(
     }
 }
 
-fn set_last_error(last_error: &Mutex<Option<String>>, error: &impl fmt::Display) {
-    *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
+fn set_last_error(last_error: &ErrorState, error: &impl fmt::Display) {
+    let message = error.to_string();
+    *last_error.message.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(message.clone());
+    if let Some(handler) = &last_error.handler {
+        (handler.0)(&message);
+    }
 }
 
 fn handle_client(stream: TcpStream, descriptor: &MonitorDescriptor, stop: &AtomicBool) -> Result<(), ClientError> {
@@ -944,6 +982,29 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn background_error_handlers_observe_updated_state_after_its_lock_is_released() {
+        let state_slot = Arc::new(Mutex::new(None::<std::sync::Weak<ErrorState>>));
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let slot = Arc::clone(&state_slot);
+        let captured = Arc::clone(&messages);
+        let builder = Monitor::builder().error_handler(move |message| {
+            let state = slot.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
+            assert_eq!(state.message.try_lock().unwrap().as_deref(), Some(message));
+            captured.lock().unwrap().push(message.to_owned());
+        });
+        assert!(format!("{builder:?}").contains("ErrorHandler"));
+        let state = Arc::new(ErrorState {
+            message: Mutex::new(None),
+            handler: builder.error_handler,
+        });
+        *state_slot.lock().unwrap() = Some(Arc::downgrade(&state));
+        set_last_error(&state, &"connection failed");
+        set_last_error(&state, &"listener failed");
+        assert_eq!(*messages.lock().unwrap(), ["connection failed", "listener failed"]);
+        assert_eq!(state.message.lock().unwrap().as_deref(), Some("listener failed"));
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))] // Test assertion adapter; callers exercise only the expected protocol variant.
     fn recorder_activity(response: Response) -> RecorderActivity {
         let Response::RecorderActivity(activity) = response else {
@@ -1167,7 +1228,7 @@ mod tests {
         let clients = Arc::new(ActiveClients::new());
         let (mut peer, stream) = connected_pair();
         let registration = clients.register(&stream).unwrap().unwrap();
-        let last_error = Arc::new(Mutex::new(None));
+        let last_error = Arc::new(ErrorState::default());
         spawn_client_thread_with(
             stream,
             test_descriptor(),
@@ -1178,7 +1239,7 @@ mod tests {
         );
         assert_eq!(
             (
-                last_error.lock().unwrap().clone(),
+                last_error.message.lock().unwrap().clone(),
                 clients.state.lock().unwrap().streams.len(),
                 connection_is_closed(&mut peer)
             ),

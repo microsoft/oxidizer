@@ -71,6 +71,14 @@ fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
 
+fn observed_poll_count(metrics: &ExecutionMetrics, live: bool) -> String {
+    if live && metrics.source_polls.is_none() && metrics.poll_samples.is_empty() {
+        "-".into()
+    } else {
+        format_count(metrics.poll_count)
+    }
+}
+
 #[cfg_attr(test, mutants::skip)] // Glyph thresholds are presentation-only terminal formatting.
 fn timeline(intervals: &[Interval], window: Option<TimeWindow>, width: usize, color: Color) -> Line<'static> {
     Line::from(
@@ -167,7 +175,7 @@ fn draw_workers(
         }
         cells.extend([
             Cell::from(Line::from(worker.observed_tasks.to_string()).right_aligned()),
-            Cell::from(Line::from(format_count(worker.metrics.poll_count)).right_aligned()),
+            Cell::from(Line::from(observed_poll_count(&worker.metrics, worker.task_collection.is_some())).right_aligned()),
             Cell::from(Line::from(fraction(worker.metrics.executing_fraction)).right_aligned()),
             Cell::from(Line::from(duration(worker.metrics.median_poll_nanos)).right_aligned()),
             Cell::from(Line::from(duration(worker.metrics.max_poll_nanos)).right_aligned()),
@@ -216,7 +224,7 @@ fn task_row(task: &RuntimeTaskSummary) -> Row<'static> {
             format!("#{}", task.task_id),
             task.state.clone(),
             task.future_size_bytes.map_or_else(|| "-".into(), |size| size.to_string()),
-            format_count(task.metrics.poll_count),
+            observed_poll_count(&task.metrics, task.metrics_scope.is_some()),
             fraction(task.metrics.executing_fraction),
             duration(task.metrics.median_poll_nanos),
             duration(task.metrics.max_poll_nanos),
@@ -286,14 +294,18 @@ fn draw_worker_activity(
     if area.is_empty() {
         return;
     }
-    let shell = block(" Worker Activity · F1 ", false);
+    let title = worker.task_collection.map_or_else(
+        || " Worker Activity · F1 ".into(),
+        |collection| format!(" Worker Activity · task data {collection:?} · F1 "),
+    );
+    let shell = block(title, false);
     let inner = shell.inner(area);
     frame.render_widget(shell, area);
     let summary_height = inner.height.saturating_sub(5).min(4);
     let [summary, distribution] = Layout::vertical([Constraint::Length(summary_height), Constraint::Min(0)]).areas(inner);
     let mut lines = vec![Line::from(format!(
         "Polls {} · observed {}",
-        worker.metrics.poll_count,
+        observed_poll_count(&worker.metrics, worker.task_collection.is_some()),
         fraction(worker.metrics.executing_fraction)
     ))];
     if summary_height >= 3 {
@@ -332,8 +344,13 @@ fn draw_task_details(
         draw_empty_panel_with_message(frame, area, " Task Statistics ", Some("Select a task."));
         return;
     };
+    let scope = match task.metrics_scope {
+        Some(seismograph_runtime::snapshot::TaskMetricsScope::Uncollected) => " · live timing not collected",
+        Some(seismograph_runtime::snapshot::TaskMetricsScope::PollsSince(_)) => " · profiling window",
+        _ => "",
+    };
     let shell = block(
-        format!(" Task Statistics · #{} · F1 ", task.task_id),
+        format!(" Task Statistics · #{}{scope} · F1 ", task.task_id),
         view.focus == RuntimeFocus::Activity,
     );
     let inner = shell.inner(area);
@@ -407,7 +424,17 @@ fn draw_task_statistics(
         )));
     }
     if summary_height >= 3 {
-        lines.push(Line::from(axis(window)));
+        lines.push(Line::from(task.metrics.source_polls.map_or_else(
+            || axis(window),
+            |source| {
+                format!(
+                    "Task window polls {} · total {} · max {}",
+                    format_count(source.poll_count),
+                    format_runtime_duration(source.poll_duration_nanos),
+                    duration(task.metrics.max_poll_nanos),
+                )
+            },
+        )));
     }
     if summary_height >= 5 {
         lines.extend([poll_line, ready_line]);
@@ -655,6 +682,44 @@ mod tests {
         assert_eq!(
             [None, Some(0.0), Some(0.5), Some(1.0), Some(1.5)].map(fraction),
             ["-", "0.0%", "50.0%", "100.0%", "100.0%"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn live_poll_counts_without_samples_are_unavailable_instead_of_zero() {
+        let empty = ExecutionMetrics::default();
+        let observed = ExecutionMetrics {
+            poll_count: 1,
+            poll_samples: vec![10],
+            ..ExecutionMetrics::default()
+        };
+        assert_eq!(
+            [
+                observed_poll_count(&empty, true),
+                observed_poll_count(&empty, false),
+                observed_poll_count(&observed, true),
+            ],
+            ["-", "0", "1"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn source_window_counts_display_even_without_retained_samples() {
+        let measured = ExecutionMetrics {
+            source_polls: Some(seismograph_runtime::snapshot::TaskMetrics {
+                poll_count: 7,
+                ..Default::default()
+            }),
+            poll_count: 7,
+            ..ExecutionMetrics::default()
+        };
+        let zero = ExecutionMetrics {
+            source_polls: Some(seismograph_runtime::snapshot::TaskMetrics::default()),
+            ..ExecutionMetrics::default()
+        };
+        assert_eq!(
+            [observed_poll_count(&measured, true), observed_poll_count(&zero, true)],
+            ["7", "0"].map(String::from)
         );
     }
 

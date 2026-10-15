@@ -37,11 +37,25 @@ has started executing, the only thing that can terminate it is the task itself, 
 In a steady state, the executor is allocation-free, as all memory used by the executor is
 reused for new tasks when old ones complete.
 
+## Live inspection
+
+[`TaskSet::add_with_inspection`][__link1] attaches an on-demand description to native task
+storage. [`TaskSet::inspect`][__link2] visits bounded descriptions between execution cycles;
+it never polls futures, consumes wake notifications, or maintains a second task list.
+Description construction and any allocations it needs happen only when requested.
+[`TaskSet::set_poll_observer`][__link3] optionally attaches a worker-owned observer.
+Disabled observers are checked once per execution cycle and never describe
+or instrument individual polls. Enabling one also describes tasks that were
+submitted before observation started.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVwz61IbZe5QbF4vbEa1LIsAbVDxflkNvtrIbD-TpXycN1glhZIGCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbBG8P_tOeDA8b5k4s5W4TVJYbeLdxYQxMjCQbZO-1poLOmL9hZIKCakpvaW5IYW5kbGX2gmdUYXNrU2V09g
  [__link0]: https://crates.io/crates/JoinHandle
+ [__link1]: https://docs.rs/TaskSet/latest/TaskSet/?search=add_with_inspection
+ [__link2]: https://docs.rs/TaskSet/latest/TaskSet/?search=inspect
+ [__link3]: https://docs.rs/TaskSet/latest/TaskSet/?search=set_poll_observer

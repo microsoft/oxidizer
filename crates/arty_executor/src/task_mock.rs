@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::Any;
 use std::pin::Pin;
 use std::task;
 
 use mockall::mock;
 
-use crate::{TypeErasedTask, WakeSignal};
+use crate::{TaskState, TypeErasedTask, WakeSignal};
 
 // Mockall is not able to express all methods on the trait (due to generics deficiency), so we mock
 // similar-enough methods that it does know how to mock and simply call these from a manual
@@ -14,6 +15,7 @@ use crate::{TypeErasedTask, WakeSignal};
 mock! {
     #[derive(Debug)]
     pub TypeErasedTask {
+        pub fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
         fn poll(self: Pin<&Self>) -> task::Poll<()>;
         fn is_inert(&self) -> bool;
         fn consume_awakened(&self) -> bool;
@@ -24,6 +26,10 @@ mock! {
 }
 
 impl TypeErasedTask for MockTypeErasedTask {
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        self.inspect(state, visitor);
+    }
+
     fn poll(self: Pin<&Self>) -> task::Poll<()> {
         self.poll()
     }

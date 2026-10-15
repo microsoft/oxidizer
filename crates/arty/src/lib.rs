@@ -119,8 +119,8 @@
 //!   stable task placement and explicit relocation of values.
 //! - [Time](crate::documentation::time) explains worker-driven timers, timeouts,
 //!   and controlled time in tests.
-//! - [Telemetry](crate::documentation::telemetry) explains runtime events
-//!   and links to [`observed`] for further details.
+//! - [Telemetry](crate::documentation::telemetry) explains application events
+//!   through [`observed`] and optional runtime diagnostics through Seismograph.
 //!
 //! The `documentation` module is included only for docs.rs builds and
 //! doc-test collection with all documentation features, including `test-util`;
@@ -128,13 +128,22 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `performables`.
 //!
 //! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`time`** - Enables clocks, timers, and timeouts.
+//! - **`performables`** - Selects the primitive Arc/lock/channel dependency.
+//!   This does not enable event recording; `rt` also selects this feature.
+//! - **`seismograph`** - Compiles the private diagnostic backend and primitive
+//!   hooks without enabling `rt` itself. Disabled by default; runtime diagnostics
+//!   additionally require `rt` and an explicit builder `monitor` setting.
+//!   Recording policies determine which event streams are collected.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
+
+#[cfg(all(test, miri))]
+extern crate self as arty;
 
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.

@@ -115,8 +115,8 @@ The [guides][__link16] explain Arty’s capabilities in more detail:
   stable task placement and explicit relocation of values.
 * [Time][__link21] explains worker-driven timers, timeouts,
   and controlled time in tests.
-* [Telemetry][__link22] explains runtime events
-  and links to [`observed`][__link23] for further details.
+* [Telemetry][__link22] explains application events
+  through [`observed`][__link23] and optional runtime diagnostics through Seismograph.
 
 The `documentation` module is included only for docs.rs builds and
 doc-test collection with all documentation features, including `test-util`;
@@ -124,11 +124,17 @@ it is not part of the public API available to applications.
 
 ## Features
 
-The default feature set enables `rt` and `macros`.
+The default feature set enables `rt`, `macros`, and `performables`.
 
 * **`rt`** - Enables the runtime and task APIs, and implies `time`.
 * **`macros`** - Enables [`main`][__link24] and [`test`][__link25], and implies `rt`.
 * **`time`** - Enables clocks, timers, and timeouts.
+* **`performables`** - Selects the primitive Arc/lock/channel dependency.
+  This does not enable event recording; `rt` also selects this feature.
+* **`seismograph`** - Compiles the private diagnostic backend and primitive
+  hooks without enabling `rt` itself. Disabled by default; runtime diagnostics
+  additionally require `rt` and an explicit builder `monitor` setting.
+  Recording policies determine which event streams are collected.
 * **`test-util`** - Enables testing utilities, including [`ClockControl`][__link26] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
@@ -138,7 +144,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGTvrvo-fV-8bX71dk0Y2kEQby4ruQUuQ1Kgb3ChN6fCifzRhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbUcZjzk15usYbg_xdZfEkTZ8b6wsSor2fIMgbl-VEVTCzOAlhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl

@@ -816,7 +816,7 @@ mod tests {
             let runtime = register_runtime(RuntimeMetadata::new("legacy-initialization", 1));
             let task_id = runtime.handle().task_spawned(TypeDescriptorId::from_raw(1).unwrap(), None);
             let tasks = runtime.handle.control.tasks.lock().unwrap();
-            let task = tasks.iter().find(|task| task.id == task_id).unwrap();
+            let task = tasks.values().find(|task| task.id == task_id).unwrap();
             let data = task.activity.data.lock().unwrap();
             assert_eq!(
                 (

@@ -272,6 +272,9 @@ dependencies = [
  "performables",
  "pin-project",
  "scopeguard",
+ "seismograph",
+ "seismograph_protocol",
+ "seismograph_runtime",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -287,6 +290,7 @@ version = "0.1.3"
 dependencies = [
  "alloc_tracker",
  "criterion",
+ "ctor",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
