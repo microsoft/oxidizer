@@ -119,6 +119,60 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
 }
 
 #[test]
+fn shutdown_between_same_worker_tasks_skips_later_factory() {
+    let runtime = runtime();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (stopper, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let stopper = cx.scheduler().spawn(async |cx| {
+                    RuntimeOperations::from(&cx).request_stop();
+                });
+                let skipped = cx.scheduler().spawn(move |_| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (stopper, skipped)
+            }
+        })
+        .unwrap();
+
+    stopper.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
+fn shutdown_between_remote_tasks_skips_later_factory() {
+    let runtime = runtime();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (stopper, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let stopper = cx.scheduler().spawn_anywhere(cx.clone(), |cx| async move {
+                    RuntimeOperations::from(&cx).request_stop();
+                });
+                let skipped = cx.scheduler().spawn_anywhere(Unaware(invoked), |Unaware(invoked)| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (stopper, skipped)
+            }
+        })
+        .unwrap();
+
+    stopper.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
 fn stop_rejects_remote_and_blocking_factories_immediately() {
     runtime()
         .scheduler()

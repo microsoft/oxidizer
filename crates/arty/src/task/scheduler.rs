@@ -100,6 +100,17 @@ impl Scheduler {
         ACTIVE_WORKER.set(false);
     }
 
+    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient) {
+        CURRENT_WORKER.with_borrow(|current| {
+            let Some(current) = current.as_ref() else {
+                return;
+            };
+            if dispatcher.owns(&current.thread) {
+                current.tasks.begin_shutdown();
+            }
+        });
+    }
+
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
         let worker_index = dispatcher
             .worker_index(current.id())

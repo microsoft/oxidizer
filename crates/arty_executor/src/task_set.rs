@@ -67,6 +67,14 @@ impl TaskSet {
 
         core.add_remote_task(future, options, result_tx)
     }
+
+    /// Begins executor shutdown without borrowing executor-owned polling state.
+    #[doc(hidden)]
+    pub fn begin_shutdown(&self) {
+        if let Some(core) = self.core.upgrade() {
+            core.request_shutdown();
+        }
+    }
 }
 
 #[cfg(test)]

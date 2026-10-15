@@ -248,6 +248,14 @@ impl ExecutorCore {
 
         self.poll_active_tasks(&mut state_exclusive);
 
+        if self.reentrancy_safe.borrow().shutting_down {
+            let aborted_count = {
+                let mut state_reentrant = self.reentrancy_safe.borrow_mut();
+                Self::prepare_task_abort(&self.wake, &mut state_exclusive, &mut state_reentrant)
+            };
+            Self::abort_prepared_tasks(&state_exclusive, aborted_count);
+        }
+
         {
             let state_reentrant = self.reentrancy_safe.borrow();
 
@@ -384,6 +392,12 @@ impl ExecutorCore {
             // dereferencing it. Reentrant logic for registering new tasks cannot touch existing tasks.
             let task = unsafe { task_ref.as_task() };
 
+            if self.reentrancy_safe.borrow().shutting_down {
+                task.abort();
+                state_exclusive.completed.push_back(task_ref);
+                continue;
+            }
+
             match task.poll() {
                 task::Poll::Ready(()) => {
                     // The task has completed and retired its independently pooled wake state, so it
@@ -469,18 +483,24 @@ impl ExecutorCore {
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     pub(crate) fn begin_shutdown(&self) {
+        {
+            let mut state = self.reentrancy_safe.borrow_mut();
+            assert!(
+                !state.shutting_down,
+                "Cannot start shutdown process when it has already been started"
+            );
+            state.shutting_down = true;
+        }
         let mut state_exclusive = self.exclusive.borrow_mut();
         let mut state_reentrant = self.reentrancy_safe.borrow_mut();
-
-        assert!(
-            !state_reentrant.shutting_down,
-            "Cannot start shutdown process when it has already been started"
-        );
-        state_reentrant.shutting_down = true;
 
         let aborted_count = Self::prepare_task_abort(&self.wake, &mut state_exclusive, &mut state_reentrant);
         drop(state_reentrant);
         Self::abort_prepared_tasks(&state_exclusive, aborted_count);
+    }
+
+    pub(crate) fn request_shutdown(&self) {
+        self.reentrancy_safe.borrow_mut().shutting_down = true;
     }
 
     fn prepare_task_abort(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) -> usize {
