@@ -192,7 +192,16 @@ impl WakeSignal {
         if let Some(state) = unsafe { state.as_ref() } {
             state.retire();
         }
-        remove_queued_notification(&self.shared.awakened, &self.queued, self.task_ref);
+        // Lock before testing `queued`: an enqueue may hold the mutex after its active check but
+        // before publishing the flag. Acquiring the same mutex waits for that insertion.
+        let mut queue = self
+            .shared
+            .awakened
+            .lock()
+            .expect("wake queue is never held while invoking user code");
+        if self.queued.swap(false, atomic::Ordering::AcqRel) {
+            queue.retain(|queued_task_ref| *queued_task_ref != self.task_ref);
+        }
     }
 
     pub(crate) fn clear_queued_notification(&self) {
@@ -367,9 +376,19 @@ impl WakerState {
     }
 
     fn retire(&self) {
-        self.retire_with(|_active| {});
+        // Release publishes retirement before queue removal. Acquire wake checks that observe
+        // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
+        // its active check.
+        self.active.store(false, atomic::Ordering::Release);
+        if let Some(shared) = self.shared.upgrade() {
+            let mut queue = shared.awakened.lock().expect("wake queue is never held while invoking user code");
+            if self.queued.swap(false, atomic::Ordering::AcqRel) {
+                queue.retain(|queued_task_ref| *queued_task_ref != self.task_ref);
+            }
+        }
     }
 
+    #[cfg(test)]
     fn retire_with(&self, after_deactivate: impl FnOnce(bool)) {
         // Release publishes retirement before queue removal. Acquire wake checks that observe
         // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
@@ -377,7 +396,10 @@ impl WakerState {
         self.active.store(false, atomic::Ordering::Release);
         after_deactivate(self.active.load(atomic::Ordering::Acquire));
         if let Some(shared) = self.shared.upgrade() {
-            remove_queued_notification(&shared.awakened, &self.queued, self.task_ref);
+            let mut queue = shared.awakened.lock().expect("wake queue is never held while invoking user code");
+            if self.queued.swap(false, atomic::Ordering::AcqRel) {
+                queue.retain(|queued_task_ref| *queued_task_ref != self.task_ref);
+            }
         }
     }
 
@@ -429,6 +451,7 @@ fn enqueue_wake(
     true
 }
 
+#[cfg(test)]
 fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_ref: TaskRef) {
     // Lock before testing `queued`: an enqueue may hold the mutex after its active check but before
     // publishing the flag. Acquiring the same mutex waits for that insertion so retirement can
@@ -859,6 +882,19 @@ mod tests {
         remove_queued_notification(&queue, &queued, fake_task_ref);
 
         assert_eq!(queue.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn tracked_notification_is_removed() {
+        // SAFETY: Tests use this only as an opaque identity.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+        let queue = Arc::new(Mutex::new(VecDeque::from([fake_task_ref])));
+        let queued = AtomicBool::new(true);
+
+        remove_queued_notification(&queue, &queued, fake_task_ref);
+
+        assert!(queue.lock().unwrap().is_empty());
+        assert!(!queued.load(atomic::Ordering::Relaxed));
     }
 
     #[test]
