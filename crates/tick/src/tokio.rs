@@ -76,28 +76,13 @@ impl Clock {
 mod tests {
     use std::time::Duration;
 
-    use thread_aware::Relocator;
-
     use super::*;
 
     #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
     #[::tokio::test]
-    async fn timers_advance() {
-        let clock = Clock::new_tokio();
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[::tokio::test]
-    async fn timers_advance_after_relocate() {
-        let mut clock = Clock::new_tokio();
-        _ = Relocator::between_numa_nodes().relocate(&mut clock);
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[::tokio::test]
-    async fn driver_finishes_when_clock_is_dropped() {
+    async fn hidden_driver_task_finishes_when_clock_is_dropped() {
+        // Unit access is required because the public API intentionally hides the driver task's
+        // join handle; public timing and relocation behavior is covered by integration tests.
         let (clock, handle) = Clock::new_tokio_core();
 
         clock.delay(Duration::from_millis(15)).await;

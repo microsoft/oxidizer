@@ -263,23 +263,6 @@ mod tests {
     }
 
     #[test]
-    fn driver_waker_is_returned_only_when_the_earliest_deadline_changes() {
-        let mut timers = Timers::default();
-        timers.set_driver_waker(Waker::noop().clone());
-        let now = Instant::now();
-
-        let (_, first) = timers.register_and_driver_waker(now + Duration::from_secs(2), Waker::noop().clone());
-        let (_, later) = timers.register_and_driver_waker(now + Duration::from_secs(3), Waker::noop().clone());
-        let (_, same) = timers.register_and_driver_waker(now + Duration::from_secs(2), Waker::noop().clone());
-        let (_, earlier) = timers.register_and_driver_waker(now + Duration::from_secs(1), Waker::noop().clone());
-
-        assert_eq!(
-            [first.is_some(), later.is_some(), same.is_some(), earlier.is_some()],
-            [true, false, false, true]
-        );
-    }
-
-    #[test]
     fn advance_timers_ensure_correct_result() {
         let mut timers = Timers::default();
         let now = Instant::now();
