@@ -3,12 +3,14 @@
 
 #![expect(missing_docs, reason = "Test code")]
 
+use std::panic::{RefUnwindSafe, UnwindSafe};
+
 use fakeable_test::my_service_unused_fake::MyService;
 use fakeable_test::test_only_service::Service;
 use futures::executor::block_on;
 use static_assertions::assert_impl_all;
 
-assert_impl_all!(Service: Send, Sync, Clone);
+assert_impl_all!(Service: Send, Sync, Clone, UnwindSafe, RefUnwindSafe);
 
 #[test]
 fn test_real_implementation() {

@@ -26,6 +26,7 @@ pub(super) struct FakeableArgs {
 
 impl Parse for FakeableArgs {
     fn parse(input: ParseStream) -> Result<Self> {
+        // The outer option records presence; the inner option selects a feature or unit tests only.
         let mut fakes_feature = None;
         let mut fake_impl = None;
         let mut fake_constructor = None;

@@ -30,6 +30,8 @@ pub mod fakes {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    /// Shared state exercises clone and `Self` forwarding. Deliberately not `Send` or `Sync`,
+    /// so the dependency-build assertions detect fake storage leaking into the real-only wrapper.
     #[derive(Clone, Debug)]
     pub struct FakeService {
         pub value: Rc<Cell<u32>>,
@@ -52,10 +54,16 @@ pub mod fakes {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::rc::Rc;
+
+    use static_assertions::assert_not_impl_any;
 
     use super::Service;
     use super::fakes::FakeService;
+
+    // Shared interior mutability must stay visible in the fake-enabled unwind contract.
+    assert_not_impl_any!(Service: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn test_only_fake_preserves_shared_state_and_self_returns() {

@@ -12,11 +12,6 @@ use std::process::{Command, Output};
 #[cfg_attr(test, fakeable::fakeable(fake_impl = fakes::MockBackend, fakes_feature = false))]
 pub(crate) struct Backend;
 
-#[derive(Debug)]
-pub(crate) struct Request {
-    value: u32,
-}
-
 #[cfg_attr(
     test,
     fakeable::fakeable(generate_mockall_fake = true, fakes_feature = false, mockall_fake_visibility = "pub(crate)")
@@ -47,6 +42,11 @@ impl Backend {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct Request {
+    value: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::Sequence;
@@ -54,27 +54,6 @@ mod tests {
 
     use super::fakes::MockBackend;
     use super::{Backend, Command, Path, Request, io};
-
-    mod local {
-        #[fakeable::fakeable(fake_impl = MockLocal, fakes_feature = false)]
-        pub(super) struct Local;
-
-        #[fakeable::fakeable(
-            generate_mockall_fake = true,
-            mockall_fake_module = ".",
-            fakes_feature = false,
-            mockall_fake_visibility = "pub(super)"
-        )]
-        #[expect(
-            clippy::unused_self,
-            reason = "Verifies that explicit impl lint expectations still take precedence"
-        )]
-        impl Local {
-            pub(crate) fn value(&self) -> u32 {
-                42
-            }
-        }
-    }
 
     #[test]
     fn crate_private_adapter_supports_ordered_calls_and_argument_matching() {
@@ -124,5 +103,26 @@ mod tests {
         let mut mock = MockBackend::new();
         mock.expect_value().withf(|request| request.value == 3).times(1).return_const(7u32);
         assert_eq!(Backend::fake(mock).value(&Request { value: 3 }), 7);
+    }
+
+    mod local {
+        #[fakeable::fakeable(fake_impl = MockLocal, fakes_feature = false)]
+        pub(super) struct Local;
+
+        #[fakeable::fakeable(
+            generate_mockall_fake = true,
+            mockall_fake_module = ".",
+            fakes_feature = false,
+            mockall_fake_visibility = "pub(super)"
+        )]
+        #[expect(
+            clippy::unused_self,
+            reason = "Verifies that explicit impl lint expectations still take precedence"
+        )]
+        impl Local {
+            pub(crate) fn value(&self) -> u32 {
+                42
+            }
+        }
     }
 }
