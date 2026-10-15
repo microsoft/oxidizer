@@ -80,12 +80,6 @@ impl ThreadAware for IoRuntime {
     }
 }
 
-impl Default for IoRuntime {
-    fn default() -> Self {
-        Self::new(Sink::noop())
-    }
-}
-
 impl IoRuntime {
     /// Creates an empty runtime-wide I/O context registry.
     #[must_use]

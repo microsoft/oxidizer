@@ -9,7 +9,7 @@ use arty_io_host::{DriverHost, IoRuntime};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::{ThreadAware, ThreadBuilder};
 
-assert_impl_all!(IoRuntime: Clone, std::fmt::Debug, Default, Eq, Send, Sync, ThreadAware);
+assert_impl_all!(IoRuntime: Clone, std::fmt::Debug, Eq, Send, Sync, ThreadAware);
 assert_not_impl_any!(DriverHost: Send, Sync);
 
 #[test]
