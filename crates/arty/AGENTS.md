@@ -29,18 +29,17 @@
 - Do not add recovery guarantees for panicking destructors, custom wakers,
   notification hooks, telemetry processors, poisoned state, or failed runtime
   invariants merely to make a test pass.
-- Treat no-panic requirements as supported-behavior contracts, not unsafe
-  preconditions. Unsupported panics may abort, leak, or stop progress, but must
-  not cause undefined behavior.
+- Unsupported panics may abort, leak, or stop progress, but must not cause
+  undefined behavior.
 - Do not add dedicated recovery for failed runtime invariants, poisoned state,
   or unsafe-contract violations. An existing outer task boundary may still
   report such a panic through `JoinError`.
-- Before adding `catch_unwind`, identify a realistic safe-Rust path, the sound
-  state that remains after the panic, and the useful behavior visible to the
-  caller.
+- Add `catch_unwind` only for a realistic safe-Rust path with a sound
+  post-panic state and useful caller-visible behavior. If any of these are
+  absent, let the panic propagate or abort naturally.
 - Test public panic guarantees and catches required for storage safety. Do not
-  add production containment only because a test can construct a panicking
-  `Drop` or `Waker`.
+  add a `catch_unwind` only because a test can construct a panicking `Drop` or
+  `Waker`.
 
 ## Generated documentation
 
