@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "fakeable_impl",
  "mockall",
@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable_impl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "insta",
  "proc-macro2",
