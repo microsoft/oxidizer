@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::{RemoteJoinHandle, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -189,7 +189,7 @@ impl Scheduler {
         R: Send + 'static,
     {
         if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown();
+            return JoinHandle::shutdown(self.dispatcher.remote_results());
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -214,7 +214,7 @@ impl Scheduler {
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
-            let (result_tx, result_rx) = RemoteJoinHandle::channel();
+            let (result_tx, result_rx) = self.dispatcher.remote_results().channel();
             let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
             let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);

@@ -30,8 +30,8 @@ with this crate.
 ## Design tenets
 
 The executor is single-threaded. If you want to execute tasks on multiple threads, you need to
-run multiple executors on different threads. If you wish to observe task results across
-threads, you need to create a mechanism to ship the results across thread boundaries.
+run multiple executors on different threads. The [`remote`][__link1] module provides pooled channels for
+the common runtime-integration scenario of returning task results to a different thread.
 
 Tasks cannot be taken out of the executor - the only way for them to end is to either end
 naturally (with the future returning `Poll::Ready`) or for the executor to be shut down. Not
@@ -44,7 +44,7 @@ reused for new tasks when old ones complete.
 Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
 remains callable but becomes an inert no-op and cannot delay executor shutdown.
 
-Join handles may outlive the executor and report shutdown cancellation through [`JoinError`][__link1].
+Join handles may outlive the executor and report shutdown cancellation through [`JoinError`][__link2].
 A panic in a directly registered executor task remains fail-fast.
 
 
@@ -53,6 +53,7 @@ A panic in a directly registered executor task remains fail-fast.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbV0LWgfT-4K0byUpkuWbmF1AbqlaRaQFO-_IbOA-PqpdofgphZIGCaUpvaW5FcnJvcvY
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2d-tu4PqXUsbYuzt22_JPvsb_N4PPHTp9a8brx0b6bmSDYFhZIKCaUpvaW5FcnJvcvaCbWFydHlfZXhlY3V0b3JlMC4xLjM
  [__link0]: https://docs.rs/arty
- [__link1]: https://crates.io/crates/JoinError
+ [__link1]: https://docs.rs/arty_executor/0.1.3/arty_executor/remote/index.html
+ [__link2]: https://crates.io/crates/JoinError

@@ -22,8 +22,8 @@
 //! # Design tenets
 //!
 //! The executor is single-threaded. If you want to execute tasks on multiple threads, you need to
-//! run multiple executors on different threads. If you wish to observe task results across
-//! threads, you need to create a mechanism to ship the results across thread boundaries.
+//! run multiple executors on different threads. The [`remote`] module provides pooled channels for
+//! the common runtime-integration scenario of returning task results to a different thread.
 //!
 //! Tasks cannot be taken out of the executor - the only way for them to end is to either end
 //! naturally (with the future returning `Poll::Ready`) or for the executor to be shut down. Not
@@ -47,6 +47,7 @@ mod executor_core;
 mod join_handle;
 mod panic;
 mod ptr_hash;
+pub mod remote;
 mod task;
 mod task_options;
 mod task_ref;

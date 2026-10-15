@@ -14,10 +14,10 @@ use observed::Sink;
 use plurality::MultiPool;
 use tick::SimpleClock;
 
+use crate::remote::Sender as RemoteSender;
 use crate::wake::WakeShared;
 use crate::{
-    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, RemoteTaskSender, Task, TaskOptions, TaskRef,
-    TypeErasedTask, WakeSignal,
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinEventLake, JoinHandle, Task, TaskOptions, TaskRef, TypeErasedTask, WakeSignal,
 };
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
@@ -162,7 +162,7 @@ impl ExecutorCore {
         })
     }
 
-    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
+    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,

@@ -12,7 +12,8 @@ use std::pin::{Pin, pin};
 use std::task::{Context, Poll, Waker};
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{CycleOutcome, Executor, JoinError, RemoteJoinHandle, TaskOptions, TaskSet};
+use arty_executor::remote::Pool as RemotePool;
+use arty_executor::{CycleOutcome, Executor, JoinError, TaskOptions, TaskSet};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
@@ -24,9 +25,9 @@ const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 1;
 #[cfg(not(debug_assertions))]
 const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 0;
 #[cfg(debug_assertions)]
-const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 2;
-#[cfg(not(debug_assertions))]
 const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 1;
+#[cfg(not(debug_assertions))]
+const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
 fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
     let mut handle = pin!(tasks.add(async {}, TaskOptions::default()));
@@ -34,8 +35,8 @@ fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), 
     handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
 }
 
-fn spawn_remote_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
-    let (result_tx, mut handle) = RemoteJoinHandle::channel();
+fn spawn_remote_complete_once(executor: &Executor, tasks: &TaskSet, result_pool: &RemotePool) -> Poll<Result<(), JoinError>> {
+    let (result_tx, mut handle) = result_pool.channel();
     drop(tasks.add_with_remote_result(async {}, TaskOptions::default(), result_tx));
     let _ = executor.execute_cycle();
     Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()))
@@ -90,12 +91,13 @@ fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
 }
 
 #[test]
-fn remote_spawn_allocates_only_its_cross_thread_result_channel() {
+fn remote_spawn_reuses_cross_thread_result_channel_storage() {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
+    let result_pool = RemotePool::new();
 
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_remote_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
+        assert_eq!(spawn_remote_complete_once(&executor, &tasks, &result_pool), Poll::Ready(Ok(())));
     }
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -104,7 +106,7 @@ fn remote_spawn_allocates_only_its_cross_thread_result_channel() {
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_remote_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
+            assert_eq!(spawn_remote_complete_once(&executor, &tasks, &result_pool), Poll::Ready(Ok(())));
         }
     }
 
@@ -112,12 +114,12 @@ fn remote_spawn_allocates_only_its_cross_thread_result_channel() {
     assert_eq!(
         allocations,
         EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION * MEASURED_OPERATIONS as u64,
-        "remote registration must allocate only its boxed cross-thread result channel and debug bookkeeping"
+        "warmed remote registration must allocate only debug bookkeeping and nothing in release builds"
     );
-    assert_ne!(
-        bytes, 0,
-        "the boxed cross-thread result channel must be visible to the allocation tracker"
-    );
+    #[cfg(not(debug_assertions))]
+    assert_eq!(bytes, 0, "warmed remote result channels must reuse pooled storage");
+    #[cfg(debug_assertions)]
+    assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
 
     executor.begin_shutdown();
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);

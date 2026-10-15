@@ -3,7 +3,8 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinEventLake, JoinHandle, RemoteTaskSender, TaskOptions};
+use crate::remote::Sender as RemoteSender;
+use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -54,8 +55,9 @@ impl TaskSet {
     /// Arty uses this integration boundary to create a non-[`Send`] future on its destination
     /// worker while returning a `Send` result handle to the submitting thread. Keeping the
     /// concrete future at this call site lets the executor store it inline instead of behind a
-    /// `Pin<Box<dyn Future>>`.
-    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteTaskSender<R>) -> JoinHandle<R>
+    /// `Pin<Box<dyn Future>>`. Obtain `result_tx` from
+    /// [`remote::Pool::channel`](crate::remote::Pool::channel).
+    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,

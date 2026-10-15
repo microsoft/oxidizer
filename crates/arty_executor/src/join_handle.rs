@@ -3,28 +3,13 @@
 
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::task;
 
-use events_once::{BoxedReceiver, BoxedSender, LocalEventLake, PooledLocalReceiver, PooledLocalSender};
+use events_once::{LocalEventLake, PooledLocalReceiver, PooledLocalSender};
 
-use crate::{TaskPanicPayload, discard_task_panic_payload};
-
-enum TaskResult<R> {
-    Completed(R),
-    Panicked(TaskPanicPayload),
-}
-
-impl<R> Debug for TaskResult<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Completed(_) => f.write_str("Completed(..)"),
-            Self::Panicked(_) => f.write_str("Panicked(..)"),
-        }
-    }
-}
+use crate::TaskPanicPayload;
 
 /// A task failed to return its result.
 pub struct JoinError {
@@ -43,7 +28,7 @@ impl Eq for JoinError {}
 
 impl JoinError {
     #[must_use]
-    const fn shutdown() -> Self {
+    pub(crate) const fn shutdown() -> Self {
         Self { panic: None }
     }
 
@@ -153,80 +138,6 @@ impl<R: 'static> Future for JoinHandle<R> {
         Pin::new(&mut self.get_mut().rx)
             .poll(cx)
             .map(|result| result.map_err(|_disconnected| JoinError::shutdown()))
-    }
-}
-
-/// A cross-thread handle for receiving a task result.
-#[derive(Debug)]
-pub struct RemoteJoinHandle<R: Send + 'static> {
-    rx: BoxedReceiver<TaskResult<R>>,
-}
-
-impl<R: Send + 'static> RemoteJoinHandle<R> {
-    /// Creates a result sender and its matching join handle.
-    #[must_use]
-    pub fn channel() -> (RemoteTaskSender<R>, Self) {
-        let (tx, rx) = events_once::Event::boxed();
-        (RemoteTaskSender { tx: Some(tx) }, Self { rx })
-    }
-}
-
-impl<R: Send + 'static> Future for RemoteJoinHandle<R> {
-    type Output = Result<R, JoinError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().rx).poll(cx).map(|result| match result {
-            Ok(TaskResult::Completed(value)) => Ok(value),
-            Ok(TaskResult::Panicked(panic)) => Err(JoinError::panicked(panic)),
-            Err(_) => Err(JoinError::shutdown()),
-        })
-    }
-}
-
-/// The sending endpoint for a [`RemoteJoinHandle`].
-pub struct RemoteTaskSender<R: Send + 'static> {
-    tx: Option<BoxedSender<TaskResult<R>>>,
-}
-
-impl<R: Send + 'static> Debug for RemoteTaskSender<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RemoteTaskSender").finish_non_exhaustive()
-    }
-}
-
-impl<R: Send + 'static> RemoteTaskSender<R> {
-    fn send(mut self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
-        let tx = self.tx.take().expect("a remote task sender publishes at most one result");
-        catch_unwind(AssertUnwindSafe(|| tx.send(result)))
-    }
-
-    /// Sends a successfully completed result.
-    ///
-    /// # Errors
-    ///
-    /// Returns a panic payload if notifying the result receiver panics.
-    pub fn completed(self, result: R) -> Result<(), TaskPanicPayload> {
-        self.send(TaskResult::Completed(result))
-    }
-
-    /// Sends a captured task panic.
-    ///
-    /// # Errors
-    ///
-    /// Returns a panic payload if notifying the result receiver panics.
-    pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
-        self.send(TaskResult::Panicked(panic))
-    }
-}
-
-impl<R: Send + 'static> Drop for RemoteTaskSender<R> {
-    fn drop(&mut self) {
-        let Some(tx) = self.tx.take() else {
-            return;
-        };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(tx))) {
-            discard_task_panic_payload(panic);
-        }
     }
 }
 

@@ -5,6 +5,7 @@ use std::any::type_name;
 use std::fmt::Debug;
 use std::thread::ThreadId;
 
+use arty_executor::remote::Pool as RemotePool;
 use performables::arc::Arc;
 
 use crate::runtime::Error;
@@ -46,6 +47,10 @@ impl DispatcherClient {
 
     pub(crate) fn shutdown_signal(&self) -> Arc<std::sync::atomic::AtomicBool> {
         self.core.shutdown_signal()
+    }
+
+    pub(crate) fn remote_results(&self) -> &RemotePool {
+        self.core.remote_results()
     }
 
     pub(crate) fn is_current_blocking_task(&self) -> bool {

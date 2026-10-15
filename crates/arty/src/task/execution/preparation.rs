@@ -6,7 +6,8 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use arty_executor::{RemoteJoinHandle, RemoteTaskSender, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
+use arty_executor::remote::{Pool as RemotePool, Sender as RemoteSender};
+use arty_executor::{TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
 use performables::arc::Arc;
 use pin_project::pin_project;
@@ -108,6 +109,7 @@ fn discard_panicking_drop<T>(value: T) {
 pub(crate) type BoxedRemoteFutureFactory = Box<dyn FnOnce(Builtins, &TaskSet) + Send + 'static>;
 
 pub(crate) fn prepare_remote<FF, F, R>(
+    result_pool: &RemotePool,
     future_factory: FF,
     parent_task_enrichment: Transfer,
     placement: TaskPlacement,
@@ -118,7 +120,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = RemoteJoinHandle::channel();
+    let (result_tx, result_rx) = result_pool.channel();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
     let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
@@ -133,12 +135,12 @@ where
     (future_factory, JoinHandle::new(result_rx))
 }
 
-pub(crate) fn prepare_blocking<F, R>(body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
+pub(crate) fn prepare_blocking<F, R>(result_pool: &RemotePool, body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let (result_tx, result_rx) = RemoteJoinHandle::channel();
+    let (result_tx, result_rx) = result_pool.channel();
     let task = BlockingTask {
         pending: Some((body, result_tx)),
     };
@@ -146,7 +148,7 @@ where
 }
 
 struct BlockingTask<F, R: Send + 'static> {
-    pending: Option<(F, RemoteTaskSender<R>)>,
+    pending: Option<(F, RemoteSender<R>)>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -203,7 +205,9 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
         let sink = Sink::noop();
+        let result_pool = RemotePool::new();
         let (factory, handle) = prepare_remote(
+            &result_pool,
             move |_| {
                 // This test polls and observes the factory on one thread; no synchronization is needed.
                 factory_invoked.store(true, Ordering::Relaxed);
@@ -244,7 +248,8 @@ mod tests {
 
     #[test]
     fn blocking_task_delivers_its_result() {
-        let (task, handle) = prepare_blocking(|| 42);
+        let result_pool = RemotePool::new();
+        let (task, handle) = prepare_blocking(&result_pool, || 42);
         task();
 
         assert_eq!(block_on(handle).unwrap(), 42);
@@ -252,7 +257,8 @@ mod tests {
 
     #[test]
     fn blocking_panic_is_delivered_to_joiner() {
-        let (task, handle) = prepare_blocking(|| panic!("blocking task"));
+        let result_pool = RemotePool::new();
+        let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"));
         task();
 
         assert!(block_on(handle).unwrap_err().is_panic());
@@ -264,7 +270,9 @@ mod tests {
         struct Payload(u32);
 
         let sink = Sink::noop();
+        let result_pool = RemotePool::new();
         let (factory, handle) = prepare_remote(
+            &result_pool,
             |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
             sink.transfer_context(),
             TaskPlacement::Any,
@@ -279,7 +287,8 @@ mod tests {
 
     #[test]
     fn discarded_preparation_reports_shutdown() {
-        let (task, handle) = prepare_blocking(|| 42);
+        let result_pool = RemotePool::new();
+        let (task, handle) = prepare_blocking(&result_pool, || 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
@@ -301,14 +310,16 @@ mod tests {
         }
 
         let capture = PanicOnDrop;
-        let (task, handle) = prepare_blocking(move || drop(capture));
+        let result_pool = RemotePool::new();
+        let (task, handle) = prepare_blocking(&result_pool, move || drop(capture));
         catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
         assert!(block_on(handle).unwrap_err().is_shutdown());
     }
 
     #[test]
     fn discarded_blocking_task_contains_join_waker_panic() {
-        let (task, handle) = prepare_blocking(|| 42);
+        let result_pool = RemotePool::new();
+        let (task, handle) = prepare_blocking(&result_pool, || 42);
         let mut handle = pin!(handle);
         let waker = Waker::from(Arc::new(PanicWake));
         assert!(handle.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());

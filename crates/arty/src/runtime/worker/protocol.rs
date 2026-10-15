@@ -97,7 +97,9 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let sink = Sink::noop();
+        let result_pool = arty_executor::remote::Pool::new();
         let (factory, join) = prepare_remote(
+            &result_pool,
             |_| async { 42 },
             sink.transfer_context(),
             TaskPlacement::Any,

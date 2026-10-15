@@ -16,9 +16,10 @@ use std::task;
 use events_once::PooledLocalSender;
 use observed::Sink;
 
+use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{RemoteTaskSender, TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
+use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -93,12 +94,12 @@ where
     }
 }
 
-impl<F, R> Task<F, R, RemoteTaskSender<R>>
+impl<F, R> Task<F, R, RemoteSender<R>>
 where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteTaskSender<R>) -> Self {
+    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteSender<R>) -> Self {
         Self::new_with_target(future, remote_result_tx, options, sink)
     }
 }
@@ -435,7 +436,7 @@ impl<R: 'static> TaskResultTarget<R> for PooledLocalSender<R> {
     }
 }
 
-impl<R: Send + 'static> TaskResultTarget<R> for RemoteTaskSender<R> {
+impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
     fn is_remote(&self) -> bool {
         true
     }
@@ -576,7 +577,7 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::RemoteJoinHandle;
+    use crate::remote::Pool as RemotePool;
     use crate::testing::TestSubjectFuture;
 
     struct PinnedDropFuture {
@@ -801,7 +802,7 @@ mod tests {
 
     #[test]
     fn observed_remote_panic_reports_aggregate_poll_count() {
-        let (result_tx, mut result_rx) = RemoteJoinHandle::<u64>::channel();
+        let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let polls = Rc::new(Cell::new(0));
         let task = pin!(Task::new_remote(
@@ -874,7 +875,7 @@ mod tests {
 
     #[test]
     fn cancellation_join_notification_panic_is_not_reported_as_a_task_panic() {
-        let (result_tx, mut result_rx) = RemoteJoinHandle::<u64>::channel();
+        let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let waker = Waker::from(Arc::new(PanickingJoinWake));
         assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());

@@ -6,6 +6,7 @@ use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::TaskPlacement;
+use arty_executor::remote::Pool as RemotePool;
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
@@ -72,6 +73,8 @@ pub(crate) struct DispatcherCore {
     /// Sink for runtime telemetry. Enrichment context is captured from it at spawn time and
     /// restored on every poll of spawned futures.
     sink: observed::Sink,
+
+    remote_results: RemotePool,
 }
 
 impl DispatcherCore {
@@ -109,6 +112,7 @@ impl DispatcherCore {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             sink,
+            remote_results: RemotePool::new(),
         }
     }
 
@@ -174,6 +178,10 @@ impl DispatcherCore {
         Arc::clone(&self.shutdown_started)
     }
 
+    pub(crate) fn remote_results(&self) -> &RemotePool {
+        &self.remote_results
+    }
+
     pub(crate) fn is_current_blocking_task(&self) -> bool {
         self.worker_endpoints
             .iter()
@@ -211,7 +219,7 @@ impl DispatcherCore {
     {
         if self.is_shutting_down() {
             drop(future_factory);
-            return JoinHandle::shutdown();
+            return JoinHandle::shutdown(&self.remote_results);
         }
         let endpoint = self
             .worker_endpoints
@@ -220,6 +228,7 @@ impl DispatcherCore {
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
+            &self.remote_results,
             future_factory,
             parent_task_enrichment,
             placement,

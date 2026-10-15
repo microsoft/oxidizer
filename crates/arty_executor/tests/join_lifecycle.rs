@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, RemoteJoinHandle, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::remote::Pool as RemotePool;
+use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskOptions, TaskPlacement, TaskSet};
 use observed::Sink;
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
@@ -214,7 +215,7 @@ impl Wake for PanickingRemoteJoinWake {
 fn disconnected_remote_submission_contains_panicking_join_notification() {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
-    let (result_tx, mut remote_join) = RemoteJoinHandle::<usize>::channel();
+    let (result_tx, mut remote_join) = RemotePool::new().channel::<usize>();
     let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
     let waker = Waker::from(Arc::clone(&wake));
     assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());

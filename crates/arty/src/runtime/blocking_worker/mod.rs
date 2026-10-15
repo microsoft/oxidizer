@@ -9,6 +9,7 @@ use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use arty_executor::remote::Pool as RemotePool;
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
@@ -51,6 +52,7 @@ pub(crate) struct BlockingWorker {
     is_shutting_down: Arc<AtomicBool>,
     runtime_shutdown: Arc<AtomicBool>,
     sink: Sink,
+    remote_results: RemotePool,
 }
 
 impl BlockingWorker {
@@ -65,6 +67,7 @@ impl BlockingWorker {
             is_shutting_down: Arc::new(AtomicBool::new(false)),
             runtime_shutdown,
             sink,
+            remote_results: RemotePool::new(),
         })
     }
 
@@ -91,7 +94,7 @@ impl BlockingWorker {
         let pool = self.pool.clone();
         let shutdown = Arc::clone(&self.is_shutting_down);
         let runtime_shutdown = Arc::clone(&self.runtime_shutdown);
-        let (task, join_handle) = prepare_blocking(body);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body);
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);

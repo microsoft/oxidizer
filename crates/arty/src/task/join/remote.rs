@@ -4,7 +4,7 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use arty_executor::RemoteJoinHandle;
+use arty_executor::remote::{JoinHandle as RemoteJoinHandle, Pool as RemotePool};
 use performables::arc::Arc;
 use pin_project::pin_project;
 
@@ -65,8 +65,8 @@ where
         }
     }
 
-    pub(crate) fn shutdown() -> Self {
-        let (sender, inner) = RemoteJoinHandle::channel();
+    pub(crate) fn shutdown(pool: &RemotePool) -> Self {
+        let (sender, inner) = pool.channel();
         drop(sender);
         Self::new(inner)
     }
