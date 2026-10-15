@@ -37,14 +37,11 @@ has started executing, the only thing that can terminate it is the task itself, 
 In a steady state, the executor is allocation-free, as all memory used by the executor is
 reused for new tasks when old ones complete.
 
-Cloned task wakers retain independently pooled wake metadata. Completing or canceling a task
-retires that metadata before releasing task storage, so an escaped waker remains callable but
-becomes an inert no-op and cannot delay executor shutdown.
+Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
+remains callable but becomes an inert no-op and cannot delay executor shutdown.
 
-Local join handles similarly retain their result storage independently. They may outlive the
-executor and report shutdown cancellation through [`JoinError`][__link1]. A panic in a plain executor
-task remains fail-fast. The doc-hidden remote integration used by Arty captures task panics and
-transports them through its remote join handle.
+Join handles may outlive the executor and report shutdown cancellation through [`JoinError`][__link1].
+A panic in a directly registered executor task remains fail-fast.
 
 
 <hr/>
@@ -52,6 +49,6 @@ transports them through its remote join handle.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRWiZYPGrKFIbj5V1Ovu7zDkb85v9tHSRtHcb_4IguF0W8_ZhZIKCaUpvaW5FcnJvcvaCakpvaW5IYW5kbGX2
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbBfXzINc-MZAbDjUE83-SHrgbIzk9IpmzO-8buEaC75mo2jJhZIKCaUpvaW5FcnJvcvaCakpvaW5IYW5kbGX2
  [__link0]: https://crates.io/crates/JoinHandle
  [__link1]: https://crates.io/crates/JoinError

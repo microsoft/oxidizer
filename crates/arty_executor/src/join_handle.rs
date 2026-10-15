@@ -28,6 +28,8 @@ impl<R> Debug for TaskResult<R> {
 
 /// A task failed to return its result.
 pub struct JoinError {
+    // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
+    // thread-safe error while preserving the original payload for `into_panic`.
     panic: Option<Mutex<TaskPanicPayload>>,
 }
 
@@ -66,8 +68,11 @@ impl JoinError {
     /// Returns the captured panic payload, or `None` if this error represents shutdown.
     #[must_use]
     pub fn into_panic(self) -> Option<TaskPanicPayload> {
-        self.panic
-            .map(|panic| panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
+        self.panic.map(|panic| {
+            // Consuming the mutex gives us sole ownership. Poison records a previous unwind; it
+            // does not invalidate the payload, so returning that payload remains correct.
+            panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
+        })
     }
 }
 

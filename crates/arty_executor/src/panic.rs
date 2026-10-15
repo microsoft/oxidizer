@@ -7,7 +7,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 /// A panic captured while executing or disposing an executor task.
 pub type TaskPanicPayload = Box<dyn Any + Send + 'static>;
 
-/// Disposes a captured task panic without allowing a panicking payload destructor to unwind.
+/// Disposes a captured task panic without allowing its destructor to start another unwind.
+///
+/// Cancellation and result delivery sometimes need to discard a panic payload. Payload destructors
+/// are user code and may themselves panic, so disposal catches replacement payloads and aborts only
+/// if they keep panicking beyond a bounded number of attempts.
 #[doc(hidden)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
 pub fn discard_task_panic_payload(mut panic: TaskPanicPayload) {

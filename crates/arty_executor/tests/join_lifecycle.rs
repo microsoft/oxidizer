@@ -106,12 +106,14 @@ fn direct_executor_drop_cancels_tasks_safely() {
 }
 
 #[test]
-fn request_only_shutdown_then_drop_cancels_tasks_safely() {
+fn task_set_shutdown_cancels_tasks_without_executor_drop() {
     let executor = Executor::builder().build();
     let tasks = executor.tasks();
     let mut handle = tasks.add(pending::<()>(), TaskOptions::default());
 
     tasks.begin_shutdown();
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+    assert!(!executor.has_tasks());
     drop(executor);
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));

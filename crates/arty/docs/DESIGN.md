@@ -84,21 +84,17 @@ Await required work before requesting shutdown or returning from an
 [shutdown guide](../src/documentation/shutdown.rs) and
 [critical-task guidance](CRITICAL_TASKS.md).
 
-### Retained task wakers
+### Cloned task wakers
 
-Cloned task wakers are supported independent handles. While their task is
-pending, they may cross threads and route wake requests to the task's owning
-worker without changing task affinity. Completion and cancellation retire the
-wake state before task storage is released. Calls through retained wakers then
-become inert no-ops, including after runtime shutdown.
+A task remains assigned to one worker. Calling a clone of its waker from another
+thread asks that worker to poll the task again; it never moves or polls the task
+on the calling thread.
 
-The wake state is stored in reusable `plurality::Pool` slots and uses counted
-ownership for independent handle lifetimes.
-This avoids both alternatives considered during stabilization: retaining pinned
-task storage until every escaped waker is dropped, which can block shutdown, and
-allocating a fresh `std::sync::Arc` for every task wake state, which adds an
-allocator call to task registration. The pooled state adds atomic reference
-count operations in exchange for deterministic task retirement and shutdown.
+A cloned waker may outlive both its task and the runtime. Completion and
+cancellation disconnect every clone from the task before the task's resources
+are reclaimed. Later calls are safe no-ops, and keeping a clone does not delay
+shutdown. This lifetime separation is both a memory-safety invariant and part of
+the runtime's shutdown contract.
 
 ## Failure handling
 

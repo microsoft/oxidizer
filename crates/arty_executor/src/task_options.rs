@@ -6,21 +6,26 @@ use observed::context::Transfer;
 
 use crate::telemetry;
 
-/// Describes how the runtime selected the worker for a task.
+/// Describes how the submitter selected this executor for a task.
+///
+/// This value is lifecycle telemetry metadata. It does not change how the executor schedules or
+/// polls the task.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TaskPlacement {
-    /// The runtime may select any worker.
+    /// The submitter did not require a specific worker.
     #[default]
     Any,
 
-    /// The task targets the scheduler's associated worker.
+    /// The submitter targeted its current worker.
     SameThread,
 }
 
-/// Optional context for a task registered with [`TaskSet`](crate::TaskSet).
+/// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
 ///
-/// The default options do not apply any enrichment. Runtime integrations can capture the current
-/// observed context and attach it to a task with [`observed`](Self::observed).
+/// The executor applies captured observed context while polling, cleaning up, and emitting
+/// lifecycle events so all task activity keeps the submission dimensions. Placement records how
+/// the caller chose the executor; it does not select a worker. The default options add no context
+/// and report [`TaskPlacement::Any`].
 #[derive(Debug, Default)]
 pub struct TaskOptions {
     context: Option<Transfer>,
@@ -45,14 +50,13 @@ impl TaskCreatedReporter {
 }
 
 impl TaskOptions {
-    /// Creates options for a task with the specified worker-placement route.
+    /// Creates options with the specified placement metadata.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
         Self { context: None, placement }
     }
 
-    /// Creates options that apply the captured observed `context` while the task is polled and
-    /// while its lifecycle events are emitted.
+    /// Creates options that apply the captured observed `context` throughout the task lifecycle.
     #[must_use]
     pub fn observed(context: Transfer, placement: TaskPlacement) -> Self {
         Self {

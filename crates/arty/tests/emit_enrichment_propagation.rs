@@ -10,12 +10,16 @@ testing_aids::init_tracing!();
 
 mod support;
 
-use arty::runtime::Runtime;
+use std::future::pending;
+use std::sync::mpsc;
+
+use arty::runtime::{Runtime, RuntimeOperations};
 #[cfg(feature = "macros")]
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
-use observed::{Enrichment, Sink};
+use observed::{Enrichment, Sink, emit, event};
 use support::JoinHandleExt as _;
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 #[derive(Enrichment)]
@@ -76,6 +80,18 @@ impl data_privacy::RedactedDisplay for UnclassifiedI64 {
         } else {
             write!(f, "{}", self.0)
         }
+    }
+}
+
+#[event("test.task.drop")]
+#[info]
+struct TaskDrop;
+
+struct EmitTaskDrop(Sink);
+
+impl Drop for EmitTaskDrop {
+    fn drop(&mut self) {
+        emit!(self.0, TaskDrop);
     }
 }
 
@@ -216,4 +232,41 @@ fn task_outcomes_keep_the_submission_context() {
             .count();
         assert_eq!(correlated, 1);
     }
+}
+
+#[test]
+fn cancelled_task_destructor_keeps_the_submission_context() {
+    let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
+    let runtime = runtime_with_emitter(&sink);
+    let (started, ready) = mpsc::channel();
+    let task = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((sink.clone(), started)), |cx, Unaware((sink, started))| async move {
+            let task_sink = sink.clone();
+            async move {
+                cx.scheduler().spawn(async move |_| {
+                    let _drop_event = EmitTaskDrop(task_sink);
+                    started.send(()).unwrap();
+                    pending::<()>().await;
+                })
+            }
+            .enrich(&sink, RequestCtx::new(42))
+            .await
+        })
+        .join()
+        .unwrap();
+    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    RuntimeOperations::from(&runtime).request_stop();
+    runtime.stop().unwrap();
+
+    assert!(task.join().unwrap_err().is_shutdown());
+    let events = processor.events();
+    let dropped = events.iter().find(|event| event.name() == "test.task.drop").unwrap();
+    assert!(
+        dropped
+            .dimensions()
+            .iter()
+            .any(|(key, value)| key == "request.id" && value == &observed::Value::from("42"))
+    );
 }

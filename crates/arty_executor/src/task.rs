@@ -198,7 +198,8 @@ where
         // reference to this field.
         let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled);
+        self.options
+            .with_context(|| self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled));
     }
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {

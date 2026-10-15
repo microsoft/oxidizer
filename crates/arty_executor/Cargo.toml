@@ -17,10 +17,7 @@ keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "observed::context::transfer::Transfer",
-    "observed::sink::core::Sink",
-]
+allowed_external_types = ["observed::context::transfer::Transfer", "observed::sink::core::Sink"]
 
 [dependencies]
 data_privacy = { workspace = true }

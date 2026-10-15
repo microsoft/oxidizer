@@ -8,10 +8,10 @@
 mod support;
 
 use std::error::Error as _;
-use std::future::{pending, ready};
+use std::future::{pending, poll_fn, ready};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
@@ -143,6 +143,39 @@ fn shutdown_between_same_worker_tasks_skips_later_factory() {
     assert!(skipped.join().unwrap_err().is_shutdown());
     runtime.stop().unwrap();
     assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
+fn current_worker_stop_cancels_an_awakened_task_before_repolling() {
+    let runtime = runtime();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let (waker_tx, waker_rx) = mpsc::channel();
+    let task = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((Arc::clone(&polls), waker_tx)), |_, Unaware((polls, waker_tx))| {
+            let mut waker_tx = Some(waker_tx);
+            poll_fn(move |cx| {
+                polls.fetch_add(1, Ordering::SeqCst);
+                if let Some(waker_tx) = waker_tx.take() {
+                    waker_tx.send(cx.waker().clone()).unwrap();
+                }
+                Poll::<()>::Pending
+            })
+        });
+    let task_waker = waker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(task_waker), |cx, Unaware(task_waker)| async move {
+            task_waker.wake_by_ref();
+            RuntimeOperations::from(&cx).request_stop();
+        })
+        .join()
+        .unwrap();
+
+    assert!(task.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
