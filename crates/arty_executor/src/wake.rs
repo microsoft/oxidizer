@@ -323,10 +323,15 @@ impl PinnedDrop for WakeSignal {
     }
 }
 
+/// Independently pooled wake metadata shared by the task owner and owned wakers.
+///
+/// `ref_count` is intrusive: the task-owned pointer and every owned raw waker each retain one
+/// reference. The final [`WakerStateRef`] returns the allocation to its plurality pool.
 pub(crate) struct WakerState {
     task_ref: TaskRef,
     shared: Weak<WakeShared>,
     ref_count: AtomicUsize,
+    #[cfg(test)]
     waker_count: AtomicUsize,
     awakened: AtomicBool,
     queued: AtomicBool,
@@ -345,6 +350,7 @@ impl WakerState {
             task_ref,
             shared,
             ref_count: AtomicUsize::new(1),
+            #[cfg(test)]
             waker_count: AtomicUsize::new(0),
             awakened: AtomicBool::new(false),
             queued: AtomicBool::new(false),
@@ -376,21 +382,10 @@ impl WakerState {
     }
 
     fn retire(&self) {
-        // Release publishes retirement before queue removal. Acquire wake checks that observe
-        // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
-        // its active check.
-        self.active.store(false, atomic::Ordering::Release);
-        if let Some(shared) = self.shared.upgrade() {
-            let mut queue = shared.awakened.lock().expect("wake queue is never held while invoking user code");
-            if self.queued.swap(false, atomic::Ordering::AcqRel) {
-                queue.retain(|queued_task_ref| *queued_task_ref != self.task_ref);
-            }
-        }
+        self.retire_observing(|_| {});
     }
 
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))] // Test-only synchronization hook.
-    fn retire_with(&self, after_deactivate: impl FnOnce(bool)) {
+    fn retire_observing(&self, after_deactivate: impl FnOnce(bool)) {
         // Release publishes retirement before queue removal. Acquire wake checks that observe
         // inactivity must not enqueue this task; the queue mutex closes an enqueue already past
         // its active check.
@@ -420,10 +415,13 @@ impl WakerState {
 
 impl std::fmt::Debug for WakerState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>())
+        let mut debug = f.debug_struct(std::any::type_name::<Self>());
+        debug
             .field("active", &self.active.load(atomic::Ordering::Relaxed))
-            .field("ref_count", &self.ref_count.load(atomic::Ordering::Relaxed))
-            .field("waker_count", &self.waker_count.load(atomic::Ordering::Relaxed))
+            .field("ref_count", &self.ref_count.load(atomic::Ordering::Relaxed));
+        #[cfg(test)]
+        debug.field("waker_count", &self.waker_count.load(atomic::Ordering::Relaxed));
+        debug
             .field("queued", &self.queued.load(atomic::Ordering::Relaxed))
             .finish_non_exhaustive()
     }
@@ -464,6 +462,10 @@ fn remove_queued_notification(queue: &AwakenedQueue, queued: &AtomicBool, task_r
     queue.retain(|queued_task_ref| *queued_task_ref != task_ref);
 }
 
+/// A counted owner of one pooled [`WakerState`].
+///
+/// Raw-waker clones reserve a reference before duplicating the pointer. Dropping the final owner
+/// reconstructs the original plurality pool box, returning its slot to the pool.
 struct WakerStateRef(NonNull<WakerState>);
 
 // SAFETY: The pointee is `Send + Sync`, uses an atomic reference count, and remains allocated
@@ -534,6 +536,7 @@ fn borrowed_clone(ptr: *const ()) -> RawWaker {
     let state_ptr = signal.state_ptr();
     // SAFETY: `state_ptr` owns one intrusive reference until `WakeSignal::drop`.
     let state = unsafe { state_ptr.as_ref() }.expect("initialized wake state pointer is never null");
+    #[cfg(test)]
     increment_waker_count(&state.waker_count, std::process::abort);
     increment_reference_count(&state.ref_count, std::process::abort);
     RawWaker::new(state_ptr.cast_const().cast(), &OWNED_WAKER_VTABLE)
@@ -557,6 +560,7 @@ fn borrowed_drop(_: *const ()) {
 
 fn waker_clone_waker(ptr: *const ()) -> RawWaker {
     let state = resurrect_state_ref(ptr);
+    #[cfg(test)]
     increment_waker_count(&state.waker_count, std::process::abort);
     increment_reference_count(&state.ref_count, std::process::abort);
 
@@ -572,6 +576,7 @@ fn increment_reference_count(ref_count: &AtomicUsize, on_overflow: fn() -> !) {
     }
 }
 
+#[cfg(test)]
 fn increment_waker_count(waker_count: &AtomicUsize, on_overflow: fn() -> !) {
     // Reference count increment is independent of state transitions, so Relaxed is enough.
     let previous = waker_count.fetch_add(1, atomic::Ordering::Relaxed);
@@ -612,6 +617,7 @@ impl Deref for RawWakerOwner {
     }
 }
 
+#[cfg(test)]
 impl Drop for RawWakerOwner {
     fn drop(&mut self) {
         self.waker_count.fetch_sub(1, atomic::Ordering::Release);
@@ -648,6 +654,7 @@ fn resurrect_signal_ref(ptr: *const ()) -> &'static WakeSignal {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::pin::pin;
     use std::sync::{Barrier, mpsc};
@@ -697,6 +704,36 @@ mod tests {
 
         assert_eq!(signal.external_waker_count(), 0);
         assert!(signal.can_drop_task_storage());
+    }
+
+    #[test]
+    fn concurrent_first_borrowed_waker_clones_share_installed_state() {
+        let signal = pin!(WakeSignal::fake());
+        let signal = signal.as_ref();
+        // SAFETY: The signal stays pinned until the borrowed waker and both clones are dropped.
+        let borrowed = unsafe { signal.waker_ref() };
+        let start = Barrier::new(3);
+
+        thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                borrowed.clone()
+            });
+            let second = scope.spawn(|| {
+                start.wait();
+                borrowed.clone()
+            });
+            start.wait();
+
+            let first = first.join().unwrap();
+            let second = second.join().unwrap();
+            assert!(first.will_wake(&second));
+            assert_eq!(signal.external_waker_count(), 2);
+            drop(first);
+            drop(second);
+        });
+
+        assert_eq!(signal.external_waker_count(), 0);
     }
 
     #[test]
@@ -796,15 +833,13 @@ mod tests {
             Waker::noop().clone(),
         ));
         let state = WakerState::new(Arc::downgrade(&shared), fake_task_ref);
-        let active_checked = Barrier::new(2);
-        let resume_enqueue = Barrier::new(2);
+        let (active_checked_tx, active_checked_rx) = mpsc::channel();
+        let (resume_enqueue_tx, resume_enqueue_rx) = mpsc::channel::<()>();
 
         thread::scope(|scope| {
             let wake_state = &state;
             let retire_state = &state;
             let wake_task_ref = fake_task_ref;
-            let active_checked = &active_checked;
-            let resume_enqueue = &resume_enqueue;
             let (deactivated_tx, deactivated_rx) = mpsc::channel();
             let (retire_done_tx, retire_done_rx) = mpsc::channel();
             let wake = scope.spawn({
@@ -812,27 +847,31 @@ mod tests {
                 move || {
                     enqueue_wake(&shared.awakened, &wake_state.queued, wake_task_ref, Waker::noop(), || {
                         let active = wake_state.active.load(atomic::Ordering::Acquire);
-                        active_checked.wait();
-                        resume_enqueue.wait();
+                        active_checked_tx.send(()).unwrap();
+                        _ = resume_enqueue_rx.recv();
                         active
                     })
                 }
             });
 
-            active_checked.wait();
+            active_checked_rx.recv().unwrap();
             let retire = scope.spawn(move || {
-                retire_state.retire_with(|active| {
+                retire_state.retire_observing(|active| {
                     deactivated_tx.send(active).unwrap();
                 });
                 retire_done_tx.send(()).unwrap();
             });
-            assert!(!deactivated_rx.recv().unwrap());
-            assert_eq!(retire_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
-            resume_enqueue.wait();
-
-            assert!(wake.join().unwrap());
+            let deactivated = deactivated_rx.recv().unwrap();
+            let retire_was_blocked = retire_done_rx.try_recv();
+            drop(resume_enqueue_tx);
+            let wake_enqueued = wake.join().unwrap();
             retire.join().unwrap();
-            retire_done_rx.recv().unwrap();
+            let retire_completed = retire_done_rx.recv();
+
+            assert!(!deactivated);
+            assert_eq!(retire_was_blocked, Err(mpsc::TryRecvError::Empty));
+            assert!(wake_enqueued);
+            assert!(retire_completed.is_ok());
         });
 
         assert!(shared.awakened.lock().unwrap().is_empty());

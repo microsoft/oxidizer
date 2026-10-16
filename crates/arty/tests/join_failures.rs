@@ -162,7 +162,9 @@ fn current_worker_stop_cancels_an_awakened_task_before_repolling() {
                 Poll::<()>::Pending
             })
         });
-    let task_waker = waker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+    let task_waker = testing_aids::execute_or_abandon(move || waker_rx.recv())
+        .expect("the current-worker task must publish its waker before the test timeout")
+        .expect("the current-worker task must keep its waker sender alive until publication");
 
     runtime
         .scheduler()
@@ -235,7 +237,9 @@ fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
             }
         })
         .unwrap();
-    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+    testing_aids::execute_or_abandon(move || started_rx.recv())
+        .expect("the external-shutdown blocker must start before the test timeout")
+        .expect("the external-shutdown blocker must keep its readiness sender alive");
 
     std::thread::spawn(move || operations.request_stop()).join().unwrap();
     release_tx.send(()).unwrap();

@@ -520,6 +520,7 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
 
 #[test]
 fn shutdown_retires_a_batch_of_queued_tasks() {
+    // A representative batch size, not an executor queue-capacity boundary.
     const TASK_COUNT: usize = 32;
 
     let executor = Executor::builder().build();

@@ -689,6 +689,7 @@ thread_local! {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;

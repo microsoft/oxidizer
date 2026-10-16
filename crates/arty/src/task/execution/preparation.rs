@@ -15,6 +15,11 @@ use pin_project::pin_project;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
+/// Defers construction of a task future until its first poll on the destination worker.
+///
+/// If shutdown is requested before that poll, the factory is not invoked and the wrapper stays
+/// pending. Executor teardown later disposes the uninvoked factory and notifies the join handle
+/// through the task's result target.
 #[pin_project]
 pub(crate) struct DeferredTask<FF, F> {
     factory: Option<(FF, Builtins)>,

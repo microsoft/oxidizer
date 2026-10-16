@@ -133,6 +133,10 @@ pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
+    entrypoint_with_path(args, item, test, &arty_path())
+}
+
+fn entrypoint_with_path(args: TokenStream, item: TokenStream, test: bool, runtime_path: &TokenStream) -> TokenStream {
     let mut input: ItemFn = match parse2(item.clone()) {
         Ok(input) => input,
         Err(error) => return error.to_compile_error(),
@@ -145,7 +149,6 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         Ok(args) => args,
         Err(error) => return error.write_errors(),
     };
-    let runtime_path = arty_path();
     let sig = &mut input.sig;
     let mut inputs = sig.inputs.iter();
     let fail = move |error: syn::Error| {
@@ -238,6 +241,14 @@ mod tests {
 
     use super::*;
 
+    fn expand_main(args: TokenStream, item: TokenStream) -> TokenStream {
+        entrypoint_with_path(args, item, false, &quote!(::arty))
+    }
+
+    fn expand_test(args: TokenStream, item: TokenStream) -> TokenStream {
+        entrypoint_with_path(args, item, true, &quote!(::arty))
+    }
+
     #[test]
     fn arty_path_uses_a_renamed_dependency() {
         assert_eq!(
@@ -255,7 +266,7 @@ mod tests {
 
     #[test]
     fn main_preserves_visibility_and_return_type() {
-        let expansion = main(
+        let expansion = expand_main(
             TokenStream::new(),
             quote! {
                 pub async fn main(cx: arty::task::Builtins) -> Result<(), Error> {
@@ -280,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_preserves_attributes() {
-        let expansion = test(
+        let expansion = expand_test(
             TokenStream::new(),
             quote! {
                 #[should_panic(expected = "original payload")]
@@ -312,7 +323,7 @@ mod tests {
 
     #[test]
     fn workers_selects_at_most_the_literal_count() {
-        let expansion = main(
+        let expansion = expand_main(
             quote!(workers = 4usize),
             quote! {
                 pub async fn run(cx: <App as Types>::Context) -> AppResult {
@@ -340,7 +351,7 @@ mod tests {
 
     #[test]
     fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
-        let expansion = test(
+        let expansion = expand_test(
             quote!(workers = 1),
             quote! {
                 #[ignore = "manual test"]
@@ -380,7 +391,7 @@ mod tests {
 
     #[test]
     fn controlled_test_without_workers_defaults_to_one_processor() {
-        let expansion = test(
+        let expansion = expand_test(
             TokenStream::new(),
             quote! {
                 async fn run(cx: Builtins, time: ClockControl) {
@@ -406,7 +417,7 @@ mod tests {
             quote!(340282366920938463463374607431768211456),
             TokenStream::from(forwarded),
         ] {
-            let expansion = main(
+            let expansion = expand_main(
                 quote!(workers = #workers),
                 quote! {
                     async fn run(cx: Builtins) {}
@@ -447,7 +458,7 @@ mod tests {
             quote!(1 + 1),
             quote!(WorkersPolicy::all()),
         ] {
-            for expand in [main, test] {
+            for expand in [expand_main, expand_test] {
                 let expansion = expand(
                     quote!(workers = #workers),
                     quote! {
@@ -464,7 +475,7 @@ mod tests {
     #[test]
     fn removed_configuration_options_are_rejected() {
         for args in [quote!(builder = configure()), quote!(runtime_path = ::renamed)] {
-            for expand in [main, test] {
+            for expand in [expand_main, expand_test] {
                 let expansion = expand(
                     args.clone(),
                     quote! {
@@ -497,13 +508,13 @@ mod tests {
                 async fn run(cx: Builtins, r#cx: ClockControl) {}
             ),
         ] {
-            for expand in [main, test] {
+            for expand in [expand_main, expand_test] {
                 let expansion = expand(TokenStream::new(), input.clone()).to_string();
                 assert!(expansion.starts_with(&input.to_string()));
                 assert!(expansion.contains("compile_error"), "{expansion}");
             }
         }
-        let expansion = main(
+        let expansion = expand_main(
             TokenStream::new(),
             quote!(
                 async fn run(cx: Builtins, control: ClockControl) {}
@@ -548,7 +559,7 @@ mod tests {
             ),
         ];
         for (input, message) in cases {
-            for expand in [main, test] {
+            for expand in [expand_main, expand_test] {
                 let expansion = expand(TokenStream::new(), input.clone()).to_string();
                 assert!(expansion.starts_with(&input.to_string()));
                 assert!(expansion.contains(message), "{expansion}");
@@ -580,7 +591,7 @@ mod tests {
                 ),
             ),
         ] {
-            assert!(main(args, input).to_string().contains("compile_error"));
+            assert!(expand_main(args, input).to_string().contains("compile_error"));
         }
     }
 }
