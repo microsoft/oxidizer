@@ -82,7 +82,8 @@ struct InitializationGuard<'a>(&'a Cell<bool>);
 
 impl Drop for InitializationGuard<'_> {
     fn drop(&mut self) {
-        debug_assert!(self.0.replace(false), "worker-local I/O initialization guard must be active");
+        let was_active = self.0.replace(false);
+        debug_assert!(was_active, "worker-local I/O initialization guard must be active");
     }
 }
 
