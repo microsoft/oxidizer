@@ -12,6 +12,7 @@ use observed::Sink;
 use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::Thread;
+use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
@@ -20,11 +21,19 @@ use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
-/// If we have nothing to do, we wait for something to happen for this long before executing
-/// another executor cycle (just in case something has showed up that we did not notice).
-const SUSPEND_SLEEP_DURATION: Duration = Duration::from_millis(1);
+/// Maximum fallback wait for drivers without timer-registration notifications.
+const SUSPEND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 const COMMANDS_PER_CYCLE: usize = 256;
+
+fn suspend_wait(deadline: Instant, now: Instant, requires_periodic_poll: bool) -> Duration {
+    let until_deadline = deadline.saturating_duration_since(now);
+    if requires_periodic_poll {
+        until_deadline.min(SUSPEND_POLL_INTERVAL)
+    } else {
+        until_deadline
+    }
+}
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
@@ -87,6 +96,7 @@ pub(crate) struct AsyncWorker {
     // This drives moves the timers registered with the clock forward.
     clock_driver: ClockDriver,
 
+    time: SimpleClock,
     signal: Arc<WorkerSignal>,
     _single_threaded: PhantomData<*const ()>,
 }
@@ -101,11 +111,13 @@ impl AsyncWorker {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
-        let (clock, clock_driver) = clock.activate();
+        let worker_waker = WorkerSignal::waker(&signal);
         let shutdown_signal = dispatcher.shutdown_signal();
+        let (clock, clock_driver) = clock.activate_with_driver_waker(worker_waker.clone());
+        let time = clock.simple_clock().clone();
 
         let executor = Executor::builder()
-            .owner_waker(WorkerSignal::waker(&signal))
+            .owner_waker(worker_waker)
             .sink(blocking_worker.sink().clone())
             .build();
         let tasks = executor.tasks();
@@ -120,6 +132,7 @@ impl AsyncWorker {
             executor: Some(executor),
             tasks,
             clock_driver,
+            time,
             blocking_worker,
             signal,
             _single_threaded: PhantomData,
@@ -143,13 +156,13 @@ impl AsyncWorker {
 
         if self.shutdown_signal.load(Ordering::Acquire) {
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         }
 
         let Some(executor) = self.executor.as_ref() else {
             // Executor drop cancels tasks before final timer callbacks can observe their state.
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         };
 
@@ -159,17 +172,28 @@ impl AsyncWorker {
             // An alternate low-level owner initiated executor shutdown. Complete the surrounding
             // worker shutdown before final timer callbacks run.
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         }
 
-        // Advances the timers registered with the clock.
-        _ = self.clock_driver.advance_timers(Instant::now());
+        let advance_now = self.time.instant();
+        let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
+        let requires_periodic_poll = self.clock_driver.requires_periodic_poll();
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
-            // Retain the donor's timer cadence, including externally controlled clocks.
             // A notification arriving before this wait is retained by WorkerSignal.
-            self.signal.wait(SUSPEND_SLEEP_DURATION);
+            match next_timer {
+                Some(deadline) => {
+                    // Timer advancement invokes wakers synchronously, so account for that work
+                    // before starting a relative deadline wait.
+                    self.signal
+                        .wait(suspend_wait(deadline, self.time.instant(), requires_periodic_poll));
+                }
+                None if requires_periodic_poll => {
+                    self.signal.wait(SUSPEND_POLL_INTERVAL);
+                }
+                None => self.signal.wait_for_notification(),
+            }
         }
 
         ControlFlow::Continue(())
@@ -248,7 +272,8 @@ mod tests {
     use std::pin::Pin;
     use std::sync::atomic::AtomicUsize;
     #[cfg(not(miri))]
-    use std::task::{Wake, Waker};
+    use std::task::Wake;
+    use std::task::Waker;
     use std::thread;
 
     use arty_executor::{JoinHandle as ExecutorJoinHandle, TaskOptions};
@@ -266,6 +291,63 @@ mod tests {
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::BoxedRemoteFutureFactory;
+
+    #[test]
+    fn private_suspend_wait_uses_timer_deadline_and_caps_fail_safe_polling() {
+        // The exact wait calculation is private worker-loop policy; public timer wake and
+        // completion behavior is covered by integration tests in `tests/time.rs`.
+        let now = Instant::now();
+
+        assert_eq!(
+            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, true),
+            SUSPEND_POLL_INTERVAL
+        );
+        assert_eq!(
+            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, false),
+            SUSPEND_POLL_INTERVAL + Duration::from_secs(1)
+        );
+        assert_eq!(suspend_wait(now + Duration::from_millis(20), now, false), Duration::from_millis(20));
+        assert_eq!(
+            suspend_wait(
+                now.checked_sub(Duration::from_millis(1))
+                    .expect("the current instant supports a 1 ms subtraction"),
+                now,
+                false
+            ),
+            Duration::ZERO
+        );
+    }
+    #[test]
+    fn injected_time_advances_worker_timers_without_elapsed_wall_time() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+        let control = ClockControl::new();
+        let time = control.to_simple_clock();
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::from(control.clone()),
+            Arc::clone(&signal),
+        );
+        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let before_registration = time.instant();
+        let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
+        let mut context = std::task::Context::from_waker(Waker::noop());
+        assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_pending());
+        let control = control.auto_advance_timers(true);
+        WorkerSignal::waker(&signal).wake_by_ref();
+
+        assert!(worker.execute_step().is_continue());
+        let _control = control.auto_advance_timers(false);
+        assert_eq!(time.instant().duration_since(before_registration), Duration::from_mins(1));
+        assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_ready());
+
+        drop(delay);
+        drop(clock);
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker.run();
+    }
 
     trait TestTaskSetExt {
         fn add_test<F, R>(&self, future: F) -> ExecutorJoinHandle<R>

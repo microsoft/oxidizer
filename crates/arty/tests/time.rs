@@ -7,12 +7,44 @@
 
 testing_aids::init_tracing!();
 
+use std::sync::{Arc, mpsc};
+use std::task::{Context, Wake, Waker};
+use std::thread;
 use std::time::Duration;
 
+use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Builtins;
 use tick::FutureExt;
 
 const TIMER_COUNT: usize = 8;
+
+struct CompletionWake(mpsc::Sender<()>);
+
+impl Wake for CompletionWake {
+    fn wake(self: Arc<Self>) {
+        _ = self.0.send(());
+    }
+}
+
+#[test]
+fn first_cross_thread_timer_interrupts_idle_worker_wait() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let clock = runtime.scheduler().block_on(async |builtins| builtins.clock().clone()).unwrap();
+
+    // Let the worker return to its no-deadline wait before registering the first timer remotely.
+    thread::sleep(Duration::from_millis(50));
+    let (completed, completion) = mpsc::channel();
+    let waker = Waker::from(Arc::new(CompletionWake(completed)));
+    let mut context = Context::from_waker(&waker);
+    let mut delay = Box::pin(clock.delay(Duration::from_millis(20)));
+
+    assert!(delay.as_mut().poll(&mut context).is_pending());
+    completion
+        .recv_timeout(Duration::from_millis(900))
+        .expect("the first cross-thread timer must interrupt the idle worker before the former one-second fallback");
+
+    runtime.stop().unwrap();
+}
 
 #[arty::test]
 async fn many_timers_with_relocation_ensure_advanced(builtins: Builtins) {

@@ -7,8 +7,8 @@
 //! with async runtime execution. The primary workflow involves:
 //!
 //! 1. Start with an [`InactiveClock`] that can be safely moved across threads
-//! 2. Activate it using [`InactiveClock::activate`] to get a [`Clock`] and [`ClockDriver`]
-//! 3. Use the [`ClockDriver`] to periodically advance timers in your runtime loop
+//! 2. Activate it to get a [`Clock`] and [`ClockDriver`], optionally registering a driver waker
+//! 3. Advance the [`ClockDriver`] and park until its next deadline or driver notification
 //! 4. Use the [`Clock`] for time operations like creating timers and measuring time
 //!
 //! # Integration with Runtimes
@@ -29,6 +29,12 @@
 //! # use thread_aware::{ThreadAware, ThreadBuilder};
 //! # use tick::runtime::InactiveClock;
 //! # use std::sync::{Arc, Barrier};
+//! # use std::task::{Wake, Waker};
+//! # struct DriverWake(std::thread::Thread);
+//! # impl Wake for DriverWake {
+//! #     fn wake(self: Arc<Self>) { self.0.unpark(); }
+//! #     fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }
+//! # }
 //! let builder = ThreadBuilder::default();
 //! let source = builder.build(std::thread::current().id());
 //! let root = InactiveClock::default();
@@ -45,7 +51,8 @@
 //!         inactive.relocate(Some(&source), &destination);
 //!
 //!         // Keep both values on this worker in a real runtime loop.
-//!         let (_clock, _driver) = inactive.activate();
+//!         let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
+//!         let (_clock, _driver) = inactive.activate_with_driver_waker(driver_waker);
 //!     })
 //! };
 //! let second = {
@@ -58,7 +65,8 @@
 //!         inactive.relocate(Some(&source), &destination);
 //!
 //!         // Keep both values on this worker in a real runtime loop.
-//!         let (_clock, _driver) = inactive.activate();
+//!         let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
+//!         let (_clock, _driver) = inactive.activate_with_driver_waker(driver_waker);
 //!     })
 //! };
 //!
@@ -82,15 +90,28 @@
 //! advancement:
 //!
 //! ```rust
+//! # use std::sync::Arc;
+//! # use std::task::{Wake, Waker};
 //! # use tick::runtime::InactiveClock;
-//! let (clock, driver) = InactiveClock::default().activate();
+//! # struct DriverWake(std::thread::Thread);
+//! # impl Wake for DriverWake {
+//! #     fn wake(self: Arc<Self>) { self.0.unpark(); }
+//! #     fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }
+//! # }
+//! let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
+//! let (clock, driver) = InactiveClock::default().activate_with_driver_waker(driver_waker);
 //!
 //! // Share `clock` across threads (it is Clone + Send + Sync)
 //! // Keep `driver` on a single thread to advance timers
 //! ```
 //!
+//! Use [`ClockDriver::requires_periodic_poll`] to decide what `Ok(None)` from
+//! [`ClockDriver::advance_timers`] means for an opaque clock. Notification-aware system clocks may
+//! park indefinitely; compatibility drivers and controlled clocks require a bounded periodic poll.
+//!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate
+//! [`InactiveClock::activate_with_driver_waker`]: InactiveClock::activate_with_driver_waker
 //! [`ThreadAware::relocate`]: thread_aware::ThreadAware::relocate
 
 mod clock_driver;

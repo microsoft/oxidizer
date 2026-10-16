@@ -6006,7 +6006,6 @@ dependencies = [
  "criterion",
  "futures",
  "futures-core",
- "insta",
  "jiff",
  "libc",
  "mutants",
