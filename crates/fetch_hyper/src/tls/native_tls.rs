@@ -564,6 +564,12 @@ mod tests {
     }
 
     #[test]
+    fn scheme_errors_have_stable_messages() {
+        assert_eq!(UnsupportedScheme("ftp".to_owned()).to_string(), "unsupported URI scheme: ftp");
+        assert_eq!(MissingScheme.to_string(), "URI scheme is required");
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn clone_preserves_native_variant_with_override() {
         let connector: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
