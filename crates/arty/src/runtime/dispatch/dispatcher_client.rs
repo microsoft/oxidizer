@@ -132,9 +132,10 @@ impl DispatcherClient {
 mod tests {
     use std::task::Waker;
 
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
     use performables::sync::channel;
-    use thread_aware::ThreadAware;
+    use thread_aware::{Thread, ThreadAware};
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
@@ -272,5 +273,70 @@ mod tests {
         );
 
         assert_eq!((before, after), ((true, false), (false, true)));
+    }
+
+    #[derive(Clone)]
+    struct TestIo;
+
+    impl ThreadAware for TestIo {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestIo {
+        type ContextOptions = ();
+        type Driver = TestDriver;
+
+        fn context((): Self::ContextOptions) -> Self {
+            Self
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(TestDriver)
+        }
+    }
+
+    struct TestDriver;
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    fn io(registered: bool) -> crate::io::Io {
+        let threads = test_threads(2);
+        let (command_tx, command_rx) = channel::unbounded();
+        drop(command_rx);
+        let worker = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: threads[0].clone(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(vec![]),
+            nonempty::NonEmpty::new(worker),
+            Sink::noop(),
+        )));
+        let thread = if registered { threads[0].clone() } else { threads[1].clone() };
+        crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
+    }
+
+    #[test]
+    fn context_access_rejects_an_unregistered_worker() {
+        assert!(io(false).try_context::<TestIo>(&()).is_err());
+    }
+
+    #[test]
+    fn context_access_rejects_a_closed_worker_channel() {
+        assert!(io(true).try_context::<TestIo>(&()).is_err());
     }
 }

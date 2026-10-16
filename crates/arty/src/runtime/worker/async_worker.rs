@@ -991,6 +991,7 @@ mod tests {
             )
         };
 
+        worker.begin_shutdown();
         worker.process_commands();
         worker.begin_shutdown();
         worker.process_commands();
