@@ -77,6 +77,8 @@ pub struct IoRuntime {
     registry: Arc<Mutex<Registry>>,
     sink: Sink,
     thread: Option<Thread>,
+    #[cfg(test)]
+    resolution_hook: Option<Arc<dyn Fn(TypeId) + Send + Sync>>,
 }
 
 impl fmt::Debug for IoRuntime {
@@ -108,6 +110,8 @@ impl IoRuntime {
             registry: Arc::new(Mutex::new(Registry::default())),
             sink,
             thread: None,
+            #[cfg(test)]
+            resolution_hook: None,
         }
     }
 
@@ -136,11 +140,12 @@ impl IoRuntime {
         C: IoContext,
         C::ContextOptions: Clone,
     {
+        let context_type = TypeId::of::<C>();
         let slot = {
             let mut registry = self.registry();
             Self::check_failure(&registry)?;
             let primary_available = registry.contexts.is_empty();
-            Arc::clone(registry.contexts.entry(TypeId::of::<C>()).or_insert_with(|| {
+            Arc::clone(registry.contexts.entry(context_type).or_insert_with(|| {
                 Arc::new(ContextSlot {
                     context: OnceLock::new(),
                     role: if primary_available {
@@ -151,6 +156,10 @@ impl IoRuntime {
                 })
             }))
         };
+        #[cfg(test)]
+        if let Some(hook) = &self.resolution_hook {
+            hook(context_type);
+        }
         let registered = slot.context.get_or_init(|| RegisteredContext {
             context: Mutex::new(Box::new(NeutralContext(C::context(options.clone())))),
         });
@@ -173,6 +182,11 @@ impl IoRuntime {
         &self.sink
     }
 
+    #[cfg(test)]
+    fn set_resolution_hook(&mut self, hook: Arc<dyn Fn(TypeId) + Send + Sync>) {
+        self.resolution_hook = Some(hook);
+    }
+
     fn check_failure(registry: &Registry) -> Result<(), DriverError> {
         match &registry.failure {
             Some(message) => Err(DriverError::from_message(message.as_ref())),
@@ -184,5 +198,80 @@ impl IoRuntime {
         self.registry
             .lock()
             .expect("a poisoned I/O context registry indicates a runtime invariant failure")
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::any::TypeId;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    use arty_io_core::{Driver, DriverError, DriverOptions, IoContext};
+    use observed::Sink;
+    use thread_aware_core::{Thread, ThreadAware};
+
+    use super::IoRuntime;
+
+    static CONTEXT_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Clone)]
+    struct TestContext;
+
+    impl ThreadAware for TestContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestContext {
+        type ContextOptions = ();
+        type Driver = TestDriver;
+
+        fn context((): Self::ContextOptions) -> Self {
+            CONTEXT_CALLS.fetch_add(1, Ordering::SeqCst);
+            Self
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(TestDriver)
+        }
+    }
+
+    struct TestDriver;
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> std::task::Waker {
+            std::task::Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut arty_io_core::Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn concurrent_first_retrieval_initializes_once() {
+        CONTEXT_CALLS.store(0, Ordering::SeqCst);
+        let barrier = Arc::new(Barrier::new(3));
+        let hook_barrier = Arc::clone(&barrier);
+        let mut runtime = IoRuntime::new(Sink::noop());
+        runtime.set_resolution_hook(Arc::new(move |context_type| {
+            assert_eq!(context_type, TypeId::of::<TestContext>());
+            hook_barrier.wait();
+        }));
+
+        let first_runtime = runtime.clone();
+        let first = std::thread::spawn(move || first_runtime.resolve_context::<TestContext>(&()).unwrap());
+        let second = std::thread::spawn(move || runtime.resolve_context::<TestContext>(&()).unwrap());
+        barrier.wait();
+
+        let _ = first.join().unwrap();
+        let _ = second.join().unwrap();
+
+        assert_eq!(CONTEXT_CALLS.load(Ordering::SeqCst), 1);
     }
 }
