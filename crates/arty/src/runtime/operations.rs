@@ -3,7 +3,7 @@
 
 use crate::runtime::Runtime;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::Builtins;
+use crate::task::{Builtins, Scheduler};
 
 /// A handle for requesting runtime shutdown.
 ///
@@ -39,6 +39,7 @@ impl RuntimeOperations {
     /// ```
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.
     pub fn request_stop(&self) {
+        Scheduler::begin_current_executor_shutdown(&self.dispatcher);
         self.dispatcher.stop();
     }
 }

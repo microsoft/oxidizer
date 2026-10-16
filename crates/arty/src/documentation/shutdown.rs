@@ -62,3 +62,13 @@
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.
+//!
+//! # Cloned task wakers
+//!
+//! A component may keep a clone of a task's waker and call it from any thread.
+//! While the task is pending, the call schedules another poll on the worker
+//! assigned to that task.
+//!
+//! Calling the clone after the task completes, is cancelled, or the runtime
+//! shuts down is safe and has no effect. Keeping the clone does not keep the
+//! task or runtime alive and does not delay shutdown.

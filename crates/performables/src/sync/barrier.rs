@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
-use super::mode::{Async, Mode, Sync};
 use super::wait_queue::{WaitQueue, Waiter, block_on};
+use super::{Async, Mode, Sync};
 use crate::telemetry::{self, EventKind};
 
 /// A reusable barrier with a compile-time synchronization strategy.
@@ -91,7 +91,7 @@ impl Barrier<Sync> {
     /// Panics if a previous internal panic poisoned the barrier state.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Mutating barrier progress conditions turns tests into unbounded scheduler waits.
-    pub fn wait(&self) -> BarrierWaitResult {
+    pub fn wait(&self) -> BarrierWaitOutcome {
         // std::sync::Barrier only identifies the final arrival after waiting.
         // A native mutex/condvar pair lets telemetry mark actual contention
         // before blocking, rather than incorrectly measuring only its return.
@@ -112,7 +112,7 @@ impl Barrier<Sync> {
             }
             self.record(EventKind::BarrierAccess);
         }
-        BarrierWaitResult { leader }
+        BarrierWaitOutcome { leader }
     }
 }
 
@@ -128,7 +128,7 @@ impl Barrier<Async> {
     }
 
     /// Blocks the current thread until all participants reach the barrier.
-    pub fn wait(&self) -> BarrierWaitResult {
+    pub fn wait(&self) -> BarrierWaitOutcome {
         block_on(self.wait_async())
     }
 
@@ -199,14 +199,14 @@ pub struct BarrierWait<'a> {
 }
 
 impl Future for BarrierWait<'_> {
-    type Output = BarrierWaitResult;
+    type Output = BarrierWaitOutcome;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.generation.is_none() {
             match self.barrier.arrive() {
                 Arrival::Leader => {
                     self.completed = true;
-                    return Poll::Ready(BarrierWaitResult { leader: true });
+                    return Poll::Ready(BarrierWaitOutcome { leader: true });
                 }
                 Arrival::Waiting(generation) => self.generation = Some(generation),
             }
@@ -216,7 +216,7 @@ impl Future for BarrierWait<'_> {
         if self.barrier.generation() != generation {
             self.completed = true;
             self.barrier.record(EventKind::BarrierAccess);
-            return Poll::Ready(BarrierWaitResult { leader: false });
+            return Poll::Ready(BarrierWaitOutcome { leader: false });
         }
 
         self.poll_registered(cx, generation)
@@ -224,7 +224,7 @@ impl Future for BarrierWait<'_> {
 }
 
 impl BarrierWait<'_> {
-    fn poll_registered(&mut self, cx: &Context<'_>, generation: u32) -> Poll<BarrierWaitResult> {
+    fn poll_registered(&mut self, cx: &Context<'_>, generation: u32) -> Poll<BarrierWaitOutcome> {
         let barrier = self.barrier;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -236,7 +236,7 @@ impl BarrierWait<'_> {
             self.waiter.take();
             self.completed = true;
             barrier.record(EventKind::BarrierAccess);
-            Poll::Ready(BarrierWaitResult { leader: false })
+            Poll::Ready(BarrierWaitOutcome { leader: false })
         } else {
             Poll::Pending
         }
@@ -256,13 +256,13 @@ impl Drop for BarrierWait<'_> {
     }
 }
 
-/// Result returned when a barrier generation completes.
+/// Outcome of a completed barrier generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BarrierWaitResult {
+pub struct BarrierWaitOutcome {
     leader: bool,
 }
 
-impl BarrierWaitResult {
+impl BarrierWaitOutcome {
     /// Returns whether this participant released the barrier.
     #[must_use]
     pub const fn is_leader(self) -> bool {
@@ -282,7 +282,7 @@ mod tests {
         let mut wait = barrier.wait_async();
         let context = Context::from_waker(Waker::noop());
 
-        assert_eq!(wait.poll_registered(&context, 1), Poll::Ready(BarrierWaitResult { leader: false }));
+        assert_eq!(wait.poll_registered(&context, 1), Poll::Ready(BarrierWaitOutcome { leader: false }));
     }
 
     #[test]

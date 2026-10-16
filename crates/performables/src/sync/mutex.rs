@@ -13,12 +13,13 @@ use std::task::{Context, Poll};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::mode::{Async, Mode, Sync};
+use super::{Async, Mode, Sync};
 
 mod native;
 
+use super::panic_poisoned;
 use super::wait_queue::{WaitQueue, Waiter, block_on};
-use super::{PoisonError, panic_poisoned};
+use crate::Error;
 use crate::telemetry::{self, EventKind};
 
 const LOCKED: u8 = 1;
@@ -102,8 +103,8 @@ impl<T: ?Sized, M: Mode> Mutex<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn lock_result(&self) -> Result<MutexGuard<'_, T, M>, PoisonError<MutexGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn lock_result(&self) -> Result<MutexGuard<'_, T, M>, Error<MutexGuard<'_, T, M>>> {
         M::mutex_lock(self)
     }
 
@@ -124,8 +125,8 @@ impl<T: ?Sized, M: Mode> Mutex<T, M> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] containing the acquired guard when poisoned.
-    pub fn try_lock_result(&self) -> Result<Option<MutexGuard<'_, T, M>>, PoisonError<MutexGuard<'_, T, M>>> {
+    /// Returns [`Error`] containing the acquired guard when poisoned.
+    pub fn try_lock_result(&self) -> Result<Option<MutexGuard<'_, T, M>>, Error<MutexGuard<'_, T, M>>> {
         M::mutex_try_lock(self)
     }
 
@@ -169,17 +170,15 @@ impl<T: ?Sized> Mutex<T, Async> {
     /// thread poisoned it.
     pub fn lock_async(&self) -> MutexLock<'_, T> {
         MutexLock {
-            result: self.lock_async_result(),
+            result: MutexLockFuture::new(self),
         }
     }
 
     /// Returns a future that acquires exclusive access and reports poisoning.
-    pub fn lock_async_result(&self) -> MutexLockResult<'_, T> {
-        MutexLockResult {
-            mutex: self,
-            waiter: None,
-            contention_recorded: false,
-        }
+    pub fn lock_async_result(
+        &self,
+    ) -> impl Future<Output = Result<MutexGuard<'_, T, Async>, Error<MutexGuard<'_, T, Async>>>> + fmt::Debug {
+        MutexLockFuture::new(self)
     }
 
     /// Blocks until exclusive access is acquired and reports poisoning.
@@ -190,15 +189,15 @@ impl<T: ?Sized> Mutex<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired guard if another thread
+    /// Returns [`Error`] with the acquired guard if another thread
     /// poisoned the mutex.
-    pub(super) fn lock_result_inner(&self) -> Result<MutexGuard<'_, T, Async>, PoisonError<MutexGuard<'_, T, Async>>> {
+    pub(super) fn lock_result_inner(&self) -> Result<MutexGuard<'_, T, Async>, Error<MutexGuard<'_, T, Async>>> {
         if matches!(self.try_acquire(), Acquisition::Acquired) {
             return self.acquired();
         }
 
         self.record(EventKind::MutexContention);
-        block_on(MutexLockResult {
+        block_on(MutexLockFuture {
             mutex: self,
             waiter: None,
             contention_recorded: true,
@@ -209,9 +208,9 @@ impl<T: ?Sized> Mutex<T, Async> {
     ///
     /// # Errors
     ///
-    /// Returns [`PoisonError`] with the acquired guard if the mutex was
+    /// Returns [`Error`] with the acquired guard if the mutex was
     /// successfully acquired after another thread poisoned it.
-    pub(super) fn try_lock_result_inner(&self) -> Result<Option<MutexGuard<'_, T, Async>>, PoisonError<MutexGuard<'_, T, Async>>> {
+    pub(super) fn try_lock_result_inner(&self) -> Result<Option<MutexGuard<'_, T, Async>>, Error<MutexGuard<'_, T, Async>>> {
         if matches!(self.try_acquire(), Acquisition::Acquired) {
             self.acquired().map(Some)
         } else {
@@ -253,7 +252,7 @@ impl<T: ?Sized> Mutex<T, Async> {
         Acquisition::Contended
     }
 
-    fn acquired(&self) -> Result<MutexGuard<'_, T, Async>, PoisonError<MutexGuard<'_, T, Async>>> {
+    fn acquired(&self) -> Result<MutexGuard<'_, T, Async>, Error<MutexGuard<'_, T, Async>>> {
         self.record(EventKind::MutexAccess);
         let guard = MutexGuard {
             mutex: self,
@@ -263,7 +262,7 @@ impl<T: ?Sized> Mutex<T, Async> {
         };
         if self.is_poisoned() {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }
@@ -342,7 +341,7 @@ impl<T: ?Sized + fmt::Debug, M: Mode> fmt::Debug for Mutex<T, M> {
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct MutexLock<'a, T: ?Sized> {
-    result: MutexLockResult<'a, T>,
+    result: MutexLockFuture<'a, T>,
 }
 
 impl<'a, T: ?Sized> Future for MutexLock<'a, T> {
@@ -357,17 +356,15 @@ impl<'a, T: ?Sized> Future for MutexLock<'a, T> {
     }
 }
 
-/// A future that acquires a [`Mutex`] and reports poisoning.
-#[derive(Debug)]
 #[must_use = "futures do nothing unless polled or awaited"]
-pub struct MutexLockResult<'a, T: ?Sized> {
+struct MutexLockFuture<'a, T: ?Sized> {
     mutex: &'a Mutex<T, Async>,
     waiter: Option<Arc<Waiter>>,
     contention_recorded: bool,
 }
 
-impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
-    type Output = Result<MutexGuard<'a, T, Async>, PoisonError<MutexGuard<'a, T, Async>>>;
+impl<'a, T: ?Sized> Future for MutexLockFuture<'a, T> {
+    type Output = Result<MutexGuard<'a, T, Async>, Error<MutexGuard<'a, T, Async>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if matches!(self.mutex.try_acquire(), Acquisition::Acquired) {
@@ -392,8 +389,16 @@ impl<'a, T: ?Sized> Future for MutexLockResult<'a, T> {
     clippy::type_complexity,
     reason = "polling retains an acquired guard on both successful and poisoned acquisition"
 )]
-impl<'a, T: ?Sized> MutexLockResult<'a, T> {
-    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<MutexGuard<'a, T, Async>, PoisonError<MutexGuard<'a, T, Async>>>> {
+impl<'a, T: ?Sized> MutexLockFuture<'a, T> {
+    const fn new(mutex: &'a Mutex<T, Async>) -> Self {
+        Self {
+            mutex,
+            waiter: None,
+            contention_recorded: false,
+        }
+    }
+
+    fn poll_registered(&mut self, cx: &Context<'_>) -> Poll<Result<MutexGuard<'a, T, Async>, Error<MutexGuard<'a, T, Async>>>> {
         let mutex = self.mutex;
         let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
         waiter.register(cx.waker());
@@ -415,7 +420,13 @@ impl<'a, T: ?Sized> MutexLockResult<'a, T> {
     }
 }
 
-impl<T: ?Sized> Drop for MutexLockResult<'_, T> {
+impl<T: ?Sized> fmt::Debug for MutexLockFuture<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MutexLockFuture").finish_non_exhaustive()
+    }
+}
+
+impl<T: ?Sized> Drop for MutexLockFuture<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = &self.waiter {
             let removed = self.mutex.raw.waiters.cancel_marked(waiter, || {
@@ -476,7 +487,7 @@ impl<T: ?Sized> MutexGuard<'_, T, Async> {
 
 impl<T: ?Sized, M: Mode> Drop for MutexGuard<'_, T, M> {
     fn drop(&mut self) {
-        M::mutex_release(self, super::mode::sealed::Release::new());
+        M::mutex_release(self, super::sealed::Release::new());
     }
 }
 
@@ -524,7 +535,7 @@ mod tests {
     #[cfg_attr(coverage_nightly, coverage(off))] // Failure arm deliberately remains unreachable.
     fn unlock_during_waiter_registration_completes_acquisition() {
         let mutex = Mutex::<_, Async>::new(());
-        let mut lock = mutex.lock_async_result();
+        let mut lock = MutexLockFuture::new(&mutex);
         let context = Context::from_waker(Waker::noop());
 
         let Poll::Ready(Ok(guard)) = lock.poll_registered(&context) else {

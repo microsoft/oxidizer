@@ -11,10 +11,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
+use performables::sync;
 use performables::sync::barrier::Barrier;
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
-use performables::sync::mode;
 use performables::sync::mutex::Mutex;
 
 #[cfg(miri)]
@@ -39,7 +39,7 @@ fn synchronous_objects_have_native_sized_storage() {
 fn synchronous_locks_support_const_construction_and_owned_access() {
     let mut mutex = const { Mutex::<u64>::const_new(3) };
     let mut lock = const { RwLock::<u64>::new(5) };
-    let _condition = const { Condvar::<mode::Sync>::new() };
+    let _condition = const { Condvar::<sync::Sync>::new() };
     *mutex.get_mut() += 7;
     *lock.get_mut() += 11;
 
@@ -221,7 +221,7 @@ fn synchronous_rwlock_only_exclusive_guards_poison() {
 
 #[test]
 fn synchronous_condition_wait_releases_and_reacquires_the_mutex() {
-    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<sync::Sync>::new()));
     let other = Arc::clone(&pair);
     let (started_tx, started_rx) = mpsc::channel();
     let (finished_tx, finished_rx) = mpsc::channel();
@@ -243,7 +243,7 @@ fn synchronous_condition_wait_releases_and_reacquires_the_mutex() {
 #[test]
 fn synchronous_condition_timeout_returns_the_guard() {
     let mutex = Mutex::<u64>::new(3);
-    let condition = Condvar::<mode::Sync>::new();
+    let condition = Condvar::<sync::Sync>::new();
     let (mut guard, result) = condition.wait_timeout(mutex.lock(), Duration::ZERO);
     assert!(result.timed_out());
     *guard += 5;
@@ -254,7 +254,7 @@ fn synchronous_condition_timeout_returns_the_guard() {
 
 #[test]
 fn synchronous_condition_timeout_reports_notification() {
-    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<sync::Sync>::new()));
     let other = Arc::clone(&pair);
     let (started_tx, started_rx) = mpsc::channel();
     let worker = std::thread::spawn(move || {
@@ -272,7 +272,7 @@ fn synchronous_condition_timeout_reports_notification() {
 
 #[test]
 fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
-    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<sync::Sync>::new()));
     let other = Arc::clone(&pair);
     let (started_tx, started_rx) = mpsc::channel();
     let (finished_tx, finished_rx) = mpsc::channel();
@@ -300,7 +300,7 @@ fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
 
 #[test]
 fn synchronous_condition_timeout_preserves_poisoning_after_notification() {
-    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<mode::Sync>::new()));
+    let pair = Arc::new((Mutex::<u64>::new(0), Condvar::<sync::Sync>::new()));
     let other = Arc::clone(&pair);
     let (started_tx, started_rx) = mpsc::channel();
     let (finished_tx, finished_rx) = mpsc::channel();
@@ -328,7 +328,7 @@ fn synchronous_condition_timeout_preserves_poisoning_after_notification() {
 
 #[test]
 fn synchronous_barrier_reuses_generations_with_one_leader() {
-    let barrier = Arc::new(Barrier::<mode::Sync>::new(3));
+    let barrier = Arc::new(Barrier::<sync::Sync>::new(3));
     let (finished_tx, finished_rx) = mpsc::channel();
     let workers = (0..3)
         .map(|_| {
@@ -357,7 +357,7 @@ fn synchronous_barrier_reuses_generations_with_one_leader() {
 #[test]
 #[should_panic(expected = "nonzero")]
 fn synchronous_barrier_rejects_zero_participants() {
-    let _barrier = Barrier::<mode::Sync>::new(0);
+    let _barrier = Barrier::<sync::Sync>::new(0);
 }
 
 #[cfg(feature = "serde")]
@@ -368,7 +368,7 @@ fn serde_supports_both_mutex_modes() {
     use serializer_support::ValueSerializer;
 
     let synchronous = Mutex::<u64>::deserialize(U64Deserializer::<Error>::new(7)).unwrap();
-    let asynchronous = Mutex::<u64, mode::Async>::deserialize(U64Deserializer::<Error>::new(11)).unwrap();
+    let asynchronous = Mutex::<u64, sync::Async>::deserialize(U64Deserializer::<Error>::new(11)).unwrap();
 
     assert_eq!(
         (
@@ -383,8 +383,8 @@ fn serde_supports_both_mutex_modes() {
 fn async_guards_retain_cross_thread_mobility() {
     fn require_send<T: Send>(_: T) {}
 
-    let mutex = Mutex::<u64, mode::Async>::new(7);
-    let lock = RwLock::<u64, mode::Async>::new(11);
+    let mutex = Mutex::<u64, sync::Async>::new(7);
+    let lock = RwLock::<u64, sync::Async>::new(11);
     require_send(mutex.lock());
     require_send(lock.read());
     require_send(lock.write());

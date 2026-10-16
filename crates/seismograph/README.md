@@ -13,54 +13,40 @@
 
 </div>
 
-High-performance process telemetry with extensible snapshot sources.
+Runtime telemetry for Rust applications.
 
-Instrumented crates record bounded events while registered sources contribute
-point-in-time state to a portable [`snapshot()`][__link0].
+`seismograph` collects allocation, synchronization, I/O, cache, and task events
+to help investigate memory use, contention, and scheduling. Crates such as
+`rallocator` and `performables` provide instrumentation.
 
-Snapshot capture defaults to retaining active-thread buffers and recording
-policy. [`snapshot::EventBufferDisposition::Stop`][__link1] captures the retained
-events, disables all six recording classes, and releases event-ring storage.
-Unlike legacy `Release`, it does not restart recording. Later source/encoding
-failures do not undo completed cleanup. [`recorder::clear_event_buffers()`][__link2]
-independently empties event rings without copying a snapshot or invoking
-sources, preserving recording policies and active-thread allocations.
-These operations leave process-lifetime recorder metadata registered.
+Recording is off by default, with sampling and optional backtraces to control
+its cost. Events are kept in bounded per-thread buffers. Snapshots combine
+those events with state supplied by registered sources, such as allocators
+and runtimes.
+
+## Usage
+
+Enable the event categories you need, run your workload, then capture a
+snapshot. For ownership and synchronization events:
 
 ```rust
-use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
 use seismograph::recorder::{Configuration, RecordingPolicy};
 
 seismograph::recorder(Configuration {
-    arc_dereferences: RecordingPolicy::all(false),
+    general_events: RecordingPolicy::all(false),
     ..Default::default()
 });
-seismograph::record(EventClass::ArcDereference, || {
-    Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
-});
 
-let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
-assert!(
-    decoded
-        .events
-        .events
-        .iter()
-        .any(|event| event.object_id() == Some(ObjectId::new(42)))
-);
+// Run application code that uses instrumented libraries.
+let snapshot = seismograph::snapshot(Default::default())?;
 ```
 
-Applications built with the `monitor` feature can publish a localhost
-endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-for as long as remote control should remain available:
-
-```rust
-let _monitor = seismograph::monitor::Monitor::builder()
-    .name("worker")
-    .instance("west-europe")
-    .start()
-    .unwrap();
-```
+Inspect saved snapshots with `seismograph view` from the
+[Seismograph CLI][__link0]. For live access,
+enable the `monitor` feature and start a
+[`Monitor`][__link1],
+keeping it alive while the application runs, then connect with
+`seismograph monitor`.
 
 
 <hr/>
@@ -68,7 +54,5 @@ let _monitor = seismograph::monitor::Monitor::builder()
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnIjY07yDBCMb5dOQTY4yGVUbIqi6d2b0sygbtiUL_gUfWH9hZIGCa3NlaXNtb2dyYXBoZTAuMi4w
- [__link0]: https://docs.rs/seismograph/0.2.0/seismograph/fn.snapshot.html
- [__link1]: https://docs.rs/seismograph/0.2.0/seismograph/?search=snapshot::EventBufferDisposition::Stop
- [__link2]: https://docs.rs/seismograph/0.2.0/seismograph/?search=recorder::clear_event_buffers
+ [__link0]: https://crates.io/crates/seismograph_cli
+ [__link1]: https://docs.rs/seismograph/latest/seismograph/monitor/struct.Monitor.html

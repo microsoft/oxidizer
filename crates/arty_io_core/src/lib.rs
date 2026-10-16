@@ -89,8 +89,7 @@
 //!
 //! The runtime clones and relocates contexts to its async workers and supplies the acceptable
 //! roles through [`DriverOptions`]. The context selects one role and returns it in a
-//! [`DriverInstance`]. Driver creation completes all setup; there is no special initialization
-//! cycle.
+//! [`DriverInstance`]. Driver creation completes all setup before the context is published.
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 //! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
@@ -104,9 +103,12 @@
 //!
 //! When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
 //! calls [`Driver::shutdown`] for every driver owned by that worker. Each driver rejects new
-//! operations and waits for operations already in progress, using a finite limit chosen by the
-//! driver. The runtime reports a [`DriverError`] and continues shutting down the remaining
-//! drivers. Contexts remain valid as closed handles.
+//! operations and may cancel or disrupt operations still in flight. Cleanup uses a finite limit
+//! chosen by the driver. Shutdown is best effort: the runtime reports a returned [`DriverError`]
+//! and attempts the remaining drivers, but this contract does not convert panics from driver
+//! teardown, custom wakers, diagnostics, cleanup hooks, poisoned state, or failed invariants into
+//! errors or promise recovery from them. Contexts remain valid as closed handles after normal
+//! shutdown control flow.
 pub use cycle::Cycle;
 pub use driver::Driver;
 pub use driver_error::DriverError;

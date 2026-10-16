@@ -8,10 +8,10 @@
 mod support;
 
 use std::error::Error as _;
-use std::future::{pending, ready};
+use std::future::{pending, poll_fn, ready};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
@@ -119,6 +119,134 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
 }
 
 #[test]
+fn shutdown_between_same_worker_tasks_skips_later_factory() {
+    let runtime = runtime();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (stopper, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let stopper = cx.scheduler().spawn(async |cx| {
+                    RuntimeOperations::from(&cx).request_stop();
+                });
+                let skipped = cx.scheduler().spawn(move |_| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (stopper, skipped)
+            }
+        })
+        .unwrap();
+
+    stopper.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
+fn current_worker_stop_cancels_an_awakened_task_before_repolling() {
+    let runtime = runtime();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let (waker_tx, waker_rx) = mpsc::channel();
+    let task = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((Arc::clone(&polls), waker_tx)), |_, Unaware((polls, waker_tx))| {
+            let mut waker_tx = Some(waker_tx);
+            poll_fn(move |cx| {
+                polls.fetch_add(1, Ordering::SeqCst);
+                if let Some(waker_tx) = waker_tx.take() {
+                    waker_tx.send(cx.waker().clone()).unwrap();
+                }
+                Poll::<()>::Pending
+            })
+        });
+    let task_waker = waker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(task_waker), |cx, Unaware(task_waker)| async move {
+            task_waker.wake_by_ref();
+            RuntimeOperations::from(&cx).request_stop();
+        })
+        .join()
+        .unwrap();
+
+    assert!(task.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn shutdown_between_remote_tasks_skips_later_factory() {
+    let runtime = runtime();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (stopper, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let stopper = cx.scheduler().spawn_anywhere(cx.clone(), |cx| async move {
+                    RuntimeOperations::from(&cx).request_stop();
+                });
+                let skipped = cx.scheduler().spawn_anywhere(Unaware(invoked), |Unaware(invoked)| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (stopper, skipped)
+            }
+        })
+        .unwrap();
+
+    stopper.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    runtime.stop().unwrap();
+    assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
+fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
+    let runtime = runtime();
+    let operations = RuntimeOperations::from(&runtime);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (blocker, skipped) = runtime
+        .scheduler()
+        .block_on({
+            let invoked = Arc::clone(&invoked);
+            move |cx| async move {
+                let blocker = cx.scheduler().spawn(move |_| {
+                    let mut started_tx = Some(started_tx);
+                    poll_fn(move |_| {
+                        if let Some(started_tx) = started_tx.take() {
+                            started_tx.send(()).unwrap();
+                        }
+                        release_rx.recv().unwrap();
+                        Poll::Ready(())
+                    })
+                });
+                let skipped = cx.scheduler().spawn(move |_| {
+                    invoked.store(true, Ordering::Release);
+                    async {}
+                });
+                (blocker, skipped)
+            }
+        })
+        .unwrap();
+    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    std::thread::spawn(move || operations.request_stop()).join().unwrap();
+    release_tx.send(()).unwrap();
+
+    blocker.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Acquire));
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn stop_rejects_remote_and_blocking_factories_immediately() {
     runtime()
         .scheduler()
@@ -201,6 +329,23 @@ fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
     assert_eq!(running.join().unwrap(), 42);
     assert!(queued.join().unwrap_err().is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
+    let runtime = runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let nested_scheduler = scheduler.clone();
+    let operations = RuntimeOperations::from(&runtime);
+    let callback = scheduler.spawn_blocking(move || {
+        operations.request_stop();
+        nested_scheduler.spawn_blocking(|| 7).join()
+    });
+
+    let rejected = callback.join().unwrap().unwrap_err();
+
+    assert!(rejected.is_shutdown());
     runtime.stop().unwrap();
 }
 
