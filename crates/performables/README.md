@@ -21,6 +21,11 @@ barriers, condition variables, one-time initialization, and channels.
 Synchronization supports blocking callers and executor-independent async
 waits.
 
+Ready blocking channel operations do not allocate waiter storage. Queue
+payload storage and enabled telemetry may allocate independently. Final
+arrivals at an async-capable barrier do not allocate their own waiter
+storage.
+
 ## Why use this instead of `std` or `tokio`?
 
 The crate offers:
@@ -46,7 +51,7 @@ See [`arc`][__link4] and [`sync`][__link5] for the available types and their ful
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEWLxBG1R_bUbennpOCnOulkbhCiln7flkhsbllVBCnf-UodhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbv3P03FZjPcYbBLP7LkxEfhYbcjvjrWWTrvQbE57IR7ZHq4NhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
  [__link1]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread
  [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerNuma
