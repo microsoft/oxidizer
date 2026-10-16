@@ -53,8 +53,9 @@ impl DispatcherClient {
         self.core.remote_results()
     }
 
-    pub(crate) fn is_current_blocking_task(&self) -> bool {
-        self.core.is_current_blocking_task()
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
+    pub(crate) fn is_current_blocking_thread(&self) -> bool {
+        self.core.is_current_blocking_thread()
     }
 
     /// Submits to a previously resolved worker without discarding destination affinity.
