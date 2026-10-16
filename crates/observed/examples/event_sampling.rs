@@ -70,18 +70,13 @@ impl EventProcessor for PrintingProcessor {
 struct DropHealthChecks;
 
 impl EventSampler for DropHealthChecks {
-    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-        let decision = if event.description().name() == "health.check" {
+    fn sample(&self, context: &EventSamplingContext<'_>) -> EventSamplingDecision {
+        let decision = if context.description().name() == "health.check" {
             EventSamplingDecision::Drop
         } else {
             EventSamplingDecision::Continue
         };
-        println!(
-            "sample {} on {} at {:?} -> {decision:?}",
-            event.description().name(),
-            event.sink_id(),
-            event.timestamp(),
-        );
+        println!("sample {} -> {decision:?}", context.description().name());
 
         decision
     }

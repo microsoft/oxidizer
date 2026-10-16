@@ -10,7 +10,7 @@
 //! [`emit_dyn_event`].
 //!
 //! Unlike the [`emit!`](crate::emit!) macro - which lazily builds a concrete
-//! `T: Event` and only evaluates it when a processor is interested -
+//! `T: Event` and only evaluates it once a processor receives it -
 //! [`emit_dyn_event`] takes an already-built `&dyn DynEvent` and dispatches it
 //! directly through the sink's normal pipeline.
 //!
@@ -91,15 +91,17 @@ pub trait DynEvent: Send + Sync {
 /// Emits a pre-constructed [`DynEvent`] through the given [`Sink`].
 ///
 /// This is the runtime, type-erased counterpart to [`emit!`](crate::emit!). Whereas
-/// `emit!` lazily builds a statically-typed `T: Event` and only evaluates it when a processor is
-/// interested, this function takes an already-built `&dyn DynEvent` and dispatches it directly.
+/// `emit!` lazily builds a statically-typed `T: Event` and only evaluates it once a
+/// processor receives it, this function takes an already-built `&dyn DynEvent` and
+/// dispatches it directly.
 ///
 /// It is intended for **interoperability with other telemetry crates** (such as `tracing` or
 /// `log` bridges) where events originate from a foreign type that cannot implement the
 /// [`Event`](crate::Event) trait, and are instead adapted via [`DynEvent`].
 ///
-/// The event still passes through the sink's normal pipeline. If the sink is a no-op or no
-/// processor is interested, the event is dropped without further work.
+/// The event still passes through the sink's normal pipeline. If the sink is a no-op, its
+/// event samplers drop the event, or none of its processors wants it, the event is dropped
+/// without further work.
 pub fn emit_dyn_event(sink: &Sink, event: &dyn DynEvent) {
     sink.emit_impl(IntermediateEvent::dynamic(event));
 }
