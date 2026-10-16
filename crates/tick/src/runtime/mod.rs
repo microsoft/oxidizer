@@ -7,7 +7,7 @@
 //! with async runtime execution. The primary workflow involves:
 //!
 //! 1. Start with an [`InactiveClock`] that can be safely moved across threads
-//! 2. Activate it with the runtime's driver waker to get a [`Clock`] and [`ClockDriver`]
+//! 2. Activate it to get a [`Clock`] and [`ClockDriver`], optionally registering a driver waker
 //! 3. Advance the [`ClockDriver`] and park until its next deadline or driver notification
 //! 4. Use the [`Clock`] for time operations like creating timers and measuring time
 //!
@@ -52,7 +52,7 @@
 //!
 //!         // Keep both values on this worker in a real runtime loop.
 //!         let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
-//!         let (_clock, _driver) = inactive.activate(driver_waker);
+//!         let (_clock, _driver) = inactive.activate_with_driver_waker(driver_waker);
 //!     })
 //! };
 //! let second = {
@@ -66,7 +66,7 @@
 //!
 //!         // Keep both values on this worker in a real runtime loop.
 //!         let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
-//!         let (_clock, _driver) = inactive.activate(driver_waker);
+//!         let (_clock, _driver) = inactive.activate_with_driver_waker(driver_waker);
 //!     })
 //! };
 //!
@@ -99,18 +99,19 @@
 //! #     fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }
 //! # }
 //! let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
-//! let (clock, driver) = InactiveClock::default().activate(driver_waker);
+//! let (clock, driver) = InactiveClock::default().activate_with_driver_waker(driver_waker);
 //!
 //! // Share `clock` across threads (it is Clone + Send + Sync)
 //! // Keep `driver` on a single thread to advance timers
 //! ```
 //!
-//! Controlled clocks return no system parking deadline because their time advances externally.
-//! Runtime integrations using a controlled clock must therefore retain a bounded periodic poll
-//! rather than parking indefinitely.
+//! Use [`ClockDriver::requires_periodic_poll`] to decide what `Ok(None)` from
+//! [`ClockDriver::advance_timers`] means for an opaque clock. Notification-aware system clocks may
+//! park indefinitely; compatibility drivers and controlled clocks require a bounded periodic poll.
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate
+//! [`InactiveClock::activate_with_driver_waker`]: InactiveClock::activate_with_driver_waker
 //! [`ThreadAware::relocate`]: thread_aware::ThreadAware::relocate
 
 mod clock_driver;

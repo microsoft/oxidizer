@@ -21,15 +21,18 @@ use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
-/// Maximum idle wait before a fail-safe executor cycle.
+/// Maximum fallback wait for drivers without timer-registration notifications.
 const SUSPEND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 const COMMANDS_PER_CYCLE: usize = 256;
 
-fn suspend_wait(next_timer: Option<Instant>, now: Instant) -> Duration {
-    next_timer
-        .map_or(SUSPEND_POLL_INTERVAL, |deadline| deadline.saturating_duration_since(now))
-        .min(SUSPEND_POLL_INTERVAL)
+fn suspend_wait(deadline: Instant, now: Instant, requires_periodic_poll: bool) -> Duration {
+    let until_deadline = deadline.saturating_duration_since(now);
+    if requires_periodic_poll {
+        until_deadline.min(SUSPEND_POLL_INTERVAL)
+    } else {
+        until_deadline
+    }
 }
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
@@ -110,7 +113,7 @@ impl AsyncWorker {
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
         let shutdown_signal = dispatcher.shutdown_signal();
-        let (clock, clock_driver) = clock.activate(worker_waker.clone());
+        let (clock, clock_driver) = clock.activate_with_driver_waker(worker_waker.clone());
         let time = clock.simple_clock().clone();
 
         let executor = Executor::builder()
@@ -175,14 +178,22 @@ impl AsyncWorker {
 
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
+        let requires_periodic_poll = self.clock_driver.requires_periodic_poll();
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
-            // Timer advancement invokes wakers synchronously, so account for that work before
-            // starting a relative deadline wait. No-deadline clocks retain the bounded fallback
-            // without an additional time sample.
-            let wait_now = next_timer.map_or(advance_now, |_| self.time.instant());
-            self.signal.wait(suspend_wait(next_timer, wait_now));
+            match next_timer {
+                Some(deadline) => {
+                    // Timer advancement invokes wakers synchronously, so account for that work
+                    // before starting a relative deadline wait.
+                    self.signal
+                        .wait(suspend_wait(deadline, self.time.instant(), requires_periodic_poll));
+                }
+                None if requires_periodic_poll => {
+                    self.signal.wait(SUSPEND_POLL_INTERVAL);
+                }
+                None => self.signal.wait_for_notification(),
+            }
         }
 
         ControlFlow::Continue(())
@@ -287,19 +298,21 @@ mod tests {
         // completion behavior is covered by integration tests in `tests/time.rs`.
         let now = Instant::now();
 
-        assert_eq!(suspend_wait(None, now), SUSPEND_POLL_INTERVAL);
         assert_eq!(
-            suspend_wait(Some(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1)), now),
+            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, true),
             SUSPEND_POLL_INTERVAL
         );
-        assert_eq!(suspend_wait(Some(now + Duration::from_millis(20)), now), Duration::from_millis(20));
+        assert_eq!(
+            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, false),
+            SUSPEND_POLL_INTERVAL + Duration::from_secs(1)
+        );
+        assert_eq!(suspend_wait(now + Duration::from_millis(20), now, false), Duration::from_millis(20));
         assert_eq!(
             suspend_wait(
-                Some(
-                    now.checked_sub(Duration::from_millis(1))
-                        .expect("the current instant supports a 1 ms subtraction")
-                ),
-                now
+                now.checked_sub(Duration::from_millis(1))
+                    .expect("the current instant supports a 1 ms subtraction"),
+                now,
+                false
             ),
             Duration::ZERO
         );

@@ -72,7 +72,7 @@ impl Clock {
         // timers registered by clones on any Tokio worker.
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
-        let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
+        let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate_with_driver_waker(driver_waker);
 
         let join_handle = ::tokio::spawn(run_driver(driver, notify, Instant::now, |_, _| {}));
 
@@ -147,7 +147,7 @@ mod tests {
     async fn earlier_timer_interrupts_an_established_long_deadline_wait() {
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
-        let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
+        let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate_with_driver_waker(driver_waker);
         let fixed_now = Instant::now();
         let (events, mut observed_events) = ::tokio::sync::mpsc::unbounded_channel();
         let driver_task = ::tokio::spawn(run_driver(

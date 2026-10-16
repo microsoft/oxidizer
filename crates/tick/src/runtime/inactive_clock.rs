@@ -43,46 +43,34 @@ pub struct Shared;
 ///   [`ThreadAware`].
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
-/// its associated [`ClockDriver`]. Pass the runtime's driver waker so a newly registered earlier
-/// timer can interrupt the current wait.
+/// its associated [`ClockDriver`]. This compatibility path requires bounded periodic polling when
+/// no deadline is present. Notification-aware runtimes can instead call
+/// [`InactiveClock::activate_with_driver_waker`] so first and newly earlier timer registrations can
+/// interrupt the driver's current wait.
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use std::sync::Arc;
-/// use std::task::{Wake, Waker};
 /// use std::thread;
 /// use std::time::Instant;
 ///
 /// use tick::runtime::InactiveClock;
 ///
-/// struct DriverWake(thread::Thread);
-///
-/// impl Wake for DriverWake {
-///     fn wake(self: Arc<Self>) {
-///         self.0.unpark();
-///     }
-///
-///     fn wake_by_ref(self: &Arc<Self>) {
-///         self.0.unpark();
-///     }
-/// }
-///
 /// let inactive = InactiveClock::default();
-/// let driver_waker = Waker::from(Arc::new(DriverWake(thread::current())));
-/// let (clock, mut driver) = inactive.activate(driver_waker);
+/// let (clock, mut driver) = inactive.activate();
 ///
 /// // Use the clock for time operations
 /// let now = clock.instant();
 ///
 /// // A real runtime loop advances the driver, then parks until the deadline or until
-/// // registration of the first timer (or a newly earlier timer) invokes driver_waker.
+/// // a bounded fallback because this compatibility path does not receive registration
+/// // notifications.
 /// loop {
 ///     match driver.advance_timers(Instant::now()) {
 ///         Ok(Some(deadline)) => {
 ///             thread::park_timeout(deadline.saturating_duration_since(Instant::now()))
 ///         }
-///         Ok(None) => thread::park(),
+///         Ok(None) => thread::park_timeout(std::time::Duration::from_millis(10)),
 ///         Err(_) => break,
 ///     }
 /// }
@@ -148,9 +136,9 @@ impl<S> InactiveClock<S> {
     /// Activates the clock for time operations.
     ///
     /// Consumes this inactive clock and returns a working [`Clock`] instance along with
-    /// its [`ClockDriver`]. Registering the first system timer, or a timer that precedes the
-    /// current earliest deadline, invokes `driver_waker`, allowing the runtime to interrupt its
-    /// existing wait.
+    /// its [`ClockDriver`]. This source-compatible activation path does not receive timer
+    /// registration notifications, so the driver requires bounded periodic polling whenever
+    /// [`ClockDriver::advance_timers`] returns no deadline.
     ///
     /// # Returns
     ///
@@ -158,8 +146,31 @@ impl<S> InactiveClock<S> {
     /// - [`Clock`] - The activated clock instance for time operations
     /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
     #[must_use]
-    pub fn activate(self, driver_waker: Waker) -> (Clock, ClockDriver) {
-        let driver_id = self.state.register_driver(driver_waker);
+    pub fn activate(self) -> (Clock, ClockDriver) {
+        self.activate_inner(None)
+    }
+
+    /// Activates the clock with notifications for driver wait interruption.
+    ///
+    /// Registering the first system timer, a timer that precedes the current earliest deadline,
+    /// or dropping the final clock owner invokes `driver_waker`. A system-clock driver can
+    /// therefore park indefinitely when [`ClockDriver::advance_timers`] returns no deadline and
+    /// [`ClockDriver::requires_periodic_poll`] is `false`.
+    ///
+    /// Controlled clocks do not register the waker because their time advances externally. Their
+    /// drivers continue to require bounded periodic polling.
+    ///
+    /// The retained waker must not transitively own a [`Clock`] associated with this driver.
+    /// Runtime loops commonly wait for [`ClockGone`](crate::runtime::ClockGone) before dropping the
+    /// driver; a `Waker -> runtime state -> Clock` ownership cycle would keep the final clock owner
+    /// alive and prevent that shutdown condition.
+    #[must_use]
+    pub fn activate_with_driver_waker(self, driver_waker: Waker) -> (Clock, ClockDriver) {
+        self.activate_inner(Some(driver_waker))
+    }
+
+    fn activate_inner(self, driver_waker: Option<Waker>) -> (Clock, ClockDriver) {
+        let driver_id = driver_waker.and_then(|driver_waker| self.state.register_driver(driver_waker));
         let state = self.state;
         let clock = Clock::new(state.clone());
         let driver = ClockDriver::new(state, driver_id);

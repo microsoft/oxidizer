@@ -40,6 +40,14 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
+    pub(crate) fn wait_for_notification(&self) {
+        let mut notified = self.notified.lock();
+        while !*notified {
+            notified = self.ready.wait(notified);
+        }
+        *notified = false;
+    }
+
     pub(crate) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
@@ -126,14 +134,14 @@ mod tests {
     }
 
     #[test]
-    fn remote_wake_releases_a_waiter() {
+    fn remote_wake_releases_an_indefinite_waiter() {
         let signal = Arc::new(WorkerSignal::default());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&signal);
         let worker = thread::spawn(move || {
             ready_tx.send(()).unwrap();
-            waiter.wait(TEST_TIMEOUT.saturating_mul(2));
+            waiter.wait_for_notification();
             done_tx.send(()).unwrap();
         });
         ready_rx.recv_timeout(TEST_TIMEOUT).unwrap();

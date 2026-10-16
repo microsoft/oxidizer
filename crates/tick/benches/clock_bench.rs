@@ -29,7 +29,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 fn clock(c: &mut Criterion) {
     let mut group = c.benchmark_group("clock_operations");
 
-    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, mut driver) = InactiveClock::default().activate();
 
     group.bench_function("clock_operations", |b| {
         b.iter(|| {

@@ -96,7 +96,7 @@ impl Drop for ClockOwningWake {
 fn dropping_the_final_clock_owner_wakes_the_driver() {
     let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
     let driver_waker = Waker::from(Arc::clone(&wake_count));
-    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+    let (clock, _driver) = InactiveClock::default().activate_with_driver_waker(driver_waker);
 
     drop(clock);
 
@@ -108,7 +108,7 @@ fn concurrent_final_owner_drops_wake_the_driver_once() {
     const OWNER_COUNT: usize = 8;
     let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
     let driver_waker = Waker::from(Arc::clone(&wake_count));
-    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+    let (clock, _driver) = InactiveClock::default().activate_with_driver_waker(driver_waker);
     let release = Arc::new(Barrier::new(OWNER_COUNT + 1));
     let owners: [_; OWNER_COUNT] = std::array::from_fn(|_| clock.clone());
     drop(clock);
@@ -133,7 +133,7 @@ fn concurrent_final_owner_drops_wake_the_driver_once() {
 
 #[test]
 fn driver_reports_clock_gone_only_after_the_final_clone_is_dropped() {
-    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, mut driver) = InactiveClock::default().activate();
     let final_clone = clock.clone();
     drop(clock);
 
@@ -145,7 +145,7 @@ fn driver_reports_clock_gone_only_after_the_final_clone_is_dropped() {
 
 #[test]
 fn relocating_the_only_clock_owner_finishes_its_previous_driver() {
-    let (mut clock, mut previous_driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (mut clock, mut previous_driver) = InactiveClock::default().activate();
     let builder = ThreadBuilder::default();
     let source = builder.build(thread::current().id());
     let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
@@ -164,8 +164,9 @@ fn dropping_a_newer_driver_restores_notifications_to_the_surviving_driver() {
     let root = InactiveClock::default();
     let (first_clock, first_driver) = root
         .clone()
-        .activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
-    let (second_clock, second_driver) = root.activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&second_wakes)))));
+        .activate_with_driver_waker(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
+    let (second_clock, second_driver) =
+        root.activate_with_driver_waker(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&second_wakes)))));
     drop(second_clock);
     drop(second_driver);
 
@@ -185,8 +186,9 @@ fn all_live_drivers_receive_first_timer_and_final_owner_notifications() {
     let root = InactiveClock::default();
     let (first_clock, first_driver) = root
         .clone()
-        .activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
-    let (second_clock, second_driver) = root.activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&second_wakes)))));
+        .activate_with_driver_waker(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
+    let (second_clock, second_driver) =
+        root.activate_with_driver_waker(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&second_wakes)))));
     {
         let mut context = Context::from_waker(Waker::noop());
         let mut delay = std::pin::pin!(first_clock.delay(Duration::from_secs(1)));
@@ -203,32 +205,14 @@ fn all_live_drivers_receive_first_timer_and_final_owner_notifications() {
 }
 
 #[test]
-fn registering_an_earlier_timer_notifies_live_drivers_again() {
-    let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
-    let (clock, _driver) = InactiveClock::default().activate(Waker::from(Arc::clone(&wake_count)));
-    let mut context = Context::from_waker(Waker::noop());
-    let mut long_delay = std::pin::pin!(clock.delay(Duration::from_mins(2)));
-    assert!(long_delay.as_mut().poll(&mut context).is_pending());
-    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
-
-    let mut later_delay = std::pin::pin!(clock.delay(Duration::from_mins(3)));
-    assert!(later_delay.as_mut().poll(&mut context).is_pending());
-    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
-
-    let mut earlier_delay = std::pin::pin!(clock.delay(Duration::from_mins(1)));
-    assert!(earlier_delay.as_mut().poll(&mut context).is_pending());
-    assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
-}
-
-#[test]
 fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock() {
     let root = InactiveClock::default();
-    let (owned_clock, first_driver) = root.clone().activate(Waker::noop().clone());
+    let (owned_clock, first_driver) = root.clone().activate();
     let clock_owning_waker = Waker::from(Arc::new(ClockOwningWake {
         clock: Mutex::new(Some(owned_clock)),
         wake_count: AtomicUsize::new(0),
     }));
-    let (second_clock, second_driver) = root.activate(clock_owning_waker);
+    let (second_clock, second_driver) = root.activate_with_driver_waker(clock_owning_waker);
     drop(second_clock);
     let (completed, completion) = mpsc::channel();
 
@@ -245,7 +229,7 @@ fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock
 #[test]
 fn notifying_drivers_does_not_clone_custom_wakers_under_the_registry_lock() {
     let root = InactiveClock::default();
-    let (first_clock, first_driver) = root.clone().activate(Waker::noop().clone());
+    let (first_clock, first_driver) = root.clone().activate_with_driver_waker(Waker::noop().clone());
     let first_driver = Arc::new(Mutex::new(Some(first_driver)));
     let first_driver_for_hook = Arc::clone(&first_driver);
     let hook_waker = clone_hook_waker(move || {
@@ -256,7 +240,7 @@ fn notifying_drivers_does_not_clone_custom_wakers_under_the_registry_lock() {
                 .take(),
         );
     });
-    let (second_clock, second_driver) = root.activate(hook_waker);
+    let (second_clock, second_driver) = root.activate_with_driver_waker(hook_waker);
     let (completed, completion) = mpsc::channel();
 
     let registering = thread::spawn(move || {
