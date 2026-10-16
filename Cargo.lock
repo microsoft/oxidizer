@@ -2440,7 +2440,7 @@ dependencies = [
  "bincode-next",
  "derive_more",
  "gungraun-macros",
- "gungraun-runner",
+ "gungraun-runner 0.19.4",
 ]
 
 [[package]]
@@ -2466,8 +2466,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47c68c92812da579a2510a2cc702d5aa3251992b9662d4a98502ca46e0cbe16e"
 dependencies = [
  "either-or-both",
+ "serde",
+]
+
+[[package]]
+name = "gungraun-runner"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e1460377fe936c3efbe8e27c422b745fa54ebaea81ffe4a53a6f17c7a478683"
+dependencies = [
+ "either-or-both",
  "indexmap",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3516,7 +3527,7 @@ dependencies = [
  "criterion",
  "either-or-both",
  "gungraun",
- "gungraun-runner",
+ "gungraun-runner 0.20.0",
  "jiff",
  "libc",
  "metabench_macros",
