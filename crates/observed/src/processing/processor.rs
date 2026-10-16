@@ -30,18 +30,21 @@ use crate::metadata::EventDescription;
 pub trait EventProcessor: Send + Sync {
     /// Decides whether this processor wants the event.
     ///
-    /// Called **before** the event is constructed, and again while routing it,
-    /// so it may run more than once per emission - and once per child for a
-    /// composite sink. Keep it cheap, and let the answer depend only on
-    /// `description` and on state that changes at most once, such as a
-    /// `OnceLock` filled during initialization. A sampler, rate limiter, or any
-    /// filter whose answer varies per call belongs in
-    /// [`process()`](Self::process), which runs exactly once per delivery.
+    /// Called at most once per emission for each Sink the processor belongs
+    /// to, and not at all when that Sink's
+    /// [`EventSampler`](crate::EventSampler) drops the event without asking.
+    /// Keep it cheap.
     ///
     /// It is both the lazy-construction gate and the per-processor routing
-    /// decision: if **all** processors return `false` the event closure is
-    /// never invoked, and a processor that returns `false` never receives the
+    /// decision: the event closure runs only when at least one processor
+    /// returns `true`, and a processor that returns `false` never receives the
     /// event even when a peer is interested.
+    ///
+    /// # Nested telemetry is not supported
+    ///
+    /// Do not emit from inside `is_interested()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn is_interested(&self, description: &EventDescription) -> bool;
 
     /// Processes an event by pulling fields and enrichments from the view.
@@ -51,10 +54,9 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// # Nested telemetry is not supported
     ///
-    /// Emitting from inside `process()` is silently dropped, including to a
-    /// different [`Sink`](crate::Sink): a thread-wide reentrancy guard skips
-    /// any nested `emit!` for the duration of the outer emission. Report
-    /// processor-internal failures through a non-`observed` channel instead.
+    /// Do not emit from inside `process()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn process(&self, event: &EventView<'_>);
 
     /// Forces any buffered telemetry produced by this processor out to its
