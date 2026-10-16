@@ -125,7 +125,8 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
     /// # Panics
     ///
     /// Panics if `endpoint` is not a valid URI authority, if an explicit port
-    /// cannot be represented as a `u16`, or if `server_name` is empty.
+    /// cannot be represented as a `u16`, or if `server_name` is empty or
+    /// contains a NUL character.
     pub fn server_name_override<E>(mut self, endpoint: E, server_name: impl Into<String>) -> Self
     where
         E: TryInto<Authority>,
