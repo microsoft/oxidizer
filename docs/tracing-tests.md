@@ -54,6 +54,10 @@ recorded with `Span::record`. Formatting panics propagate to the emitting test e
 when no output sink is enabled. Partial event text from a panicking formatter is
 discarded rather than leaking into a later event or capture.
 
+Span fields are formatted before locking their stored state, so their formatters
+can emit nested events without deadlocking. A failed recording leaves the previous
+span fields intact and does not poison the span's lock.
+
 This also applies during mutation testing: stdout and file output are suppressed,
 but field expressions and formatting still run, and explicitly requested buffers
 still capture output for assertions.

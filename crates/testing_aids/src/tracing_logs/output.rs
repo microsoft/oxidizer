@@ -12,7 +12,7 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use super::format::CompleteEvent;
+use super::format::formatting_layer;
 use crate::is_mutation_testing;
 
 /// Enables logging of test output to the standard output stream.
@@ -156,12 +156,7 @@ fn ensure_initialized() {
             .and(BufferWriterFactory.with_filter(|_| buffer_active()));
 
         tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .event_format(CompleteEvent)
-                    .with_ansi(false)
-                    .with_writer(writer),
-            )
+            .with(formatting_layer(writer))
             .try_init()
             .expect("this can only happen if something else besides testing_aids has configured logging");
     });

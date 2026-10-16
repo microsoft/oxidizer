@@ -65,14 +65,9 @@ impl Capture {
     #[must_use]
     pub fn subscriber(&self) -> impl tracing::Subscriber {
         super::output::assert_initialized();
-        tracing_subscriber::registry().with(
-            tracing_subscriber::fmt::layer()
-                .event_format(super::format::CompleteEvent)
-                .with_writer(CaptureWriterMaker {
-                    buffer: std::sync::Arc::clone(&self.buffer),
-                })
-                .with_ansi(false),
-        )
+        tracing_subscriber::registry().with(super::format::formatting_layer(CaptureWriterMaker {
+            buffer: std::sync::Arc::clone(&self.buffer),
+        }))
     }
 }
 
