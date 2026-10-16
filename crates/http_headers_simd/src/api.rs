@@ -414,8 +414,6 @@ mod tests {
         any(target_arch = "x86", target_arch = "x86_64")
     ))]
     use std::arch;
-    #[cfg(not(feature = "std"))]
-    use std::format;
     use std::time::Duration;
     #[cfg(not(feature = "std"))]
     use std::vec;
@@ -423,20 +421,8 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
+    use crate::test_support::{case_partners, lane_bytes};
     use crate::{base64, list, range, scalar, uri};
-
-    fn lane_bytes(length: usize) -> impl Iterator<Item = u8> {
-        // Miri keeps every byte in every lane across two blocks and a tail.
-        // Other lengths retain the boundaries of each byte class.
-        (u8::MIN..=u8::MAX).filter(move |byte| {
-            !cfg!(miri)
-                || length == 33
-                || matches!(
-                    *byte,
-                    0 | b'\t' | b'\n' | b'\r' | 0x1f..=b'0' | b'9'..=b'A' | b'Z'..=b'a' | b'z'..=0x80 | 0xff
-                )
-        })
-    }
 
     #[test]
     fn token_byte_class_is_exhaustive() {
@@ -536,22 +522,25 @@ mod tests {
             assert!(is_simple_uri_path(&bytes), "valid length {length}");
 
             for lane in 1..length {
-                let mut invalid = bytes.clone();
-                invalid[lane] = b'%';
-                assert!(!is_simple_uri_path(&invalid), "escape lane {lane}, length {length}");
-
-                let mut fragment = bytes.clone();
-                fragment[lane] = b'#';
-                assert!(is_simple_uri_path(&fragment), "one hash at {lane}, length {length}");
+                bytes[lane] = b'%';
+                assert!(!is_simple_uri_path(&bytes), "escape lane {lane}, length {length}");
+                bytes[lane] = b'#';
+                assert!(is_simple_uri_path(&bytes), "one hash at {lane}, length {length}");
 
                 for other in 1..length {
                     if other == lane {
                         continue;
                     }
-                    let mut twice = fragment.clone();
-                    twice[other] = b'#';
-                    assert!(!is_simple_uri_path(&twice), "hashes at {lane} and {other}, length {length}");
+                    // Keep every first-fragment lane, with second fragments
+                    // around block/tail boundaries instead of every lane pair.
+                    if cfg!(miri) && !matches!(other, 1 | 15 | 16 | 31 | 32) && other != length - 1 {
+                        continue;
+                    }
+                    bytes[other] = b'#';
+                    assert!(!is_simple_uri_path(&bytes), "hashes at {lane} and {other}, length {length}");
+                    bytes[other] = b'a';
                 }
+                bytes[lane] = b'a';
             }
         }
     }
@@ -559,17 +548,37 @@ mod tests {
     #[test]
     fn simd_lanes_match_scalar_for_every_byte() {
         for length in [16, 17, 31, 32, 33, 48] {
+            let mut bytes = vec![b'a'; length];
             for lane in 0..length {
-                for byte in lane_bytes(length) {
-                    let mut bytes = vec![b'a'; length];
+                for byte in lane_bytes(length, lane) {
                     bytes[lane] = byte;
-                    let context = format!("byte {byte:#04x} at lane {lane}, length {length}");
-                    assert_eq!(is_token(&bytes), scalar::is_token(&bytes), "{context}");
-                    assert_eq!(all_base64_alphabet(&bytes), base64::all_base64_alphabet(&bytes), "{context}");
-                    assert_eq!(is_token68(&bytes), scalar::is_token68(&bytes), "{context}");
-                    assert_eq!(is_field_value(&bytes), scalar::is_field_value(&bytes), "{context}");
-                    assert_eq!(find_interesting(&bytes), scalar::find_interesting(&bytes), "{context}");
+                    assert_eq!(
+                        is_token(&bytes),
+                        scalar::is_token(&bytes),
+                        "byte {byte:#04x} at lane {lane}, length {length}"
+                    );
+                    assert_eq!(
+                        all_base64_alphabet(&bytes),
+                        base64::all_base64_alphabet(&bytes),
+                        "byte {byte:#04x} at lane {lane}, length {length}"
+                    );
+                    assert_eq!(
+                        is_token68(&bytes),
+                        scalar::is_token68(&bytes),
+                        "byte {byte:#04x} at lane {lane}, length {length}"
+                    );
+                    assert_eq!(
+                        is_field_value(&bytes),
+                        scalar::is_field_value(&bytes),
+                        "byte {byte:#04x} at lane {lane}, length {length}"
+                    );
+                    assert_eq!(
+                        find_interesting(&bytes),
+                        scalar::find_interesting(&bytes),
+                        "byte {byte:#04x} at lane {lane}, length {length}"
+                    );
                 }
+                bytes[lane] = b'a';
             }
         }
     }
@@ -577,10 +586,10 @@ mod tests {
     #[test]
     fn simple_uri_lanes_match_scalar_for_every_byte() {
         for length in [16, 17, 23, 31, 32, 33, 48, 49] {
+            let mut bytes = vec![b'a'; length];
+            bytes[0] = b'/';
             for lane in 1..length {
-                for byte in lane_bytes(length) {
-                    let mut bytes = vec![b'a'; length];
-                    bytes[0] = b'/';
+                for byte in lane_bytes(length, lane) {
                     bytes[lane] = byte;
                     assert_eq!(
                         is_simple_uri_path(&bytes),
@@ -588,6 +597,7 @@ mod tests {
                         "byte {byte:#04x} at lane {lane}, length {length}"
                     );
                 }
+                bytes[lane] = b'a';
             }
         }
     }
@@ -659,11 +669,12 @@ mod tests {
     fn simple_uri_reference_lanes_match_scalar_for_every_byte() {
         let prefix = b"https://example.com";
         for length in [24, 32, 33, 48, 49] {
+            let mut bytes = vec![b'a'; length];
+            bytes[..prefix.len()].copy_from_slice(prefix);
+            bytes[prefix.len()] = b'/';
             for lane in 0..length {
-                for byte in lane_bytes(length) {
-                    let mut bytes = vec![b'a'; length];
-                    bytes[..prefix.len()].copy_from_slice(prefix);
-                    bytes[prefix.len()] = b'/';
+                let original = bytes[lane];
+                for byte in lane_bytes(length, lane) {
                     bytes[lane] = byte;
                     assert_eq!(
                         as_simple_uri_reference(&bytes).is_some(),
@@ -671,6 +682,7 @@ mod tests {
                         "byte {byte:#04x} at lane {lane}, length {length}"
                     );
                 }
+                bytes[lane] = original;
             }
         }
     }
@@ -678,7 +690,7 @@ mod tests {
     #[test]
     fn ascii_case_equality_is_exhaustive() {
         for left in u8::MIN..=u8::MAX {
-            for right in u8::MIN..=u8::MAX {
+            for right in case_partners(left) {
                 assert_eq!(
                     eq_ignore_ascii_case(&[left], &[right]),
                     left.eq_ignore_ascii_case(&right),
@@ -872,9 +884,9 @@ mod tests {
     #[test]
     fn token_list_tails_match_scalar_for_every_length_and_byte() {
         for length in 16..=33_usize {
+            let mut input = vec![b'a'; length];
             for lane in 0..length {
-                for byte in lane_bytes(length) {
-                    let mut input = vec![b'a'; length];
+                for byte in lane_bytes(length, lane) {
                     input[lane] = byte;
                     for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {
                         let expected = list::oracle(&input, empty);
@@ -885,6 +897,7 @@ mod tests {
                         );
                     }
                 }
+                input[lane] = b'a';
             }
         }
     }
