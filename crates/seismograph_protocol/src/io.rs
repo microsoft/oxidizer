@@ -394,7 +394,16 @@ impl MonitorIo {
     pub(crate) fn entries(&self, path: &Path) -> std_io::Result<Vec<std_io::Result<PathBuf>>> {
         self.checkpoint(IoOperation::Enumerate)?;
         match &self.core {
-            Core::Native => Ok(fs::read_dir(path)?.map(|entry| entry.map(|entry| entry.path())).collect()),
+            Core::Native => {
+                #[cfg(windows)]
+                {
+                    platform::directory_entries(path)
+                }
+                #[cfg(unix)]
+                {
+                    Ok(fs::read_dir(path)?.map(|entry| entry.map(|entry| entry.path())).collect())
+                }
+            }
             #[cfg(any(test, feature = "test-util"))]
             Core::Mocked(runtime) => runtime.entries(path),
         }

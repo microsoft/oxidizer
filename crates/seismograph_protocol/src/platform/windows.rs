@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 pub(crate) use discovery::{current_directory, registry_directories};
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use security::create_directory;
-pub(crate) use security::{create_descriptor, current_owner, open_directory, read_descriptor};
+pub(crate) use security::{create_descriptor, current_owner, directory_entries, open_directory, read_descriptor};
 use windows_sys::Win32::Foundation::{
     ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_NOT_FOUND, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
     GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,

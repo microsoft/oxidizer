@@ -187,19 +187,33 @@ fn scan_socket_table(table: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, Mo
             return;
         }
     };
-    for line in BufReader::new(file).lines().skip(1) {
-        match line {
-            Ok(line) => {
-                if let Some(directory) = socket_directory(&line) {
-                    add_directory(directory.to_owned(), caller, paths, errors);
-                }
-            }
-            Err(error) => {
-                errors.push(Err(error));
-                break;
-            }
+    for entry in socket_table_directories(BufReader::new(file).lines()) {
+        match entry {
+            Ok(directory) => add_directory(directory, caller, paths, errors),
+            Err(error) => errors.push(Err(error)),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn socket_table_directories(mut lines: impl Iterator<Item = io::Result<String>>) -> impl Iterator<Item = io::Result<PathBuf>> {
+    let mut stopped = false;
+    std::iter::from_fn(move || {
+        while !stopped {
+            match lines.next()? {
+                Ok(line) => {
+                    if let Some(directory) = socket_directory(&line) {
+                        return Some(Ok(directory.to_owned()));
+                    }
+                }
+                Err(error) => {
+                    stopped = error.kind() != io::ErrorKind::InvalidData;
+                    return Some(Err(error));
+                }
+            }
+        }
+        None
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -284,6 +298,39 @@ mod tests {
                 .kind(),
             io::ErrorKind::PermissionDenied
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn invalid_socket_table_text_does_not_hide_later_monitors() {
+        let registry = PathBuf::from("/custom runtime/seismograph");
+        let mut rows = b"Num RefCount Protocol Flags Type St Inode Path\n".to_vec();
+        rows.extend_from_slice(b"0000: 2 0 10000 1 01 1234 /unrelated-\xff\n");
+        rows.extend_from_slice(
+            format!(
+                "0000: 2 0 10000 1 01 1235 {}/42-01010101010101010101010101010101.sock\n",
+                registry.display()
+            )
+            .as_bytes(),
+        );
+        let entries = socket_table_directories(io::Cursor::new(rows).lines())
+            .map(|entry| entry.map_err(|error| error.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(entries, [Err(io::ErrorKind::InvalidData), Ok(registry)]);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn socket_table_read_failures_are_reported_without_looping() {
+        let mut reads = 0;
+        let lines = std::iter::from_fn(|| {
+            reads += 1;
+            Some(Err(io::Error::from(io::ErrorKind::IsADirectory)))
+        });
+        let entries = socket_table_directories(lines)
+            .map(|entry| entry.map_err(|error| error.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!((reads, entries), (1, vec![Err(io::ErrorKind::IsADirectory)]));
     }
 
     #[test]

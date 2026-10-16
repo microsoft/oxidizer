@@ -138,13 +138,17 @@ pub(crate) fn registry_directories() -> io::Result<DirectoryEntries> {
             owner,
         }));
     }
-    // The current user's entry may also have been enumerated from ProfileList.
+    deduplicate_entries(&mut entries);
+    Ok(entries)
+}
+
+fn deduplicate_entries(entries: &mut DirectoryEntries) {
+    // A different user's claim must not hide the actual owner's registry.
     let mut seen = std::collections::BTreeSet::new();
     entries.retain(|entry| match entry {
-        Ok(entry) => seen.insert(entry.path.clone()),
+        Ok(entry) => seen.insert((entry.path.clone(), entry.owner.clone())),
         Err(_) => true,
     });
-    Ok(entries)
 }
 
 fn profile_local_app_data(sid: &str) -> io::Result<PathBuf> {
@@ -220,6 +224,27 @@ fn registry_string(root: HKEY, key: &str, value: &str, expand: bool) -> io::Resu
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conflicting_owner_claims_do_not_hide_a_registry() {
+        let path = PathBuf::from(r"C:\Users\Alice\AppData\Local\Seismograph\monitor");
+        let pretender = MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1002".into());
+        let owner = MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1001".into());
+        let mut entries = [pretender.clone(), owner.clone(), owner.clone()]
+            .map(|owner| Ok(DirectoryEntry { path: path.clone(), owner }))
+            .into_iter()
+            .collect::<Vec<_>>();
+        entries.push(Err(io::Error::new(io::ErrorKind::InvalidData, "invalid profile")));
+        deduplicate_entries(&mut entries);
+        let actual = entries
+            .into_iter()
+            .map(|entry| entry.map(|entry| (entry.path, entry.owner)).map_err(|error| error.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [Ok((path.clone(), pretender)), Ok((path, owner)), Err(io::ErrorKind::InvalidData),]
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "native known-folder and profile APIs")]

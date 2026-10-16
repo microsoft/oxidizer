@@ -8,6 +8,8 @@
 //! `/tmp`. Windows uses the user's local application-data directory.
 //! No administrator setup is required. Discovery aggregates accessible
 //! registries while retaining owner and administrator access checks.
+//! Windows registries require direct local-disk paths; network locations,
+//! substituted drives, and reparse-point ancestors are rejected before probing.
 
 use std::io;
 use std::path::{Path, PathBuf};
