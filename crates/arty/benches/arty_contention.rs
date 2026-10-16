@@ -16,11 +16,11 @@
 //! task waker, transitions to pending, wakes through the retained clone, and
 //! returns `Pending`. Its next poll returns `Ready`.
 //!
-//! Arty's inner tasks stay on the worker selected for the relocated cache,
-//! while Tokio may move its child tasks between workers. The cases are
-//! comparable in cache work and task count at one and eight workers, but this
-//! is one coordination workload rather than a claim about general runtime
-//! performance.
+//! Arty's inner tasks stay on their outer task's worker (also the worker selected
+//! for the relocated cache in that workload), while Tokio may move its child
+//! tasks between workers. The cases are comparable in child lifecycle, cache
+//! work where applicable, and task count at one and eight workers, but these are
+//! coordination workloads rather than claims about general runtime performance.
 //!
 //! Callgrind is intentionally omitted because it cannot model the scheduling
 //! and cross-worker contention these workloads are intended to expose.
@@ -181,10 +181,11 @@ async fn arty_outer(cx: Builtins, cache: Cache) {
 }
 
 async fn arty_retained_waker_outer(cx: Builtins, (): ()) {
-    let scheduler = cx.scheduler().clone();
+    let scheduler = cx.scheduler();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for handle in &mut handles {
-        *handle = Some(scheduler.spawn(|_| RetainedWaker::default()));
+        let future = RetainedWaker::default();
+        *handle = Some(scheduler.spawn(move |_| future));
     }
 
     for handle in handles {
@@ -291,7 +292,8 @@ async fn tokio_outer(cache: Cache) {
 async fn tokio_retained_waker_outer() {
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for handle in &mut handles {
-        *handle = Some(tokio::spawn(RetainedWaker::default()));
+        let future = RetainedWaker::default();
+        *handle = Some(tokio::spawn(future));
     }
 
     for handle in handles {
