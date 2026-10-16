@@ -34,9 +34,14 @@ pub(crate) fn build(
     sink: Sink,
     thread_builder: &ThreadBuilder,
 ) -> Result<Runtime, Error> {
-    let pool_mode = processor_config.blocking_pool_policy.mode_label();
+    let RuntimeConfig {
+        workers_policy,
+        stack_size: configured_stack_size,
+        blocking_pool_policy,
+    } = processor_config;
+    let pool_mode = blocking_pool_policy.mode_label();
     let available = available_processors();
-    let processors = processor_config.workers_policy.select(&available).inspect_err(|_| {
+    let processors = workers_policy.select(&available).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {
@@ -56,14 +61,13 @@ pub(crate) fn build(
     let mut async_worker_join_handles = Vec::with_capacity(processors.len());
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
-    let stack_size = processor_config
-        .stack_size
+    let stack_size = configured_stack_size
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
-    let blocking_pool = build_pool(&processor_config.blocking_pool_policy).inspect_err(|_| {
+    let blocking_pool = build_pool(&blocking_pool_policy).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {

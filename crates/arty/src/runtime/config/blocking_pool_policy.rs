@@ -133,11 +133,13 @@ impl Default for BlockingPoolPolicy {
 fn validated_max(max_workers: Option<usize>) -> Result<Option<NonZeroU32>, Error> {
     max_workers
         .map(|max_workers| {
-            let max_workers = u32::try_from(max_workers).map_err(|_| Error::blocking_pool_limit_too_large())?;
-            let max_workers = NonZeroU32::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit)?;
-            if max_workers.get() > MAX_BLOCKING_WORKERS {
+            if max_workers > MAX_BLOCKING_WORKERS as usize {
                 return Err(Error::blocking_pool_limit_too_large());
             }
+            let max_workers = u32::try_from(max_workers)
+                .expect("validated above to fit within the 10,000-worker u32 limit");
+            let max_workers =
+                NonZeroU32::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit)?;
             Ok(max_workers)
         })
         .transpose()
