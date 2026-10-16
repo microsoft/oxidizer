@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 use std::{fmt, thread};
 
 use arty_executor::discard_task_panic_payload;
@@ -53,17 +54,19 @@ impl Drop for BlockingTaskScope {
 struct JoinableThreadPool {
     jobs: Option<channel::Sender<BlockingJob>>,
     workers: Vec<thread::JoinHandle<()>>,
+    worker_threads: Arc<Mutex<Vec<ThreadId>>>,
     receiver: channel::Receiver<BlockingJob>,
     queued_count: Arc<std::sync::atomic::AtomicUsize>,
     active_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl JoinableThreadPool {
-    fn new(thread_count: usize) -> Self {
+    fn new(thread_count: usize, worker_threads: Arc<Mutex<Vec<ThreadId>>>) -> Self {
         let (jobs, receiver) = channel::unbounded();
         let mut pool = Self {
             jobs: Some(jobs),
             workers: Vec::with_capacity(thread_count),
+            worker_threads,
             receiver,
             queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -87,27 +90,29 @@ impl JoinableThreadPool {
         true
     }
 
+    #[cfg_attr(test, mutants::skip)] // Mutating worker construction creates non-terminating pools.
     fn set_num_threads(&mut self, thread_count: usize) {
         while self.workers.len() < thread_count {
             let receiver = self.receiver.clone();
             let queued_count = Arc::clone(&self.queued_count);
             let active_count = Arc::clone(&self.active_count);
-            self.workers.push(
-                thread::Builder::new()
-                    .name("arty-blocking".to_string())
-                    .spawn(move || {
-                        while let Ok(job) = receiver.recv() {
-                            active_count.fetch_add(1, Ordering::SeqCst);
-                            queued_count.fetch_sub(1, Ordering::SeqCst);
-                            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
-                            active_count.fetch_sub(1, Ordering::SeqCst);
-                            if let Err(panic) = outcome {
-                                discard_task_panic_payload(panic);
-                            }
+            let worker_threads = Arc::clone(&self.worker_threads);
+            let worker = thread::Builder::new()
+                .name("arty-blocking".to_string())
+                .spawn(move || {
+                    worker_threads.lock().push(thread::current().id());
+                    while let Ok(job) = receiver.recv() {
+                        active_count.fetch_add(1, Ordering::SeqCst);
+                        queued_count.fetch_sub(1, Ordering::SeqCst);
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                        active_count.fetch_sub(1, Ordering::SeqCst);
+                        if let Err(panic) = outcome {
+                            discard_task_panic_payload(panic);
                         }
-                    })
-                    .expect("blocking worker thread creation must succeed"),
-            );
+                    }
+                })
+                .expect("blocking worker thread creation must succeed");
+            self.workers.push(worker);
         }
     }
 
@@ -123,6 +128,7 @@ impl JoinableThreadPool {
         self.queued_count.load(Ordering::SeqCst)
     }
 
+    #[cfg_attr(test, mutants::skip)] // Equivalent mutation: consuming self still runs Drop.
     fn join(mut self) {
         self.shutdown_and_join();
     }
@@ -134,6 +140,7 @@ impl JoinableThreadPool {
                 discard_task_panic_payload(panic);
             }
         }
+        self.worker_threads.lock().clear();
     }
 }
 
@@ -241,8 +248,9 @@ impl BlockingWorker {
         self.is_shutting_down.store(true, Ordering::Release);
     }
 
-    pub(crate) fn is_current_task(&self) -> bool {
-        CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, &self.pool.identity)))
+    pub(crate) fn owns_current_thread(&self) -> bool {
+        self.pool.owns_current_thread()
+            || CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, &self.pool.identity)))
     }
 
     /// Waits for the currently running blocking tasks to complete.
@@ -260,6 +268,7 @@ pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
 pub(crate) struct BlockingPool {
     pool: Arc<Mutex<Option<JoinableThreadPool>>>,
     identity: Arc<()>,
+    worker_threads: Arc<Mutex<Vec<ThreadId>>>,
     saturation_reported: Arc<AtomicBool>,
     max_thread_count: NonZeroUsize,
     mode: &'static str,
@@ -289,11 +298,13 @@ impl BlockingPool {
 
     pub(crate) fn new_with_mode(max_thread_count: Option<NonZeroUsize>, mode: &'static str) -> Self {
         // Start with one thread and let the pool grow as needed.
-        let thread_pool = JoinableThreadPool::new(Self::INITIAL_THREAD_COUNT);
+        let worker_threads = Arc::new(Mutex::new(Vec::new()));
+        let thread_pool = JoinableThreadPool::new(Self::INITIAL_THREAD_COUNT, Arc::clone(&worker_threads));
 
         Self {
             pool: Arc::new(Mutex::new(Some(thread_pool))),
             identity: Arc::new(()),
+            worker_threads,
             saturation_reported: Arc::new(AtomicBool::new(false)),
             max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
             mode,
@@ -320,6 +331,11 @@ impl BlockingPool {
         if let Some(pool) = pool {
             pool.join();
         }
+    }
+
+    fn owns_current_thread(&self) -> bool {
+        let current = thread::current().id();
+        self.worker_threads.lock().contains(&current)
     }
 
     /// Grows the pool by one thread if possible, returning whether it grew.
@@ -411,6 +427,7 @@ pub(super) mod blocking_worker_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
     use std::thread;
+    use std::thread::ThreadId;
 
     use events_once::Event;
     use observed::{Sink, Value};
@@ -419,10 +436,17 @@ pub(super) mod blocking_worker_tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use crate::runtime::blocking_worker::{BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, is_current_blocking_pool};
+    use crate::runtime::blocking_worker::{
+        BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
+    };
 
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
+    }
+
+    fn joinable_pool(thread_count: usize) -> (JoinableThreadPool, Arc<Mutex<Vec<ThreadId>>>) {
+        let workers = Arc::new(Mutex::new(Vec::new()));
+        (JoinableThreadPool::new(thread_count, Arc::clone(&workers)), workers)
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -461,6 +485,103 @@ pub(super) mod blocking_worker_tests {
         let _scope = BlockingTaskScope::enter(Arc::clone(&current));
         assert!(is_current_blocking_pool(&current));
         assert!(!is_current_blocking_pool(&other));
+    }
+
+    #[test]
+    fn joinable_pool_reports_active_work() {
+        let (pool, _) = joinable_pool(1);
+        let (started, ready) = channel();
+        let (release, released) = channel();
+        assert!(pool.execute(move || {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+        }));
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        assert_eq!(pool.active_count(), 1);
+        release.send(()).unwrap();
+        pool.join();
+    }
+
+    #[test]
+    fn joinable_pool_rejects_work_after_shutdown() {
+        let (mut pool, workers) = joinable_pool(1);
+        pool.shutdown_and_join();
+
+        assert!(!pool.execute(|| panic!("a shut down pool must reject work")));
+        assert!(workers.lock().is_empty());
+    }
+
+    #[test]
+    fn joinable_pool_reports_disconnected_submission() {
+        let (jobs, disconnected) = performables::sync::channel::unbounded::<BlockingJob>();
+        drop(disconnected);
+        let (_, receiver) = performables::sync::channel::unbounded();
+        let mut pool = JoinableThreadPool {
+            jobs: Some(jobs),
+            workers: Vec::new(),
+            worker_threads: Arc::new(Mutex::new(Vec::new())),
+            receiver,
+            queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+
+        assert!(!pool.execute(|| {}));
+        assert_eq!(pool.queued_count(), 0);
+        pool.shutdown_and_join();
+    }
+
+    #[test]
+    fn joinable_pool_contains_job_panics() {
+        let (pool, _) = joinable_pool(1);
+        assert!(pool.execute(|| panic!("direct pool job panic")));
+        let (completed, received) = channel();
+        assert!(pool.execute(move || completed.send(()).unwrap()));
+
+        received.recv_timeout(TEST_TIMEOUT).unwrap();
+        pool.join();
+    }
+
+    #[test]
+    fn joinable_pool_discards_worker_panic_and_clears_membership() {
+        let workers = Arc::new(Mutex::new(Vec::new()));
+        let worker = thread::spawn(|| panic!("worker failure"));
+        workers.lock().push(worker.thread().id());
+        let (_, receiver) = performables::sync::channel::unbounded();
+        let mut pool = JoinableThreadPool {
+            jobs: None,
+            workers: vec![worker],
+            worker_threads: Arc::clone(&workers),
+            receiver,
+            queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+
+        pool.shutdown_and_join();
+        assert!(workers.lock().is_empty());
+    }
+
+    #[test]
+    fn dropping_joinable_pool_clears_worker_membership() {
+        let (pool, workers) = joinable_pool(1);
+        let (completed, received) = channel();
+        assert!(pool.execute(move || completed.send(()).unwrap()));
+        received.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_eq!(workers.lock().len(), 1);
+
+        drop(pool);
+        assert!(workers.lock().is_empty());
+    }
+
+    #[test]
+    fn joinable_pool_debug_reports_counts() {
+        let (pool, _) = joinable_pool(1);
+
+        let debug = format!("{pool:?}");
+        assert!(debug.contains("queued_count: 0"));
+        assert!(debug.contains("active_count: 0"));
+        assert!(debug.contains("max_count: 1"));
+        pool.join();
     }
 
     #[test]

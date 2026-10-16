@@ -27,8 +27,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
 /// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
 ///
-/// On any asynchronous Arty worker or one of this runtime's blocking callbacks,
-/// dropping the owner only requests shutdown and returns without waiting.
+/// On any asynchronous Arty worker or one of this runtime's blocking worker
+/// threads, including callback teardown, dropping the owner only requests
+/// shutdown and returns without waiting.
 /// The workers complete their cleanup independently; destruction in those
 /// contexts is not a shutdown-completion barrier.
 ///
@@ -140,9 +141,10 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if called from an async Arty worker or one of
-    /// this runtime's blocking callbacks, because those contexts cannot wait for
-    /// shutdown. In those cases the owner is consumed without waiting.
+    /// Returns an [`Error`] if called from an async Arty worker or one of this
+    /// runtime's blocking worker threads, including callback teardown, because
+    /// those contexts cannot wait for shutdown. In those cases the owner is
+    /// consumed without waiting.
     ///
     /// Also returns an error if a worker panicked. All workers are joined before
     /// reporting a worker failure; task failures must be observed through their
@@ -175,7 +177,7 @@ impl Runtime {
         if Scheduler::is_current_worker_thread() {
             return Err(Error::shutdown_wait_from_worker());
         }
-        if self.scheduler.dispatcher.is_current_blocking_task() {
+        if self.scheduler.dispatcher.is_current_blocking_thread() {
             return Err(Error::shutdown_wait_from_blocking_callback());
         }
         self.scheduler.dispatcher.wait()
@@ -252,7 +254,7 @@ mod tests {
         assert!(
             runtime
                 .scheduler()
-                .spawn_blocking(move || dispatcher.is_current_blocking_task())
+                .spawn_blocking(move || dispatcher.is_current_blocking_thread())
                 .join()
                 .unwrap()
         );

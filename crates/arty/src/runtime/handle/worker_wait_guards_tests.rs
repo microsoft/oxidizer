@@ -5,12 +5,30 @@
 //! These tests retain the private dispatcher so every owned worker is joined.
 //! See docs/INTERNALS.md, "Shutdown guard tests".
 
+use std::cell::RefCell;
 use std::future::pending;
 use std::sync::mpsc;
 
 use thread_aware::Unaware;
 
-use crate::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use crate::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+
+thread_local! {
+    static RUNTIME_OWNER: RefCell<Option<ThreadLocalRuntimeOwner>> = const { RefCell::new(None) };
+}
+
+struct ThreadLocalRuntimeOwner {
+    runtime: Option<Runtime>,
+    dropped: mpsc::Sender<()>,
+}
+
+impl Drop for ThreadLocalRuntimeOwner {
+    #[mutants::skip] // Test stimulus, not runtime behavior.
+    fn drop(&mut self) {
+        drop(self.runtime.take());
+        self.dropped.send(()).unwrap();
+    }
+}
 
 /// Exercises both wait guards while cancellation destroys a task on its worker.
 struct Probe {
@@ -42,6 +60,42 @@ fn async_worker_stop_returns_without_self_joining() {
     assert!(dispatcher.is_shutting_down());
     dispatcher.wait().unwrap();
     assert!(result.is_err());
+}
+
+#[test]
+fn blocking_thread_local_owner_drop_returns_without_self_joining() {
+    testing_aids::execute_or_abandon(|| {
+        let runtime = runtime();
+        let dispatcher = runtime.scheduler.dispatcher.clone();
+        let operations = RuntimeOperations::from(&runtime);
+        let scheduler = runtime
+            .scheduler()
+            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+            .join()
+            .unwrap();
+        let (dropped, received) = mpsc::channel();
+
+        scheduler
+            .spawn_blocking(move || {
+                RUNTIME_OWNER.with(|owner| {
+                    assert!(
+                        owner
+                            .replace(Some(ThreadLocalRuntimeOwner {
+                                runtime: Some(runtime),
+                                dropped,
+                            }))
+                            .is_none()
+                    );
+                });
+            })
+            .join()
+            .unwrap();
+
+        operations.request_stop();
+        dispatcher.wait().unwrap();
+        received.try_recv().unwrap();
+    })
+    .unwrap();
 }
 
 #[test]
