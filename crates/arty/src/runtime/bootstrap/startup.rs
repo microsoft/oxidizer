@@ -14,8 +14,7 @@ use performables::sync::channel::{OneshotReceiver, Sender};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
-use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::bootstrap::pools::BlockingPools;
+use crate::runtime::bootstrap::pools::build_pool;
 use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
@@ -35,9 +34,14 @@ pub(crate) fn build(
     sink: Sink,
     thread_builder: &ThreadBuilder,
 ) -> Result<Runtime, Error> {
-    let pool_mode = processor_config.blocking_pool_policy.mode_label();
+    let RuntimeConfig {
+        workers_policy,
+        stack_size: configured_stack_size,
+        blocking_pool_policy,
+    } = processor_config;
+    let pool_mode = blocking_pool_policy.mode_label();
     let available = available_processors();
-    let processors = processor_config.workers_policy.select(&available).inspect_err(|_| {
+    let processors = workers_policy.select(&available).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {
@@ -57,14 +61,13 @@ pub(crate) fn build(
     let mut async_worker_join_handles = Vec::with_capacity(processors.len());
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
-    let stack_size = processor_config
-        .stack_size
+    let stack_size = configured_stack_size
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
+    let blocking_pool = build_pool(&blocking_pool_policy).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {
@@ -92,22 +95,16 @@ pub(crate) fn build(
                 worker_index,
                 worker_endpoint_tx,
                 thread_builder: thread_builder.clone(),
-                blocking_pools: blocking_pools.clone(),
-                shutdown_started: Arc::clone(&shutdown_started),
+                blocking_scheduler: blocking_pool.scheduler(),
                 sink: sink.clone(),
             }
             .start(),
         );
 
-        let (waker, thread, blocking_worker) = worker_endpoint_rx
+        let (waker, thread) = worker_endpoint_rx
             .recv()
             .expect("failed to receive the worker endpoint from the starting worker");
-        async_worker_command_txs.push(WorkerEndpoint {
-            command_tx,
-            waker,
-            thread,
-            blocking_worker,
-        });
+        async_worker_command_txs.push(WorkerEndpoint { command_tx, waker, thread });
         async_worker_success_rxs.push(success_rx);
     }
 
@@ -116,6 +113,7 @@ pub(crate) fn build(
         ThreadWaiter::new(async_worker_join_handles),
         NonEmpty::from_vec(async_worker_command_txs)
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
+        blocking_pool.scheduler(),
         sink,
         shutdown_started,
     ));
@@ -144,7 +142,7 @@ pub(crate) fn build(
         }
     );
 
-    Ok(Runtime::with_dispatcher(dispatcher_client))
+    Ok(Runtime::with_dispatcher_and_pool(dispatcher_client, blocking_pool))
 }
 
 /// The data set required to start one async worker (the message channels and associated data).
@@ -158,10 +156,9 @@ struct AsyncWorkerStartInfo {
     inactive_clock: InactiveClock,
     processor: ProcessorSet,
     worker_index: usize,
-    worker_endpoint_tx: Sender<(Waker, Thread, Arc<BlockingWorker>)>,
+    worker_endpoint_tx: Sender<(Waker, Thread)>,
     thread_builder: ThreadBuilder,
-    blocking_pools: BlockingPools,
-    shutdown_started: Arc<AtomicBool>,
+    blocking_scheduler: vicinal::Scheduler,
     sink: Sink,
 }
 
@@ -187,8 +184,7 @@ impl AsyncWorkerStartInfo {
             worker_index,
             worker_endpoint_tx,
             thread_builder,
-            blocking_pools,
-            shutdown_started,
+            blocking_scheduler,
             sink,
         } = self;
 
@@ -202,14 +198,10 @@ impl AsyncWorkerStartInfo {
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
 
-        // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker =
-            BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
-
         let signal = Arc::new(WorkerSignal::default());
 
         worker_endpoint_tx
-            .send((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
+            .send((WorkerSignal::waker(&signal), current.clone()))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have
@@ -224,7 +216,7 @@ impl AsyncWorkerStartInfo {
             start_signal.dispatcher,
             current,
             sink,
-            Arc::clone(&blocking_worker),
+            blocking_scheduler,
             clock,
             signal,
         );
@@ -251,7 +243,6 @@ impl AsyncWorkerStartInfo {
         }
         emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
-        blocking_worker.join();
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }

@@ -1,6 +1,6 @@
 # Design
 
-Arty runs async tasks on dedicated workers, with separate pools for blocking
+Arty runs async tasks on dedicated workers, with a separate pool for blocking
 work. Tasks receive `Builtins` with their worker's scheduler, clock, and
 telemetry sink.
 
@@ -56,9 +56,22 @@ See the
 ## Blocking work and I/O
 
 `spawn_blocking` runs a synchronous callback away from async workers. Captures
-and results must be `Send`. Workers share one blocking pool by default; the
-per-worker policy separates their blocking workloads into one pool per worker,
-potentially using more threads.
+and results must be `Send`. One runtime-owned Vicinal pool executes all
+blocking work. The legacy `per_worker` policy maps limits to processor-local
+worker groups. The `shared` policy uses one system-wide worker group with a
+default upper bound of 10,000 workers.
+
+Tokio's blocking pool defaults to 512 threads. Arty does not copy that value
+because Vicinal lazily starts processor-affine workers and uses different
+locality and queueing rules. Arty's 10,000-worker value is a defensive
+configuration ceiling, not a recommended steady-state thread count.
+
+When unwinding is enabled, a panic from the callback body is returned through
+its `JoinHandle` as `JoinError`. Arty does not add compatibility wrappers around
+Vicinal for panics from destructors, join-waker notification, or dropping the
+runtime owner from inside its own blocking callback. Those uncommon cases are
+outside the supported containment contract. They can be reconsidered if a
+concrete application requirement justifies the added lifecycle complexity.
 
 Arty provides timers, but not async network or file I/O drivers. An async I/O
 library still needs its own runtime support. See [I/O](IO.md).
@@ -71,13 +84,15 @@ join handle neither cancels its task nor waits for it.
 `RuntimeOperations::request_stop` requests shutdown without waiting.
 `Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
 Dropping the owner also requests shutdown and normally waits, but cannot return
-errors. Neither waits when called from an async Arty worker or the runtime's own
-blocking callback; `stop` returns an error in those contexts.
+errors. On an async Arty worker, shutdown is handed off rather than waiting and
+`stop` returns an error. Do not call `stop` or drop the runtime owner from one of
+that runtime's blocking callbacks. Pool destruction may wait for the callback
+that is performing the destruction and deadlock.
 
 Shutdown rejects new submissions and cancels unfinished async tasks on their
-worker. Rejected factories and queued blocking callbacks do not run.
-Already-running callbacks finish before shutdown completes; one that never
-returns can prevent it.
+worker. Rejected factories do not run. Blocking callbacks admitted before the
+shutdown flag is observed may still start. Already-running callbacks finish
+before shutdown completes; one that never returns can prevent it.
 
 Await required work before requesting shutdown or returning from an
 `#[arty::main]` or `#[arty::test]` body. See the
@@ -98,9 +113,11 @@ the runtime's shutdown contract.
 
 ## Failure handling
 
-Application errors remain task results. A caught panic becomes `JoinError`;
-that alone does not stop the runtime or repair shared state. Worker isolation
-does not make every panic recoverable: some failures must stop the process.
+Application errors remain task results. A caught task-factory, async-task-body,
+or blocking-callback-body panic becomes `JoinError`; that alone does not stop
+the runtime or repair shared state. This guarantee does not extend to arbitrary
+panics from destructors or notification callbacks. Worker isolation does not
+make every panic recoverable: some failures must stop the process.
 
 Runtime telemetry uses a no-op sink by default. Configured telemetry processors
 must not panic. See [panic handling](PANICS.md) for how task, shutdown, and

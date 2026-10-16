@@ -23,7 +23,8 @@ impl RuntimeOperations {
     ///
     /// May be called repeatedly from any thread. Pending tasks are cancelled,
     /// and new submissions receive [`JoinError`](crate::task::JoinError).
-    /// Running blocking callbacks are allowed to finish. The owner remains
+    /// Running blocking callbacks are allowed to finish, and callbacks admitted
+    /// concurrently with the stop request may still start. The owner remains
     /// responsible for waiting for shutdown when it is stopped or dropped.
     ///
     /// # Examples

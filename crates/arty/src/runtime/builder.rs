@@ -19,7 +19,8 @@ use crate::runtime::handle::Runtime;
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
+/// a shared blocking pool capped at 10,000 workers, a real-time clock, and
+/// a no-op telemetry sink.
 ///
 /// # Examples
 ///
@@ -85,14 +86,13 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets whether async workers share their blocking-task pool.
+    /// Sets the locality and worker count for blocking tasks.
     ///
-    /// The default shares one pool across async workers. Use
-    /// [`BlockingPoolPolicy::shared`] for one runtime-wide pool, or
-    /// [`BlockingPoolPolicy::per_worker`] to give each worker its own pool.
-    /// Chain [`BlockingPoolPolicy::max`] to set the thread limit.
-    /// A zero shared-pool limit is rejected by [`build`](Self::build), not by
-    /// this setter.
+    /// The runtime always owns one pool. Use [`BlockingPoolPolicy::per_worker`]
+    /// for processor-local worker groups or [`BlockingPoolPolicy::shared`] for
+    /// system-wide sharing. Chain [`BlockingPoolPolicy::max`] to set the
+    /// fixed worker count for that locality. Limits outside `1..=10_000` are
+    /// rejected by [`build`](Self::build), not by this setter.
     ///
     /// # Examples
     ///

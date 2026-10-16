@@ -7,10 +7,9 @@ coordination invariants behind Arty's public runtime behavior.
 
 [`runtime/bootstrap/startup.rs`](../src/runtime/bootstrap/startup.rs) starts
 workers in stable processor order. Each worker first publishes a
-`WorkerEndpoint`: its command sender, wake handle, thread coordinate, and
-blocking worker. Bootstrap collects every endpoint before constructing the
-dispatcher, then distributes a `DispatcherClient` back to every worker through
-its start channel.
+`WorkerEndpoint`: its command sender, wake handle, and thread coordinate.
+Bootstrap collects every endpoint before constructing the dispatcher, then
+distributes a `DispatcherClient` back to every worker through its start channel.
 
 Each worker constructs its `Builtins` after receiving the shared dispatcher.
 Bootstrap waits for every worker's success signal before returning the
@@ -27,11 +26,33 @@ owns the complete endpoint set and maps runtime thread IDs to worker indexes.
 `DispatcherClient` is the cloneable capability used by schedulers and workers;
 it does not own a separate runtime or worker set.
 
-`Runtime` owns the dispatcher and the worker-shutdown waiter. Scheduler,
-`Builtins`, join, clock, and operations handles can outlive individual tasks,
-but they do not keep the runtime running. `Runtime::stop` and `Runtime::drop`
-request shutdown through the dispatcher; the waiter joins async workers, and
-each worker joins its blocking pool before its thread exits.
+`Runtime` owns the dispatcher, the worker-shutdown waiter, and the single
+`vicinal::Pool` used for blocking work. Each async worker and the dispatcher
+hold scheduler values for that pool. Scheduler, `Builtins`, join, clock, and
+operations handles can outlive individual tasks, but they do not keep the
+runtime running. `Runtime::stop` and `Runtime::drop` request shutdown through
+the dispatcher; workers drop their scheduler values during shutdown, the
+waiter joins async workers, and dropping the runtime-owned pool completes
+blocking-pool shutdown. Pool destruction is handed to a helper thread only when
+the runtime owner is dropped from an async Arty worker. A Vicinal blocking
+worker does not carry that marker, so dropping the owner from its own blocking
+callback is unsupported and can self-wait.
+
+## Intentional blocking compatibility boundary
+
+Arty guarantees that unwinding from the `spawn_blocking` callback body is
+reported as `JoinError`. The Vicinal integration intentionally does not recreate
+the former blocking-worker machinery for these uncommon edge cases:
+
+- panics while destroying an abandoned blocking result;
+- panics while destroying a cancelled blocking callback capture;
+- panics from a blocking join's receiver waker;
+- runtime-owner destruction from inside the runtime's own blocking callback.
+
+Do not reintroduce those checks or compatibility shims only to restore old
+integration tests. The simpler lifecycle is the current design. Add support
+later only when a concrete caller requirement justifies the extra ownership,
+panic-containment, and reentrancy machinery.
 
 ### Shutdown guard tests
 

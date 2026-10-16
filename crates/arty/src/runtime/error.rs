@@ -39,16 +39,16 @@ impl Error {
         Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
     }
 
+    pub(crate) fn blocking_pool_limit_too_large() -> Self {
+        Self::new(RuntimeValidation::BlockingPoolLimitTooLarge)
+    }
+
     pub(crate) fn block_on_from_worker() -> Self {
         Self::new(RuntimeValidation::BlockOnFromWorker)
     }
 
     pub(crate) fn shutdown_wait_from_worker() -> Self {
         Self::new(RuntimeValidation::ShutdownWaitFromWorker)
-    }
-
-    pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
-        Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
     }
 
     #[cfg(any(test, feature = "macros"))]
@@ -91,9 +91,9 @@ impl StdError for InsufficientProcessors {}
 pub(crate) enum RuntimeValidation {
     InvalidWorkerCount,
     InvalidBlockingPoolLimit,
+    BlockingPoolLimitTooLarge,
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
-    ShutdownWaitFromBlockingCallback,
 }
 
 impl Display for RuntimeValidation {
@@ -101,9 +101,9 @@ impl Display for RuntimeValidation {
         f.write_str(match self {
             Self::InvalidWorkerCount => "worker count must be greater than zero",
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
+            Self::BlockingPoolLimitTooLarge => "blocking pool max_workers must not exceed 10000",
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
-            Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
         })
     }
 }
@@ -163,6 +163,11 @@ mod tests {
                 "blocking pool max_workers must be greater than zero",
             ),
             (
+                Error::blocking_pool_limit_too_large(),
+                RuntimeValidation::BlockingPoolLimitTooLarge,
+                "blocking pool max_workers must not exceed 10000",
+            ),
+            (
                 Error::block_on_from_worker(),
                 RuntimeValidation::BlockOnFromWorker,
                 "block_on cannot be called from an async Arty worker",
@@ -171,11 +176,6 @@ mod tests {
                 Error::shutdown_wait_from_worker(),
                 RuntimeValidation::ShutdownWaitFromWorker,
                 "an async Arty worker cannot wait for runtime shutdown",
-            ),
-            (
-                Error::shutdown_wait_from_blocking_callback(),
-                RuntimeValidation::ShutdownWaitFromBlockingCallback,
-                "a runtime blocking callback cannot wait for its own shutdown",
             ),
         ];
 

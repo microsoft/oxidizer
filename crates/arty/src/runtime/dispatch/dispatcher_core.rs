@@ -15,12 +15,11 @@ use performables::sync::channel;
 use thread_aware::Thread;
 
 use crate::runtime::Error;
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedTaskFactory};
 use crate::task::Builtins;
-use crate::task::execution::prepare_remote;
+use crate::task::execution::{prepare_blocking, prepare_remote};
 use crate::task::join::JoinHandle;
 
 #[derive(Debug)]
@@ -28,7 +27,6 @@ pub(crate) struct WorkerEndpoint {
     pub(crate) command_tx: channel::Sender<AsyncWorkerCommand>,
     pub(crate) waker: Waker,
     pub(crate) thread: Thread,
-    pub(crate) blocking_worker: Arc<BlockingWorker>,
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -75,17 +73,27 @@ pub(crate) struct DispatcherCore {
     sink: observed::Sink,
 
     remote_results: RemotePool,
+
+    blocking_scheduler: vicinal::Scheduler,
 }
 
 impl DispatcherCore {
     #[cfg(test)]
     pub(crate) fn new(wait_for_shutdown: ThreadWaiter, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
+        let blocking_pool = vicinal::Pool::new();
+        Self::new_with_shutdown(
+            wait_for_shutdown,
+            worker_endpoints,
+            blocking_pool.scheduler(),
+            sink,
+            Arc::new(AtomicBool::new(false)),
+        )
     }
 
     pub(crate) fn new_with_shutdown(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
+        blocking_scheduler: vicinal::Scheduler,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
     ) -> Self {
@@ -113,6 +121,7 @@ impl DispatcherCore {
             next_async_worker_index: AtomicUsize::new(0),
             sink,
             remote_results: RemotePool::new(),
+            blocking_scheduler,
         }
     }
 
@@ -127,7 +136,6 @@ impl DispatcherCore {
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
-            endpoint.blocking_worker.shutdown();
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
@@ -182,24 +190,18 @@ impl DispatcherCore {
         &self.remote_results
     }
 
-    pub(crate) fn is_current_blocking_task(&self) -> bool {
-        self.worker_endpoints
-            .iter()
-            .any(|endpoint| endpoint.blocking_worker.is_current_task())
-    }
-
-    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
-        self.blocking_worker(self.next_worker_index())
-    }
-
-    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
-        Arc::clone(
-            &self
-                .worker_endpoints
-                .get(usize::from(worker_index))
-                .expect("scheduler worker index must be registered")
-                .blocking_worker,
-        )
+    pub(crate) fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
+    where
+        B: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        if self.is_shutting_down() {
+            drop(body);
+            return JoinHandle::shutdown(&self.remote_results);
+        }
+        let (task, join) = prepare_blocking(&self.remote_results, body, Arc::clone(&self.shutdown_started));
+        self.blocking_scheduler.spawn_and_forget(task);
+        join
     }
 
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
@@ -268,7 +270,6 @@ mod tests {
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
 
     #[cfg_attr(test, mutants::skip)]
@@ -277,7 +278,6 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
         }
     }
 

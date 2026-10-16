@@ -166,14 +166,19 @@ fn assert_async_follows_relocation(observation: &RelocationObservation) {
     );
 }
 
+#[cfg_attr(test, mutants::skip)] // Test oracle, not production behavior; assertion mutations invalidate the test itself.
+fn assert_blocking_stays_off_async_workers(observation: &RelocationObservation) {
+    assert_ne!(observation.blocking_task.before, observation.async_task.before);
+    assert_ne!(observation.blocking_task.before, observation.async_task.after);
+    assert_ne!(observation.blocking_task.after, observation.async_task.before);
+    assert_ne!(observation.blocking_task.after, observation.async_task.after);
+}
+
 #[test]
-fn relocating_scheduler_uses_destination_pool_when_per_worker() {
+fn relocating_scheduler_changes_async_binding_when_processor_local() {
     let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Scheduler);
 
-    assert_ne!(
-        observation.blocking_task.before, observation.blocking_task.after,
-        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating the scheduler"
-    );
+    assert_blocking_stays_off_async_workers(&observation);
     assert_async_follows_relocation(&observation);
 }
 
@@ -189,13 +194,10 @@ fn relocating_scheduler_uses_same_pool_when_shared() {
 }
 
 #[test]
-fn relocating_builtins_uses_destination_pool_when_per_worker() {
+fn relocating_builtins_changes_async_binding_when_processor_local() {
     let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Builtins);
 
-    assert_ne!(
-        observation.blocking_task.before, observation.blocking_task.after,
-        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating Builtins"
-    );
+    assert_blocking_stays_off_async_workers(&observation);
     assert_async_follows_relocation(&observation);
 }
 
@@ -225,18 +227,18 @@ fn foreign_owner_relocation_preserves_runtime_binding() {
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .join()
         .unwrap();
-    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
+    let blocking_before = builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
 
     builtins.relocate(Some(&source), &destination);
 
+    let blocking_after = builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
+    assert_eq!(builtins.thread(), &source);
     assert_eq!(
-        (
-            builtins.thread(),
-            builtins.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
-            builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap(),
-        ),
-        (&source, source.id(), blocking_thread),
+        builtins.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
+        source.id()
     );
+    assert!(![source.id(), destination.id()].contains(&blocking_before));
+    assert!(![source.id(), destination.id()].contains(&blocking_after));
 }
 
 #[test]
@@ -277,15 +279,15 @@ fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .join()
         .unwrap();
-    let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
+    let blocking_before = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
 
     scheduler.relocate(Some(builtins.thread()), &destination);
 
+    let blocking_after = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
     assert_eq!(
-        (
-            scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
-            scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
-        ),
-        (builtins.thread().id(), blocking_thread),
+        scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
+        builtins.thread().id()
     );
+    assert!(![builtins.thread().id(), destination.id()].contains(&blocking_before));
+    assert!(![builtins.thread().id(), destination.id()].contains(&blocking_after));
 }

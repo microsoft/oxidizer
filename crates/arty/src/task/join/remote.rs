@@ -5,17 +5,18 @@ use std::pin::Pin;
 use std::task::{self, Poll};
 
 use arty_executor::remote::{JoinHandle as RemoteJoinHandle, Pool as RemotePool};
-use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
-use crate::runtime::blocking_worker::is_current_blocking_pool;
 
 /// A handle for receiving an async or blocking task's result.
 ///
 /// Await the handle inside async code. Completion produces `Ok(result)`. A task
 /// panic or shutdown cancellation produces [`JoinError`] without unwinding the
 /// joining task.
+///
+/// For blocking tasks, panic containment covers the callback body. It does not
+/// cover panics from capture or result destructors or from the receiver waker.
 ///
 /// Dropping the handle does not cancel its task or rethrow a task panic.
 /// The runtime must remain running for pending async work to complete.
@@ -49,7 +50,6 @@ where
     #[debug(ignore)]
     #[pin]
     inner: RemoteJoinHandle<R>,
-    blocking_pool: Option<Arc<()>>,
     completed: bool,
 }
 
@@ -58,11 +58,7 @@ where
     R: Send + 'static,
 {
     pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
-        Self {
-            inner,
-            blocking_pool: None,
-            completed: false,
-        }
+        Self { inner, completed: false }
     }
 
     pub(crate) fn shutdown(pool: &RemotePool) -> Self {
@@ -71,23 +67,10 @@ where
         Self::new(inner)
     }
 
-    pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
-        self.blocking_pool = Some(pool);
-        self
-    }
-
     #[cfg(test)]
     pub(crate) fn join(self) -> Result<R, JoinError> {
         futures::executor::block_on(self)
     }
-}
-
-#[cfg_attr(test, mutants::skip)] // Removing this guard makes the black-box blocking-pool regression deadlock.
-fn assert_not_current_blocking_pool(blocking_pool: Option<&Arc<()>>) {
-    assert!(
-        !blocking_pool.is_some_and(is_current_blocking_pool),
-        "blocking JoinHandle cannot be polled while the current blocking pool waits for it"
-    );
 }
 
 impl<R> Future for JoinHandle<R>
@@ -99,7 +82,6 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         assert!(!*this.completed, "JoinHandle polled after completion");
-        assert_not_current_blocking_pool(this.blocking_pool.as_ref());
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;

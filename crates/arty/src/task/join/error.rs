@@ -47,8 +47,10 @@ pub struct JoinError {
 impl JoinError {
     /// Returns `true` if the task panicked.
     ///
-    /// This includes panics in a factory, an async future, or a blocking
-    /// callback when unwinding is enabled.
+    /// This includes panics in a factory, an async future, or the body of a
+    /// blocking callback when unwinding is enabled. It does not promise
+    /// containment for panics from blocking capture or result destructors or
+    /// from a join receiver's waker.
     ///
     /// # Examples
     ///

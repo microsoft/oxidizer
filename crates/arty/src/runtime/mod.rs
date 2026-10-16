@@ -35,7 +35,6 @@
 //! See the [configuration](crate::documentation::configuration) and
 //! [shutdown](crate::documentation::shutdown) guides for more.
 
-pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
