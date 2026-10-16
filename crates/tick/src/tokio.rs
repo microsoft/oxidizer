@@ -92,6 +92,15 @@ mod tests {
     #[derive(Debug)]
     struct CountingWake(AtomicUsize);
 
+    async fn next_driver_event(
+        observed_events: &mut ::tokio::sync::mpsc::UnboundedReceiver<(Option<Instant>, Option<WaitOutcome>)>,
+    ) -> (Option<Instant>, Option<WaitOutcome>) {
+        ::tokio::time::timeout(Duration::from_secs(1), observed_events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     impl Wake for CountingWake {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -150,27 +159,28 @@ mod tests {
             },
         ));
 
-        assert_eq!(observed_events.recv().await.unwrap(), (None, None));
+        assert_eq!(next_driver_event(&mut observed_events).await, (None, None));
 
         let long_deadline = fixed_now + Duration::from_secs(5);
         let long_timer = clock.register_timer(long_deadline, Waker::noop().clone());
-        assert_eq!(observed_events.recv().await.unwrap(), (None, Some(WaitOutcome::Notified)));
-        assert_eq!(observed_events.recv().await.unwrap(), (Some(long_deadline), None));
+        assert_eq!(next_driver_event(&mut observed_events).await, (None, Some(WaitOutcome::Notified)));
+        assert_eq!(next_driver_event(&mut observed_events).await, (Some(long_deadline), None));
 
         let tokio_now = ::tokio::time::Instant::now();
         let short_deadline = fixed_now + Duration::from_millis(20);
         let short_timer = clock.register_timer(short_deadline, Waker::noop().clone());
         assert_eq!(
-            observed_events.recv().await.unwrap(),
+            next_driver_event(&mut observed_events).await,
             (Some(long_deadline), Some(WaitOutcome::Notified))
         );
-        assert_eq!(observed_events.recv().await.unwrap(), (Some(short_deadline), None));
+        assert_eq!(next_driver_event(&mut observed_events).await, (Some(short_deadline), None));
         assert_eq!(::tokio::time::Instant::now(), tokio_now);
 
+        driver_task.abort();
+        assert!(driver_task.await.unwrap_err().is_cancelled());
         clock.unregister_timer(short_timer);
         clock.unregister_timer(long_timer);
         drop(clock);
-        driver_task.await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
@@ -180,7 +190,9 @@ mod tests {
         // join handle; public timing and relocation behavior is covered by integration tests.
         let (clock, handle) = Clock::new_tokio_core();
 
-        clock.delay(Duration::from_millis(15)).await;
+        ::tokio::time::timeout(Duration::from_secs(1), clock.delay(Duration::from_millis(15)))
+            .await
+            .unwrap();
         drop(clock);
 
         ::tokio::time::timeout(Duration::from_secs(1), handle)
