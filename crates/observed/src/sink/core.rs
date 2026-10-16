@@ -5,6 +5,8 @@
 
 use std::any::type_name;
 use std::sync::Arc;
+use std::time::SystemTime;
+use std::{iter, slice};
 
 use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
@@ -13,7 +15,7 @@ use crate::context::Transfer;
 use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
-use crate::processing::{EventProcessor, EventView, IntermediateEvent};
+use crate::processing::{EvaluatedEvent, EventProcessor, EventView};
 use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 use crate::{Event, FlushError, SinkFlushError, SinkId};
 
@@ -384,30 +386,21 @@ impl Sink {
     /// Called by the [`emit!`](crate::emit!) macro with the captured
     /// [`SourceLocation`]; prefer that macro over calling this directly.
     pub fn emit<E: Event, F: FnOnce() -> E>(&self, build: F, source_location: SourceLocation) {
-        let state = IntermediateEvent::typed(build, source_location);
-        self.emit_impl(state);
-    }
-
-    /// Dispatches an event through the sink.
-    ///
-    /// It's automatically called by the `emit!` macro expansion, and can be called directly for
-    /// [`DynEvent`s](DynEvent)
-    pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
         if self.is_noop() {
             return;
         }
 
-        let description = state.description();
-        if !self.is_interested_in(&description) {
+        let description = E::DESCRIPTION;
+        if !self.is_interested(&description) {
             return;
         }
 
-        // Build the event value BEFORE taking the reentrancy guard. `evaluate`
+        // Build the event value BEFORE taking the reentrancy guard. `build`
         // runs ordinary user code - a field initializer may call a helper that
         // legitimately emits telemetry of its own, often to an unrelated sink.
         // The hazard the guard exists for starts when processors run, so
         // holding it across construction would silently drop that telemetry.
-        let event = state.evaluate();
+        let event = EvaluatedEvent::new(build(), source_location);
 
         let Some(_guard) = super::try_acquire_reentrancy_guard() else {
             return;
@@ -416,10 +409,76 @@ impl Sink {
         self.dispatch_to_processors(&event, &description);
     }
 
-    /// Returns `true` if at least one processor is interested in the event.
+    /// Routes an already-built event without a lazy-construction interest pass.
+    pub(crate) fn emit_dynamic(&self, event: &dyn DynEvent) {
+        let children = match &*self.inner {
+            SinkInner::Single(state) => slice::from_ref(state),
+            SinkInner::Composite { children } => children.as_slice(),
+            SinkInner::Noop { .. } => return,
+        };
+        if children.iter().all(|child| child.processors.is_empty()) {
+            return;
+        }
+
+        let description = event.description();
+        let mut children = children.iter();
+        let Some(dispatch) = children.find_map(|child| child.prepare_dynamic_dispatch(event, &description)) else {
+            return;
+        };
+        let Some(_guard) = super::try_acquire_reentrancy_guard() else {
+            return;
+        };
+
+        // Admission remains outside the guard so one-time initialization can
+        // emit telemetry. The borrowed continuation retains the selected
+        // recipient without caching a decision for another emission.
+        // See docs/implementation.md, "Constructed dynamic events".
+        dispatch();
+        for child in children {
+            if let Some(dispatch) = child.prepare_dynamic_dispatch(event, &description) {
+                dispatch();
+            }
+        }
+    }
+
+    /// Returns whether any processor is interested in the described event.
     ///
-    /// For Composite, returns `true` if any child is interested.
-    fn is_interested_in(&self, description: &EventDescription) -> bool {
+    /// Aggregates [`EventProcessor::is_interested`] for `description`, returning
+    /// `true` if any processor is interested. A composite is interested if any
+    /// child is interested; no-op sinks and sinks without processors return `false`.
+    ///
+    /// External event sources can use this query before collecting fields or
+    /// constructing an event. Like the processor check, it uses the event
+    /// description rather than inspecting event fields. It does not construct
+    /// or dispatch events, flush processors, invoke samplers, or read timestamps
+    /// or enrichments.
+    ///
+    /// This is current interest, not a delivery guarantee or a lifetime
+    /// filtering decision. Checks do not form an atomic snapshot across
+    /// processors. Initialization may change selection for subsequent emissions;
+    /// earlier decisions need not be revisited during the same emission.
+    /// See [`EventProcessor::is_interested`] for the processor contract.
+    /// Query again for each candidate event rather than caching the result for
+    /// the sink's lifetime. Emission checks interest independently and remains
+    /// subject to sampling and other delivery filters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use observed::Sink;
+    /// use observed::metadata::EventDescription;
+    ///
+    /// // An external source can describe an event without collecting its fields.
+    /// let description = EventDescription::new("request.completed", None, None, None, false, false);
+    /// let sink = Sink::noop();
+    ///
+    /// assert!(!sink.is_interested(&description));
+    /// ```
+    #[must_use]
+    // Interest checks run for each candidate event; permit cross-crate
+    // inlining on this hot path (docs/performance.md, "#[inline] annotations").
+    #[inline]
+    pub fn is_interested(&self, description: &EventDescription) -> bool {
         match &*self.inner {
             SinkInner::Single(state) => state.is_interested(description),
             SinkInner::Composite { children } => children.iter().any(|c| c.is_interested(description)),
@@ -431,7 +490,7 @@ impl Sink {
     /// sink, delegates dispatch to each child leaf so every leaf constructs its
     /// own `EventView` rooted at itself (which walks its own enrichment slot).
     ///
-    /// The reentrancy guard acquired in [`Sink::emit_impl`] is held across all
+    /// The reentrancy guard acquired in [`Sink::emit`] is held across all
     /// sibling dispatches, so composites safely iterate children without the
     /// guard falsely tripping.
     fn dispatch_to_processors(&self, event: &dyn DynEvent, description: &EventDescription) {
@@ -538,6 +597,23 @@ impl SingleSinkState {
         self.processors.iter().any(|p| p.is_interested(description))
     }
 
+    /// Selects the first recipient and returns allocation-free deferred dispatch.
+    fn prepare_dynamic_dispatch<'a>(&'a self, event: &'a dyn DynEvent, description: &'a EventDescription) -> Option<impl FnOnce() + 'a> {
+        let mut interested = self.processors.iter().filter(move |processor| processor.is_interested(description));
+        let first = interested.next()?;
+
+        Some(move || {
+            if self.sampler.is_some() {
+                // Sampling can initialize processors in either direction. Keep
+                // the fresh post-sampling checks for all recipients in `dispatch`.
+                self.dispatch(event, description);
+                return;
+            }
+
+            self.deliver(event, self.clock.system_time(), iter::once(first).chain(interested));
+        })
+    }
+
     /// Offers the event context to this leaf's [`EventSampler`], then builds an
     /// [`EventView`] rooted at this leaf's enrichment slot and hands it to each
     /// interested processor unless the sampler dropped it.
@@ -552,11 +628,24 @@ impl SingleSinkState {
             return;
         }
 
+        self.deliver(
+            event,
+            timestamp,
+            self.processors.iter().filter(|processor| processor.is_interested(description)),
+        );
+    }
+
+    /// Shares one leaf's context among lazily selected recipients.
+    fn deliver<'p>(
+        &self,
+        event: &dyn DynEvent,
+        timestamp: SystemTime,
+        recipients: impl Iterator<Item = &'p PerformableArc<dyn EventProcessor>>,
+    ) {
         let view = EventView::new(event, self.enrichment.current(), self.isolated_enrichment, self.id, timestamp);
-        for processor in self.processors.iter() {
-            if processor.is_interested(description) {
-                processor.process(&view);
-            }
+        // Keep selection lazy so preceding processors can affect later interest checks.
+        for processor in recipients {
+            processor.process(&view);
         }
     }
 }
@@ -612,12 +701,12 @@ mod tests {
 
     #[test]
     fn noop_sink_interest_dispatch_and_flush() {
-        // `emit_impl` gates on `is_noop()`, so these no-op arms are only reachable
+        // `emit` gates on `is_noop()`, so these no-op arms are only reachable
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
         let description = EventDescription::new("dummy", None, None, None, false, false);
 
-        assert!(!noop.is_interested_in(&description));
+        assert!(!noop.is_interested(&description));
         noop.dispatch_to_processors(&DummyDyn, &description);
         noop.flush().expect("noop flush should succeed");
     }
@@ -787,7 +876,7 @@ mod tests {
         );
 
         let description = dummy_description();
-        assert!(sink.is_interested_in(&description));
+        assert!(sink.is_interested(&description));
         sink.dispatch_to_processors(&DummyDyn, &description);
 
         assert_eq!(uninterested.processed.load(Ordering::Relaxed), 0);
@@ -804,7 +893,7 @@ mod tests {
             SimpleClock::new_frozen(),
         );
 
-        assert!(!sink.is_interested_in(&dummy_description()));
+        assert!(!sink.is_interested(&dummy_description()));
     }
 
     #[test]

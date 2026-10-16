@@ -215,6 +215,13 @@ whether the event must be constructed and which processors are eligible to recei
 per-processor routing. Leaves in a composite decide independently. See `EventSampler::sample` and
 [Sinks and Keys](#sinks-and-keys) for the two contracts.
 
+External event sources can query `Sink::is_interested` with an `EventDescription` before collecting fields or constructing an event.
+The query reports current processor interest only; it does not predict delivery or perform sampling.
+
+Already-constructed dynamic events are routed directly to interested processors.
+Each leaf retains its own timestamp and enrichment context, and sampling remains separate from processor interest.
+Processor initialization completed during sampling is reflected in the recipients selected afterward.
+
 ### Signal Routing: How Events Become Logs and Metrics
 
 An event can produce any combination of signals defined by its schema. The trace signal is [planned](#planned-not-implemented).
@@ -319,6 +326,20 @@ restore the same thread-local chain twice and dispatch every event to those proc
 rather than silently repairing it. A composite has no identity of its own
 (`id()` reports the `<composite>` sentinel) and holds no enrichment: records travel through each leaf's own processors and carry that leaf's
 `SinkId`, redaction, and enrichment. `.enrich(&composite, …)` broadcasts to every leaf's slot.
+
+#### Sink interest
+
+`Sink::is_interested(&EventDescription)` aggregates `EventProcessor::is_interested`, returning true when any processor is interested, or any child of a composite is interested.
+Both checks use the event description rather than inspecting event fields.
+No-op sinks and sinks without processors are uninterested. The query does not construct or dispatch events, flush processors, invoke event or log sampling, or read clocks or enrichments.
+
+Processor interest depends only on the event description and state that changes at most once, such as initialization through a `OnceLock`.
+Initialization may change the answer in either direction. Callers query each candidate event rather than treating an answer as a lifetime cache entry.
+Interest checks do not form an atomic snapshot across processors, and earlier decisions need not be revisited during the same emission.
+Initialization may therefore affect selection for subsequent emissions without changing decisions already made.
+Interest is not a delivery guarantee: emission checks interest independently and remains subject to sampling and other delivery filters.
+
+The [interest-query implementation guide](docs/implementation.md) describes how the query and emission share the same routing logic.
 
 #### How sinks, processors, and destinations relate
 

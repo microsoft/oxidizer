@@ -28,20 +28,29 @@ use crate::metadata::EventDescription;
 /// metrics-only) select them through
 /// [`is_interested()`](EventProcessor::is_interested).
 pub trait EventProcessor: Send + Sync {
-    /// Decides whether this processor wants the event.
+    /// Returns whether this processor is interested in the described event.
     ///
-    /// Called **before** the event is constructed, and again while routing it,
-    /// so it may run more than once per emission - and once per child for a
-    /// composite sink. Keep it cheap, and let the answer depend only on
+    /// Uses the event description rather than inspecting event fields.
+    ///
+    /// Called while routing events and, for lazy typed events, **before**
+    /// construction. It may run more than once per emission, including through
+    /// composite sinks. Keep it cheap, and let the answer depend only on
     /// `description` and on state that changes at most once, such as a
     /// `OnceLock` filled during initialization. A sampler, rate limiter, or any
     /// filter whose answer varies per call belongs in
     /// [`process()`](Self::process), which runs exactly once per delivery.
     ///
-    /// It is both the lazy-construction gate and the per-processor routing
-    /// decision: if **all** processors return `false` the event closure is
-    /// never invoked, and a processor that returns `false` never receives the
-    /// event even when a peer is interested.
+    /// Also called by [`Sink::is_interested`](crate::Sink::is_interested),
+    /// which aggregates processor interest independently of emission.
+    ///
+    /// Interest is advisory for the current check, not the processor's lifetime.
+    /// Initialization may change selection for subsequent emissions. Checks do
+    /// not form an atomic snapshot across processors, and earlier decisions
+    /// need not be revisited during the same emission.
+    ///
+    /// Interest gates lazy construction and selects recipients. If every
+    /// processor declines admission, the event closure is never invoked.
+    /// Routing can check interest independently of admission.
     fn is_interested(&self, description: &EventDescription) -> bool;
 
     /// Processes an event by pulling fields and enrichments from the view.
