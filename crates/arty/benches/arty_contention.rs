@@ -1,15 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A focused Arty/Tokio contention workload using a relocated cache payload.
+//! Focused Arty/Tokio contention workloads for common nested-task patterns.
 //!
 //! Each case submits one outer task and fans out ten inner operations. The
-//! cache touch is black-boxed so the benchmark measures the scheduling work
-//! around an observable operation rather than an optimized-away future.
+//! relocated-cache workload black-boxes each cache touch so it measures the
+//! scheduling work around an observable operation rather than an optimized-away
+//! future.
 //!
 //! The cache is a mutex behind a per-thread `performables::arc::Arc`. Arty
 //! relocates that payload before the outer task starts; Tokio uses the same
 //! cache type without an equivalent relocation hook.
+//!
+//! On its first poll, each nested retained-waker future clones and retains its
+//! task waker, transitions to pending, wakes through the retained clone, and
+//! returns `Pending`. Its next poll returns `Ready`.
 //!
 //! Arty's inner tasks stay on the worker selected for the relocated cache,
 //! while Tokio may move its child tasks between workers. The cases are
@@ -18,9 +23,11 @@
 //! performance.
 //!
 //! Callgrind is intentionally omitted because it cannot model the scheduling
-//! and mutex contention this workload is intended to expose.
+//! and cross-worker contention these workloads are intended to expose.
 
 use std::hint::black_box;
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
 use arty::runtime::{Runtime, WorkersPolicy};
@@ -118,12 +125,66 @@ impl ArtyCase {
     }
 }
 
+#[derive(Debug)]
+struct ArtyNestedRetainedWakerCase {
+    runtime: Runtime,
+}
+
+impl ArtyNestedRetainedWakerCase {
+    fn new(workers: usize) -> Self {
+        let case = Self {
+            runtime: Runtime::builder()
+                .workers(WorkersPolicy::exactly(workers))
+                .build()
+                .expect("benchmark runtime construction must succeed"),
+        };
+        for _ in 0..workers {
+            black_box(case.run(CONCURRENCY));
+        }
+        case
+    }
+
+    fn run(&self, concurrency: usize) -> Duration {
+        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
+        let scheduler = self.runtime.scheduler();
+        let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
+        let start = Instant::now();
+        for handle in &mut handles {
+            *handle = Some(scheduler.spawn_anywhere((), arty_retained_waker_outer));
+        }
+        futures::executor::block_on(async move {
+            for handle in handles {
+                let Some(handle) = handle else {
+                    unreachable!("all benchmark outer task slots are filled");
+                };
+                handle.await.expect("benchmark outer task finishes before shutdown");
+            }
+        });
+        start.elapsed()
+    }
+}
+
 async fn arty_outer(cx: Builtins, cache: Cache) {
     let scheduler = cx.scheduler().clone();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
         let cache = cache.clone();
         *handle = Some(scheduler.spawn(move |_| async move { cache.touch(operation) }));
+    }
+
+    for handle in handles {
+        let Some(handle) = handle else {
+            unreachable!("all benchmark inner task slots are filled");
+        };
+        handle.await.expect("benchmark inner task finishes before shutdown");
+    }
+}
+
+async fn arty_retained_waker_outer(cx: Builtins, (): ()) {
+    let scheduler = cx.scheduler().clone();
+    let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
+    for handle in &mut handles {
+        *handle = Some(scheduler.spawn(|_| RetainedWaker::default()));
     }
 
     for handle in handles {
@@ -174,6 +235,44 @@ impl TokioCase {
     }
 }
 
+#[derive(Debug)]
+struct TokioNestedRetainedWakerCase {
+    runtime: tokio::runtime::Runtime,
+}
+
+impl TokioNestedRetainedWakerCase {
+    fn new(workers: usize) -> Self {
+        let case = Self {
+            runtime: tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(workers)
+                .build()
+                .expect("benchmark runtime construction must succeed"),
+        };
+        for _ in 0..workers {
+            black_box(case.run(CONCURRENCY));
+        }
+        case
+    }
+
+    fn run(&self, concurrency: usize) -> Duration {
+        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
+        let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
+        let start = Instant::now();
+        for handle in &mut handles {
+            *handle = Some(self.runtime.spawn(tokio_retained_waker_outer()));
+        }
+        futures::executor::block_on(async move {
+            for handle in handles {
+                let Some(handle) = handle else {
+                    unreachable!("all benchmark outer task slots are filled");
+                };
+                handle.await.expect("benchmark outer task finishes before shutdown");
+            }
+        });
+        start.elapsed()
+    }
+}
+
 async fn tokio_outer(cache: Cache) {
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
@@ -186,6 +285,39 @@ async fn tokio_outer(cache: Cache) {
             unreachable!("all benchmark inner task slots are filled");
         };
         handle.await.expect("benchmark inner task finishes before shutdown");
+    }
+}
+
+async fn tokio_retained_waker_outer() {
+    let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
+    for handle in &mut handles {
+        *handle = Some(tokio::spawn(RetainedWaker::default()));
+    }
+
+    for handle in handles {
+        let Some(handle) = handle else {
+            unreachable!("all benchmark inner task slots are filled");
+        };
+        handle.await.expect("benchmark inner task finishes before shutdown");
+    }
+}
+
+#[derive(Debug, Default)]
+struct RetainedWaker {
+    retained: Option<Waker>,
+}
+
+impl Future for RetainedWaker {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.retained.take().is_some() {
+            Poll::Ready(())
+        } else {
+            self.retained = Some(cx.waker().clone());
+            self.retained.as_ref().expect("waker was retained immediately above").wake_by_ref();
+            Poll::Pending
+        }
     }
 }
 
@@ -225,6 +357,35 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     group.finish();
+
+    let mut group = criterion.benchmark_group(ARTY_NESTED_RETAINED_WAKER.group_name());
+    group.throughput(Throughput::Elements(
+        u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
+    ));
+    for workers in WORKERS {
+        let name = format!("concurrency_w{workers}");
+        group.bench_function(BenchmarkId::new(ARTY_NESTED_RETAINED_WAKER.benchmark_name(), &name), |bencher| {
+            let case = ArtyNestedRetainedWakerCase::new(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run(CONCURRENCY);
+                }
+                elapsed
+            });
+        });
+        group.bench_function(BenchmarkId::new(TOKIO_NESTED_RETAINED_WAKER.benchmark_name(), &name), |bencher| {
+            let case = TokioNestedRetainedWakerCase::new(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run(CONCURRENCY);
+                }
+                elapsed
+            });
+        });
+    }
+    group.finish();
 }
 
 #[benchmark(ARTY, "arty_contention/relocated_cache", "Arty")]
@@ -238,6 +399,20 @@ fn arty_workload(case: &ArtyCase, concurrency: u64) -> Duration {
 #[bench::concurrency_w1(&TokioCase::new(1), 10)]
 #[bench::concurrency_w8(&TokioCase::new(8), 10)]
 fn tokio_workload(case: &TokioCase, concurrency: u64) -> Duration {
+    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+}
+
+#[benchmark(ARTY_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Arty")]
+#[bench::concurrency_w1(&ArtyNestedRetainedWakerCase::new(1), 10)]
+#[bench::concurrency_w8(&ArtyNestedRetainedWakerCase::new(8), 10)]
+fn arty_nested_retained_waker_workload(case: &ArtyNestedRetainedWakerCase, concurrency: u64) -> Duration {
+    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+}
+
+#[benchmark(TOKIO_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Tokio")]
+#[bench::concurrency_w1(&TokioNestedRetainedWakerCase::new(1), 10)]
+#[bench::concurrency_w8(&TokioNestedRetainedWakerCase::new(8), 10)]
+fn tokio_nested_retained_waker_workload(case: &TokioNestedRetainedWakerCase, concurrency: u64) -> Duration {
     case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
 }
 
@@ -255,7 +430,7 @@ metabench::main!(
                 .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
         );
     },
-    benchmarks = [ARTY, TOKIO],
+    benchmarks = [ARTY, TOKIO, ARTY_NESTED_RETAINED_WAKER, TOKIO_NESTED_RETAINED_WAKER],
 );
 
 #[cfg(not(target_os = "linux"))]
@@ -265,5 +440,5 @@ metabench::main!(
         benchmarks = criterion_benchmarks,
         unit = "ns",
     },
-    benchmarks = [ARTY, TOKIO],
+    benchmarks = [ARTY, TOKIO, ARTY_NESTED_RETAINED_WAKER, TOKIO_NESTED_RETAINED_WAKER],
 );
