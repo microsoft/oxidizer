@@ -121,8 +121,9 @@ fn formats_once_with_stdout_and_buffer_enabled() {
     ignore = "file output is covered by native tests and cargo careful; Miri retains buffer routing tests"
 )]
 fn formats_once_with_stdout_file_and_buffer_enabled() {
-    let file_name = "testing-aids-formatting.log";
-    let file_guard = write_to_stdout_and_file(file_name);
+    let directory = tempfile::tempdir_in(log_file("")).unwrap();
+    let file_name = format!("{}/formatting.log", directory.path().file_name().unwrap().to_str().unwrap());
+    let file_guard = write_to_stdout_and_file(&file_name);
     let buffer_guard = write_to_stdout_and_buffer();
     let formats = Cell::new(0);
     let value = FormatProbe(&formats);
@@ -140,9 +141,7 @@ fn formats_once_with_stdout_file_and_buffer_enabled() {
     assert!(lines[3].contains("after-file-marker"));
 
     if !testing_aids::is_mutation_testing() {
-        let path = log_file(file_name);
-        let file_output = std::fs::read_to_string(&path).unwrap();
-        std::fs::remove_file(path).unwrap();
+        let file_output = std::fs::read_to_string(directory.path().join("formatting.log")).unwrap();
         assert_eq!(file_output, format!("{}\n", lines[..3].join("\n")));
     }
 }
