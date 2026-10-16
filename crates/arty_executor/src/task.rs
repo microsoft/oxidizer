@@ -62,6 +62,10 @@ where
     #[cfg(all(debug_assertions, test))]
     diagnostic_waker_registry: Arc<DiagnosticWakerRegistry>,
 
+    /// Diagnostic-specific tests opt into wrapping the production polling waker.
+    #[cfg(all(debug_assertions, test))]
+    diagnostic_waker: bool,
+
     // Technically, the wakers also touch the wake signal from other threads but that is
     // private business of the wake signal and nothing that is visible to this type.
     _single_threaded: PhantomData<*const ()>,
@@ -78,6 +82,14 @@ where
     #[must_use]
     pub(crate) fn new(future: F, result_tx: PooledLocalSender<R>) -> Self {
         Self::new_with_options(future, result_tx, TaskOptions::default(), Sink::noop())
+    }
+
+    #[cfg(all(debug_assertions, test))]
+    #[must_use]
+    fn new_diagnostic(future: F, result_tx: PooledLocalSender<R>) -> Self {
+        let mut task = Self::new(future, result_tx);
+        task.diagnostic_waker = true;
+        task
     }
 
     #[must_use]
@@ -122,6 +134,8 @@ where
             poll_count: Cell::new(0),
             #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
+            #[cfg(all(debug_assertions, test))]
+            diagnostic_waker: false,
             _single_threaded: PhantomData,
             _requires_pin: PhantomPinned,
         }
@@ -241,7 +255,7 @@ where
 
         // SAFETY: Our future and the task that owns it are always pinned by design, the
         // `Pin` annotation just gets lost in the type layering. We add it back here.
-        let future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
+        let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
 
         // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
         // shared references to the wake signal, so creating a shared reference here is valid.
@@ -264,16 +278,25 @@ where
             // independently pooled state and may outlive both the poll and the task.
             let waker = unsafe { wake_signal.waker_ref() };
 
-            // Unit tests wrap the waker to exercise clone backtrace diagnostics.
-            #[cfg(all(debug_assertions, test))]
-            let waker = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
+            let mut poll = |waker: &task::Waker| {
+                let mut cx = task::Context::from_waker(waker);
+                catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.as_mut().poll(&mut cx)))
+            };
 
-            let mut cx = task::Context::from_waker(&waker);
+            #[cfg(all(debug_assertions, test))]
+            let result = if self.diagnostic_waker {
+                let diagnostic = DiagnosticWaker::with_inner_and_registry(waker.clone(), Arc::clone(&self.diagnostic_waker_registry));
+                poll(&diagnostic)
+            } else {
+                poll(&waker)
+            };
+            #[cfg(not(all(debug_assertions, test)))]
+            let result = poll(&waker);
 
             // Runtime integrations can provide a remote result target that receives captured
             // panics. Plain executor tasks retain the fail-fast behavior.
-            match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
-                Ok(x) => x,
+            match result {
+                Ok(outcome) => outcome,
                 Err(panic) => return self.finish_panicked(maybe_payload, wake_signal, panic),
             }
         };
@@ -459,6 +482,12 @@ impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
     }
 }
 
+/// Inline pinned future storage with explicit, panic-contained destruction.
+///
+/// Boxing the future would add an allocation per task, while an ordinary field cannot catch a
+/// panic from its own implicit destructor. Normal completion and cancellation therefore retire
+/// the future in place before terminal result handling. [`Drop`] is only the fail-fast fallback
+/// for an invariant-breaking path that did not perform that explicit retirement.
 struct FutureStorage<F> {
     inner: ManuallyDrop<F>,
     live: bool,
@@ -996,6 +1025,38 @@ mod tests {
 
     #[test]
     #[cfg(debug_assertions)]
+    fn ordinary_polling_does_not_enable_waker_diagnostics() {
+        use std::cell::RefCell;
+        use std::future::poll_fn;
+
+        let event_pool = LocalEventPool::<u64>::new();
+        let (tx, _rx) = event_pool.rent();
+        let stashed_wakers = Rc::new(RefCell::new(Vec::new()));
+        let task = pin!(Task::new(
+            {
+                let stashed_wakers = Rc::clone(&stashed_wakers);
+                poll_fn(move |cx| {
+                    stashed_wakers.borrow_mut().push(cx.waker().clone());
+                    task::Poll::Pending
+                })
+            },
+            tx,
+        ));
+        let task = task.as_ref();
+        task.initialize(WakeSignal::fake());
+
+        _ = task.poll();
+
+        let mut inspected_waker_count = 0;
+        task.inspect_waker_backtraces(&mut |_| inspected_waker_count += 1);
+        assert_eq!(inspected_waker_count, 0);
+        assert_eq!(stashed_wakers.borrow().len(), 1);
+
+        task.abort();
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
     fn inspect_wakers_returns_stashed_wakers() {
         use std::cell::RefCell;
         use std::future::poll_fn;
@@ -1006,7 +1067,7 @@ mod tests {
         let stashed_wakers = Rc::new(RefCell::new(Vec::new()));
 
         // Our task just stashes a clone of the waker on every poll.
-        let task = pin!(Task::new(
+        let task = pin!(Task::new_diagnostic(
             {
                 let stashed_wakers = Rc::clone(&stashed_wakers);
 

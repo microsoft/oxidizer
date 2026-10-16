@@ -5,6 +5,8 @@
 //!
 //! Submission code owns admission decisions. These helpers construct executable
 //! payloads and their result channels without deciding whether work is accepted.
+//! Deferred worker-local factories are invoked only inside executor polling; if
+//! runtime shutdown wins before that poll, executor teardown disposes them.
 
 mod preparation;
 

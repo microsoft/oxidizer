@@ -90,7 +90,9 @@ fn blocking_pool_reports_distinct_saturation_episodes() {
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         });
-        started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+        testing_aids::execute_or_abandon(move || started_rx.recv())
+            .expect("the task must report readiness before the test watchdog expires")
+            .expect("the task retains the readiness sender until it reports progress");
 
         let queued: Vec<_> = (0..=5).map(|_| runtime.scheduler().spawn_blocking(|| {})).collect();
         release_tx.send(()).unwrap();

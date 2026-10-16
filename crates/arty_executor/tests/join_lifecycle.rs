@@ -4,6 +4,7 @@
 //! Public join-handle and executor-lifecycle contracts.
 
 use std::cell::{Cell, RefCell};
+use std::fmt;
 use std::future::{Ready, pending, poll_fn, ready};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -23,6 +24,7 @@ thread_local! {
     static REENTRANT_TELEMETRY_SUBMISSION: RefCell<Option<(TaskSet, Rc<Cell<bool>>)>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_EXECUTOR: RefCell<Option<Rc<Executor>>> = const { RefCell::new(None) };
     static OWNER_DROP_TELEMETRY: RefCell<Option<OwnerDropState>> = const { RefCell::new(None) };
+    static CONTEXT_DROP_SUBMISSION: RefCell<Option<ContextDropState>> = const { RefCell::new(None) };
 }
 
 struct ReentrantSubmissionProcessor;
@@ -33,6 +35,37 @@ struct OwnerDropState {
     owner: Executor,
     tasks: TaskSet,
     nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+}
+
+struct ContextDropState {
+    tasks: TaskSet,
+    nested: Rc<RefCell<Option<JoinHandle<usize>>>>,
+}
+
+struct SubmitOnContextDrop;
+
+impl data_privacy::RedactedDisplay for SubmitOnContextDrop {
+    fn fmt(&self, _redactor: &dyn data_privacy::Redactor, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("context-drop")
+    }
+}
+
+impl Drop for SubmitOnContextDrop {
+    fn drop(&mut self) {
+        let Some(state) = CONTEXT_DROP_SUBMISSION.take() else {
+            return;
+        };
+        let handle = state.tasks.add(async { 42 }, TaskOptions::default());
+        assert!(state.nested.replace(Some(handle)).is_none());
+    }
+}
+
+struct ContextDropEnrichment;
+
+impl observed::enrichment::Enrichment for ContextDropEnrichment {
+    fn into_entries(self) -> Vec<observed::__private::EnrichmentEntry> {
+        vec![observed::__private::EnrichmentEntry::new("context.drop", SubmitOnContextDrop)]
+    }
 }
 
 impl EventProcessor for ReentrantSubmissionProcessor {
@@ -288,6 +321,26 @@ fn task_created_processor_may_complete_and_release_the_new_task() {
     assert!(!executor.has_tasks());
 }
 
+#[test]
+fn completed_context_drop_may_submit_a_nested_task() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let nested = Rc::new(RefCell::new(None));
+    CONTEXT_DROP_SUBMISSION.set(Some(ContextDropState {
+        tasks: tasks.clone(),
+        nested: Rc::clone(&nested),
+    }));
+    let context = Sink::noop().transfer_context().with_enrichment(ContextDropEnrichment);
+    let mut outer = tasks.add(async { 7 }, TaskOptions::observed(context, TaskPlacement::Any));
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+    assert_eq!(poll_once(&mut outer), Poll::Ready(Ok(7)));
+    let mut nested = nested.borrow_mut().take().expect("context destructor submitted a nested task");
+    assert_eq!(poll_once(&mut nested), Poll::Ready(Ok(42)));
+}
+
 struct ReentrantIntoFuture {
     tasks: TaskSet,
     nested_completed: Rc<Cell<bool>>,
@@ -467,6 +520,8 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
 
 #[test]
 fn shutdown_retires_a_batch_of_queued_tasks() {
+    // A small representative batch exercises bulk retirement without coupling the test to queue
+    // capacity or turning it into a stress workload.
     const TASK_COUNT: usize = 32;
 
     let executor = Executor::builder().build();

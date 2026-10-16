@@ -20,7 +20,6 @@ use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink, emit, event};
 use support::JoinHandleExt as _;
-use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 #[derive(Enrichment)]
@@ -257,7 +256,9 @@ fn cancelled_task_destructor_keeps_the_submission_context() {
         })
         .join()
         .unwrap();
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    testing_aids::execute_or_abandon(move || ready.recv())
+        .expect("the task must report readiness before the test watchdog expires")
+        .expect("the task retains the readiness sender until it reports progress");
 
     RuntimeOperations::from(&runtime).request_stop();
     runtime.stop().unwrap();

@@ -16,6 +16,11 @@ use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 #[pin_project]
+/// Defers construction of a worker-local future until the executor first polls the task.
+///
+/// The shared shutdown flag closes the gap between runtime admission and that first poll. If
+/// shutdown wins, the factory remains retained and the wrapper stays pending; worker/executor
+/// teardown then drops the factory and reports shutdown through the join path.
 pub(crate) struct DeferredTask<FF, F> {
     factory: Option<(FF, Builtins)>,
     #[pin]
@@ -49,6 +54,8 @@ where
         }
         if this.future.as_ref().get_ref().is_none() {
             if this.shutdown_signal.load(Ordering::Acquire) {
+                // Do not invoke user code or synthesize a successful result after shutdown.
+                // Executor teardown owns factory disposal and shutdown notification.
                 *this.cancelled = true;
                 return Poll::Pending;
             }
