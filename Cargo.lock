@@ -2005,7 +2005,6 @@ dependencies = [
  "http_extensions",
  "hyper",
  "hyper-rustls",
- "hyper-tls",
  "hyper-util",
  "insta",
  "layered",
@@ -2016,6 +2015,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project",
+ "rcgen",
  "rustls",
  "seatbelt",
  "templated_uri",
@@ -2023,6 +2023,7 @@ dependencies = [
  "tick",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls",
  "tower",
  "tracing",
  "wiremock",
@@ -2818,22 +2819,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "tokio",
- "tower-service",
-]
-
-[[package]]
-name = "hyper-tls"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
-dependencies = [
- "bytes",
- "http-body-util",
- "hyper",
- "hyper-util",
- "native-tls",
- "tokio",
- "tokio-native-tls",
  "tower-service",
 ]
 
