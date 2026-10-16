@@ -51,6 +51,45 @@
 //! }
 //! ```
 //!
+//! # Whole-event metric bindings
+//!
+//! Metric destinations register an event type at startup. The event macro
+//! supplies a static field inventory, including instrument metadata:
+//!
+//! ```
+//! use observed::processing::MetricBindings;
+//! use observed::{Event, event};
+//!
+//! #[event("request.completed")]
+//! #[counter(bytes_sent, name = "bytes_sent", unit = "By")]
+//! struct RequestCompleted {
+//!     #[unredacted]
+//!     bytes_sent: u32,
+//! }
+//!
+//! let mut bindings = MetricBindings::new();
+//! // A destination prepares one target for each declared instrument.
+//! bindings
+//!     .bind_event::<RequestCompleted>(|metric| metric.instrument_name())
+//!     .unwrap();
+//! let instrument = RequestCompleted::DESCRIPTION.fields()[0]
+//!     .metric()
+//!     .unwrap()
+//!     .instrument_description()
+//!     .unwrap();
+//! assert_eq!(instrument.unit(), "By");
+//! ```
+//!
+//! Destination processors use [`MetricBindings`](processing::MetricBindings)
+//! to associate complete events with prepared targets. Numeric recording selects event
+//! identities and stable field indices without string matching, hashing, or allocating.
+//! The field visitor enumerates routed fields but evaluates only bound numeric getters,
+//! without redaction or enrichment visits. Events emitted through a sink follow
+//! that sink's timestamp, context, and sampling rules.
+//! Each instrument declares a [`MetricValueKind`](metadata::MetricValueKind).
+//! Binding delivers the existing [`Value`] type, normalizing unsigned measurements
+//! to `Value::U64` and retaining signed integers and floats without losing precision.
+//!
 //! # Enrichment
 //!
 //! Enrichment attaches key-value context to **every event** emitted within a scope.
@@ -355,6 +394,21 @@ pub use observed_macros::Enrichment;
 /// recorded by the instrument. The referenced field **must exist**, otherwise
 /// compilation fails. A fieldless `#[counter]` records `1` for every emission.
 ///
+/// ## Whole-event metric bindings
+///
+/// The macro attaches a static field inventory to [`Event::DESCRIPTION`].
+/// [`EventDescription::fields`](metadata::EventDescription::fields) exposes the same
+/// descriptors passed to [`Event::visit_fields`], with stable numeric field indices
+/// and declared measurement representations. A fieldless counter remains in
+/// [`EventDescription::metric`](metadata::EventDescription::metric).
+///
+/// Backends register entire events with prepared destinations at startup through
+/// [`MetricBindings`](processing::MetricBindings). Numeric extraction uses lazy field
+/// getters and prepared indices, never instrument names at emission time.
+/// Backends reject events containing unsupported kinds or numeric types.
+/// Events emitted through a sink follow that sink's field routing, enrichment,
+/// timestamp, and sampling rules.
+///
 /// Value-type constraints are enforced at compile time:
 ///
 /// - The value field must be `#[unredacted]`. A classified value is rendered
@@ -454,7 +508,7 @@ pub use sink::{Sink, SinkId};
 pub use text::Text;
 pub use value::Value;
 
-/// Hidden module re-exporting types that the `emit!` and `#[event(...)]` macros reference.
+/// Hidden construction helpers and reexports used by the event macros.
 ///
 /// This is **not public API** - it exists solely for macro-generated code.
 #[doc(hidden)]
@@ -463,4 +517,79 @@ pub mod __private {
     pub use ::data_privacy::{RedactedDisplay, RedactedToString, Sensitive};
 
     pub use crate::enrichment::EnrichmentEntry;
+
+    #[must_use]
+    pub const fn log_description(
+        name: &'static str,
+        severity: crate::Severity,
+        body: Option<&'static str>,
+    ) -> crate::metadata::LogDescription {
+        crate::metadata::LogDescription::new(name, severity, body)
+    }
+
+    #[must_use]
+    pub const fn metric_description(
+        name: &'static str,
+        kind: crate::metadata::InstrumentKind,
+        description: &'static str,
+        unit: &'static str,
+        value_kind: crate::metadata::MetricValueKind,
+    ) -> crate::metadata::MetricDescription {
+        crate::metadata::MetricDescription::new(name, kind, description, unit, value_kind)
+    }
+
+    #[must_use]
+    pub const fn log_field(key: &'static str) -> crate::metadata::LogFieldEntry {
+        crate::metadata::LogFieldEntry::new(key)
+    }
+
+    #[must_use]
+    pub const fn metric_field(
+        key: &'static str,
+        instrument: Option<crate::metadata::MetricDescription>,
+    ) -> crate::metadata::MetricFieldEntry {
+        match instrument {
+            Some(instrument) => crate::metadata::MetricFieldEntry::instrument(key, instrument),
+            None => crate::metadata::MetricFieldEntry::dimension(key),
+        }
+    }
+
+    #[must_use]
+    pub const fn source_location(crate_name: &'static str, file: &'static str, line: u32) -> crate::metadata::SourceLocation {
+        crate::metadata::SourceLocation::new(crate_name, file, line)
+    }
+
+    #[must_use]
+    pub const fn field_descriptor(
+        name: &'static str,
+        log: Option<crate::metadata::LogFieldEntry>,
+        metric: Option<crate::metadata::MetricFieldEntry>,
+    ) -> crate::metadata::FieldDescriptor {
+        crate::metadata::FieldDescriptor::new(name, log, metric)
+    }
+
+    #[must_use]
+    pub const fn event_fields<const N: usize>(mut fields: [crate::metadata::FieldDescriptor; N]) -> [crate::metadata::FieldDescriptor; N] {
+        // Copied descriptors take their new position rather than keeping stale indices.
+        let mut remaining = fields.as_mut_slice();
+        let mut index = 0;
+        while let [field, tail @ ..] = remaining {
+            *field = field.with_field_index(index);
+            index += 1;
+            remaining = tail;
+        }
+        fields
+    }
+
+    #[must_use]
+    pub const fn event_description(
+        name: &'static str,
+        type_id: Option<std::any::TypeId>,
+        log: Option<crate::metadata::LogDescription>,
+        metric: Option<crate::metadata::MetricDescription>,
+        disabled: bool,
+        fields: &'static [crate::metadata::FieldDescriptor],
+    ) -> crate::metadata::EventDescription {
+        crate::metadata::EventDescription::from_parts(name, type_id, log, metric, false, disabled).with_fields(fields)
+    }
 }

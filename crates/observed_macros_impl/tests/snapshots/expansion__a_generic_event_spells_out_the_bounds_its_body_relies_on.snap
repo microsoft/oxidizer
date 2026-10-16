@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"generic\"\"#,\nr\"\n            #[info]\n            struct Generic<'a, T, const N: usize>\n            where\n                T: Clone,\n            {\n                #[unredacted]\n                unredacted_value: T,\n                #[data_class(DataTaxonomy::Euii)]\n                classified: T,\n                #[data_class(DataTaxonomy::Euii)]\n                classified_ref: &'a T,\n                defaulted: T,\n                optional: Option<T>,\n                matrix: [T; N],\n                #[unredacted]\n                concrete: i64,\n            }\n            \",)"
+expression: "expand_event(r#\"\"generic\"\"#,\nr\"\n        #[info]\n        struct Generic<'a, T, const N: usize>\n        where\n            T: Clone,\n        {\n            #[unredacted]\n            unredacted_value: T,\n            #[data_class(DataTaxonomy::Euii)]\n            classified: T,\n            #[data_class(DataTaxonomy::Euii)]\n            classified_ref: &'a T,\n            defaulted: T,\n            optional: Option<T>,\n            matrix: [T; N],\n            #[unredacted]\n            concrete: i64,\n        }\n        \",)"
 ---
 struct Generic<'a, T, const N: usize>
 where
@@ -32,13 +32,13 @@ const _: () = {
         [T; N]: ::observed::__private::RedactedDisplay,
         [T; N]: ::core::marker::Send + ::core::marker::Sync,
     {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "generic",
             ::core::option::Option::Some(
                 ::core::any::TypeId::of::<Generic<'static, T, N>>(),
             ),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "generic",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -46,35 +46,71 @@ const _: () = {
             ),
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "unredacted_value",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("unredacted_value"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "classified",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("classified"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "classified_ref",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("classified_ref"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "defaulted",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("defaulted"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "optional",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("optional"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "matrix",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("matrix"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "concrete",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("concrete"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "unredacted_value",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("unredacted_value"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|_| ::observed::Value::from(self.unredacted_value.clone()),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "classified",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|engine| ::observed::Value::from_redacted(
                         &::observed::__private::Sensitive::new(
                             &self.classified,
@@ -85,15 +121,8 @@ const _: () = {
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "classified_ref",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified_ref"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
                     &|engine| ::observed::Value::from_redacted(
                         &::observed::__private::Sensitive::new(
                             self.classified_ref,
@@ -104,61 +133,36 @@ const _: () = {
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "defaulted",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("defaulted"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
                     &|engine| ::observed::Value::from_redacted(&self.defaulted, engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "optional",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("optional"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 match self.optional.as_ref() {
                     ::core::option::Option::Some(__val) => {
                         visitor(
-                            &FIELD_DESC,
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
                             &|_engine| ::observed::Value::from_redacted(__val, _engine),
                         )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
+                            &|_| ::observed::Value::from("n/a"),
+                        )?;
                     }
                 }
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "matrix",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("matrix"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
                     &|engine| ::observed::Value::from_redacted(&self.matrix, engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "concrete",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("concrete"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[6usize],
                     &|_| ::observed::Value::from(self.concrete.clone()),
                 )?;
             }

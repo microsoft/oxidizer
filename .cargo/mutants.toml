@@ -49,6 +49,8 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # This constructor delegates to Default; replacing it with Default is identical.
+    'crates/observed_perf_counters/src/processor.rs:\d+:\d+: replace PerfCounterProcessor::builder -> PerfCounterProcessorBuilder with Default::default\(\)$',
     # O_NOFOLLOW and O_NONBLOCK have disjoint bits, so XOR is equivalent to OR.
     'crates/metabench/src/artifact.rs:\d+:\d+: replace \| with \^ in open_regular_file$',
     # There are no API contracts for what these must return because they

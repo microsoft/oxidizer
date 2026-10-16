@@ -55,6 +55,8 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # This constructor delegates to Default; replacing it with Default is identical.
+    'crates/observed_perf_counters/src/processor.rs:\d+:\d+: replace PerfCounterProcessor::builder -> PerfCounterProcessorBuilder with Default::default\(\)$',
     # Unix and unsupported-platform pipe adapters are compiled out on Windows.
     'crates/metabench/src/worker_log\.rs:\d+:\d+: (?:.* in (?:prepare_reader_unix|prepare_reader_with|read_available_unix|prepare_reader_unsupported|read_available_unsupported)$|replace (?:prepare_reader_unix|prepare_reader_with|read_available_unix|prepare_reader_unsupported|read_available_unsupported) ->)',
     # Unix artifact-open flags are compiled out on Windows.

@@ -18,7 +18,7 @@ use quote::{ToTokens, format_ident, quote};
 use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
+use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token, Type};
 
 use crate::field_attrs::{
     Dimension, FieldRedaction, IfNone, LogRouting, MetricRouting, SharedFieldAttrs, is_borrowed_str, is_mutable_reference_type,
@@ -233,7 +233,7 @@ struct FieldMetric {
 /// Parsed definition of a single field.
 struct FieldDef {
     ident: Ident,
-    ty: syn::Type,
+    ty: Type,
     /// Log-signal routing for the field (logged by default under its own name).
     log: LogRouting,
     /// Metric-dimension routing for the field.
@@ -261,7 +261,7 @@ impl FieldDef {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum InstrumentKindValue {
     Counter,
     UpDownCounter,
@@ -382,8 +382,8 @@ pub(crate) enum NumericKind {
 /// parenthesis wrappers are transparent; `Option<T>` deliberately is **not**, so
 /// an optional field can never satisfy an instrument's value-type requirement.
 #[must_use]
-pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
-    let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
+pub(crate) fn numeric_kind(ty: &Type) -> Option<NumericKind> {
+    let Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
     let ident = type_path.path.segments.last()?.ident.to_string();
@@ -399,8 +399,8 @@ pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
 /// they can be rejected with a specific diagnostic instead of the generic
 /// "not a supported numeric type" one.
 #[must_use]
-pub(crate) fn is_128_bit_int(ty: &syn::Type) -> bool {
-    let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
+pub(crate) fn is_128_bit_int(ty: &Type) -> bool {
+    let Type::Path(type_path) = strip_type_wrappers(ty) else {
         return false;
     };
     type_path
@@ -412,10 +412,10 @@ pub(crate) fn is_128_bit_int(ty: &syn::Type) -> bool {
 
 /// Strips transparent `Paren`/`Group` wrappers from a type.
 #[must_use]
-pub(crate) fn strip_type_wrappers(ty: &syn::Type) -> &syn::Type {
+pub(crate) fn strip_type_wrappers(ty: &Type) -> &Type {
     match ty {
-        syn::Type::Paren(inner) => strip_type_wrappers(&inner.elem),
-        syn::Type::Group(inner) => strip_type_wrappers(&inner.elem),
+        Type::Paren(inner) => strip_type_wrappers(&inner.elem),
+        Type::Group(inner) => strip_type_wrappers(&inner.elem),
         other => other,
     }
 }
@@ -894,7 +894,7 @@ fn log_description_expr(def: &EventDef) -> TokenStream {
     };
     quote! {
         ::core::option::Option::Some(
-            ::observed::metadata::LogDescription::new(
+            ::observed::__private::log_description(
                 #log_name,
                 ::observed::Severity::#severity,
                 #body_expr,
@@ -1004,11 +1004,12 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         // A fieldless event-level metric is always a counter (records `1`).
         quote! {
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
+                ::observed::__private::metric_description(
                     #instrument_name,
                     ::observed::metadata::InstrumentKind::Counter,
                     #description,
                     #unit,
+                    ::observed::metadata::MetricValueKind::U64,
                 )
             )
         }
@@ -1016,23 +1017,27 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         quote! { ::core::option::Option::None }
     };
 
-    let has_field_metrics = def.fields.iter().any(|f| f.metric_value.is_some());
     let disabled = def.disabled;
     let has_log = def.log.is_some();
 
     let visit_fields_body = generate_visit_fields_body(&def.fields, has_log);
+    let fields = def
+        .fields
+        .iter()
+        .filter(|field| field_reaches_signal(field, has_log))
+        .map(|field| generate_field_descriptor(field, has_log));
 
     quote! {
         const _: () = {
             impl #impl_generics ::observed::Event for #struct_ident #ty_generics #where_clause {
                 const DESCRIPTION: ::observed::metadata::EventDescription =
-                    ::observed::metadata::EventDescription::new(
+                    ::observed::__private::event_description(
                         #event_name,
                         #type_id_expr,
                         #log_expr,
                         #metric_expr,
-                        #has_field_metrics,
                         #disabled,
+                        &::observed::__private::event_fields([#(#fields),*]),
                     );
 
                 fn visit_fields(
@@ -1048,12 +1053,15 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
 }
 
 fn generate_visit_fields_body(fields: &[FieldDef], has_log: bool) -> TokenStream {
-    let visits: Vec<TokenStream> = fields.iter().map(|f| generate_field_visit(f, has_log)).collect();
+    let visits = fields
+        .iter()
+        .filter(|field| field_reaches_signal(field, has_log))
+        .enumerate()
+        .map(|(index, field)| generate_field_visit(field, index));
     quote! { #(#visits)* }
 }
 
-fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
-    let field_ident = &field.ident;
+fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
     // Unraw-ed so a field written as `r#type` is exported under the domain key
     // `type`; `field_ident` keeps the raw form because it addresses the field.
     let default_key = field.ident.unraw().to_string();
@@ -1061,7 +1069,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     // Log routing
     let log_key = if has_log { field.log_key() } else { None };
     let log_entry = if let Some(key) = &log_key {
-        quote! { ::core::option::Option::Some(::observed::metadata::LogFieldEntry::new(#key)) }
+        quote! { ::core::option::Option::Some(::observed::__private::log_field(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -1072,38 +1080,41 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         let kind = decl.kind;
         let description = decl.description.as_deref().unwrap_or("");
         let unit = decl.unit.as_deref().unwrap_or("");
+        let representation = match numeric_kind(&field.ty) {
+            Some(NumericKind::UnsignedInt) => format_ident!("U64"),
+            Some(NumericKind::SignedInt) => format_ident!("I64"),
+            Some(NumericKind::Float) => format_ident!("F64"),
+            None => unreachable!("instrument value types are validated before code generation"),
+        };
         quote! {
-            ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
+            ::core::option::Option::Some(::observed::__private::metric_field(
                 #default_key,
-                ::observed::metadata::MetricDescription::new(
+                ::core::option::Option::Some(::observed::__private::metric_description(
                     #name,
                     ::observed::metadata::InstrumentKind::#kind,
                     #description,
                     #unit,
-                ),
+                    ::observed::metadata::MetricValueKind::#representation,
+                )),
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {
-        quote! { ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::dimension(#key)) }
+        quote! { ::core::option::Option::Some(::observed::__private::metric_field(#key, ::core::option::Option::None)) }
     } else {
         quote! { ::core::option::Option::None }
     };
 
-    // Skip emitting a visit if the field is not routed to any signal. The
-    // `where` clause is built from the same predicate, so both must agree.
-    if !field_reaches_signal(field, has_log) {
-        return quote! {};
-    }
+    quote! { ::observed::__private::field_descriptor(#default_key, #log_entry, #metric_entry) }
+}
 
-    let field_desc = quote! {
-        const FIELD_DESC: ::observed::metadata::FieldDescriptor =
-            ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
-    };
+fn generate_field_visit(field: &FieldDef, index: usize) -> TokenStream {
+    let field_ident = &field.ident;
+    let descriptor = quote! { &<Self as ::observed::Event>::DESCRIPTION.fields()[#index] };
 
     // `Option<T>` fields dispatch on `#[if_none(...)]`: a `None` value is
     // either dropped or replaced with a placeholder string (default `"n/a"`).
     if let Some(inner_ty) = option_inner_type(&field.ty) {
-        return generate_option_field_visit(field, inner_ty, &field_desc);
+        return generate_option_field_visit(field, inner_ty, &descriptor);
     }
 
     let owned = quote! { self.#field_ident.clone() };
@@ -1124,8 +1135,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
 
     quote! {
         {
-            #field_desc
-            visitor(&FIELD_DESC, & #getter )?;
+            visitor(#descriptor, & #getter )?;
         }
     }
 }
@@ -1178,7 +1188,7 @@ fn value_expr(
 ///   [`Drop`](IfNone::Drop) skips the field entirely (`visitor` is never
 ///   called), while [`Fill`](IfNone::Fill) records the placeholder string
 ///   in place of the missing value.
-fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_desc: &TokenStream) -> TokenStream {
+fn generate_option_field_visit(field: &FieldDef, inner_ty: &Type, descriptor: &TokenStream) -> TokenStream {
     let field_ident = &field.ident;
     let inner_is_ref = is_reference_type(inner_ty);
     let engine = quote! { _engine };
@@ -1198,23 +1208,26 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
         // `drop`: omit the field entirely when `None`.
         IfNone::Drop => quote! {
             if let ::core::option::Option::Some(__val) = self.#field_ident.as_ref() {
-                #field_desc
-                visitor(&FIELD_DESC, &|_engine| #some_value )?;
+                visitor(#descriptor, &|_engine| #some_value )?;
             }
         },
         // Fill: record the placeholder string in place of a missing value.
         IfNone::Fill(placeholder) => quote! {
             {
-                #field_desc
                 match self.#field_ident.as_ref() {
                     ::core::option::Option::Some(__val) => {
-                        visitor(&FIELD_DESC, &|_engine| #some_value )?;
+                        visitor(#descriptor, &|_engine| #some_value )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from(#placeholder))?;
+                        visitor(#descriptor, &|_| ::observed::Value::from(#placeholder))?;
                     }
                 }
+
             }
         },
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod metric_tests;

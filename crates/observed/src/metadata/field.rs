@@ -12,9 +12,8 @@ pub struct LogFieldEntry {
 }
 
 impl LogFieldEntry {
-    /// Creates a new log field entry.
     #[must_use]
-    pub const fn new(key: &'static str) -> Self {
+    pub(crate) const fn new(key: &'static str) -> Self {
         Self { key }
     }
 
@@ -46,15 +45,13 @@ pub struct MetricFieldEntry {
 }
 
 impl MetricFieldEntry {
-    /// Creates a dimension entry (no instrument).
     #[must_use]
-    pub const fn dimension(key: &'static str) -> Self {
+    pub(crate) const fn dimension(key: &'static str) -> Self {
         Self { key, instrument: None }
     }
 
-    /// Creates an instrument entry - the field carries this metric value.
     #[must_use]
-    pub const fn instrument(key: &'static str, description: MetricDescription) -> Self {
+    pub(crate) const fn instrument(key: &'static str, description: MetricDescription) -> Self {
         Self {
             key,
             instrument: Some(description),
@@ -89,28 +86,42 @@ impl MetricFieldEntry {
 ///
 /// All keys are compile-time `'static` strings, so descriptors are `Copy` and
 /// snapshotting consumers can retain them without allocating.
+///
+/// Event macros construct descriptors and assign their event-field indices.
+/// Consumers inspect or copy them; there is no public construction or mutation API.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDescriptor {
     field_name: &'static str,
     log: Option<LogFieldEntry>,
     metric: Option<MetricFieldEntry>,
+    field_index: Option<usize>,
 }
 
 impl FieldDescriptor {
-    /// Creates a descriptor with explicit per-signal entries.
     #[must_use]
-    pub const fn new(field_name: &'static str, log: Option<LogFieldEntry>, metric: Option<MetricFieldEntry>) -> Self {
-        Self { field_name, log, metric }
+    pub(crate) const fn new(field_name: &'static str, log: Option<LogFieldEntry>, metric: Option<MetricFieldEntry>) -> Self {
+        Self {
+            field_name,
+            log,
+            metric,
+            field_index: None,
+        }
     }
 
-    /// Creates a descriptor included in logs only.
     #[must_use]
-    pub const fn log_only(key: &'static str) -> Self {
-        Self {
-            field_name: key,
-            log: Some(LogFieldEntry::new(key)),
-            metric: None,
-        }
+    pub(crate) const fn with_field_index(mut self, index: usize) -> Self {
+        self.field_index = Some(index);
+        self
+    }
+
+    /// Returns this field's position in [`EventDescription::fields`](super::EventDescription::fields).
+    ///
+    /// Event fields return `Some(index)`. Enrichment entries return `None`:
+    /// they are attached context, not fields in the event's declaration.
+    /// An optional event field keeps its index even when its value is absent.
+    #[must_use]
+    pub const fn field_index(&self) -> Option<usize> {
+        self.field_index
     }
 
     /// Returns the log routing entry for this field, if any.
@@ -139,11 +150,11 @@ impl FieldDescriptor {
 #[cfg(test)]
 mod field_tests {
     use super::*;
-    use crate::metadata::InstrumentKind;
+    use crate::metadata::{InstrumentKind, MetricValueKind};
 
     #[test]
     fn metric_field_entry_instrument_accessors() {
-        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "d", "ms");
+        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "d", "ms", MetricValueKind::F64);
         let entry = MetricFieldEntry::instrument("dur", desc);
         let instrument = entry.instrument_description().expect("instrument is set");
         assert_eq!(instrument.instrument_name(), "http.server.duration");
@@ -175,6 +186,10 @@ mod field_tests {
         assert_eq!(descriptor.metric().expect("metric routing is set").key(), "region");
 
         // A log-only field carries no metric routing at all.
-        assert!(FieldDescriptor::log_only("msg").metric().is_none());
+        assert!(
+            FieldDescriptor::new("msg", Some(LogFieldEntry::new("msg")), None)
+                .metric()
+                .is_none()
+        );
     }
 }
