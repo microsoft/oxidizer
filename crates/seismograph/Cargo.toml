@@ -20,15 +20,20 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "getrandom::error::Error",
     "seismograph_protocol::Error",
+    "seismograph_protocol::io::MonitorIo",
     "seismograph_protocol::monitor::MonitorDescriptor",
 ]
 
 [features]
 monitor = ["dep:getrandom", "dep:seismograph_protocol"]
+test-util = ["monitor", "seismograph_protocol/test-util"]
 
 [dependencies]
 getrandom = { workspace = true, optional = true }
@@ -39,6 +44,7 @@ windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] 
 
 [dev-dependencies]
 mutants.workspace = true
+seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

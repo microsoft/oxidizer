@@ -29,6 +29,17 @@
 //! representation size as [`std::sync::Arc`]. Its thread-aware per-thread and
 //! per-NUMA strategies lazily materialize and reuse affinity-local values.
 //!
+//! # Live monitor integration workload
+//!
+//! Run `cargo +1.95.0 test -p performables --features seismograph --test seismograph_monitor live_monitor -- --ignored --nocapture`
+//! in one terminal, then `cargo +1.95.0 run -p seismograph_cli -- monitor`
+//! in another terminal using the same checkout and OS environment.
+//! Select `performables-integration`,
+//! press Enter to connect, and press `s` to capture. The Primitives and Threads
+//! tabs show real mutex and Arc activity from three named worker threads.
+//! Press Enter in the workload terminal to stop it and remove its endpoint.
+//! No administrator setup or application changes are required.
+//!
 //! # Choosing a synchronization mode
 //!
 //! The mode belongs to the shared object, not to individual callers.

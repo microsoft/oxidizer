@@ -1,4 +1,11 @@
 +
+ACL
+IPC
+UID
+XDG
+cancellable
+nonblocking
+pathname
 Arty's
 quickstart
 rethrow

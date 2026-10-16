@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use crate::Error;
 use crate::codec::{SliceReader, push_string, push_u32, push_u64};
-use crate::monitor::{AuthenticationToken, InstanceId};
+use crate::monitor::InstanceId;
 
 const DEFAULT_EVENT_CAPACITY_PER_THREAD: u32 = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: u32 = 64;
@@ -186,11 +186,8 @@ pub struct RecorderActivity {
 /// Request sent by a monitor client.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
-    /// Authenticates with the monitor.
-    Hello {
-        /// Descriptor-provided authentication token.
-        authentication: AuthenticationToken,
-    },
+    /// Identifies an OS-authorized connection and reads the current configuration.
+    Hello,
     /// Changes process-wide non-cache recording configuration.
     ///
     /// Cache recording is changed independently with [`Request::SetCacheRecording`].
@@ -203,7 +200,7 @@ pub enum Request {
     ReadRecorderStatistics,
     /// Reads cache-event recording configuration.
     ReadCacheRecording,
-    /// Reads the server's `seismograph` crate semantic version after authentication.
+    /// Reads the server's `seismograph` crate semantic version after the handshake.
     ///
     /// Legacy servers close the connection without a response to this request.
     /// The fixed-size [`Response::Hello`] remains unchanged for legacy clients.
@@ -250,11 +247,7 @@ pub enum Response {
 
 pub(crate) fn encode_request(request: &Request) -> Result<(u16, Vec<u8>), Error> {
     Ok(match request {
-        Request::Hello { authentication } => {
-            let mut payload = Vec::with_capacity(32);
-            payload.extend_from_slice(&authentication.as_bytes());
-            (1, payload)
-        }
+        Request::Hello => (1, Vec::new()),
         Request::SetRecording(configuration) => {
             validate_legacy_recording(*configuration)?;
             (2, encode_recording(*configuration))
@@ -276,13 +269,7 @@ pub(crate) fn encode_request(request: &Request) -> Result<(u16, Vec<u8>), Error>
 
 pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error> {
     match kind {
-        1 if payload.len() == 32 => {
-            let mut token = [0; 32];
-            token.copy_from_slice(payload);
-            Ok(Request::Hello {
-                authentication: AuthenticationToken::from_bytes(token),
-            })
-        }
+        1 if payload.is_empty() => Ok(Request::Hello),
         2 => decode_recording(payload).map(Request::SetRecording),
         3 if payload.len() == 1 => Ok(Request::CaptureSnapshot(SnapshotOptions {
             event_buffers: decode_event_buffer_disposition(payload[0])?,
@@ -776,8 +763,7 @@ mod tests {
 
     #[test]
     fn hello_messages_round_trip_without_public_version_fields() {
-        let authentication = AuthenticationToken::from_bytes([7; 32]);
-        let request = Request::Hello { authentication };
+        let request = Request::Hello;
         let mut bytes = Vec::new();
         write_request(&mut bytes, 1, &request).unwrap();
         assert_eq!(read_request(&mut bytes.as_slice()).unwrap(), (1, request));

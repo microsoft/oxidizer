@@ -50,9 +50,18 @@ assert!(
 );
 ```
 
-Applications built with the `monitor` feature can publish a localhost
+Applications built with the `monitor` feature can publish an OS-authorized local
 endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-for as long as remote control should remain available:
+for as long as local control should remain available. The owning user and
+root/elevated administrators can connect without a token. Startup creates
+the user’s private registry automatically; no administrator setup is needed.
+Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
+fallback. Windows uses the user’s local application-data directory.
+Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
+the monitor’s identity, transport, discovery, persistence, and clock
+capability. Omitting it preserves native I/O; `seismograph_protocol`’s
+`test-util` feature provides an isolated in-memory implementation for
+application tests without host registry setup.
 
 ```rust
 let _monitor = seismograph::monitor::Monitor::builder()
@@ -62,13 +71,19 @@ let _monitor = seismograph::monitor::Monitor::builder()
     .unwrap();
 ```
 
+## Features
+
+* **`monitor`**: Enables the OS-authorized local monitor server.
+* **`test-util`**: Enables `monitor`, the protocol’s mock I/O controls, and
+  `monitor::Builder::isolated` for native tests using a temporary registry.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnIjY07yDBCMb5dOQTY4yGVUbIqi6d2b0sygbtiUL_gUfWH9hZIGCa3NlaXNtb2dyYXBoZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbcRUHOMc8jkAbavFwutfQGtMbP-Y1jqJej0obsU30n7EIZKBhZIGCa3NlaXNtb2dyYXBoZTAuMi4w
  [__link0]: https://docs.rs/seismograph/0.2.0/seismograph/fn.snapshot.html
  [__link1]: https://docs.rs/seismograph/0.2.0/seismograph/?search=snapshot::EventBufferDisposition::Stop
  [__link2]: https://docs.rs/seismograph/0.2.0/seismograph/?search=recorder::clear_event_buffers
