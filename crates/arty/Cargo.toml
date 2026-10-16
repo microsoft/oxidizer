@@ -93,7 +93,7 @@ metabench = { path = "../metabench" }
 mutants = { workspace = true }
 nonempty = { workspace = true }
 observed = { path = "../observed" }
-ohno = { path = "../ohno", features = ["app-err"] }
+ohno = { workspace = true, features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
 plurality = { path = "../plurality", features = ["std"] }
