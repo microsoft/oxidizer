@@ -17,34 +17,30 @@ keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["scopeguard::*"]
-
-[features]
-default = []
-test-util = ["dep:scopeguard"]
+allowed_external_types = ["observed::context::transfer::Transfer", "observed::sink::core::Sink"]
 
 [dependencies]
+data_privacy = { workspace = true }
 events_once = { workspace = true }
-foldhash = { workspace = true, features = ["std"] }
 nm = { workspace = true }
+observed = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
-scopeguard = { workspace = true, optional = true }
 tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
+foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
 mockall = { workspace = true }
 mutants = { workspace = true }
+observed_testing = { path = "../observed_testing" }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]
@@ -54,4 +50,3 @@ workspace = true
 [[bench]]
 name = "ae_basic_operations"
 harness = false
-required-features = ["test-util"]

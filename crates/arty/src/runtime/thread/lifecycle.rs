@@ -11,7 +11,7 @@ use crate::runtime::telemetry::events::{
 
 /// Spawns a thread with a preferred name and stack size, reporting the thread's
 /// lifecycle (spawn, start, panic, exit) through `sink`.
-pub(in crate::runtime) fn spawn<F>(sink: &Sink, name: &str, stack_size: Option<usize>, task: F) -> JoinHandle<()>
+pub(crate) fn spawn<F>(sink: &Sink, name: &str, stack_size: Option<usize>, task: F) -> JoinHandle<()>
 where
     F: FnOnce() + Send + 'static,
 {
