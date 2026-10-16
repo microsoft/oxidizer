@@ -8,6 +8,7 @@
 //! channels return their storage to the pool after both endpoints are dropped, avoiding a fresh
 //! channel allocation when reusable capacity is available.
 
+use std::any::type_name;
 use std::fmt::{self, Debug};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -66,7 +67,7 @@ impl Default for Pool {
 
 impl Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -89,7 +90,7 @@ impl<R: Send + 'static> Future for JoinHandle<R> {
 
 impl<R: Send + 'static> Debug for JoinHandle<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -125,7 +126,7 @@ impl<R: Send + 'static> Sender<R> {
 
 impl<R: Send + 'static> Debug for Sender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -192,8 +193,8 @@ mod tests {
 
         assert_eq!(format!("{:?}", TaskResult::Completed(1)), "Completed(..)");
         assert_eq!(format!("{:?}", TaskResult::<u8>::Panicked(Box::new("panic"))), "Panicked(..)");
-        assert!(format!("{pool:?}").starts_with(std::any::type_name::<Pool>()));
-        assert!(format!("{sender:?}").starts_with(std::any::type_name::<Sender<u8>>()));
-        assert!(format!("{handle:?}").starts_with(std::any::type_name::<JoinHandle<u8>>()));
+        assert!(format!("{pool:?}").starts_with(type_name::<Pool>()));
+        assert!(format!("{sender:?}").starts_with(type_name::<Sender<u8>>()));
+        assert!(format!("{handle:?}").starts_with(type_name::<JoinHandle<u8>>()));
     }
 }

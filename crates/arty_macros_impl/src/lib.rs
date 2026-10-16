@@ -193,7 +193,7 @@ fn entrypoint_with_path(args: TokenStream, item: TokenStream, test: bool, runtim
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };

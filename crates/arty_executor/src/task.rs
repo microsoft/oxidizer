@@ -482,11 +482,12 @@ impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
     }
 }
 
-/// Inline pinned storage with explicit destruction for a task future.
+/// Inline pinned future storage with explicit, panic-contained destruction.
 ///
-/// Terminal task paths destroy the future in place so destructor panics can be captured while the
-/// task's result and telemetry are finalized. The `Drop` implementation is a fallback for paths
-/// that release task storage without first performing that explicit destruction.
+/// Boxing the future would add an allocation per task, while an ordinary field cannot catch a
+/// panic from its own implicit destructor. Normal completion and cancellation therefore retire
+/// the future in place before terminal result handling. [`Drop`] is only the fail-fast fallback
+/// for an invariant-breaking path that did not perform that explicit retirement.
 struct FutureStorage<F> {
     inner: ManuallyDrop<F>,
     live: bool,
