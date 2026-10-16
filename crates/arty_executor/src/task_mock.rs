@@ -6,7 +6,7 @@ use std::task;
 
 use mockall::mock;
 
-use crate::{TypeErasedTask, WakeSignal};
+use crate::{TaskCreatedReporter, TaskOptions, TypeErasedTask, WakeSignal};
 
 // Mockall is not able to express all methods on the trait (due to generics deficiency), so we mock
 // similar-enough methods that it does know how to mock and simply call these from a manual
@@ -15,10 +15,10 @@ mock! {
     #[derive(Debug)]
     pub TypeErasedTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()>;
-        fn is_inert(&self) -> bool;
         fn consume_awakened(&self) -> bool;
+        fn is_awakened(&self) -> bool;
         fn abort(self: Pin<&Self>);
-        unsafe fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
+        fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
         // Intentionally missing: inspect_waker_backtraces
     }
 }
@@ -28,25 +28,28 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.poll()
     }
 
-    fn is_inert(&self) -> bool {
-        self.is_inert()
+    fn created_reporter(&self) -> TaskCreatedReporter {
+        TaskOptions::default().created_reporter(observed::Sink::noop())
     }
 
     fn consume_awakened(&self) -> bool {
         self.consume_awakened()
     }
 
+    fn is_awakened(&self) -> bool {
+        self.is_awakened()
+    }
+
+    fn clear_queued_notification(&self) {}
+
     fn abort(self: Pin<&Self>) {
         self.abort();
     }
 
-    unsafe fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
-        // SAFETY: Forwarding safety guarantees from trait.
-        unsafe {
-            self.initialize(wake_signal);
-        }
+    fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
+        self.initialize(wake_signal);
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, test))]
     fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&std::backtrace::Backtrace)) {}
 }
