@@ -29,9 +29,9 @@ pub enum CycleOutcome {
     /// [1]: crate::ExecutorBuilder::owner_waker
     Suspend,
 
-    /// The executor has completed shutdown and is ready to be dropped.
+    /// The executor has completed graceful shutdown and owns no tasks.
     ///
     /// Additional processing cycles are unnecessary but harmless and continue returning
-    /// `Shutdown`.
+    /// `Shutdown`. Join handles that outlive the executor may report task cancellation.
     Shutdown,
 }

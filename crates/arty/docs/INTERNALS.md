@@ -33,6 +33,20 @@ but they do not keep the runtime running. `Runtime::stop` and `Runtime::drop`
 request shutdown through the dispatcher; the waiter joins async workers, and
 each worker joins its blocking pool before its thread exits.
 
+### Shutdown guard tests
+
+Tests that consume or drop a runtime owner on an async worker must retain a
+dispatcher on the test thread and call its `wait` method after the worker-side
+operation. Joining a task or a different runtime does not join that runtime's
+workers. Cancellation can also destroy captured runtime owners on the worker,
+so each nested runtime needs its own completion barrier.
+
+The consuming-owner cases live in `runtime/handle/worker_wait_guards_tests.rs`
+because the public API does not expose a completion handle after consuming the owner.
+The public cancellation test retains its runtime owner outside the cancelled
+task and calls `stop` from the test thread. Both forms keep the worker wait
+guards active and join every runtime before returning.
+
 ## Worker command lifecycle
 
 [`runtime/worker/async_worker.rs`](../src/runtime/worker/async_worker.rs)

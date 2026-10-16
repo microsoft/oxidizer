@@ -181,7 +181,7 @@ impl Runtime {
         self.scheduler.dispatcher.wait()
     }
 
-    pub(in crate::runtime) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
+    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
             shutdown_on_drop: true,
@@ -201,6 +201,10 @@ impl Drop for Runtime {
         let _ = self.wait();
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod worker_wait_guards_tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
