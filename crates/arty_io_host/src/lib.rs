@@ -22,13 +22,11 @@
 //! that worker, and then create its driver host:
 //!
 //! ```
-//! use std::task::Waker;
-//! use std::time::Duration;
-//!
-//! use arty_io_host::IoRuntime;
-//! use observed::Sink;
-//! use thread_aware::{ThreadAware, ThreadBuilder};
-//!
+//! # use std::task::Waker;
+//! # use std::time::Duration;
+//! # use arty_io_host::IoRuntime;
+//! # use observed::Sink;
+//! # use thread_aware::{ThreadAware, ThreadBuilder};
 //! # fn main() -> Result<(), arty_io_core::DriverError> {
 //! // One runtime-wide value owns the shared context registry and telemetry sink.
 //! let runtime = IoRuntime::new(Sink::noop());

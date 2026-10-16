@@ -28,13 +28,6 @@ Clone the runtime-wide registry for each worker, relocate the clone onto
 that worker, and then create its driver host:
 
 ```rust
-use std::task::Waker;
-use std::time::Duration;
-
-use arty_io_host::IoRuntime;
-use observed::Sink;
-use thread_aware::{ThreadAware, ThreadBuilder};
-
 // One runtime-wide value owns the shared context registry and telemetry sink.
 let runtime = IoRuntime::new(Sink::noop());
 let worker = ThreadBuilder::default().build(std::thread::current().id());
