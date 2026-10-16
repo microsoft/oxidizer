@@ -36,6 +36,38 @@ Describe 'Anvil workspace package selection' {
             Should -Be 'path+file:///checkout%20with%20spaces/crates/ohno#ohno@0.5.2'
     }
 
+    It 'qualifies a bare explicit workspace package override' {
+        ConvertTo-WorkspacePackageSelection '--package ohno' $metadata |
+            Should -Be '--package path+file:///checkout%20with%20spaces/crates/ohno#ohno@0.5.2'
+    }
+
+    It 'uses metadata IDs for tools that compare the original package ID fragment' {
+        ConvertTo-WorkspacePackageSelection '--package ohno@0.5.2' $metadata -Format MetadataId |
+            Should -Be "--package $local"
+    }
+
+    It 'converts an already qualified selection at a tool boundary' {
+        ConvertTo-WorkspacePackageSelection '--package path+file:///checkout%20with%20spaces/crates/ohno#ohno@0.5.2' $metadata -Format MetadataId |
+            Should -Be "--package $local"
+    }
+
+    It 'uses name and version only for workspace-only selectors such as cargo-each' {
+        ConvertTo-WorkspacePackageSelection '--package path+file:///checkout%20with%20spaces/crates/ohno#ohno@0.5.2' $metadata -Format NameVersion |
+            Should -Be '--package ohno@0.5.2'
+    }
+
+    It 'preserves metadata IDs that already include the package name' {
+        $metadata.workspace_members = @('path+file:///checkout/crates/errors#ohno@0.5.2')
+        $metadata.packages[1].id = $metadata.workspace_members[0]
+        ConvertTo-WorkspacePackageSelection '--package ohno' $metadata -Format MetadataId |
+            Should -Be "--package $($metadata.workspace_members[0])"
+    }
+
+    It 'does not accept a registry source as a workspace override' {
+        { ConvertTo-WorkspacePackageSelection "--package $registry" $metadata } |
+            Should -Throw '*unknown workspace*'
+    }
+
     It 'preserves the <Selection> sentinel' -TestCases @(
         @{ Selection = '--skip' }
         @{ Selection = '--workspace' }

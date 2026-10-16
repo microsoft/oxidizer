@@ -96,8 +96,6 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
         Write-Host "$recipeName`: no affected packages; skipping"
         exit 0
     }
-    $packageArgs = @(if ($package) { '--package'; $package } elseif ($include) { -split $include } else { '--workspace' })
-
     switch ($profile) {
         'tree-borrows' {
             $env:MIRIFLAGS = "-Zmiri-tree-borrows $($env:MIRIFLAGS)".Trim()
@@ -117,12 +115,6 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
         }
     }
 
-    if ($example) {
-        & cargo '+{{ rust_nightly }}' miri run --all-features --locked @packageArgs --example $example
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        exit 0
-    }
-
     # The metadata and compiler-artifact streams must come from the same Cargo
     # version because Cargo changed package-ID formats in 1.78.
     $metadata = & cargo '+{{ rust_nightly }}' metadata --no-deps --format-version 1
@@ -135,6 +127,14 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
     } catch {
         Write-Error "anvil miri: could not parse cargo metadata output: $($_.Exception.Message)"
         exit 1
+    }
+
+    . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+    $packageArgs = @(if ($package) { -split (ConvertTo-WorkspacePackageSelection "--package $package" $metadata) } elseif ($include) { -split $include } else { '--workspace' })
+    if ($example) {
+        & cargo '+{{ rust_nightly }}' miri run --all-features --locked @packageArgs --example $example
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        exit 0
     }
 
     $workspaceMembers = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
