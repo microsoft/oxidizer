@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use arty_io_host::{DriverHost, IoRuntime};
+use observed::metadata::EventDescription;
+use observed::processing::{EventProcessor, EventView};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 
 #[derive(Clone, Copy)]
@@ -26,6 +28,7 @@ struct State {
     cycles: Mutex<Vec<(Kind, Duration)>>,
     driver_waker: Mutex<Option<Waker>>,
     shutdowns: AtomicUsize,
+    fail_initialization: AtomicBool,
     fail_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
     interrupts: AtomicUsize,
@@ -53,6 +56,9 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
         let kind = if SECOND { Kind::Second } else { Kind::First };
         self.state.roles.lock().unwrap().push((kind, options.role()));
+        if self.state.fail_initialization.load(Ordering::SeqCst) {
+            return Err(DriverError::from_message("initialization failed"));
+        }
         Ok(TestDriver {
             kind,
             state: Arc::clone(&self.state),
@@ -102,14 +108,29 @@ impl Wake for InterruptWake {
     }
 }
 
+struct TestProcessor;
+
+impl EventProcessor for TestProcessor {
+    fn is_interested(&self, _description: &EventDescription) -> bool {
+        true
+    }
+
+    fn process(&self, _event: &EventView<'_>) {}
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
+}
+
 struct WakeHostOnDrop {
     host_interrupt: Waker,
     dropped: Arc<AtomicBool>,
 }
 
-#[expect(clippy::manual_noop_waker, reason = "custom Wake drop behavior is the contract under test")]
 impl Wake for WakeHostOnDrop {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
 }
 
 impl Drop for WakeHostOnDrop {
@@ -164,9 +185,17 @@ fn host(runtime: &IoRuntime) -> DriverHost {
     runtime.driver_host(Waker::noop().clone())
 }
 
+fn test_runtime() -> IoRuntime {
+    IoRuntime::new(observed::Sink::new(
+        "arty_io_host_test",
+        vec![Arc::new(TestProcessor)],
+        tick::SimpleClock::new_frozen(),
+    ))
+}
+
 #[test]
 fn first_context_is_primary_and_later_contexts_are_secondary() {
-    let runtime = IoRuntime::new(observed::Sink::noop());
+    let runtime = test_runtime();
     let host = host(&runtime);
     let state = Arc::new(State::default());
 
@@ -181,15 +210,16 @@ fn first_context_is_primary_and_later_contexts_are_secondary() {
 
 #[test]
 fn runtime_identity_is_shared_only_by_clones() {
-    let runtime = IoRuntime::new(observed::Sink::noop());
+    let runtime = test_runtime();
 
     assert_eq!(runtime, runtime.clone());
-    assert_ne!(runtime, IoRuntime::new(observed::Sink::noop()));
+    assert_ne!(runtime, test_runtime());
+    assert_eq!(format!("{runtime:?}"), "IoRuntime { .. }");
 }
 
 #[test]
 fn worker_local_drivers_are_created_lazily() {
-    let runtime = IoRuntime::new(observed::Sink::noop());
+    let runtime = test_runtime();
     let first = host(&runtime);
     let second = host(&runtime);
     let state = Arc::new(State::default());
@@ -206,7 +236,7 @@ fn worker_local_drivers_are_created_lazily() {
 
 #[test]
 fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let wait = Duration::from_millis(7);
     let _ = host.context::<Context<false>>(&state).unwrap();
@@ -223,7 +253,7 @@ fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
 
 #[test]
 fn cycle_failures_are_returned_to_the_runtime() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let _ = host.context::<Context<false>>(&state).unwrap();
     state.fail_cycle.store(true, Ordering::SeqCst);
@@ -234,11 +264,32 @@ fn cycle_failures_are_returned_to_the_runtime() {
 }
 
 #[test]
+fn driver_initialization_failures_are_returned_to_the_runtime() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    state.fail_initialization.store(true, Ordering::SeqCst);
+
+    let Err(error) = host.context::<Context<false>>(&state) else {
+        panic!("driver initialization should fail");
+    };
+
+    assert_eq!(error.to_string(), "initialization failed");
+}
+
+#[test]
+fn empty_host_cycle_is_a_noop() {
+    let host = host(&test_runtime());
+
+    host.execute_cycle(Duration::from_millis(1)).unwrap();
+}
+
+#[test]
 fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let interrupt = host.waker();
     let _ = host.context::<Context<false>>(&state).unwrap();
+    assert!(format!("{host:?}").starts_with("DriverHost { thread: "));
 
     interrupt.wake_by_ref();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
@@ -254,7 +305,7 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
 
 #[test]
 fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let dropped = Arc::new(AtomicBool::new(false));
     let driver_waker = Waker::from(Arc::new(WakeHostOnDrop {
@@ -272,7 +323,7 @@ fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
 
 #[test]
 fn waking_the_primary_does_not_clone_the_provider_waker() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let cloned = Arc::new(AtomicBool::new(false));
     let driver_waker = clone_host_waker(host.waker(), Arc::clone(&cloned));
@@ -286,7 +337,7 @@ fn waking_the_primary_does_not_clone_the_provider_waker() {
 
 #[test]
 fn drop_attempts_every_driver_after_shutdown_errors() {
-    let host = host(&IoRuntime::new(observed::Sink::noop()));
+    let host = host(&test_runtime());
     let state = Arc::new(State::default());
     state.fail_shutdown.store(true, Ordering::SeqCst);
     let _ = host.context::<Context<false>>(&state).unwrap();

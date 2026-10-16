@@ -305,3 +305,66 @@ impl Drop for DriverHost {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::task::Waker;
+
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
+    use observed::Sink;
+    use thread_aware::{Thread, ThreadAware, ThreadBuilder};
+
+    use crate::IoRuntime;
+
+    #[derive(Clone)]
+    struct TestContext;
+
+    impl ThreadAware for TestContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestContext {
+        type ContextOptions = ();
+        type Driver = TestDriver;
+
+        fn context((): Self::ContextOptions) -> Self {
+            Self
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(TestDriver)
+        }
+    }
+
+    struct TestDriver;
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nested_context_retrieval_is_rejected_during_initialization() {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let mut runtime = IoRuntime::new(Sink::noop());
+        runtime.relocate(None, &thread);
+        let host = runtime.driver_host(Waker::noop().clone());
+        host.initializing.set(true);
+
+        let Err(error) = host.context::<TestContext>(&()) else {
+            panic!("nested context retrieval should fail");
+        };
+
+        assert_eq!(error.to_string(), "I/O context retrieval cannot be nested during initialization");
+    }
+}

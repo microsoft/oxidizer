@@ -324,6 +324,7 @@ dependencies = [
  "static_assertions",
  "thread_aware",
  "thread_aware_core",
+ "tick",
 ]
 
 [[package]]

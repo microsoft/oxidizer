@@ -77,3 +77,24 @@ pub(crate) struct IoDriverShutdownFailed {
     #[dimension(log = "error.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use arty_io_core::{DriverError, DriverRole};
+
+    use super::{IoDriverErrorMessage, IoDriverRoleLabel};
+
+    #[test]
+    fn telemetry_values_preserve_driver_details() {
+        let error = DriverError::from_message("driver failed");
+
+        let error_message = IoDriverErrorMessage::new(&error);
+        let primary = IoDriverRoleLabel::from(DriverRole::Primary);
+        let secondary = IoDriverRoleLabel::from(DriverRole::Secondary);
+
+        assert_eq!(error_message.0, "driver failed");
+        assert_eq!(primary.0, "primary");
+        assert_eq!(secondary.0, "secondary");
+    }
+}
