@@ -17,9 +17,7 @@ const _: () = {
                     ::observed::metadata::InstrumentKind::Counter,
                     "heartbeats",
                     "1",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValueKind::U64,
-                    ),
+                    ::observed::metadata::MetricValueKind::U64,
                 ),
             ),
             false,

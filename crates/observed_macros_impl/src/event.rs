@@ -1009,7 +1009,7 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
                     ::observed::metadata::InstrumentKind::Counter,
                     #description,
                     #unit,
-                    ::core::option::Option::Some(::observed::metadata::MetricValueKind::U64),
+                    ::observed::metadata::MetricValueKind::U64,
                 )
             )
         }
@@ -1094,7 +1094,7 @@ fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
                     ::observed::metadata::InstrumentKind::#kind,
                     #description,
                     #unit,
-                    ::core::option::Option::Some(::observed::metadata::MetricValueKind::#representation),
+                    ::observed::metadata::MetricValueKind::#representation,
                 )),
             ))
         }

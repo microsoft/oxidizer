@@ -8,9 +8,9 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use observed::metadata::{EventDescription, InstrumentKind, MetricValue, MetricValueKind};
+use observed::metadata::{EventDescription, InstrumentKind, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, MetricBindings};
-use observed::{Event, FlushError};
+use observed::{Event, FlushError, Value};
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
 
@@ -118,7 +118,7 @@ impl PerfCounterProcessorBuilder {
     /// Rust attributes supply the aggregation operation, not deployment metadata.
     /// Counters add unsigned increments, gauges replace unsigned readings, and
     /// up/down counters apply signed deltas to a non-negative `u64` total.
-    /// Histograms, floats, signed gauges, and unknown numeric types are rejected.
+    /// Histograms, floats, and signed gauges are rejected.
     /// An unsupported instrument,
     /// an event without metrics, or duplicate registration is a startup error.
     /// Names must be unique across the category, including case variants.
@@ -140,8 +140,8 @@ impl PerfCounterProcessorBuilder {
         ) {
             if !matches!(
                 (metric.kind(), metric.value_kind()),
-                (InstrumentKind::Counter | InstrumentKind::Gauge, Some(MetricValueKind::U64))
-                    | (InstrumentKind::UpDownCounter, Some(MetricValueKind::I64))
+                (InstrumentKind::Counter | InstrumentKind::Gauge, MetricValueKind::U64)
+                    | (InstrumentKind::UpDownCounter, MetricValueKind::I64)
             ) {
                 self.error = Some(Error::configuration(UnsupportedMetric::new(
                     metric.instrument_name(),
@@ -163,7 +163,7 @@ impl PerfCounterProcessorBuilder {
                 kind: metric.kind(),
             }
         }) {
-            self.error = Some(source.into());
+            self.error = Some(Error::caused_by(source));
         }
         self
     }
@@ -264,23 +264,29 @@ impl PerfCounterProcessor {
     }
 
     // Apply one checked aggregation; rejected arithmetic leaves its prior total intact.
-    fn record(&self, target: &MetricTarget, value: MetricValue) {
+    fn record(&self, target: &MetricTarget, value: &Value) {
         let total = &self.totals[target.index];
         let failure = match (target.kind, value) {
-            (InstrumentKind::Gauge, MetricValue::U64(value)) => {
-                total.store(value, Ordering::Relaxed);
+            (InstrumentKind::Gauge, Value::U64(value)) => {
+                total.store(*value, Ordering::Relaxed);
                 None
             }
-            (InstrumentKind::Counter, MetricValue::U64(delta)) => total
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(delta))
+            (InstrumentKind::Counter, Value::U64(delta)) => total
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(*delta))
                 .err()
                 .map(|_| false),
-            (InstrumentKind::UpDownCounter, MetricValue::I64(delta)) => total
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add_signed(delta))
+            (InstrumentKind::UpDownCounter, Value::I64(delta)) => total
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add_signed(*delta))
                 .err()
                 .map(|_| delta.is_negative()),
             _ => {
-                self.report(&Error::configuration(MeasurementMismatch::new(target.kind, value.kind())));
+                let value_kind = match value {
+                    Value::U64(_) => Some(MetricValueKind::U64),
+                    Value::I64(_) => Some(MetricValueKind::I64),
+                    Value::F64(_) => Some(MetricValueKind::F64),
+                    _ => None,
+                };
+                self.report(&Error::configuration(MeasurementMismatch::new(target.kind, value_kind)));
                 return;
             }
         };
@@ -307,8 +313,8 @@ impl EventProcessor for PerfCounterProcessor {
     }
 
     fn process(&self, event: &EventView<'_>) {
-        if let Err(source) = self.bindings.record(event, |target, value| self.record(target, value)) {
-            self.report(&source.into());
+        if let Err(source) = self.bindings.record(event, |target, value| self.record(target, &value)) {
+            self.report(&Error::caused_by(source));
         }
     }
 
@@ -478,8 +484,8 @@ mod tests {
             index: 0,
             kind: InstrumentKind::Counter,
         };
-        processor.record(&target, MetricValue::U64(u64::MAX));
-        processor.record(&target, MetricValue::U64(1));
+        processor.record(&target, &Value::U64(u64::MAX));
+        processor.record(&target, &Value::U64(1));
         let id = processor.schema.counters.iter().find(|counter| counter.name == "Bytes").unwrap().id;
         assert!(
             processor
@@ -529,7 +535,7 @@ mod tests {
                 index: 0,
                 kind: InstrumentKind::Gauge,
             },
-            MetricValue::I64(-1),
+            &Value::I64(-1),
         );
         let original = processor.flush().unwrap_err();
         let original = std::error::Error::source(&original).unwrap().to_string();
@@ -546,6 +552,31 @@ mod tests {
             format!("{:?}", PerfCounterProcessor::builder())
                 .contains(type_name::<PerfCounterProcessorBuilder>().rsplit("::").next().unwrap())
         );
+    }
+
+    #[test]
+    fn incompatible_values_report_only_representation_and_keep_the_previous_total() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        for (kind, value, expected) in [
+            (InstrumentKind::Counter, Value::I64(-1), Some(MetricValueKind::I64)),
+            (InstrumentKind::UpDownCounter, Value::U64(u64::MAX), Some(MetricValueKind::U64)),
+            (InstrumentKind::Gauge, Value::F64(1.5), Some(MetricValueKind::F64)),
+            (InstrumentKind::Gauge, Value::String("not a measurement".into()), None),
+        ] {
+            let processor = build_for_test(
+                PerfCounterProcessor::builder()
+                    .category("Mismatch")
+                    .instance("worker")
+                    .bind_event::<WideGauge>(),
+            );
+            processor.record(&MetricTarget { index: 0, kind }, &value);
+            let error = processor.error.lock().as_ref().unwrap().clone();
+            let cause = ohno::ErrorExt::find_source::<MeasurementMismatch>(&error).unwrap();
+            assert_eq!((cause.kind, cause.value_kind), (kind, expected));
+            assert_eq!(named_values(&processor), [("Value".into(), 0)]);
+            assert!(!error.to_string().contains("not a measurement"));
+        }
     }
 
     #[test]
@@ -665,7 +696,7 @@ mod tests {
                         InstrumentKind::Counter,
                         "",
                         "",
-                        Some(MetricValueKind::U64),
+                        MetricValueKind::U64,
                     )),
                 )),
             )]),

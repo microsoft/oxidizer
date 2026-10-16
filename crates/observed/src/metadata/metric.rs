@@ -40,35 +40,6 @@ pub enum MetricValueKind {
     F64,
 }
 
-/// A numeric metric measurement, separate from general telemetry field values.
-///
-/// Binding converts numeric field values using their declared representation,
-/// preserving signedness and integer precision. This value
-/// carries no dimensions, redaction, or destination-specific aggregation.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[non_exhaustive]
-pub enum MetricValue {
-    /// An unsigned integer increment or reading.
-    U64(u64),
-    /// A signed integer delta or reading.
-    I64(i64),
-    /// A floating-point observation.
-    F64(f64),
-}
-
-impl MetricValue {
-    /// The numeric representation of this measurement.
-    #[must_use]
-    #[inline]
-    pub const fn kind(self) -> MetricValueKind {
-        match self {
-            Self::U64(_) => MetricValueKind::U64,
-            Self::I64(_) => MetricValueKind::I64,
-            Self::F64(_) => MetricValueKind::F64,
-        }
-    }
-}
-
 /// Describes a metric instrument derived from event metadata.
 ///
 /// Two kinds of metric descriptions exist:
@@ -90,7 +61,7 @@ pub struct MetricDescription {
     ///
     /// [UCUM]: https://ucum.org/ucum
     unit: &'static str,
-    value_kind: Option<MetricValueKind>,
+    value_kind: MetricValueKind,
 }
 
 impl MetricDescription {
@@ -100,7 +71,7 @@ impl MetricDescription {
         kind: InstrumentKind,
         description: &'static str,
         unit: &'static str,
-        value_kind: Option<MetricValueKind>,
+        value_kind: MetricValueKind,
     ) -> Self {
         Self {
             instrument_name,
@@ -111,9 +82,12 @@ impl MetricDescription {
         }
     }
 
-    /// Numeric representation, or `None` for legacy or unspecified metadata.
+    /// Numeric representation of the instrument's measurement.
+    ///
+    /// The event macro derives this from the field type. Fieldless counters
+    /// use [`MetricValueKind::U64`] and record one per emission.
     #[must_use]
-    pub const fn value_kind(&self) -> Option<MetricValueKind> {
+    pub const fn value_kind(&self) -> MetricValueKind {
         self.value_kind
     }
 
@@ -150,20 +124,19 @@ mod tests {
     use super::*;
 
     static_assertions::assert_impl_all!(MetricValueKind: UnwindSafe, RefUnwindSafe);
-    static_assertions::assert_impl_all!(MetricValue: UnwindSafe, RefUnwindSafe);
     static_assertions::assert_impl_all!(MetricDescription: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn runtime_description_preserves_the_selected_numeric_representation() {
         for kind in [MetricValueKind::U64, MetricValueKind::I64, MetricValueKind::F64] {
-            let metric = MetricDescription::new("value", InstrumentKind::Gauge, "", "", Some(kind));
-            assert_eq!(metric.value_kind(), Some(kind));
+            let metric = MetricDescription::new("value", InstrumentKind::Gauge, "", "", kind);
+            assert_eq!(metric.value_kind(), kind);
         }
     }
 
     #[test]
-    fn metadata_preserves_unspecified_representation_and_explicit_text() {
-        let defaults = MetricDescription::new("count", InstrumentKind::Counter, "", "", None);
+    fn metadata_preserves_numeric_representation_and_explicit_text() {
+        let defaults = MetricDescription::new("count", InstrumentKind::Counter, "", "", MetricValueKind::U64);
         assert_eq!(
             (
                 defaults.instrument_name(),
@@ -172,9 +145,9 @@ mod tests {
                 defaults.unit(),
                 defaults.value_kind()
             ),
-            ("count", InstrumentKind::Counter, "", "", None),
+            ("count", InstrumentKind::Counter, "", "", MetricValueKind::U64),
         );
-        let explicit = MetricDescription::new("size", InstrumentKind::Histogram, "size", "By", None);
+        let explicit = MetricDescription::new("size", InstrumentKind::Histogram, "size", "By", MetricValueKind::F64);
         assert_eq!(
             (
                 explicit.instrument_name(),
@@ -183,7 +156,7 @@ mod tests {
                 explicit.unit(),
                 explicit.value_kind()
             ),
-            ("size", InstrumentKind::Histogram, "size", "By", None,),
+            ("size", InstrumentKind::Histogram, "size", "By", MetricValueKind::F64),
         );
     }
 
@@ -209,7 +182,13 @@ mod tests {
     fn metric_description_reports_description_and_unit_verbatim() {
         // Both reach the exported instrument as-is, and they must not be
         // transposed with one another or with the instrument name.
-        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "server duration", "ms", None);
+        let desc = MetricDescription::new(
+            "http.server.duration",
+            InstrumentKind::Histogram,
+            "server duration",
+            "ms",
+            MetricValueKind::F64,
+        );
 
         assert_eq!(desc.description(), "server duration");
         assert_eq!(desc.unit(), "ms");

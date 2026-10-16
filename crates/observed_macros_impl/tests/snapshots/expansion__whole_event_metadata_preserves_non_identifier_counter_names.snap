@@ -15,9 +15,7 @@ const _: () = {
                     ::observed::metadata::InstrumentKind::Counter,
                     "",
                     "",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValueKind::U64,
-                    ),
+                    ::observed::metadata::MetricValueKind::U64,
                 ),
             ),
             false,

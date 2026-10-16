@@ -8,7 +8,7 @@ use std::ops::ControlFlow;
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 
-use crate::metadata::{EventDescription, MetricDescription, MetricValue, MetricValueKind};
+use crate::metadata::{EventDescription, MetricDescription, MetricValueKind};
 use crate::processing::EventView;
 use crate::{Event, Value};
 
@@ -107,13 +107,16 @@ impl<T> MetricBindings<T> {
     /// Unbound and disabled events are ignored. Events emitted through a sink
     /// follow that sink's timestamp, context, and sampling rules. Numeric
     /// recording never inspects enrichment or constructs signal records.
+    /// Measurements use [`Value::U64`], [`Value::I64`], or [`Value::F64`]
+    /// according to their declared [`MetricValueKind`]. Unsigned fields whose
+    /// ordinary getters widen to `I64` are normalized to `U64` without loss.
     ///
     /// # Errors
     ///
     /// Returns an error if an accepted event omits, repeats, or reorders bound
     /// fields, or supplies a non-numeric or incompatible value. Earlier targets
     /// have already received their measurements.
-    pub fn record(&self, event: &EventView<'_>, mut record: impl FnMut(&T, MetricValue)) -> Result<(), MetricReadError> {
+    pub fn record(&self, event: &EventView<'_>, mut record: impl FnMut(&T, Value)) -> Result<(), MetricReadError> {
         let description = event.description();
         if description.is_disabled() {
             return Ok(());
@@ -122,7 +125,7 @@ impl<T> MetricBindings<T> {
             return Ok(());
         };
         if let Some(counter) = &targets.counter {
-            record(counter, MetricValue::U64(1));
+            record(counter, Value::U64(1));
         }
         let mut remaining = targets
             .fields
@@ -148,7 +151,7 @@ impl<T> MetricBindings<T> {
                 failure = Some(InvalidFieldVisit::new(description.name(), expected, index).into());
                 return ControlFlow::Break(());
             }
-            match Self::measurement(&getter(&redactor), metric.value_kind, description.name(), index) {
+            match Self::measurement(getter(&redactor), metric.value_kind, description.name(), index) {
                 Ok(value) => record(&metric.target, value),
                 Err(error) => {
                     failure = Some(error);
@@ -167,25 +170,20 @@ impl<T> MetricBindings<T> {
         Ok(())
     }
 
-    fn measurement(
-        value: &Value,
-        expected: Option<MetricValueKind>,
-        event_name: &'static str,
-        slot: usize,
-    ) -> Result<MetricValue, MetricReadError> {
-        let value = match *value {
+    fn measurement(value: Value, expected: MetricValueKind, event_name: &'static str, slot: usize) -> Result<Value, MetricReadError> {
+        let (value, actual) = match value {
             // Value widens u8/u16/u32 into I64. Static metadata retains their
             // unsigned origin so counters can recover it without losing bits.
-            Value::I64(value) if expected == Some(MetricValueKind::U64) && value >= 0 => MetricValue::U64(value.cast_unsigned()),
-            Value::I64(value) => MetricValue::I64(value),
-            Value::U64(value) => MetricValue::U64(value),
-            Value::F64(value) => MetricValue::F64(value),
+            Value::I64(value) if expected == MetricValueKind::U64 && value >= 0 => {
+                (Value::U64(value.cast_unsigned()), MetricValueKind::U64)
+            }
+            value @ Value::I64(_) => (value, MetricValueKind::I64),
+            value @ Value::U64(_) => (value, MetricValueKind::U64),
+            value @ Value::F64(_) => (value, MetricValueKind::F64),
             _ => return Err(NonnumericMeasurement::new(event_name, slot).into()),
         };
-        if let Some(expected) = expected
-            && expected != value.kind()
-        {
-            return Err(MismatchedRepresentation::new(event_name, slot, expected, value.kind()).into());
+        if expected != actual {
+            return Err(MismatchedRepresentation::new(event_name, slot, expected, actual).into());
         }
         Ok(value)
     }
@@ -218,7 +216,7 @@ pub struct MetricReadError;
 // One prepared destination and its declared measurement representation.
 #[derive(Debug)]
 struct MetricTarget<T> {
-    value_kind: Option<MetricValueKind>,
+    value_kind: MetricValueKind,
     target: T,
 }
 

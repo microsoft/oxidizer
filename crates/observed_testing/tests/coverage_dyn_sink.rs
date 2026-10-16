@@ -427,7 +427,13 @@ fn metadata_accessors() {
     let field = observed::__private::field_descriptor("count", Some(observed::__private::log_field("count")), None);
     assert_eq!(field.field_name(), "count");
 
-    let metric = observed::__private::metric_description("http.requests", InstrumentKind::Counter, "request count", "{request}", None);
+    let metric = observed::__private::metric_description(
+        "http.requests",
+        InstrumentKind::Counter,
+        "request count",
+        "{request}",
+        observed::metadata::MetricValueKind::U64,
+    );
     assert_eq!(metric.description(), "request count");
     assert_eq!(metric.unit(), "{request}");
 }

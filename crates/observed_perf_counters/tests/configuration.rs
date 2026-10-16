@@ -7,7 +7,6 @@
 // slot/lifetime checks remain covered by the library's isolated Miri suite.
 #![cfg(not(miri))]
 
-use std::any::TypeId;
 use std::error::Error as _;
 use std::io::Write;
 use std::ops::ControlFlow;
@@ -73,7 +72,7 @@ impl Event for UntypedEvent {
             InstrumentKind::Counter,
             "",
             "",
-            Some(MetricValueKind::U64),
+            MetricValueKind::U64,
         )),
         false,
         &[],
@@ -314,7 +313,7 @@ fn multiple_sets_and_supported_integer_kinds_are_selected_from_the_same_file() {
 }
 
 #[test]
-fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
+fn unsupported_numeric_types_are_startup_errors() {
     #[event("float.gauge")]
     #[gauge(value, name = "Float")]
     struct FloatGauge {
@@ -327,38 +326,7 @@ fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
         #[unredacted]
         value: i64,
     }
-    struct MissingType;
-    impl Event for MissingType {
-        const DESCRIPTION: EventDescription = observed::__private::event_description(
-            "missing.type",
-            Some(TypeId::of::<Self>()),
-            None,
-            None,
-            false,
-            &observed::__private::event_fields([observed::__private::field_descriptor(
-                "value",
-                None,
-                Some(observed::__private::metric_field(
-                    "value",
-                    Some(observed::__private::metric_description(
-                        "Unknown",
-                        InstrumentKind::Counter,
-                        "",
-                        "",
-                        None,
-                    )),
-                )),
-            )]),
-        );
-        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
-        }
-    }
-    for builder in [
-        builder().bind_event::<FloatGauge>(),
-        builder().bind_event::<SignedGauge>(),
-        builder().bind_event::<MissingType>(),
-    ] {
+    for builder in [builder().bind_event::<FloatGauge>(), builder().bind_event::<SignedGauge>()] {
         assert!(builder.build().unwrap_err().is_invalid_configuration());
     }
 }

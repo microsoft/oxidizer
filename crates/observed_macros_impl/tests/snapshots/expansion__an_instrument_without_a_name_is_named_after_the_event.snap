@@ -17,9 +17,7 @@ const _: () = {
                     ::observed::metadata::InstrumentKind::Counter,
                     "",
                     "",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricValueKind::U64,
-                    ),
+                    ::observed::metadata::MetricValueKind::U64,
                 ),
             ),
             false,
@@ -36,9 +34,7 @@ const _: () = {
                                     ::observed::metadata::InstrumentKind::Gauge,
                                     "",
                                     "",
-                                    ::core::option::Option::Some(
-                                        ::observed::metadata::MetricValueKind::F64,
-                                    ),
+                                    ::observed::metadata::MetricValueKind::F64,
                                 ),
                             ),
                         ),

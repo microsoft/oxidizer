@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use observed::metadata::{EventDescription, MetricValue};
+use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView, MetricBindings};
-use observed::{FlushError, Sink, emit, event};
+use observed::{FlushError, Sink, Value, emit, event};
 use tick::SimpleClock;
 
 #[event("request.completed")]
@@ -33,7 +33,7 @@ impl EventProcessor for Processor {
     fn process(&self, event: &EventView<'_>) {
         self.bindings
             .record(event, |counter, value| {
-                if let MetricValue::U64(value) = value {
+                if let Value::U64(value) = value {
                     counter.fetch_add(value, Ordering::Relaxed);
                 } else {
                     unreachable!("the event declares an unsigned counter");

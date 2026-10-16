@@ -79,7 +79,7 @@ fn generated_fields_expose_routes_and_measurement_metadata() {
             InstrumentKind::Counter,
             "Transferred bytes",
             "By",
-            Some(MetricValueKind::U64)
+            MetricValueKind::U64
         )
     );
 }
@@ -115,13 +115,8 @@ fn macro_inventory_assigns_indices_once_and_keeps_optional_fields_in_the_invento
 
 #[test]
 fn the_hidden_indexer_reassigns_copied_descriptors_instead_of_retaining_stale_positions() {
-    let metric = observed::__private::metric_description(
-        std::hint::black_box("count"),
-        InstrumentKind::Counter,
-        "",
-        "",
-        Some(MetricValueKind::U64),
-    );
+    let metric =
+        observed::__private::metric_description(std::hint::black_box("count"), InstrumentKind::Counter, "", "", MetricValueKind::U64);
     let instrument = observed::__private::metric_field("value", Some(metric));
     assert_eq!(
         (instrument.key(), instrument.instrument_description().unwrap().instrument_name()),

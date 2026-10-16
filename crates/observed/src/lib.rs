@@ -86,6 +86,9 @@
 //! The field visitor enumerates routed fields but evaluates only bound numeric getters,
 //! without redaction or enrichment visits. Events emitted through a sink follow
 //! that sink's timestamp, context, and sampling rules.
+//! Each instrument declares a [`MetricValueKind`](metadata::MetricValueKind).
+//! Binding delivers the existing [`Value`] type, normalizing unsigned measurements
+//! to `Value::U64` and retaining signed integers and floats without losing precision.
 //!
 //! # Enrichment
 //!
@@ -530,7 +533,7 @@ pub mod __private {
         kind: crate::metadata::InstrumentKind,
         description: &'static str,
         unit: &'static str,
-        value_kind: Option<crate::metadata::MetricValueKind>,
+        value_kind: crate::metadata::MetricValueKind,
     ) -> crate::metadata::MetricDescription {
         crate::metadata::MetricDescription::new(name, kind, description, unit, value_kind)
     }

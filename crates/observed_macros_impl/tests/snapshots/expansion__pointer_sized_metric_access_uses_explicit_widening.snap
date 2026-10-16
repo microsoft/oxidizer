@@ -27,9 +27,7 @@ const _: () = {
                                     ::observed::metadata::InstrumentKind::Counter,
                                     "",
                                     "",
-                                    ::core::option::Option::Some(
-                                        ::observed::metadata::MetricValueKind::U64,
-                                    ),
+                                    ::observed::metadata::MetricValueKind::U64,
                                 ),
                             ),
                         ),
@@ -47,9 +45,7 @@ const _: () = {
                                     ::observed::metadata::InstrumentKind::UpDownCounter,
                                     "",
                                     "",
-                                    ::core::option::Option::Some(
-                                        ::observed::metadata::MetricValueKind::I64,
-                                    ),
+                                    ::observed::metadata::MetricValueKind::I64,
                                 ),
                             ),
                         ),

@@ -16,7 +16,7 @@ use std::time::SystemTime;
 use data_privacy::RedactionEngine;
 use observed::__private::{event_description, event_fields, field_descriptor, log_field, metric_description, metric_field};
 use observed::interop::{DynEvent, emit_dyn_event};
-use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricValue, MetricValueKind};
+use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
 use observed::{Event, FlushError, Sink, Value, emit, event};
 use ohno::ErrorExt;
@@ -97,7 +97,7 @@ impl EventProcessor for Processor {
     fn process(&self, event: &EventView<'_>) {
         self.bindings
             .record(event, |target, value| {
-                let MetricValue::U64(value) = value else {
+                let Value::U64(value) = value else {
                     panic!("this test processor records unsigned values")
                 };
                 target.fetch_add(value, Ordering::Relaxed);
@@ -266,13 +266,7 @@ impl Event for NumericOnly {
             None,
             Some(metric_field(
                 "amount",
-                Some(metric_description(
-                    "numeric",
-                    InstrumentKind::Counter,
-                    "",
-                    "",
-                    Some(MetricValueKind::U64),
-                )),
+                Some(metric_description("numeric", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
             )),
         )]),
     );
@@ -371,13 +365,7 @@ fn bound_recording_never_evaluates_unbound_field_getters() {
                     None,
                     Some(metric_field(
                         "amount",
-                        Some(metric_description(
-                            "amount",
-                            InstrumentKind::Counter,
-                            "",
-                            "",
-                            Some(MetricValueKind::U64),
-                        )),
+                        Some(metric_description("amount", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
                     )),
                 ),
             ]),
@@ -419,7 +407,7 @@ fn runtime_field_inventory_determines_metric_presence() {
             None,
             Some(metric_field(
                 "amount",
-                Some(metric_description("amount", InstrumentKind::Counter, "", "", None)),
+                Some(metric_description("amount", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
             )),
         ),
     ]);
@@ -439,7 +427,7 @@ fn fieldless_counters_record_one_without_visiting_unneeded_fields() {
             "count.only",
             Some(TypeId::of::<Self>()),
             None,
-            Some(metric_description("count", InstrumentKind::Counter, "", "", None)),
+            Some(metric_description("count", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
             false,
             &event_fields([field_descriptor("unused", Some(log_field("unused")), None)]),
         );
@@ -471,7 +459,7 @@ fn invalid_static_field_indices_fail_before_preparing_targets() {
                 None,
                 Some(metric_field(
                     "value",
-                    Some(metric_description("value", InstrumentKind::Counter, "", "", None)),
+                    Some(metric_description("value", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
                 )),
             )],
         );
@@ -506,38 +494,17 @@ fn standard_arc_processor_delegates_interest_and_delivery() {
 }
 
 #[test]
-fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored() {
-    struct LegacyNumeric;
-    impl Event for LegacyNumeric {
-        const DESCRIPTION: EventDescription = event_description(
-            "numeric",
-            Some(TypeId::of::<NumericOnly>()),
-            None,
-            None,
-            false,
-            &event_fields([field_descriptor(
-                "amount",
-                None,
-                Some(metric_field(
-                    "amount",
-                    Some(metric_description("numeric", InstrumentKind::Counter, "", "", None)),
-                )),
-            )]),
-        );
-        fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
-        }
-    }
+fn unbound_events_are_ignored_and_bound_unsigned_getters_are_normalized() {
     let mut bindings = MetricBindings::<()>::default();
     let adapter = NumericAdapter(&NumericOnly { amount: 19 });
     let view = EventView::new_synthetic(&adapter, SystemTime::UNIX_EPOCH);
     bindings
         .record(&view, |(), _| panic!("unbound measurement must not be delivered"))
         .unwrap();
-    bindings.bind_event::<LegacyNumeric>(|_| ()).unwrap();
+    bindings.bind_event::<NumericOnly>(|_| ()).unwrap();
     let mut values = Vec::new();
     bindings.record(&view, |(), value| values.push(value)).unwrap();
-    assert_eq!(values, [MetricValue::I64(19)]);
+    assert_eq!(values, [Value::U64(19)]);
 }
 
 /// Declares numeric metadata but never visits its measurement.
@@ -622,7 +589,7 @@ fn synthetic_views_and_dynamic_emission_forward_indexed_fields() {
     let view = EventView::new_synthetic(&dynamic, SystemTime::UNIX_EPOCH);
     bindings
         .record(&view, |target, value| {
-            let MetricValue::U64(value) = value else {
+            let Value::U64(value) = value else {
                 panic!("adapter supplies unsigned values")
             };
             target.fetch_add(value, Ordering::Relaxed);
@@ -855,7 +822,7 @@ struct NumericKinds {
 
 #[test]
 fn visitor_recording_preserves_signed_deltas_gauges_and_float_observations() {
-    struct Capture(MetricBindings<usize>, Arc<Mutex<Vec<MetricValue>>>);
+    struct Capture(MetricBindings<usize>, Arc<Mutex<Vec<Value>>>);
     impl EventProcessor for Capture {
         fn is_interested(&self, description: &EventDescription) -> bool {
             self.0.is_interested(description)
@@ -903,14 +870,14 @@ fn visitor_recording_preserves_signed_deltas_gauges_and_float_observations() {
     assert_eq!(
         *values.lock().unwrap(),
         [
-            MetricValue::U64(1),
-            MetricValue::I64(i64::from(i8::MIN)),
-            MetricValue::I64(i64::from(i16::MIN)),
-            MetricValue::I64(i64::from(i32::MIN)),
-            MetricValue::I64(i64::MIN),
-            MetricValue::I64(isize::MIN as i64),
-            MetricValue::U64(u64::MAX),
-            MetricValue::F64(1.5),
+            Value::U64(1),
+            Value::I64(i64::from(i8::MIN)),
+            Value::I64(i64::from(i16::MIN)),
+            Value::I64(i64::from(i32::MIN)),
+            Value::I64(i64::MIN),
+            Value::I64(isize::MIN as i64),
+            Value::U64(u64::MAX),
+            Value::F64(1.5),
         ]
     );
     assert_eq!(
@@ -926,14 +893,14 @@ fn visitor_recording_preserves_signed_deltas_gauges_and_float_observations() {
             .map(MetricDescription::value_kind)
             .collect::<Vec<_>>(),
         [
-            Some(MetricValueKind::U64),
-            Some(MetricValueKind::I64),
-            Some(MetricValueKind::I64),
-            Some(MetricValueKind::I64),
-            Some(MetricValueKind::I64),
-            Some(MetricValueKind::I64),
-            Some(MetricValueKind::U64),
-            Some(MetricValueKind::F64),
+            MetricValueKind::U64,
+            MetricValueKind::I64,
+            MetricValueKind::I64,
+            MetricValueKind::I64,
+            MetricValueKind::I64,
+            MetricValueKind::I64,
+            MetricValueKind::U64,
+            MetricValueKind::F64,
         ]
     );
 }
@@ -1033,6 +1000,75 @@ fn nonnumeric_getters_and_incompatible_float_values_are_reported() {
 }
 
 #[test]
+fn normalized_values_follow_the_required_numeric_kind_without_losing_bits() {
+    #[event("signed")]
+    #[gauge(value)]
+    struct Signed {
+        #[unredacted]
+        value: i64,
+    }
+    #[event("float")]
+    #[histogram(value)]
+    struct Float {
+        #[unredacted]
+        value: f64,
+    }
+    struct Probe(EventDescription, Value);
+    impl DynEvent for Probe {
+        fn name(&self) -> &'static str {
+            self.0.name()
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn description(&self) -> EventDescription {
+            self.0
+        }
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&self.0.fields()[0], &|_| self.1.clone())
+        }
+    }
+    let mut bindings = MetricBindings::<()>::new();
+    bindings.bind_event::<NumericOnly>(|_| ()).unwrap();
+    bindings.bind_event::<Signed>(|_| ()).unwrap();
+    bindings.bind_event::<Float>(|_| ()).unwrap();
+    for (description, supplied, expected) in [
+        (NumericOnly::DESCRIPTION, Value::I64(0), Value::U64(0)),
+        (NumericOnly::DESCRIPTION, Value::I64(i64::MAX), Value::U64(i64::MAX.cast_unsigned())),
+        (NumericOnly::DESCRIPTION, Value::U64(u64::MAX), Value::U64(u64::MAX)),
+        (Signed::DESCRIPTION, Value::I64(0), Value::I64(0)),
+        (Signed::DESCRIPTION, Value::I64(i64::MAX), Value::I64(i64::MAX)),
+        (Signed::DESCRIPTION, Value::I64(i64::MIN), Value::I64(i64::MIN)),
+        (Float::DESCRIPTION, Value::F64(f64::MAX), Value::F64(f64::MAX)),
+        (Float::DESCRIPTION, Value::F64(f64::NEG_INFINITY), Value::F64(f64::NEG_INFINITY)),
+    ] {
+        let probe = Probe(description, supplied);
+        let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
+        let mut recorded = Vec::new();
+        bindings.record(&view, |(), value| recorded.push(value)).unwrap();
+        assert_eq!(recorded, [expected]);
+    }
+    let probe = Probe(Signed::DESCRIPTION, Value::U64(u64::MAX));
+    let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
+    let error = bindings
+        .record(&view, |(), _| panic!("incompatible unsigned value must not be delivered"))
+        .unwrap_err();
+    assert_eq!(
+        primary_message(&error),
+        "event `signed` has invalid metric field 0: numeric representation differs from its declaration (expected I64, got U64)"
+    );
+}
+
+#[test]
 fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
     struct Visits(&'static [usize]);
     const VISIT_FIELDS: &[FieldDescriptor] = &event_fields([NumericOnly::DESCRIPTION.fields()[0], NumericOnly::DESCRIPTION.fields()[0]]);
@@ -1079,8 +1115,8 @@ fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
         .unwrap();
     for (indices, delivered) in [
         (&[1, 0][..], vec![]),
-        (&[0, 0][..], vec![(0, MetricValue::U64(7))]),
-        (&[0, 1, 1][..], vec![(0, MetricValue::U64(7)), (1, MetricValue::U64(7))]),
+        (&[0, 0][..], vec![(0, Value::U64(7))]),
+        (&[0, 1, 1][..], vec![(0, Value::U64(7)), (1, Value::U64(7))]),
     ] {
         let probe = Visits(indices);
         let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);

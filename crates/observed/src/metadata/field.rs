@@ -150,11 +150,11 @@ impl FieldDescriptor {
 #[cfg(test)]
 mod field_tests {
     use super::*;
-    use crate::metadata::InstrumentKind;
+    use crate::metadata::{InstrumentKind, MetricValueKind};
 
     #[test]
     fn metric_field_entry_instrument_accessors() {
-        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "d", "ms", None);
+        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "d", "ms", MetricValueKind::F64);
         let entry = MetricFieldEntry::instrument("dur", desc);
         let instrument = entry.instrument_description().expect("instrument is set");
         assert_eq!(instrument.instrument_name(), "http.server.duration");

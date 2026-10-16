@@ -288,7 +288,7 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
                         InstrumentKind::Counter,
                         "",
                         "",
-                        Some(MetricValueKind::U64),
+                        MetricValueKind::U64,
                     )),
                 )),
             )]),

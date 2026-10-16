@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use observed::processing::{MetricBindingError, MetricReadError};
+use observed::processing::MetricBindingError;
 use ohno::ErrorExt;
 
 /// A configuration, native publishing, or counter-processing failure.
@@ -44,18 +44,6 @@ impl Error {
         self.find_source::<NativeFailure>()
             .map(|cause| cause.code)
             .or_else(|| self.find_source::<CollectionFailure>().map(|cause| cause.code))
-    }
-}
-
-impl From<MetricBindingError> for Error {
-    fn from(source: MetricBindingError) -> Self {
-        Self::caused_by(source)
-    }
-}
-
-impl From<MetricReadError> for Error {
-    fn from(source: MetricReadError) -> Self {
-        Self::caused_by(source)
     }
 }
 
@@ -175,7 +163,7 @@ pub(crate) mod configuration {
     pub(crate) struct UnsupportedMetric {
         pub(crate) name: String,
         pub(crate) kind: InstrumentKind,
-        pub(crate) value_kind: Option<MetricValueKind>,
+        pub(crate) value_kind: MetricValueKind,
     }
 
     #[ohno::error]
@@ -184,7 +172,7 @@ pub(crate) mod configuration {
     )]
     pub(crate) struct MeasurementMismatch {
         pub(crate) kind: InstrumentKind,
-        pub(crate) value_kind: MetricValueKind,
+        pub(crate) value_kind: Option<MetricValueKind>,
     }
 
     #[ohno::error]

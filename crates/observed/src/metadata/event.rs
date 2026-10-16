@@ -142,7 +142,7 @@ impl EventDescription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::metric::InstrumentKind;
+    use crate::metadata::metric::{InstrumentKind, MetricValueKind};
     use crate::severity::Severity;
 
     #[test]
@@ -187,7 +187,7 @@ mod tests {
             "event.metric",
             None,
             None,
-            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "", None)),
+            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
             false,
             false,
         );
