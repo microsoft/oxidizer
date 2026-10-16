@@ -126,6 +126,10 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
         );
         let server_name = server_name.into();
         assert!(!server_name.is_empty(), "native TLS server name override cannot be empty");
+        assert!(
+            !server_name.contains('\0'),
+            "native TLS server name override cannot contain a NUL character"
+        );
         self.backend
             .server_name_overrides
             .insert(server_name_override_key(&endpoint), server_name);
@@ -303,6 +307,12 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
     #[should_panic(expected = "native TLS server name override cannot be empty")]
     fn server_name_override_rejects_empty_server_name() {
         let _ = TlsOptions::builder_native_tls().server_name_override("localhost", "");
+    }
+
+    #[test]
+    #[should_panic(expected = "native TLS server name override cannot contain a NUL character")]
+    fn server_name_override_rejects_embedded_nul() {
+        let _ = TlsOptions::builder_native_tls().server_name_override("localhost", "good.example\0evil.example");
     }
 
     #[test]

@@ -3,18 +3,165 @@
 
 //! Platform native TLS connector implementation.
 
+use std::io::IoSlice;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use fetch_options::RequestFilter;
 use http::Uri;
-use hyper_tls::MaybeHttpsStream;
+use hyper::rt::{Read, ReadBufCursor, Write};
+use hyper_util::client::legacy::connect::{Connected, Connection};
 use hyper_util::rt::TokioIo;
+use seatbelt::RecoveryInfo;
 
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
 use crate::{Connect, HyperIo};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type RecordedErrorKind = Arc<Mutex<Option<std::io::ErrorKind>>>;
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing the established connection adds a heap allocation to every successful native TLS connection"
+)]
+pub(crate) enum NativeTlsStream<S> {
+    Http(S),
+    Https(TokioIo<tokio_native_tls::TlsStream<TokioIo<RecordingIo<S>>>>),
+}
+
+// Pure I/O forwarding preserves the behavior of the wrapped HTTP/TLS stream;
+// mutating these methods only creates equivalent behavior or artificial hangs.
+#[cfg_attr(test, mutants::skip)]
+impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Http(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Https(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)]
+impl<S: Read + Write + Unpin> Write for NativeTlsStream<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Http(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Https(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_write_vectored(self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Http(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            Self::Https(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Http(stream) => stream.is_write_vectored(),
+            Self::Https(stream) => stream.is_write_vectored(),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Http(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Https(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Http(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Https(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+}
+
+impl<S: HyperIo + Unpin> Connection for NativeTlsStream<S> {
+    fn connected(&self) -> Connected {
+        match self {
+            Self::Http(stream) => stream.connected(),
+            Self::Https(stream) => {
+                let connected = stream.inner().get_ref().get_ref().get_ref().inner().inner.connected();
+                if negotiated_h2(stream.inner().get_ref()) {
+                    connected.negotiated_h2()
+                } else {
+                    connected
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // Native TLS owns ALPN negotiation; this only maps its reported protocol into hyper metadata.
+fn negotiated_h2<S: std::io::Read + std::io::Write>(stream: &native_tls::TlsStream<S>) -> bool {
+    stream.negotiated_alpn().unwrap_or(None).is_some_and(|protocol| protocol == b"h2")
+}
+
+pub(crate) struct RecordingIo<S> {
+    inner: S,
+    error_kind: RecordedErrorKind,
+}
+
+impl<S: Read + Unpin> Read for RecordingIo<S> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+        let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        record_error_kind(&self.error_kind, &result);
+        result
+    }
+}
+
+impl<S: Write + Unpin> Write for RecordingIo<S> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        let result = Pin::new(&mut self.inner).poll_write(cx, buf);
+        record_error_kind(&self.error_kind, &result);
+        result
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Pure forwarding; native TLS handshakes use poll_write.
+    fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
+        let result = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
+        record_error_kind(&self.error_kind, &result);
+        result
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Pure capability forwarding.
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Pure forwarding; the handshake's transient I/O path is covered through poll_read.
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let result = Pin::new(&mut self.inner).poll_flush(cx);
+        record_error_kind(&self.error_kind, &result);
+        result
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Pure forwarding after connection establishment.
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let result = Pin::new(&mut self.inner).poll_shutdown(cx);
+        record_error_kind(&self.error_kind, &result);
+        result
+    }
+}
+
+impl<S: Connection> Connection for RecordingIo<S> {
+    fn connected(&self) -> Connected {
+        self.inner.connected()
+    }
+}
+
+fn record_error_kind<T>(recorded: &RecordedErrorKind, result: &Poll<std::io::Result<T>>) {
+    if let Poll::Ready(Err(error)) = result {
+        *recorded
+            .lock()
+            .expect("handshake error recorder mutex must not be poisoned because recording does not execute user code") =
+            Some(error.kind());
+    }
+}
 
 pub(crate) struct NativeTlsConnector<C, S>
 where
@@ -62,7 +209,7 @@ where
     C: Connect<S>,
     S: HyperIo + Unpin,
 {
-    type Response = MaybeHttpsStream<S>;
+    type Response = NativeTlsStream<S>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -89,7 +236,7 @@ where
             if is_https {
                 connect_https(tls, &server_name, stream).await
             } else {
-                Ok(MaybeHttpsStream::Http(stream))
+                Ok(NativeTlsStream::Http(stream))
             }
         })
     }
@@ -99,17 +246,38 @@ where
 // real ClientHello. A successful platform certificate-validation path remains
 // out of scope because it would require platform-specific trust-store changes.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 async fn connect_https<S: HyperIo + Unpin>(
     tls: tokio_native_tls::TlsConnector,
     server_name: &str,
     stream: S,
-) -> Result<MaybeHttpsStream<S>, BoxError> {
-    let stream = tls.connect(server_name, TokioIo::new(stream)).await?;
-    Ok(MaybeHttpsStream::Https(TokioIo::new(stream)))
+) -> Result<NativeTlsStream<S>, BoxError> {
+    let error_kind = Arc::new(Mutex::new(None));
+    let recording = RecordingIo {
+        inner: stream,
+        error_kind: Arc::clone(&error_kind),
+    };
+    match tls.connect(server_name, TokioIo::new(recording)).await {
+        Ok(stream) => Ok(wrap_https_stream(stream)),
+        Err(error) => {
+            let recovery = error_kind
+                .lock()
+                .expect("handshake error recorder mutex must not be poisoned because recording does not execute user code")
+                .map_or_else(RecoveryInfo::never, RecoveryInfo::from);
+            Err(Box::new(http_extensions::HttpError::other(
+                error,
+                recovery,
+                crate::error_labels::LABEL_CONNECT,
+            )))
+        }
+    }
 }
 
-fn error<S: HyperIo>(message: impl Into<BoxError>) -> Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<S>, BoxError>> + Send>> {
+#[cfg_attr(test, mutants::skip)] // Type-only adaptation after a successful platform TLS handshake.
+fn wrap_https_stream<S>(stream: tokio_native_tls::TlsStream<TokioIo<RecordingIo<S>>>) -> NativeTlsStream<S> {
+    NativeTlsStream::Https(TokioIo::new(stream))
+}
+
+fn error<S: HyperIo>(message: impl Into<BoxError>) -> Pin<Box<dyn Future<Output = Result<NativeTlsStream<S>, BoxError>> + Send>> {
     let error = message.into();
     Box::pin(async move { Err(error) })
 }
@@ -128,11 +296,11 @@ fn server_name(backend: &fetch_tls::NativeTlsBackend, destination: &Uri) -> Stri
 mod tests {
     use std::io::{Read as _, Write as _};
     use std::net::{SocketAddr, TcpListener as StdTcpListener};
-    use std::sync::{Arc, Mutex};
 
     use bytes::Bytes;
     use http::Version;
     use layered::Service as _;
+    use seatbelt::{Recovery, RecoveryKind};
     use templated_uri::BaseUri;
     use tick::Clock;
     use tokio::net::TcpStream;
@@ -163,6 +331,45 @@ mod tests {
 
     fn fake_connector() -> FakeConnector {
         FakeConnector::new_success(Bytes::new(), Clock::new_frozen())
+    }
+
+    struct ResetStream;
+
+    impl hyper::rt::Read for ResetStream {
+        fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::ErrorKind::ConnectionReset.into()))
+        }
+    }
+
+    impl Write for ResetStream {
+        fn poll_write(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl Connection for ResetStream {
+        fn connected(&self) -> Connected {
+            Connected::new()
+        }
+    }
+
+    #[derive(Clone)]
+    struct ResetConnector;
+
+    impl layered::Service<BaseUri> for ResetConnector {
+        type Out = http_extensions::Result<ResetStream>;
+
+        async fn execute(&self, _input: BaseUri) -> Self::Out {
+            Ok(ResetStream)
+        }
     }
 
     #[derive(Clone)]
@@ -318,13 +525,34 @@ mod tests {
             server_name
         });
 
-        connector
-            .call(request)
-            .await
-            .expect_err("scripted TLS peer closes after reading ClientHello");
+        let Err(error) = connector.call(request).await else {
+            panic!("scripted TLS peer should fail after reading ClientHello");
+        };
 
         assert_eq!(peer.join().unwrap(), expected_server_name);
         assert_eq!(destination.lock().unwrap().as_ref().unwrap().authority(), &request_authority);
+        assert_eq!(
+            error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
+            RecoveryKind::Never
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn handshake_connection_reset_is_retryable() {
+        let fetch_tls::TlsBackend::NativeTls(backend) = native_tls_backend() else {
+            panic!("expected native TLS backend");
+        };
+        let mut connector = NativeTlsConnector::new(backend, ResetConnector, &RequestFilter::Https);
+
+        let Err(error) = connector.call(Uri::from_static("https://example.com/")).await else {
+            panic!("connection reset should fail the handshake");
+        };
+
+        assert_eq!(
+            error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
+            RecoveryKind::Retry
+        );
     }
 
     #[cfg_attr(miri, ignore)]
