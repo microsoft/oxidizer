@@ -6,7 +6,7 @@
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
 use std::time::Duration;
 
@@ -28,12 +28,27 @@ struct State {
     cycles: Mutex<Vec<(Kind, Duration)>>,
     driver_waker: Mutex<Option<Waker>>,
     context_calls: AtomicUsize,
+    context_gate: Mutex<Option<Arc<ContextGate>>>,
     shutdowns: AtomicUsize,
     panic_context: AtomicBool,
     fail_initialization: AtomicBool,
     fail_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
     interrupts: AtomicUsize,
+}
+
+struct ContextGate {
+    entered: Barrier,
+    release: Barrier,
+}
+
+impl ContextGate {
+    fn new() -> Self {
+        Self {
+            entered: Barrier::new(2),
+            release: Barrier::new(2),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -85,7 +100,13 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     type Driver = TestDriver;
 
     fn context(options: Self::ContextOptions) -> Self {
-        options.context_calls.fetch_add(1, Ordering::SeqCst);
+        if options.context_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            let gate = options.context_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                gate.entered.wait();
+                gate.release.wait();
+            }
+        }
         assert!(!options.panic_context.load(Ordering::SeqCst), "context construction failed");
         Self { state: options }
     }
@@ -273,6 +294,40 @@ fn worker_local_drivers_are_created_lazily() {
 }
 
 #[test]
+fn concurrent_workers_share_one_context_initialization() {
+    let runtime = test_runtime();
+    let state = Arc::new(State::default());
+    let gate = Arc::new(ContextGate::new());
+    *state.context_gate.lock().unwrap() = Some(Arc::clone(&gate));
+
+    let first_runtime = runtime.clone();
+    let first_state = Arc::clone(&state);
+    let first = std::thread::spawn(move || {
+        let host = host(&first_runtime);
+        let _ = host.context::<Context<false>>(&first_state).unwrap();
+    });
+    gate.entered.wait();
+
+    let second_runtime = runtime;
+    let second_state = Arc::clone(&state);
+    let second = std::thread::spawn(move || {
+        let host = host(&second_runtime);
+        let _ = host.context::<Context<false>>(&second_state).unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    gate.release.wait();
+
+    first.join().unwrap();
+    second.join().unwrap();
+
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
+        [DriverRole::Primary, DriverRole::Primary]
+    );
+}
+
+#[test]
 fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
@@ -364,7 +419,7 @@ fn context_construction_can_reenter_the_runtime_registry() {
 
     assert_eq!(
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
-        [DriverRole::Primary, DriverRole::Secondary]
+        [DriverRole::Secondary, DriverRole::Primary]
     );
 }
 

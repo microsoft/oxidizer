@@ -2,9 +2,8 @@
 // Licensed under the MIT License.
 
 use std::any::{Any, TypeId};
-use std::collections::hash_map::Entry;
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::task::Waker;
 
 use arty_io_core::{DriverError, DriverRole, IoContext};
@@ -36,7 +35,6 @@ where
 
 struct RegisteredContext {
     context: Mutex<Box<dyn ErasedContext>>,
-    role: DriverRole,
 }
 
 impl RegisteredContext {
@@ -54,9 +52,14 @@ impl RegisteredContext {
     }
 }
 
+struct ContextSlot {
+    context: OnceLock<RegisteredContext>,
+    role: DriverRole,
+}
+
 #[derive(Default)]
 struct Registry {
-    contexts: HashMap<TypeId, Arc<RegisteredContext>>,
+    contexts: HashMap<TypeId, Arc<ContextSlot>>,
     failure: Option<Arc<str>>,
 }
 
@@ -133,37 +136,27 @@ impl IoRuntime {
         C: IoContext,
         C::ContextOptions: Clone,
     {
-        if let Some(registered) = self.registered_context::<C>()? {
-            return Ok(Resolution {
-                context: registered.clone_context::<C>(),
-                role: registered.role,
-            });
-        }
-
-        let candidate = C::context(options.clone());
-        let registered = {
+        let slot = {
             let mut registry = self.registry();
             Self::check_failure(&registry)?;
             let primary_available = registry.contexts.is_empty();
-            match registry.contexts.entry(TypeId::of::<C>()) {
-                Entry::Occupied(entry) => Arc::clone(entry.get()),
-                Entry::Vacant(entry) => {
-                    let registered = Arc::new(RegisteredContext {
-                        context: Mutex::new(Box::new(NeutralContext(candidate))),
-                        role: if primary_available {
-                            DriverRole::Primary
-                        } else {
-                            DriverRole::Secondary
-                        },
-                    });
-                    entry.insert(Arc::clone(&registered));
-                    registered
-                }
-            }
+            Arc::clone(registry.contexts.entry(TypeId::of::<C>()).or_insert_with(|| {
+                Arc::new(ContextSlot {
+                    context: OnceLock::new(),
+                    role: if primary_available {
+                        DriverRole::Primary
+                    } else {
+                        DriverRole::Secondary
+                    },
+                })
+            }))
         };
+        let registered = slot.context.get_or_init(|| RegisteredContext {
+            context: Mutex::new(Box::new(NeutralContext(C::context(options.clone())))),
+        });
         Ok(Resolution {
             context: registered.clone_context::<C>(),
-            role: registered.role,
+            role: slot.role,
         })
     }
 
@@ -178,15 +171,6 @@ impl IoRuntime {
 
     pub(crate) const fn sink(&self) -> &Sink {
         &self.sink
-    }
-
-    fn registered_context<C>(&self) -> Result<Option<Arc<RegisteredContext>>, DriverError>
-    where
-        C: IoContext,
-    {
-        let registry = self.registry();
-        Self::check_failure(&registry)?;
-        Ok(registry.contexts.get(&TypeId::of::<C>()).cloned())
     }
 
     fn check_failure(registry: &Registry) -> Result<(), DriverError> {
