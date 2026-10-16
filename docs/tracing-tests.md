@@ -46,6 +46,18 @@ testing_aids::init_tracing!();
 The initialization is idempotent. If you forget it, the `testing_aids` tracing helpers
 panic with a pointer to this guide rather than failing silently.
 
+The initialized subscriber stays interested in every level for the process lifetime.
+**Silent means discarding output after formatting, not skipping formatting.** Field
+expressions, `Debug` and `Display` implementations, and message formatting all execute
+synchronously, including fields supplied when a span is created or subsequently
+recorded with `Span::record`. Formatting panics propagate to the emitting test even
+when no output sink is enabled. Partial event text from a panicking formatter is
+discarded rather than leaking into a later event or capture.
+
+This also applies during mutation testing: stdout and file output are suppressed,
+but field expressions and formatting still run, and explicitly requested buffers
+still capture output for assertions.
+
 > A binary that deliberately runs with no subscriber (to exercise the
 > no-subscriber code paths) must NOT initialize tracing and must own its own
 > binary; see `crates/cachet/tests/no_subscriber.rs`.
@@ -58,6 +70,11 @@ all threads: the capture buffer records events emitted from *any* thread. Becaus
 this, if a test binary uses these helpers at all, **every test in that binary MUST be
 `#[serial]`** - not just the ones that call the helpers - so that no other test runs
 concurrently and emits into the shared buffer.
+
+Events are formatted once and their rendered text is routed to each active sink.
+Output has no timestamps or ANSI colors; stdout receives INFO and above, while file
+and buffer output receive every level. Span fields recorded before a sink is enabled
+remain available in the context of later captured events.
 
 ```rust
 use testing_aids::tracing_logs;

@@ -21,6 +21,8 @@ macro_rules! assert_panic {
 /// this macro at module scope so a silent, always-interested subscriber is installed
 /// before any test runs. Without it, `tracing` emission lines may be reported as lacking
 /// test coverage even though they execute, and log capture may silently observe nothing.
+/// The subscriber evaluates field expressions and formats events and span fields
+/// synchronously even with no output enabled, including during mutation testing.
 /// See `docs/tracing-tests.md`.
 ///
 /// The invoking crate must have a dev-dependency on the [`ctor`](https://docs.rs/ctor)

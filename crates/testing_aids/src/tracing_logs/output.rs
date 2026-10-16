@@ -6,13 +6,13 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
-use tracing::subscriber::Interest;
-use tracing::{Level, Metadata, Subscriber};
-use tracing_subscriber::Layer;
+use tracing::Level;
 use tracing_subscriber::fmt::MakeWriter;
-use tracing_subscriber::layer::{Context, Filter, SubscriberExt};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use super::format::CompleteEvent;
 use crate::is_mutation_testing;
 
 /// Enables logging of test output to the standard output stream.
@@ -27,7 +27,8 @@ use crate::is_mutation_testing;
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
-/// Logging is disabled under mutation testing - this becomes a no-op.
+/// Output is disabled under mutation testing - this becomes a no-op. The initialized
+/// subscriber still evaluates fields and formats events and spans synchronously.
 ///
 /// # Panics
 ///
@@ -36,7 +37,7 @@ use crate::is_mutation_testing;
 /// process-initialization function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
     if is_mutation_testing() {
-        // Under mutation testing, we do not log anything, to speed up the tests.
+        // Suppress diagnostic output, but leave the initialized formatter enabled.
         return;
     }
 
@@ -58,7 +59,8 @@ pub fn write_to_stdout() {
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
-/// Logging is disabled under mutation testing - this becomes a no-op.
+/// Output is disabled under mutation testing - this becomes a no-op. The initialized
+/// subscriber still evaluates fields and formats events and spans synchronously.
 ///
 /// # Panics
 ///
@@ -69,7 +71,7 @@ pub fn write_to_stdout() {
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
     if is_mutation_testing() {
-        // Under mutation testing, we do not log anything, to speed up the tests.
+        // Suppress diagnostic output, but leave the initialized formatter enabled.
         return FileGuard::fake();
     }
 
@@ -120,11 +122,11 @@ pub fn log_file(file_name: &str) -> String {
 /// with all output sinks silent.
 ///
 /// The installed subscriber is permanently interested in every callsite at every
-/// level (via an always-interested no-op interest-keeper layer), so once it is
-/// present `tracing-core` can never cache a callsite as disabled and event field
-/// expressions are always evaluated. It produces no output on its own: the stdout,
-/// file, and buffer sinks are separate formatting layers, each off (and skipping
-/// formatting) until a `write_to_*` helper turns it on.
+/// level, so once it is present `tracing-core` can never cache a callsite as disabled.
+/// Field expressions and `Debug`, `Display`, and message formatting are exercised
+/// synchronously, including initial and recorded span fields and during mutation
+/// testing. Output is discarded after formatting until a `write_to_*` helper enables
+/// a sink. Events are formatted once, regardless of the number of active sinks.
 ///
 /// Installing this from a `#[cfg(test)] #[ctor::ctor]` process-initialization
 /// function guarantees the subscriber is present before any unit test runs, which
@@ -145,109 +147,29 @@ pub fn initialize() {
 
 fn ensure_initialized() {
     INITIALIZER.call_once(|| {
-        // Each output sink is a formatting layer gated by a `SinkFilter` that is
-        // active only while that sink is turned on. The filter runs before the
-        // layer formats an event, so when a sink is off its (relatively expensive)
-        // event formatting is skipped entirely rather than being rendered and then
-        // discarded by the writer.
-        // All layers omit the timestamp. Wall-clock timestamps would make captured
-        // output non-deterministic (breaking buffer assertions) and reading the clock
-        // via `SystemTime::now` is an unsupported operation under Miri's isolation.
-        let terminal_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(StdoutWriterFactory)
-            .with_filter(SinkFilter {
-                active: stdout_active,
-                max_level: Some(Level::INFO),
-            });
+        // Filter writers, not the layer: interest and formatting must remain enabled
+        // even when no sink wants output. Tee the rendered bytes to avoid invoking
+        // user formatters again for each sink.
+        let writer = StdoutWriterFactory
+            .with_max_level(Level::INFO)
+            .and(LogFileWriter.with_filter(|_| file_active()))
+            .and(BufferWriterFactory.with_filter(|_| buffer_active()));
 
-        let file_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(LogFileWriter)
-            // No coloring codes or such fancy stuff in the file, please.
-            .with_ansi(false)
-            .with_filter(SinkFilter {
-                active: file_active,
-                max_level: None,
-            });
-
-        let buffer_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(BufferWriterFactory)
-            .with_ansi(false)
-            .with_filter(SinkFilter {
-                active: buffer_active,
-                max_level: None,
-            });
-
-        // The interest keeper carries no filter and does no formatting, so it is
-        // permanently interested in every callsite at every level. This is
-        // deliberate and load-bearing on two counts. First, because this
-        // always-interested layer is part of the process-global subscriber from the
-        // very first initialization, `tracing-core` can never cache a callsite's
-        // interest as "disabled", which makes both buffer capture and per-test
-        // thread-local capture deterministic regardless of test execution order.
-        // Second, keeping every callsite enabled forces `tracing` to evaluate event
-        // field expressions (e.g. `duration.as_nanos()`) on every emission even when
-        // no sink is capturing, so coverage of those expressions is deterministic.
-        // See `docs/tracing-tests.md`.
         tracing_subscriber::registry()
-            .with(InterestKeeper)
-            .with(terminal_layer)
-            .with(file_layer)
-            .with(buffer_layer)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .event_format(CompleteEvent)
+                    .with_ansi(false)
+                    .with_writer(writer),
+            )
             .try_init()
             .expect("this can only happen if something else besides testing_aids has configured logging");
     });
 }
 
-/// No-op layer that is permanently interested in every callsite at every level.
-///
-/// It performs no formatting and produces no output; its sole job is to keep every
-/// `tracing` callsite enabled from process start. This prevents `tracing-core` from
-/// caching a callsite's interest as "disabled" and forces event field expressions to
-/// be evaluated on every emission, which keeps capture and coverage deterministic
-/// independent of which output sinks are active. See `docs/tracing-tests.md`.
-#[derive(Debug)]
-struct InterestKeeper;
-
-impl<S: Subscriber> Layer<S> for InterestKeeper {
-    fn register_callsite(&self, _metadata: &'static Metadata<'static>) -> Interest {
-        Interest::always()
-    }
-}
-
-/// Per-layer filter that enables its formatting layer only while the associated sink
-/// is active, so event formatting is skipped when nothing is capturing.
-///
-/// Returns [`Interest::sometimes`] so the decision is re-evaluated on every event
-/// rather than cached: the sink activation flags change at runtime, and the always
-/// interested [`InterestKeeper`] guarantees no callsite is ever cached as disabled.
-struct SinkFilter {
-    /// Whether this sink is currently active.
-    active: fn() -> bool,
-    /// The most verbose level this sink accepts, or `None` for every level.
-    max_level: Option<Level>,
-}
-
-impl<S> Filter<S> for SinkFilter {
-    fn enabled(&self, meta: &Metadata<'_>, _cx: &Context<'_, S>) -> bool {
-        (self.active)() && self.max_level.is_none_or(|level| *meta.level() <= level)
-    }
-
-    fn callsite_enabled(&self, _metadata: &'static Metadata<'static>) -> Interest {
-        Interest::sometimes()
-    }
-}
-
-/// Whether the stdout sink is currently active.
-fn stdout_active() -> bool {
-    STDOUT_ENABLED.load(Ordering::Relaxed)
-}
-
 /// Whether the file sink is currently active.
 ///
-/// Reads a lock-free flag rather than locking [`LOG_FILE`] so the per-event filter
+/// Reads a lock-free flag rather than locking [`LOG_FILE`] so the writer filter
 /// stays off the global mutex on the hot path. The flag is kept in sync with
 /// `LOG_FILE` by setting it under that lock whenever the file sink is attached or
 /// detached.
@@ -257,7 +179,7 @@ fn file_active() -> bool {
 
 /// Whether the buffer sink is currently active.
 ///
-/// Reads a lock-free flag rather than locking [`LOG_BUFFER`] so the per-event filter
+/// Reads a lock-free flag rather than locking [`LOG_BUFFER`] so the writer filter
 /// stays off the global mutex on the hot path. The flag is kept in sync with
 /// `LOG_BUFFER` by setting it under that lock whenever the buffer sink is attached or
 /// detached.
@@ -453,7 +375,7 @@ impl BufferGuard {
     /// Detaches the capture buffer and returns everything logged during the guard's
     /// lifetime, one entry per emitted log line.
     ///
-    /// `tracing`'s formatting layers write synchronously on each event, so there is
+    /// `tracing`'s formatting layer writes synchronously on each event, so there is
     /// no asynchronous buffering to flush; the returned lines are complete as of the
     /// last emission on this thread before the call.
     #[must_use]

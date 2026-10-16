@@ -67,7 +67,7 @@ impl Capture {
         super::output::assert_initialized();
         tracing_subscriber::registry().with(
             tracing_subscriber::fmt::layer()
-                .without_time()
+                .event_format(super::format::CompleteEvent)
                 .with_writer(CaptureWriterMaker {
                     buffer: std::sync::Arc::clone(&self.buffer),
                 })
