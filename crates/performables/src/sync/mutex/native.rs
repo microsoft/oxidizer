@@ -6,7 +6,7 @@ use std::sync::{LockResult, MutexGuard as NativeGuard, TryLockError};
 use super::*;
 
 impl<T: ?Sized> Mutex<T, Sync> {
-    pub(in crate::sync) fn lock_result_native(&self) -> Result<MutexGuard<'_, T>, PoisonError<MutexGuard<'_, T>>> {
+    pub(in crate::sync) fn lock_result_native(&self) -> Result<MutexGuard<'_, T>, Error<MutexGuard<'_, T>>> {
         match self.raw.try_lock() {
             Ok(raw) => self.acquired_native(Ok(raw)),
             Err(TryLockError::Poisoned(error)) => self.acquired_native(Err(error)),
@@ -17,7 +17,7 @@ impl<T: ?Sized> Mutex<T, Sync> {
         }
     }
 
-    pub(in crate::sync) fn try_lock_result_native(&self) -> Result<Option<MutexGuard<'_, T>>, PoisonError<MutexGuard<'_, T>>> {
+    pub(in crate::sync) fn try_lock_result_native(&self) -> Result<Option<MutexGuard<'_, T>>, Error<MutexGuard<'_, T>>> {
         match self.raw.try_lock() {
             Ok(raw) => self.acquired_native(Ok(raw)).map(Some),
             Err(TryLockError::Poisoned(error)) => self.acquired_native(Err(error)).map(Some),
@@ -31,7 +31,7 @@ impl<T: ?Sized> Mutex<T, Sync> {
     pub(in crate::sync) fn acquired_native<'a>(
         &'a self,
         result: LockResult<NativeGuard<'a, ()>>,
-    ) -> Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>> {
+    ) -> Result<MutexGuard<'a, T>, Error<MutexGuard<'a, T>>> {
         let (raw, poisoned) = match result {
             Ok(raw) => (raw, false),
             Err(error) => (error.into_inner(), true),
@@ -45,7 +45,7 @@ impl<T: ?Sized> Mutex<T, Sync> {
         self.record(EventKind::MutexAccess);
         if poisoned {
             self.record(EventKind::LockPoisonObserved);
-            Err(PoisonError::new(guard))
+            Err(Error::poisoned(guard))
         } else {
             Ok(guard)
         }

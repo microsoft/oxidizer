@@ -3,25 +3,25 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::atomic::AtomicBool;
 use std::thread::ThreadId;
 
+use arty_executor::remote::Pool as RemotePool;
 use performables::arc::Arc;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
+#[derive(Clone)]
 pub(crate) struct DispatcherClient {
-    core: Arc<DispatcherCore<ThreadWaiter>>,
+    core: Arc<DispatcherCore>,
 }
 
 impl DispatcherClient {
-    pub(in crate::runtime) const fn new(core: Arc<DispatcherCore<ThreadWaiter>>) -> Self {
+    pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
     }
 
@@ -41,12 +41,16 @@ impl DispatcherClient {
         self.core.owns(thread)
     }
 
-    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.core.is_shutting_down()
+    }
+
+    pub(crate) fn shutdown_signal(&self) -> Arc<std::sync::atomic::AtomicBool> {
         self.core.shutdown_signal()
     }
 
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        self.core.is_shutting_down()
+    pub(crate) fn remote_results(&self) -> &RemotePool {
+        self.core.remote_results()
     }
 
     pub(crate) fn is_current_blocking_task(&self) -> bool {
@@ -62,25 +66,7 @@ impl DispatcherClient {
     {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
-}
 
-impl Debug for DispatcherClient {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
-    #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish()
-    }
-}
-
-impl Clone for DispatcherClient {
-    fn clone(&self) -> Self {
-        Self {
-            core: Arc::clone(&self.core),
-        }
-    }
-}
-
-impl DispatcherClient {
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -99,9 +85,7 @@ impl DispatcherClient {
     {
         self.core.spawn_everywhere(make_factory)
     }
-}
 
-impl DispatcherClient {
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self) {
         self.core.stop();
@@ -112,6 +96,14 @@ impl DispatcherClient {
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn wait(&self) -> Result<(), Error> {
         self.core.join()
+    }
+}
+
+impl Debug for DispatcherClient {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
+    #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(type_name::<Self>()).finish()
     }
 }
 
@@ -127,6 +119,7 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
+    use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::scheduler::Scheduler;
 
     #[test]
@@ -144,31 +137,13 @@ mod tests {
             Sink::noop(),
         )));
         let clone = client.clone();
+        assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
         assert!(!client.is_shutting_down());
         assert!(!clone.is_shutting_down());
 
         client.stop();
         assert!(client.is_shutting_down());
         assert!(clone.is_shutting_down());
-    }
-
-    #[test]
-    fn clients_return_the_dispatchers_shutdown_signal() {
-        let (command_tx, _commands) = channel::unbounded();
-        let worker = WorkerEndpoint {
-            command_tx,
-            waker: Waker::noop().clone(),
-            thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-        };
-        let core = Arc::new(DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
-            nonempty::NonEmpty::new(worker),
-            Sink::noop(),
-        ));
-        let client = DispatcherClient::new(Arc::clone(&core));
-
-        assert!(Arc::ptr_eq(&client.shutdown_signal(), &core.shutdown_signal()));
     }
 
     #[test]

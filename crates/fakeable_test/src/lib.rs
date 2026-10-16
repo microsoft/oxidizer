@@ -25,3 +25,8 @@ pub mod my_service_mockall;
 pub mod my_service_unused_fake;
 
 pub mod trait_service;
+
+pub mod test_only_service;
+
+#[cfg(test)]
+mod private_service_mockall;

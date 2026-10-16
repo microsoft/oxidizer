@@ -5,13 +5,13 @@
 
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, LitBool, LitStr, Path, Result, Token};
+use syn::{Ident, Lit, LitBool, LitStr, Path, Result, Token};
 
 /// Arguments for the `#[fakeable(...)]` attribute macro.
 #[derive(Debug, Clone)]
 pub(super) struct FakeableArgs {
-    /// The feature/cfg attribute name for enabling fake implementations.
-    pub(super) fakes_feature: String,
+    /// Consumer feature enabling fakes, or `None` for unit tests only.
+    pub(super) fakes_feature: Option<String>,
     /// The path to the fake implementation type (for structs only).
     pub(super) fake_impl: Option<Path>,
     /// The name of the constructor method for creating fake instances (for structs only).
@@ -20,15 +20,19 @@ pub(super) struct FakeableArgs {
     pub(super) generate_mockall_fake: Option<bool>,
     /// The module where mockall fake should be generated (for impl blocks only).
     pub(super) mockall_fake_module: Option<String>,
+    /// Effective visibility of the generated mock container (for impl blocks only).
+    pub(super) mockall_fake_visibility: Option<syn::Visibility>,
 }
 
 impl Parse for FakeableArgs {
     fn parse(input: ParseStream) -> Result<Self> {
+        // The outer option records presence; the inner option selects a feature or unit tests only.
         let mut fakes_feature = None;
         let mut fake_impl = None;
         let mut fake_constructor = None;
         let mut generate_mockall_fake = None;
         let mut mockall_fake_module = None;
+        let mut mockall_fake_visibility = None;
 
         let args: Punctuated<FakeableArg, Token![,]> = Punctuated::parse_terminated(input)?;
 
@@ -38,7 +42,14 @@ impl Parse for FakeableArgs {
                     if fakes_feature.is_some() {
                         return Err(syn::Error::new_spanned(&value, "fakes_feature specified multiple times"));
                     }
-                    fakes_feature = Some(value.value());
+                    let feature = match value {
+                        Lit::Str(value) => Some(value.value()),
+                        Lit::Bool(value) if !value.value => None,
+                        value => {
+                            return Err(syn::Error::new_spanned(value, "fakes_feature must be a feature name or false"));
+                        }
+                    };
+                    fakes_feature = Some(feature);
                 }
                 FakeableArg::FakeImpl(path) => {
                     if fake_impl.is_some() {
@@ -64,12 +75,24 @@ impl Parse for FakeableArgs {
                     }
                     mockall_fake_module = Some(module.value());
                 }
+                FakeableArg::MockallFakeVisibility(value) => {
+                    if mockall_fake_visibility.is_some() {
+                        return Err(syn::Error::new_spanned(&value, "mockall_fake_visibility specified multiple times"));
+                    }
+                    let visibility = syn::parse_str(&value.value()).map_err(|_error| {
+                        syn::Error::new_spanned(
+                            &value,
+                            "mockall_fake_visibility must be a Rust visibility, or an empty string for private",
+                        )
+                    })?;
+                    mockall_fake_visibility = Some(visibility);
+                }
             }
         }
 
         // Default to "test-util" if not specified, per M-TEST-UTIL:
         // https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html#M-TEST-UTIL
-        let fakes_feature = fakes_feature.unwrap_or_else(|| "test-util".to_string());
+        let fakes_feature = fakes_feature.unwrap_or_else(|| Some("test-util".to_string()));
 
         Ok(Self {
             fakes_feature,
@@ -77,17 +100,19 @@ impl Parse for FakeableArgs {
             fake_constructor,
             generate_mockall_fake,
             mockall_fake_module,
+            mockall_fake_visibility,
         })
     }
 }
 
 #[derive(Debug, Clone)]
 enum FakeableArg {
-    FakesFeature(LitStr),
+    FakesFeature(Lit),
     FakeImpl(Path),
     FakeConstructor(LitStr),
     GenerateMockallFake(LitBool),
     MockallFakeModule(LitStr),
+    MockallFakeVisibility(LitStr),
 }
 
 impl Parse for FakeableArg {
@@ -97,7 +122,7 @@ impl Parse for FakeableArg {
 
         match name.to_string().as_str() {
             "fakes_feature" | "fakes_attribute" => {
-                let value: LitStr = input.parse()?;
+                let value: Lit = input.parse()?;
                 Ok(Self::FakesFeature(value))
             }
             "fake_impl" => {
@@ -130,9 +155,10 @@ impl Parse for FakeableArg {
                 }
                 Ok(Self::MockallFakeModule(value))
             }
+            "mockall_fake_visibility" => Ok(Self::MockallFakeVisibility(input.parse()?)),
             _ => Err(syn::Error::new_spanned(
                 name,
-                "unknown argument; expected fakes_feature (or fakes_attribute), fake_impl, fake_constructor, generate_mockall_fake, or mockall_fake_module",
+                "unknown argument; expected fakes_feature (or fakes_attribute), fake_impl, fake_constructor, generate_mockall_fake, mockall_fake_module, or mockall_fake_visibility",
             )),
         }
     }
