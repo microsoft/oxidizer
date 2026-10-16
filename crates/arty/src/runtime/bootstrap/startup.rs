@@ -7,6 +7,7 @@ use std::task::Waker;
 use std::thread;
 
 use arty_executor::TaskSet;
+use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -16,6 +17,7 @@ use performables::sync::channel::{OneshotReceiver, Sender};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
+use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
@@ -69,6 +71,7 @@ pub(in crate::runtime) fn build(
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
+    let io_runtime = IoRuntime::new(sink.clone());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
             &sink,
@@ -99,6 +102,7 @@ pub(in crate::runtime) fn build(
                 thread_builder: thread_builder.clone(),
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
+                io_runtime: io_runtime.clone(),
                 sink: sink.clone(),
             }
             .start(),
@@ -167,6 +171,7 @@ struct AsyncWorkerStartInfo {
     thread_builder: ThreadBuilder,
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
+    io_runtime: IoRuntime,
     sink: Sink,
 }
 
@@ -194,6 +199,7 @@ impl AsyncWorkerStartInfo {
             thread_builder,
             blocking_pools,
             shutdown_started,
+            mut io_runtime,
             sink,
         } = self;
 
@@ -206,6 +212,7 @@ impl AsyncWorkerStartInfo {
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
+        io_runtime.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
         let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
@@ -228,10 +235,13 @@ impl AsyncWorkerStartInfo {
 
         let dispatcher = Rc::new(start_signal.dispatcher);
         let shutdown_signal = dispatcher.shutdown_signal();
+        let io = Io::new(io_runtime.clone(), dispatcher.as_ref().clone(), current.clone());
+        let driver_host = RuntimeDriverHost::new(&io_runtime, dispatcher.as_ref().clone(), &current, WorkerSignal::waker(&signal));
+        signal.set_driver_waker(driver_host.waker());
 
         let thread_state_constructor = {
             async move |tasks: TaskSet, clock| {
-                let builtins = Builtins::sync_init(RuntimeBuiltins::new(&dispatcher, clock, current, sink));
+                let builtins = Builtins::sync_init(RuntimeBuiltins::new(&dispatcher, clock, io, current, sink));
                 Scheduler::register_current(builtins.clone(), tasks);
                 builtins
             }
@@ -248,6 +258,7 @@ impl AsyncWorkerStartInfo {
                 shutdown_signal,
                 success_tx,
             )
+            .with_driver_host(driver_host)
         };
 
         emit!(

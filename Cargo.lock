@@ -251,6 +251,7 @@ version = "0.4.0"
 dependencies = [
  "arty_executor",
  "arty_io_core",
+ "arty_io_host",
  "arty_macros",
  "bolero",
  "criterion",

@@ -26,6 +26,7 @@ allowed_external_types = [
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
     "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
 ]
 
 [features]

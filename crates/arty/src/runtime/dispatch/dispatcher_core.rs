@@ -10,6 +10,7 @@ use nonempty::NonEmpty;
 use observed::emit;
 use performables::arc::Arc;
 use performables::sync::channel;
+use performables::sync::mutex::Mutex;
 use thread_aware::Thread;
 
 use crate::runtime::Error;
@@ -58,6 +59,7 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
     stopped_reported: AtomicBool,
+    shutdown_error: Mutex<Option<Error>>,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
 
@@ -104,6 +106,7 @@ impl<WFS> DispatcherCore<WFS> {
             wait_for_shutdown,
             shutdown_started,
             stopped_reported: AtomicBool::new(false),
+            shutdown_error: Mutex::new(None),
             worker_endpoints,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
@@ -114,6 +117,24 @@ impl<WFS> DispatcherCore<WFS> {
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
     pub(in crate::runtime) fn stop(&self) {
+        self.stop_inner();
+    }
+
+    pub(in crate::runtime) fn stop_with_error(&self, error: Error) {
+        let mut shutdown_error = match self.shutdown_error.lock_result() {
+            Ok(shutdown_error) => shutdown_error,
+            Err(poisoned) => {
+                let shutdown_error = poisoned.into_inner();
+                self.shutdown_error.clear_poison();
+                shutdown_error
+            }
+        };
+        _ = shutdown_error.get_or_insert(error);
+        drop(shutdown_error);
+        self.stop_inner();
+    }
+
+    fn stop_inner(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
@@ -128,6 +149,18 @@ impl<WFS> DispatcherCore<WFS> {
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
+    }
+
+    pub(in crate::runtime) fn take_shutdown_error(&self) -> Option<Error> {
+        let mut shutdown_error = match self.shutdown_error.lock_result() {
+            Ok(shutdown_error) => shutdown_error,
+            Err(poisoned) => {
+                let shutdown_error = poisoned.into_inner();
+                self.shutdown_error.clear_poison();
+                shutdown_error
+            }
+        };
+        shutdown_error.take()
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -159,6 +192,19 @@ impl<WFS> DispatcherCore<WFS> {
         (0..self.worker_endpoints.len())
             .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
             .collect()
+    }
+
+    pub(in crate::runtime) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> bool {
+        if self.is_shutting_down() {
+            return false;
+        }
+        let endpoint = self
+            .worker_endpoints
+            .get(usize::from(worker_index))
+            .expect("worker index must identify a registered runtime worker");
+        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::AccessIo { access: Some(access) });
+        endpoint.waker.wake_by_ref();
+        send_result.is_ok()
     }
 
     pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {
@@ -263,6 +309,7 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::pin;
     use std::task;
     use std::task::Poll;
@@ -282,6 +329,20 @@ mod tests {
             thread: thread.clone(),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
         }
+    }
+
+    #[test]
+    fn io_access_rejects_shutdown_and_closed_workers() {
+        let threads = test_threads(1);
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let dispatcher = DispatcherCore::new(
+            MockWaitForShutdown::new(),
+            NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
+            observed::Sink::noop(),
+        );
+
+        dispatcher.stop();
+        assert!(!dispatcher.access_io(WorkerIndex(0), Box::new(|_| {})));
     }
 
     #[test]
@@ -457,6 +518,33 @@ mod tests {
             panic!("a disconnected join must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    #[test]
+    fn shutdown_error_access_recovers_poisoned_mutexes() {
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::<_>::new(
+            MockWaitForShutdown::new(),
+            NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
+            observed::Sink::noop(),
+        );
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _shutdown_error = dispatcher.shutdown_error.lock_result().unwrap();
+            panic!("poison shutdown error mutex");
+        }));
+        assert!(panic.is_err());
+
+        dispatcher.stop_with_error(Error::runtime_shutting_down());
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _shutdown_error = dispatcher.shutdown_error.lock_result().unwrap();
+            panic!("poison shutdown error mutex");
+        }));
+        assert!(panic.is_err());
+
+        assert!(dispatcher.take_shutdown_error().is_some());
     }
 
     #[cfg_attr(test, mutants::skip)]
