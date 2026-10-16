@@ -160,7 +160,33 @@ impl DiagnosticWakerRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Wake;
+
     use super::*;
+
+    struct CountingWake(AtomicUsize);
+
+    impl Wake for CountingWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn wake_by_ref_delegates_without_consuming_the_diagnostic_waker() {
+        let registry = Arc::new(DiagnosticWakerRegistry::new());
+        let counting_wake = Arc::new(CountingWake(AtomicUsize::new(0)));
+        let waker = DiagnosticWaker::with_inner_and_registry(Waker::from(Arc::clone(&counting_wake)), Arc::clone(&registry));
+
+        waker.wake_by_ref();
+        waker.wake_by_ref();
+
+        assert_eq!(counting_wake.0.load(Ordering::Relaxed), 2);
+        assert!(registry.backtraces.lock().unwrap().is_empty());
+
+        drop(waker);
+    }
 
     #[test]
     #[expect(clippy::redundant_clone, reason = "intentional - testing cloning logic")]
