@@ -16,11 +16,9 @@
     SetPublishFalse, AddCommit, ...) so scenarios can build their pre-release
     git history declaratively.
 
-    Synthetic workspaces use workspace inheritance for cross-package dependencies
-    (`bar.workspace = true`) which mirrors the real repo and side-steps a latent
-    bug in `Update-PackageVersion` that mis-handles inline `path = "...", version
-    = "..."` deps. The Update-PackageVersion bug is pinned by an integration test
-    in Phase 5; fixtures intentionally use the production-shaped pattern.
+    Synthetic workspaces default to workspace inheritance for cross-package
+    dependencies (`bar.workspace = true`). Tests for crate-owned path dependency
+    versions replace these declarations explicitly.
 #>
 
 # --- TOPOLOGY PRESETS ---
