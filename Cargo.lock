@@ -3508,7 +3508,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "metabench"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "alloc_tracker",
  "bolero",
@@ -3534,7 +3534,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "metabench_macros_impl",
  "mutants",
@@ -3543,7 +3543,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros_impl"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bolero",
  "proc-macro-crate 3.5.0",
