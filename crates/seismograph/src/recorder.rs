@@ -1684,7 +1684,7 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
         count
     }
 
-    #[cfg(all(target_os = "linux", not(miri)))]
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
     {
         const SKIPPED_FRAMES: usize = 4;
         const CAPACITY: usize = 28;
@@ -1700,7 +1700,7 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
         retained
     }
 
-    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux"))))]
+    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux", target_os = "macos"))))]
     {
         let _ = frames;
         0
@@ -3503,7 +3503,7 @@ mod tests {
         configure(Configuration::default());
     }
 
-    #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+    #[cfg(all(any(target_os = "windows", target_os = "linux", target_os = "macos"), not(miri)))]
     #[test]
     fn stack_capture_returns_real_frames_within_the_fixed_capacity() {
         let (frames, count) = capture_stack();
@@ -3899,7 +3899,7 @@ mod tests {
         });
         assert_eq!(capture_backtrace(BacktraceCapture::Never), Vec::new());
         let captured = capture_backtrace(BacktraceCapture::Always);
-        #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+        #[cfg(all(any(target_os = "windows", target_os = "linux", target_os = "macos"), not(miri)))]
         assert!(!captured.is_empty());
         assert!(captured.len() <= MAX_STACK_FRAMES);
 

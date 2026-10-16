@@ -203,7 +203,7 @@ impl RuntimeBuilder {
 
 impl RuntimeBuilder {
     #[must_use]
-    pub(in crate::runtime) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             clock: InactiveClock::default(),
             processor_config: RuntimeConfig::default(),

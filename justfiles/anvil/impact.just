@@ -31,7 +31,10 @@
 # mode anvil-impact does not snapshot or recompute (so it needs neither
 # cargo-delta nor a fetched base ref, which group jobs lack); it asserts the
 # downloaded include_<tier>.txt files are present -- failing loudly if any are
-# missing -- and the checks read them directly.
+# missing -- and the checks read them directly. The cache also carries an
+# optional doctest_packages.txt capability projection. Doc-test consumes it
+# when present and falls back to one locked metadata query for caches produced
+# by older catalogs or full-workspace paths that did not need package mapping.
 # ANVIL_IMPACT_INPUT_DIR optionally selects a different read-only cache in
 # consume mode, for example a checked-in fixture. Unset/empty uses the default
 # target/anvil/impact directory. Computing impact never writes to this override.
@@ -262,22 +265,22 @@ _anvil-impact-snapshot:
         # host: RUNNER_TEMP on GitHub Actions, AGENT_TEMPDIRECTORY on Azure
         # Pipelines -- both are job-owned and cleaned up by the runner, so the
         # throwaway worktree never leaks into the workspace or survives the job.
-        # Local runs have neither, so fall back to the system temp dir. The
-        # worktree name includes $PID so concurrent impact runs (e.g. several
-        # local checks, or matrix legs sharing a temp root) each get a distinct
-        # path and never remove or overwrite another run's baseline checkout.
+        # Local runs fall back to the system temp dir. A fresh nonce prevents
+        # collisions with abandoned directories when the OS reuses a PID.
         $tmpRoot = $env:RUNNER_TEMP
         if (-not $tmpRoot) { $tmpRoot = $env:AGENT_TEMPDIRECTORY }
         if (-not $tmpRoot) { $tmpRoot = [System.IO.Path]::GetTempPath() }
-        $wt = Join-Path $tmpRoot "anvil-baseline-$PID"
-        if (Test-Path $wt) { git worktree remove --force $wt 2>$null | Out-Null }
+        $wt = Join-Path $tmpRoot "anvil-baseline-$PID-$([System.Guid]::NewGuid().ToString('N'))"
         # GIT_LFS_SKIP_SMUDGE=1: the worktree inherits the repo config but not
         # the credential helper, so LFS smudge would fail. cargo-delta only
         # needs file content hashes; LFS pointer files hash consistently.
         $env:GIT_LFS_SKIP_SMUDGE = '1'
-        git worktree add --detach $wt $baseSha 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Error "anvil-impact: failed to create baseline worktree at $wt"; exit 1 }
+        $baselineFailed = $false
         try {
+            $worktreeOutput = @(git worktree add --detach $wt $baseSha 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                throw "anvil-impact: failed to create baseline worktree at ${wt}: $($worktreeOutput -join [Environment]::NewLine)"
+            }
             if (-not (Test-Path (Join-Path $wt 'Cargo.toml'))) {
                 # First-time anvil adoption: the base predates the cargo
                 # workspace (no root Cargo.toml), so there is nothing for
@@ -307,8 +310,39 @@ _anvil-impact-snapshot:
                 Set-Content -LiteralPath $baselineJson -Value $baseSnap -Encoding UTF8
                 Set-Content -LiteralPath $baselineKeyFile -Value $baselineKey -Encoding UTF8 -NoNewline
             }
+        } catch {
+            $baselineFailed = $true
+            throw
         } finally {
-            git worktree remove --force $wt 2>$null | Out-Null
+            $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+            $worktreeOutput = @(git worktree list --porcelain -z)
+            $listFailed = $LASTEXITCODE -ne 0
+            if ($listFailed) {
+                $cleanupFailures.Add("failed to list worktrees: $($worktreeOutput -join [Environment]::NewLine)")
+            }
+            $worktrees = if ($listFailed) { @() } else { ($worktreeOutput -join "`n").Split([char] 0) }
+            $registeredPath = 'worktree ' + $wt.Replace([System.IO.Path]::DirectorySeparatorChar, [char] '/')
+            if ($listFailed -or $worktrees -contains $registeredPath) {
+                $cleanupOutput = @(git worktree remove --force --force $wt 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                    $cleanupFailures.Add("failed to remove baseline worktree at ${wt}: $($cleanupOutput -join [Environment]::NewLine)")
+                }
+            }
+            try {
+                if (Test-Path -LiteralPath $wt) {
+                    Remove-Item -LiteralPath $wt -Recurse -Force -ErrorAction Stop
+                }
+            } catch {
+                $cleanupFailures.Add("failed to remove baseline directory at ${wt}: $($_.Exception.Message)")
+            }
+            if ($cleanupFailures.Count -gt 0) {
+                $cleanupMessage = "anvil-impact: baseline cleanup failed: $($cleanupFailures -join '; ')"
+                if ($baselineFailed) {
+                    Write-Warning -Message $cleanupMessage -WarningAction Continue
+                } else {
+                    throw $cleanupMessage
+                }
+            }
         }
     }
 
@@ -371,6 +405,7 @@ anvil-impact: _anvil-impact-snapshot
     $currentKeyFile = Join-Path $snapDir 'current.key'
     $impactJson = Join-Path $impactDir 'impact.json'
     $impactStateFile = Join-Path $impactDir 'impact.state'
+    $doctestPackages = Join-Path $impactDir 'doctest_packages.txt'
 
     # Local safety net + warning for a dirty working tree. cargo-delta scopes
     # on the *committed* diff of HEAD against the base ref, so uncommitted
@@ -395,8 +430,10 @@ anvil-impact: _anvil-impact-snapshot
         Set-Content -LiteralPath (Join-Path $impactDir 'include_affected.txt') -Value '--workspace' -Encoding UTF8 -NoNewline
         Set-Content -LiteralPath (Join-Path $impactDir 'include_required.txt') -Value '--workspace' -Encoding UTF8 -NoNewline
         Set-Content -LiteralPath $impactJson -Value '{}' -Encoding UTF8
-        # Invalidate any prior clean-tree cache so committing recomputes.
+        # Invalidate prior clean-tree projections so widened checks discover
+        # current workspace capabilities instead of trusting stale metadata.
         Remove-Item -LiteralPath $impactStateFile -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $doctestPackages -ErrorAction SilentlyContinue
         exit 0
     }
 
@@ -407,7 +444,8 @@ anvil-impact: _anvil-impact-snapshot
     $includeFiles = @('modified', 'affected', 'required') | ForEach-Object { Join-Path $impactDir "include_$_.txt" }
     $fresh = (Test-Path $impactJson) -and (Test-Path $impactStateFile) -and `
         ("$(Get-Content -Raw $impactStateFile)".Trim() -eq $wantState) -and `
-        (@($includeFiles | Where-Object { -not (Test-Path $_) }).Count -eq 0)
+        (@($includeFiles | Where-Object { -not (Test-Path $_) }).Count -eq 0) -and `
+        (Test-Path -LiteralPath $doctestPackages -PathType Leaf)
     if ($fresh) {
         Write-Host 'anvil-impact: impact set up to date (cache hit)'
         exit 0
@@ -424,6 +462,7 @@ anvil-impact: _anvil-impact-snapshot
         Set-Content -LiteralPath (Join-Path $impactDir 'include_required.txt') -Value '--workspace' -Encoding UTF8 -NoNewline
         Set-Content -LiteralPath $impactJson -Value '{}' -Encoding UTF8
         Set-Content -LiteralPath $impactStateFile -Value $wantState -Encoding UTF8 -NoNewline
+        Remove-Item -LiteralPath $doctestPackages -ErrorAction SilentlyContinue
         exit 0
     }
 
@@ -434,11 +473,13 @@ anvil-impact: _anvil-impact-snapshot
     $deltaArgs = @()
     if (Test-Path '.delta.toml') { $deltaArgs = @('--config', (Resolve-Path '.delta.toml').Path) }
 
-    # Full impact JSON -- the durable source of truth. cargo-delta prints
-    # nothing when no files changed between baseline and current (it "quits"
-    # early), so default to an empty object so impact.json always exists --
-    # the freshness check above keys on its presence, and a missing file
-    # would force a recompute on every invocation.
+    # Full impact JSON -- the durable source of truth. When no files changed
+    # between baseline and current the impact set is empty, which cargo-delta
+    # reports either as a report with empty tiers or by printing nothing at
+    # all (it "quits" early). Store an empty object for that blank output so
+    # impact.json always exists -- the freshness check above keys on its
+    # presence, and a missing file would force a recompute on every
+    # invocation.
     $impactOut = (& cargo {{_anvil_stable_toolchain_args}} delta @deltaArgs impact --baseline $baselineJson --current $currentJson --format json | Out-String)
     if ($LASTEXITCODE -ne 0) { Write-Error 'anvil-impact: cargo delta impact failed'; exit 1 }
     if ([string]::IsNullOrWhiteSpace($impactOut)) { $impactOut = '{}' }
@@ -470,8 +511,8 @@ anvil-impact: _anvil-impact-snapshot
 # Output (stdout, exactly one line so the caller can capture it):
 #   * "--package name@version --package name2@version2 ..." when the
 #     tier has members. Each package is a version-qualified cargo spec:
-#     the version (read from `cargo metadata --no-deps`, i.e. workspace
-#     members only) disambiguates a workspace member from a like-named
+#     the version (read from locked `cargo metadata --no-deps` and intersected
+#     with workspace_members) disambiguates a workspace member from a like-named
 #     transitive dependency pulled in at a different version, which a
 #     bare `-p name` cannot do ("multiple packages named name").
 #   * "--skip" when the tier is empty (recipes treat this as a no-op).
@@ -516,10 +557,11 @@ _anvil-impact-format tier impactJson:
     # nested workspaces cargo-delta can instead emit a manifest directory
     # leaf; accept any reported identifier only when every matching namespace
     # resolves to the *same* workspace package.
-    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error 'anvil-impact: cargo metadata failed'
-        exit $LASTEXITCODE
+    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
+    $metadataExit = $LASTEXITCODE
+    if ($metadataExit -ne 0) {
+        [Console]::Error.WriteLine('anvil-impact: cargo metadata failed')
+        exit $metadataExit
     }
     try {
         $meta = $metadataJson | ConvertFrom-Json
@@ -538,7 +580,20 @@ _anvil-impact-format tier impactJson:
     $byName = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
     $byLib = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
     $byDirLeaf = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-    foreach ($p in $meta.packages) {
+    $workspaceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($id in $meta.workspace_members) { [void]$workspaceIds.Add("$id") }
+    $workspacePackages = @($meta.packages | Where-Object { $workspaceIds.Contains("$($_.id)") })
+    if ($tier -eq 'modified') {
+        $doctestSpecs = [string[]]@(
+            $workspacePackages |
+                Where-Object { $_.targets | Where-Object { $_.doctest -eq $true } } |
+                ForEach-Object { "$($_.name)@$($_.version)" }
+        )
+        [Array]::Sort($doctestSpecs, [System.StringComparer]::Ordinal)
+        $doctestFile = Join-Path (Split-Path $impactJson -Parent) 'doctest_packages.txt'
+        Set-Content -LiteralPath $doctestFile -Value ($doctestSpecs -join "`n") -Encoding UTF8 -NoNewline
+    }
+    foreach ($p in $workspacePackages) {
         if (-not $byName.ContainsKey($p.name)) {
             $byName[$p.name] = [System.Collections.Generic.List[object]]::new()
         }
@@ -602,6 +657,51 @@ _anvil-impact-format tier impactJson:
     } else {
         Write-Output ($specs -join ' ')
     }
+
+# Private. Returns the workspace-member package specs with at least one Cargo
+# target marked doctest=true. Prefer the projection written while impact
+# metadata was already in memory; fall back to one locked metadata query when
+# impact is disabled, widened before projection, or an older cache is consumed.
+#
+# Output is one space-delimited line of name@version specs, sorted ordinally.
+
+# Resolve workspace doctest capability from the impact cache.
+[script("pwsh", "-NoProfile")]
+_anvil-impact-doctest-packages:
+    $ErrorActionPreference = 'Stop'
+    if ($env:ANVIL_IMPACT -and $env:ANVIL_IMPACT -notin @('off', 'consume')) {
+        [Console]::Error.WriteLine("anvil: ANVIL_IMPACT='$($env:ANVIL_IMPACT)' is not recognized (expected 'off', 'consume', or unset).")
+        exit 2
+    }
+    $inputDir = if ($env:ANVIL_IMPACT -eq 'consume' -and $env:ANVIL_IMPACT_INPUT_DIR) { $env:ANVIL_IMPACT_INPUT_DIR } else { 'target/anvil/impact' }
+    $file = Join-Path $inputDir 'doctest_packages.txt'
+    if ($env:ANVIL_IMPACT -ne 'off' -and (Test-Path -LiteralPath $file -PathType Leaf)) {
+        $specs = @(Get-Content -LiteralPath $file | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Write-Output ($specs -join ' ')
+        exit 0
+    }
+    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
+    $metadataExit = $LASTEXITCODE
+    if ($metadataExit -ne 0) {
+        [Console]::Error.WriteLine('anvil-doc-test: cargo metadata failed')
+        exit $metadataExit
+    }
+    try {
+        $meta = $metadataJson | ConvertFrom-Json
+    } catch {
+        Write-Error "anvil-doc-test: could not parse cargo metadata output: $_"
+        exit 1
+    }
+    $workspaceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($id in $meta.workspace_members) { [void]$workspaceIds.Add("$id") }
+    $specs = [string[]]@(
+        $meta.packages |
+            Where-Object { $workspaceIds.Contains("$($_.id)") } |
+            Where-Object { $_.targets | Where-Object { $_.doctest -eq $true } } |
+            ForEach-Object { "$($_.name)@$($_.version)" }
+    )
+    [Array]::Sort($specs, [System.StringComparer]::Ordinal)
+    Write-Output ($specs -join ' ')
 
 # Private. Resolves an impact category's scope for a check recipe and echoes it on stdout.
 #   1. ANVIL_IMPACT=off            -> tier default (full-workspace / run).

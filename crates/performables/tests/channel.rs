@@ -357,6 +357,19 @@ fn closing_queue_preserves_buffered_values_and_rejects_sends() {
 }
 
 #[test]
+fn root_error_retains_borrowed_send_values_and_implements_standard_error() {
+    let value = String::from("rejected");
+    let (sender, receiver) = bounded(1);
+    drop(receiver);
+
+    let error: performables::Error<_> = sender.try_send(value.as_str()).unwrap_err();
+    assert!(error.is_closed());
+    let standard_error: &dyn std::error::Error = &error;
+    assert_eq!(standard_error.to_string(), "channel is closed");
+    assert_eq!(error.into_value(), Some("rejected"));
+}
+
+#[test]
 fn sender_close_wakes_receivers_and_preserves_buffered_values() {
     let (sender, receiver) = bounded(2);
     sender.try_send(1).unwrap();

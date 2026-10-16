@@ -44,6 +44,7 @@ These are the primary crates built out of this repo:
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fetch_winhttp`](./crates/fetch_winhttp/README.md) - WinHTTP-based HTTP transport for the fetch client (Windows only).
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`future_assert`](./crates/future_assert/README.md) - Manual polling assertions for futures in tests, without an async runtime.
 - [`http_compression`](./crates/http_compression/README.md) - HTTP request and response body compression and decompression.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`http_headers`](./crates/http_headers/README.md) - Fast, ergonomic typed HTTP headers with borrowed views.
@@ -55,7 +56,7 @@ These are the primary crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
-- [`rallocator`](./crates/rallocator/README.md) - Windows and Linux x64/ARM64 owner-return allocator with Seismograph allocation events.
+- [`rallocator`](./crates/rallocator/README.md) - Windows, Linux and macOS x64/ARM64 owner-return allocator with Seismograph allocation events.
   - [Allocation recording](./crates/rallocator/README.md#allocation-recording)
   - [Migration from v1](./crates/rallocator/README.md#migration-from-v1)
 - [`seismograph_cli`](./crates/seismograph_cli/README.md) - Live monitoring and snapshot tools for seismograph telemetry.

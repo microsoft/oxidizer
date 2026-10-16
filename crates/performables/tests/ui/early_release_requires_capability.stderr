@@ -1,0 +1,47 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+ --> tests/ui/early_release_requires_capability.rs:7:5
+  |
+7 |     M::mutex_release(guard);
+  |     ^^^^^^^^^^^^^^^^------- argument #2 of type `performables::sync::sealed::Release` is missing
+  |
+note: associated function defined here
+ --> src/sync/mod.rs
+  |
+  |         fn mutex_release<T: ?Sized>(guard: &mut mutex::MutexGuard<'_, T, Self>, release: Release)
+  |            ^^^^^^^^^^^^^
+help: provide the argument
+  |
+7 |     M::mutex_release(guard, /* performables::sync::sealed::Release */);
+  |                           +++++++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/ui/early_release_requires_capability.rs:11:5
+   |
+11 |     M::rwlock_release_read(guard);
+   |     ^^^^^^^^^^^^^^^^^^^^^^------- argument #2 of type `performables::sync::sealed::Release` is missing
+   |
+note: associated function defined here
+  --> src/sync/mod.rs
+   |
+   |         fn rwlock_release_read<T: ?Sized>(guard: &mut lock::RwLockReadGuard<'_, T, Self>, release: Release)
+   |            ^^^^^^^^^^^^^^^^^^^
+help: provide the argument
+   |
+11 |     M::rwlock_release_read(guard, /* performables::sync::sealed::Release */);
+   |                                 +++++++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/ui/early_release_requires_capability.rs:15:5
+   |
+15 |     M::rwlock_release_write(guard);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^------- argument #2 of type `performables::sync::sealed::Release` is missing
+   |
+note: associated function defined here
+  --> src/sync/mod.rs
+   |
+   |         fn rwlock_release_write<T: ?Sized>(guard: &mut lock::RwLockWriteGuard<'_, T, Self>, release: Release)
+   |            ^^^^^^^^^^^^^^^^^^^^
+help: provide the argument
+   |
+15 |     M::rwlock_release_write(guard, /* performables::sync::sealed::Release */);
+   |                                  +++++++++++++++++++++++++++++++++++++++++++

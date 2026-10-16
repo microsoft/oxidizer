@@ -17,8 +17,9 @@
 
 use std::borrow::Cow;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::time::SystemTime;
+
+use performables::arc::Arc;
 
 use crate::enrichment::{EnrichmentNode, OptEnrichmentNode};
 use crate::interop::DynEvent;

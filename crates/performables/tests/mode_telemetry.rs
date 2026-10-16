@@ -8,10 +8,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
 
+use performables::sync;
 use performables::sync::barrier::Barrier;
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
-use performables::sync::mode;
 use performables::sync::mutex::Mutex;
 use seismograph::recorder::event::{EventKind, ObjectId};
 use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
@@ -90,8 +90,8 @@ fn synchronization_modes_preserve_public_object_identity() {
         }};
     }
 
-    let synchronous = exercise!(mode::Sync);
-    let asynchronous = exercise!(mode::Async);
+    let synchronous = exercise!(sync::Sync);
+    let asynchronous = exercise!(sync::Async);
     let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap().events;
 
