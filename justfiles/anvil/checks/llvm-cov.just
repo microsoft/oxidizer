@@ -43,19 +43,18 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
             Write-Error 'anvil-llvm-cov: cargo metadata failed'
             exit $LASTEXITCODE
         }
+        $metadata = $metadataJson | ConvertFrom-Json
         $optedOut = @(
-            ($metadataJson | ConvertFrom-Json).packages |
+            $metadata.packages |
                 Where-Object { $null -ne $_.metadata.'coverage-gate'.'min-lines-percent' -and [double]$_.metadata.'coverage-gate'.'min-lines-percent' -eq 0 } |
                 ForEach-Object { $_.name }
         )
         if ($optedOut.Count -gt 0) {
             $filtered = [System.Collections.Generic.List[string]]::new()
             for ($i = 0; $i -lt $pkg.Count; $i++) {
-                # Impact emits version-qualified specs (name@version);
-                # compare the bare name against the opt-out set, but keep
-                # the full name@version token in $pkg so the llvm-cov
-                # measurement below resolves unambiguously.
-                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains (($pkg[$i + 1] -split '@', 2)[0])) {
+                # Compare workspace names, retaining the source-qualified
+                # specs for test selection and coverage gating.
+                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains ((($pkg[$i + 1] -split '#')[-1] -split '@', 2)[0])) {
                     $testOnlyPkg.Add('--package')
                     $testOnlyPkg.Add($pkg[$i + 1])
                     $i++
@@ -94,6 +93,13 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     if ($pkg.Count -eq 0 -and $testOnlyPkg.Count -gt 0) {
         Write-Host 'anvil-llvm-cov: all affected packages opted out of coverage; tests completed'
         exit 0
+    }
+    $coveragePkg = $pkg
+    if ($pkg -contains '--package') {
+        # cargo-llvm-cov 0.9 compares metadata ID fragments literally: use the
+        # original #version form when Cargo omits the redundant package name.
+        . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+        $coveragePkg = @(-split (ConvertTo-WorkspacePackageSelection ($pkg -join ' ') $metadata -Format MetadataId))
     }
     # The *report* output directory (target/coverage/) is something we
     # choose and must exist before --output-path runs.
@@ -205,12 +211,12 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     foreach ($cfg in $configs) {
         cargo '+{{ rust_nightly }}' llvm-cov clean --workspace
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg $cfg.flag --locked --no-report
+        & cargo '+{{ rust_nightly }}' llvm-cov nextest @coveragePkg $cfg.flag --locked --no-report
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         # The same lcov report feeds the gate, Codecov, and ADO. On Windows,
         # retry only CreateProcess error 206 through llvm-cov's response-file
         # support; all other cargo-llvm-cov failures propagate unchanged.
-        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info" $pkg
+        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info" $coveragePkg
         if ($reportExitCode -ne 0) { exit $reportExitCode }
     }
     # Local coverage gate: cargo-coverage-gate compares per-package line
@@ -236,7 +242,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         if ($pkg[$i] -eq '--workspace') { continue }
         if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
             $gateArgs.Add('--package')
-            $gateArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
+            $gateArgs.Add((($pkg[$i + 1] -split '#')[-1] -split '@', 2)[0])
             $i++
             continue
         }

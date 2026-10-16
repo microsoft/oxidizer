@@ -19,6 +19,12 @@ anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-check-all-targets: no affected packages; skipping'; exit 0 }
+    # cargo-each resolves only workspace names/versions; its child Cargo command
+    # uses the member manifest to distinguish local and registry copies.
+    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+    $include = ConvertTo-WorkspacePackageSelection $include ($metadataJson | ConvertFrom-Json) -Format NameVersion
     $pkg = @(if ($include) { -split $include } else { '--workspace' })
     $configs = @(
         @{ name = 'default';    flags = @() },
@@ -27,7 +33,7 @@ anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     foreach ($cfg in $configs) {
         Write-Host "anvil-check-all-targets: checking $($cfg.name) features"
         $featureArgs = $cfg.flags
-        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --package '{spec}' --all-targets @featureArgs --locked
+        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --manifest-path '{manifest}' --all-targets @featureArgs --locked
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 

@@ -675,10 +675,9 @@ _anvil-impact-doctest-packages:
     }
     $inputDir = if ($env:ANVIL_IMPACT -eq 'consume' -and $env:ANVIL_IMPACT_INPUT_DIR) { $env:ANVIL_IMPACT_INPUT_DIR } else { 'target/anvil/impact' }
     $file = Join-Path $inputDir 'doctest_packages.txt'
+    $selection = $null
     if ($env:ANVIL_IMPACT -ne 'off' -and (Test-Path -LiteralPath $file -PathType Leaf)) {
-        $specs = @(Get-Content -LiteralPath $file | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        Write-Output ($specs -join ' ')
-        exit 0
+        $selection = (@(Get-Content -LiteralPath $file | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' ')
     }
     $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
     $metadataExit = $LASTEXITCODE
@@ -701,7 +700,9 @@ _anvil-impact-doctest-packages:
             ForEach-Object { "$($_.name)@$($_.version)" }
     )
     [Array]::Sort($specs, [System.StringComparer]::Ordinal)
-    Write-Output ($specs -join ' ')
+    if ($null -eq $selection) { $selection = $specs -join ' ' }
+    . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+    Write-Output (ConvertTo-WorkspacePackageSelection -Selection $selection -Metadata $meta)
 
 # Private. Resolves an impact category's scope for a check recipe and echoes it on stdout.
 #   1. ANVIL_IMPACT=off            -> tier default (full-workspace / run).
@@ -732,7 +733,15 @@ _anvil-impact-include tier:
     $inputDir = if ($env:ANVIL_IMPACT -eq 'consume' -and $env:ANVIL_IMPACT_INPUT_DIR) { $env:ANVIL_IMPACT_INPUT_DIR } else { 'target/anvil/impact' }
     $file = Join-Path $inputDir "include_$tier.txt"
     if (Test-Path -LiteralPath $file -PathType Leaf) {
-        Write-Output ("$(Get-Content -Raw -LiteralPath $file)".Trim())
+        $selection = "$(Get-Content -Raw -LiteralPath $file)".Trim()
+        if ($selection -in @('', '--skip', '--workspace')) { Write-Output $selection; exit 0 }
+        # Impact artifacts cross checkout paths and operating systems. Resolve
+        # portable cache specs to source-qualified IDs on the consuming runner.
+        $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $meta = $metadataJson | ConvertFrom-Json
+        . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+        Write-Output (ConvertTo-WorkspacePackageSelection -Selection $selection -Metadata $meta)
     } elseif ($env:ANVIL_IMPACT -eq 'consume') {
         Write-Error "anvil-impact: ANVIL_IMPACT=consume but the input impact cache is missing ($file). A complete cache holds include_modified.txt, include_affected.txt and include_required.txt. The read directory is ANVIL_IMPACT_INPUT_DIR when set, otherwise target/anvil/impact -- check that variable if the path above is not where you expected. Supply a complete impact cache before scoped checks run."
         exit 1

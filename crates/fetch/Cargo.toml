@@ -174,7 +174,7 @@ hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-
 insta = { workspace = true }
 mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
-ohno = { path = "../ohno", features = ["test-util", "app-err"] }
+ohno = { workspace = true, features = ["test-util", "app-err"] }
 opentelemetry-stdout = { workspace = true, features = [
     "metrics",
 ], default-features = false }

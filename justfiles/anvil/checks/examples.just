@@ -29,13 +29,7 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if (-not $package -and $include -eq '--skip') { Write-Host 'anvil-examples: no affected packages; skipping'; exit 0 }
-    $pkgArgs = @(if ($package) { '--package'; $package } elseif ($include) { -split $include } else { '--workspace' })
-    $exampleArgs = @(if ($example) { '--example'; $example } else { '--examples' })
     $stableArgs = {{_anvil_stable_toolchain_args}}
-    & cargo @stableArgs build @pkgArgs @exampleArgs --all-features --locked
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    if (-not $run) { exit 0 }
-
     $metadataJson = & cargo @stableArgs metadata --no-deps --format-version 1
     if ($LASTEXITCODE -ne 0) { Write-Error 'anvil-examples: cargo metadata failed'; exit $LASTEXITCODE }
     try {
@@ -44,6 +38,13 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
         Write-Error "anvil-examples: could not parse cargo metadata output: $_"
         exit 1
     }
+    . (Join-Path '{{ justfile_directory() }}' 'scripts/lib/anvil-package-selection.ps1')
+    $pkgArgs = @(if ($package) { -split (ConvertTo-WorkspacePackageSelection "--package $package" $meta) } elseif ($include) { -split $include } else { '--workspace' })
+    $exampleArgs = @(if ($example) { '--example'; $example } else { '--examples' })
+    & cargo @stableArgs build @pkgArgs @exampleArgs --all-features --locked
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not $run) { exit 0 }
+
     $selectedPackages = if ($package) {
         @($package)
     } elseif ($include -and $include -ne '--workspace') {
@@ -51,7 +52,7 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
         $parts = @(-split $include)
         for ($i = 0; $i -lt $parts.Count; $i++) {
             if ($parts[$i] -eq '--package' -and ++$i -lt $parts.Count) {
-                $names.Add(($parts[$i] -split '@', 2)[0])
+                $names.Add((($parts[$i] -split '#')[-1] -split '@', 2)[0])
             }
         }
         @($names)
@@ -69,7 +70,8 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
                     Write-Host "anvil-examples: $($p.name)::$($target.name) skipped by package metadata"
                     continue
                 }
-                [pscustomobject]@{ package = $p.name; example = $target.name }
+                $source = ([string]$p.id -split '#', 2)[0]
+                [pscustomobject]@{ package = "$source#$($p.name)@$($p.version)"; example = $target.name }
             }
         }
     )

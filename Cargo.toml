@@ -206,9 +206,7 @@ observed_macros = { path = "crates/observed_macros", default-features = false, v
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.26.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.4.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.2" }
-ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.2" }
+ohno = { default-features = false, version = "0.5.2" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
@@ -420,9 +418,6 @@ wildcard_imports = "allow"
 panic = "warn"
 
 [patch.crates-io]
-# Runtime processor discovery reaches `ohno` through `cpulist`. Use the same
-# version and source as `observed` so packaging and CI selectors stay unambiguous.
-ohno = { path = "crates/ohno" }
 # `events_once` depends on the published crate. Reuse this workspace member so
 # Cargo package selectors remain unambiguous in impact-scoped CI.
 plurality = { path = "crates/plurality" }

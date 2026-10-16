@@ -73,7 +73,7 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     for ($i = 0; $i -lt $tokens.Count; $i++) {
         if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
             if ($null -eq $affected) { $affected = @() }
-            $affected += ($tokens[$i + 1] -split '@', 2)[0]
+            $affected += (($tokens[$i + 1] -split '#')[-1] -split '@', 2)[0]
             $i++
         }
     }
@@ -86,7 +86,8 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $loomTargets = @(foreach ($pkg in $pkgs) {
         foreach ($t in $pkg.targets) {
             if (($t.kind -contains 'test') -and ($t.'required-features' -contains 'loom')) {
-                [pscustomobject]@{ pkg = $pkg.name; target = $t.name }
+                $source = ([string]$pkg.id -split '#', 2)[0]
+                [pscustomobject]@{ pkg = $pkg.name; spec = "$source#$($pkg.name)@$($pkg.version)"; target = $t.name }
             }
         }
     })
@@ -112,7 +113,7 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $env:RUSTFLAGS = "--cfg loom $($env:RUSTFLAGS)".Trim()
     foreach ($lt in $loomTargets) {
         Write-Host "anvil-loom: $($lt.pkg) :: $($lt.target)"
-        & cargo {{_anvil_stable_toolchain_args}} test -p $lt.pkg --release --all-features --locked --test $lt.target -- --test-threads=1
+        & cargo {{_anvil_stable_toolchain_args}} test -p $lt.spec --release --all-features --locked --test $lt.target -- --test-threads=1
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 

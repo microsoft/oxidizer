@@ -33,7 +33,12 @@ app-err = []
 test-util = []
 
 [dependencies]
-ohno_macros = { workspace = true }
+# Other workspace crates use published ohno through the root workspace dependency,
+# without a local path or crates.io patch, so unreleased changes stay isolated.
+# Keep macro-family dependencies in their owning manifests, not the root manifest.
+# Paths support local development; exact versions keep the published family aligned.
+# Publish ohno, ohno_macros, and ohno_macros_impl together at the same version.
+ohno_macros = { path = "../ohno_macros", default-features = false, version = "=0.5.2" }
 typeid = { workspace = true }
 
 [dev-dependencies]

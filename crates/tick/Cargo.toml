@@ -72,7 +72,7 @@ futures = { workspace = true, features = ["default", "executor", "futures-execut
 insta = { workspace = true }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
-ohno = { path = "../ohno", features = ["app-err"] }
+ohno = { workspace = true, features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
