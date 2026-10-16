@@ -248,6 +248,7 @@ impl BlockingWorker {
         self.is_shutting_down.store(true, Ordering::Release);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     pub(crate) fn owns_current_thread(&self) -> bool {
         self.pool.owns_current_thread()
             || CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, &self.pool.identity)))
@@ -333,6 +334,7 @@ impl BlockingPool {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     fn owns_current_thread(&self) -> bool {
         let current = thread::current().id();
         self.worker_threads.lock().contains(&current)

@@ -102,12 +102,6 @@ fn blocking_thread_teardown_retains_wait_guard() {
 
 #[test]
 fn blocking_thread_local_owner_drop_returns_without_self_joining() {
-    if testing_aids::is_mutation_testing() {
-        // Predicate mutations are covered without deadlocking by
-        // `blocking_thread_teardown_retains_wait_guard`.
-        return;
-    }
-
     testing_aids::execute_or_abandon(|| {
         let runtime = runtime();
         let dispatcher = runtime.scheduler.dispatcher.clone();

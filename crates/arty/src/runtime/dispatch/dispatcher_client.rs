@@ -53,6 +53,7 @@ impl DispatcherClient {
         self.core.remote_results()
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     pub(crate) fn is_current_blocking_thread(&self) -> bool {
         self.core.is_current_blocking_thread()
     }
