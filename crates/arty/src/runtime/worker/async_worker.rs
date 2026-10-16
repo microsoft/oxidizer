@@ -340,13 +340,14 @@ mod tests {
             Arc::clone(&signal),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let before_registration = time.instant();
         let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
         let mut context = std::task::Context::from_waker(Waker::noop());
         assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_pending());
         control.advance(Duration::from_mins(2));
 
         assert!(worker.execute_step().is_continue());
-        assert_eq!(worker.clock_driver.advance_timers(time.instant()).unwrap(), None);
+        assert_eq!(worker.clock_driver.advance_timers(before_registration).unwrap(), None);
 
         drop(delay);
         drop(clock);
