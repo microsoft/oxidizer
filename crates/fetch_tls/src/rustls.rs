@@ -13,14 +13,13 @@ use rustls::crypto::CryptoProvider;
 
 use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
-use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
+use crate::options::{ClientAuth, SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
 /// Rustls TLS backend configuration.
 #[derive(Clone, Debug)]
 pub struct RustlsOptions {
     crypto_provider: Option<Arc<CryptoProvider>>,
     verifier_factory: Option<ServerCertVerifierFactory>,
-    client_identity_resolver: Option<Arc<dyn ResolvesClientCert>>,
 }
 
 impl RustlsOptions {
@@ -28,7 +27,6 @@ impl RustlsOptions {
         Self {
             crypto_provider: None,
             verifier_factory: None,
-            client_identity_resolver: None,
         }
     }
 
@@ -58,12 +56,12 @@ impl RustlsOptions {
             .dangerous()
             .with_custom_certificate_verifier(verifier);
 
-        let mut config = match (self.client_identity_resolver, shared.client_identity.as_ref()) {
-            (Some(resolver), _) => Ok(builder.with_client_cert_resolver(resolver)),
-            (None, Some(identity)) => builder
+        let mut config = match shared.client_auth.as_ref() {
+            Some(ClientAuth::Resolver(resolver)) => Ok(builder.with_client_cert_resolver(Arc::clone(resolver))),
+            Some(ClientAuth::Identity(identity)) => builder
                 .with_client_auth_cert(identity.cert_chain().to_vec(), identity.private_key().clone_key())
                 .map_err(BackendError::caused_by),
-            (None, None) => Ok(builder.with_no_client_auth()),
+            None => Ok(builder.with_no_client_auth()),
         }?;
         config.alpn_protocols = map_to_alpn(shared.resolved_supported_http_versions(backend_defaults))
             .iter()
@@ -151,10 +149,12 @@ impl TlsOptionsBuilder<RustlsOptions> {
     /// Sets a [`ResolvesClientCert`] for mutual TLS authentication.
     ///
     /// Use this when the private key lives behind an external signing oracle
-    /// (`HSM`, secure enclave, etc.) instead of in memory. Takes precedence
-    /// over [`TlsOptionsBuilder::client_identity`](crate::TlsOptionsBuilder::client_identity).
+    /// (`HSM`, secure enclave, etc.) instead of in memory.
+    ///
+    /// Replaces any previously configured
+    /// [`ClientIdentity`](crate::ClientIdentity).
     pub fn client_identity_resolver(mut self, resolver: Arc<dyn ResolvesClientCert>) -> Self {
-        self.backend.client_identity_resolver = Some(resolver);
+        self.shared.client_auth = Some(ClientAuth::Resolver(resolver));
         self
     }
 
@@ -211,7 +211,7 @@ mod tests {
 
     fn shared_with(identity: Option<ClientIdentity>) -> SharedOptions {
         SharedOptions {
-            client_identity: identity,
+            client_auth: identity.map(|identity| ClientAuth::Identity(Arc::new(identity))),
             ..SharedOptions::default()
         }
     }
@@ -221,7 +221,6 @@ mod tests {
         let rustls = RustlsOptions::new();
         assert!(rustls.crypto_provider.is_none());
         assert!(rustls.verifier_factory.is_none());
-        assert!(rustls.client_identity_resolver.is_none());
     }
 
     #[test]
@@ -229,7 +228,7 @@ mod tests {
         let builder = TlsOptions::builder_rustls();
         assert!(builder.backend.crypto_provider.is_none());
         assert!(builder.backend.verifier_factory.is_none());
-        assert!(builder.backend.client_identity_resolver.is_none());
+        assert!(builder.shared.client_auth.is_none());
     }
 
     #[test]
@@ -250,7 +249,6 @@ mod tests {
                 CALLED.store(true, Ordering::SeqCst);
                 Arc::new(AcceptAll)
             })),
-            client_identity_resolver: None,
         };
         rustls_backend.build(&crate::TlsBackendBuilder::new(), &shared_with(None)).unwrap();
         assert!(CALLED.load(Ordering::SeqCst));
@@ -266,7 +264,7 @@ mod tests {
     fn client_identity_sets_identity_in_shared() {
         let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
         let builder = TlsOptions::builder_rustls().client_identity(identity);
-        assert!(builder.shared.client_identity.is_some());
+        assert!(matches!(builder.shared.client_auth, Some(ClientAuth::Identity(_))));
     }
 
     #[test]
@@ -279,7 +277,7 @@ mod tests {
     fn new_rustls_produces_rustls_tls_options() {
         let tls = TlsOptions::new_rustls();
         assert!(matches!(tls.inner, TlsOptionsKind::Rustls(_)));
-        assert!(tls.shared.client_identity.is_none());
+        assert!(tls.shared.client_auth.is_none());
     }
 
     #[test]
@@ -293,7 +291,6 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: None,
         };
         let config = rustls_backend
             .build(
@@ -310,11 +307,10 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: None,
         };
         let shared = SharedOptions {
             supported_http_versions: Some(vec![http::Version::HTTP_11]),
-            client_identity: None,
+            client_auth: None,
         };
         let config = rustls_backend
             .build(
@@ -332,7 +328,6 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: None,
         };
         let err = rustls_backend
             .build(
@@ -371,7 +366,6 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: Some(provider()),
             verifier_factory: None,
-            client_identity_resolver: None,
         };
         let err = rustls_backend
             .build(&crate::TlsBackendBuilder::new(), &shared_with(None))
@@ -386,7 +380,6 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: Some(provider()),
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: None,
         };
         rustls_backend
             .build(
@@ -422,13 +415,13 @@ mod tests {
         );
         let tls = TlsOptions::from(Arc::clone(&config));
         assert!(matches!(tls.inner, TlsOptionsKind::PreConfigured(_)));
-        assert!(tls.shared.client_identity.is_none());
+        assert!(tls.shared.client_auth.is_none());
     }
 
     #[test]
     fn client_identity_resolver_stores_resolver() {
         let builder = TlsOptions::builder_rustls().client_identity_resolver(Arc::new(StubResolver));
-        assert!(builder.backend.client_identity_resolver.is_some());
+        assert!(matches!(builder.shared.client_auth, Some(ClientAuth::Resolver(_))));
     }
 
     #[test]
@@ -437,34 +430,36 @@ mod tests {
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: Some(Arc::new(StubResolver)),
         };
         rustls_backend
             .build(
                 &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
-                &shared_with(None),
+                &SharedOptions {
+                    client_auth: Some(ClientAuth::Resolver(Arc::new(StubResolver))),
+                    ..SharedOptions::default()
+                },
             )
             .unwrap();
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
-    fn build_resolver_takes_precedence_over_identity() {
-        // Identity bytes are intentionally invalid; if precedence is wrong,
-        // build would error trying to parse them. The resolver path skips
-        // identity parsing entirely.
+    fn client_identity_resolver_replaces_identity() {
         let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
-        let rustls_backend = RustlsOptions {
-            crypto_provider: None,
-            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: Some(Arc::new(StubResolver)),
-        };
-        rustls_backend
-            .build(
-                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
-                &shared_with(Some(identity)),
-            )
-            .unwrap();
+        let builder = TlsOptions::builder_rustls()
+            .client_identity(identity)
+            .client_identity_resolver(Arc::new(StubResolver));
+
+        assert!(matches!(builder.shared.client_auth, Some(ClientAuth::Resolver(_))));
+    }
+
+    #[test]
+    fn client_identity_replaces_resolver() {
+        let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
+        let builder = TlsOptions::builder_rustls()
+            .client_identity_resolver(Arc::new(StubResolver))
+            .client_identity(identity);
+
+        assert!(matches!(builder.shared.client_auth, Some(ClientAuth::Identity(_))));
     }
 
     #[test]
