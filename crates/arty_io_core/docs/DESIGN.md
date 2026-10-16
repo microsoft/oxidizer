@@ -46,11 +46,9 @@ Each context registration uses one driver role on every async worker:
 - A **primary** driver may wait inside `execute_cycle`.
 - A **secondary** driver must return from `execute_cycle` without waiting.
 
-The runtime passes the roles still available through
-`DriverOptions::allowed_roles`. The context selects one of them and returns it
-in `DriverInstance`. A registration must use the same role on every async
-worker. Once one registration uses the primary role, later registrations can
-only use the secondary role.
+The runtime assigns the first context type the primary role and later context
+types the secondary role. It passes the assigned role through
+`DriverOptions::role`.
 
 An async worker invokes secondary drivers first with
 `Cycle::max_wait() == Duration::ZERO`. A secondary either processes completions
@@ -72,10 +70,8 @@ need a separate wake for later completions because its next `execute_cycle`
 call performs the worker's I/O wait.
 
 `Driver::waker` serves the opposite direction. The runtime calls it to make a
-waiting `execute_cycle` return promptly. Any wake before or during a wait applies
-to that wait. If no wait is active, the wake remains latched for the next wait,
-regardless of how much time passes before the wait starts. The driver may process
-ready completions after waking; the requirement is that it stop waiting promptly.
+waiting `execute_cycle` return promptly. A wake immediately before the wait must
+remain latched for that wait.
 
 ## Processing completions
 
@@ -93,28 +89,10 @@ When the runtime shuts down an async worker, it stops calling
 `execute_cycle` and synchronously calls `Driver::shutdown` for every driver
 owned by that worker.
 
-Each driver closes its context to new operations. Operations still in flight are
-no longer assumed to be valuable and may be cancelled or disrupted instead of
-being drained. Any remaining cleanup must use the driver's own means of making
-progress; it cannot require another driver on the same async worker to run. The
-driver chooses a finite time limit and returns an error instead of waiting
-forever.
-
-Shutdown is best effort. When a driver returns a shutdown error, the runtime
-reports it and attempts `shutdown` on the remaining drivers. This includes the
-driver whose `execute_cycle` failed and every driver of an unpublished
-registration that was created successfully, including drivers that finish
-creation after another worker reports the failure. A failed `IoContext::driver`
-call returns no driver; that implementation cleans up its own partial
-construction.
-
-This contract does not convert panics from driver teardown, custom wakers,
-diagnostics, cleanup hooks, poisoned state, or failed invariants into
-`DriverError`, and it does not promise that shutdown continues after such a
-panic. Driver implementations must not panic from those paths. Panic conversion
-is a runtime policy for runtime-owned user execution bodies, not a driver
-lifecycle guarantee. Context values may outlive their drivers, but they remain
-closed and reject new operations after normal shutdown control flow.
+Each driver closes its context to new operations and may cancel or disrupt
+operations still in flight. Cleanup must make progress independently and use a
+finite limit. The runtime reports returned errors and attempts to shut down the
+remaining drivers.
 
 ## Scope
 
