@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+use std::task::Waker;
 
 use thread_aware::{Thread, ThreadAware};
 
@@ -42,22 +43,49 @@ pub struct Shared;
 ///   [`ThreadAware`].
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
-/// its associated [`ClockDriver`]. The driver is responsible for advancing timers and must
-/// be called periodically by the runtime.
+/// its associated [`ClockDriver`]. Pass the runtime's driver waker so a newly registered earlier
+/// timer can interrupt the current wait.
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```no_run
+/// use std::sync::Arc;
+/// use std::task::{Wake, Waker};
+/// use std::thread;
+/// use std::time::Instant;
+///
 /// use tick::runtime::InactiveClock;
 ///
+/// struct DriverWake(thread::Thread);
+///
+/// impl Wake for DriverWake {
+///     fn wake(self: Arc<Self>) {
+///         self.0.unpark();
+///     }
+///
+///     fn wake_by_ref(self: &Arc<Self>) {
+///         self.0.unpark();
+///     }
+/// }
+///
 /// let inactive = InactiveClock::default();
-/// let (clock, driver) = inactive.activate();
+/// let driver_waker = Waker::from(Arc::new(DriverWake(thread::current())));
+/// let (clock, mut driver) = inactive.activate(driver_waker);
 ///
 /// // Use the clock for time operations
 /// let now = clock.instant();
 ///
-/// // Driver must be advanced periodically (typically by the runtime)
-/// // driver.advance_timers(std::time::Instant::now());
+/// // A real runtime loop advances the driver, then parks until the deadline or until
+/// // registration of the first timer (or a newly earlier timer) invokes driver_waker.
+/// loop {
+///     match driver.advance_timers(Instant::now()) {
+///         Ok(Some(deadline)) => {
+///             thread::park_timeout(deadline.saturating_duration_since(Instant::now()))
+///         }
+///         Ok(None) => thread::park(),
+///         Err(_) => break,
+///     }
+/// }
 /// ```
 ///
 /// # Thread-aware isolated runtimes
@@ -120,7 +148,9 @@ impl<S> InactiveClock<S> {
     /// Activates the clock for time operations.
     ///
     /// Consumes this inactive clock and returns a working [`Clock`] instance along with
-    /// its [`ClockDriver`]. The driver must be called periodically to advance timers.
+    /// its [`ClockDriver`]. Registering the first system timer, or a timer that precedes the
+    /// current earliest deadline, invokes `driver_waker`, allowing the runtime to interrupt its
+    /// existing wait.
     ///
     /// # Returns
     ///
@@ -128,10 +158,11 @@ impl<S> InactiveClock<S> {
     /// - [`Clock`] - The activated clock instance for time operations
     /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
     #[must_use]
-    pub fn activate(self) -> (Clock, ClockDriver) {
+    pub fn activate(self, driver_waker: Waker) -> (Clock, ClockDriver) {
+        let driver_id = self.state.register_driver(driver_waker);
         let state = self.state;
         let clock = Clock::new(state.clone());
-        let driver = ClockDriver::new(state);
+        let driver = ClockDriver::new(state, driver_id);
 
         (clock, driver)
     }
@@ -144,45 +175,5 @@ impl From<crate::ClockControl> for InactiveClock<Isolated> {
             state: ClockState::ClockControl(control),
             _marker: PhantomData,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
-
-    use super::*;
-    use crate::ClockControl;
-
-    #[test]
-    fn assert_types() {
-        assert_impl_all!(InactiveClock: Send, Sync, Clone);
-        assert_impl_all!(InactiveClock<Shared>: Send, Sync);
-        assert_not_impl_any!(InactiveClock<Shared>: Clone);
-    }
-
-    #[test]
-    fn activate_ok() {
-        let inactive_clock = InactiveClock::default();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_shared_ok() {
-        let inactive_clock = InactiveClock::new_shared();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_with_fake_clock_ok() {
-        let inactive_clock = InactiveClock::from(ClockControl::new());
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::ClockControl(_)));
-        assert!(matches!(&driver.state, &ClockState::ClockControl(_)));
     }
 }

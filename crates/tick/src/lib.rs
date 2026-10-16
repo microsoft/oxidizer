@@ -325,6 +325,8 @@ mod state;
 mod stopwatch;
 mod system_time_ext;
 mod timers;
+#[cfg(any(feature = "tokio", test))]
+mod tokio;
 
 pub mod runtime;
 pub(crate) mod timeout;

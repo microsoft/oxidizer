@@ -186,6 +186,19 @@ pub struct Clock {
     time: SimpleClock,
 }
 
+#[cfg(any(feature = "test-util", test))]
+struct TestTimerRegistration<'a> {
+    clock: &'a Clock,
+    key: TimerKey,
+}
+
+#[cfg(any(feature = "test-util", test))]
+impl Drop for TestTimerRegistration<'_> {
+    fn drop(&mut self) {
+        self.clock.unregister_timer(self.key);
+    }
+}
+
 impl std::fmt::Debug for Clock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match &self.state {
@@ -209,50 +222,10 @@ impl ThreadAware for Clock {
 }
 
 impl Clock {
-    /// Creates a new clock driven by the Tokio runtime.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called outside of a Tokio runtime context.
-    #[cfg(any(feature = "tokio", test))]
-    #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub fn new_tokio() -> Self {
-        Self::new_tokio_core().0
-    }
-
-    pub(crate) fn new(state: ClockState) -> Self {
-        Self {
-            time: SimpleClock::from_state(&state),
-            state,
-        }
-    }
-
-    #[cfg(any(feature = "tokio", test))]
-    fn new_tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
-        /// How often the Tokio clock driver advances timers.
-        ///
-        /// A 10ms resolution balances precision with runtime overhead for the
-        /// background task that drives timer advancement in Tokio.
-        const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
-
-        // The Tokio clock is driven by a single background task that advances a shared timer
-        // set. We use the `Shared` inactive-clock variant which intentionally does not support
-        // cloning or per-core relocation, since both would create configurations the single
-        // background driver could not advance correctly.
-        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate();
-
-        let join_handle = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(TIMER_RESOLUTION).await;
-
-                if driver.advance_timers(Instant::now()).is_err() {
-                    break;
-                }
-            }
-        });
-
-        (clock, join_handle)
+    pub(crate) fn new(mut state: ClockState) -> Self {
+        let time = SimpleClock::from_state(&state);
+        state.activate_clock_owner();
+        Self { state, time }
     }
 
     /// Used for testing. For this clock, timers do not advance.
@@ -497,6 +470,30 @@ impl Clock {
         crate::Stopwatch::new(self)
     }
 
+    /// Registers a system timer at an absolute deadline for runtime integration tests.
+    ///
+    /// The returned guard unregisters the timer when dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this clock is controlled rather than system-backed.
+    #[doc(hidden)]
+    #[cfg(any(feature = "test-util", test))]
+    #[must_use]
+    #[expect(
+        clippy::panic,
+        reason = "the test-only absolute registration helper is valid only for system clocks"
+    )]
+    pub fn register_system_timer_at_for_test(&self, when: Instant) -> impl Drop + '_ {
+        let ClockState::System(storage) = self.clock_state() else {
+            panic!("absolute system timer registration requires a system clock");
+        };
+        TestTimerRegistration {
+            clock: self,
+            key: storage.register_timer(when, Waker::noop().clone()),
+        }
+    }
+
     /// Returns time in the same comparison domain used to advance this clock's timers.
     ///
     /// Controlled timers must follow their manually advanced clock. System timers must instead
@@ -514,7 +511,7 @@ impl Clock {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.register_timer(when, waker),
-            ClockState::System(timers) => timers.with_timers(|t| t.register(when, waker)),
+            ClockState::System(storage) => storage.register_timer(when, waker),
         }
     }
 
@@ -522,7 +519,7 @@ impl Clock {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.unregister_timer(key),
-            ClockState::System(timers) => timers.with_timers(|t| t.unregister(key)),
+            ClockState::System(storage) => storage.with_timers(|timers| timers.unregister(key)),
         }
     }
 
@@ -571,64 +568,12 @@ impl From<&Clock> for SimpleClock {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
-
-    use std::fmt::Debug;
-    use std::task::Context;
-    use std::thread::sleep;
-
-    use futures::FutureExt;
-    use thread_aware::Relocator;
-
     use super::*;
-    use crate::ClockControl;
-    use crate::runtime::InactiveClock;
-
-    static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
-
-    #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(Clock: Send, Sync, AsRef<Clock>);
-    }
-
-    #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.
-    #[test]
-    fn test_now() {
-        let now = std::time::SystemTime::now();
-
-        let clock = Clock::new_system_frozen();
-        let absolute = clock.system_time();
-        assert!(absolute >= now);
-    }
-
-    #[test]
-    fn test_now_with_control() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-
-        let now = clock.system_time();
-        assert_eq!(now, control.system_time());
-
-        () = control.advance(Duration::from_secs(10));
-
-        assert_eq!(clock.system_time(), now.checked_add(Duration::from_secs(10)).unwrap());
-    }
-
-    #[test]
-    fn test_instant_now() {
-        let clock = Clock::new_system_frozen();
-        let clock_instant = clock.instant();
-        let system_instant = Instant::now();
-
-        assert!(
-            (system_instant.duration_since(clock_instant)) < Duration::from_secs(10),
-            "the `Instant` retrieved from the clock is not the same as the system one"
-        );
-    }
 
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
-    fn test_configured_fast_instant_now() {
+    fn private_simple_clock_state_tracks_fast_instant_configuration() {
+        // The selected private `TimeKind` variant is not observable through public behavior.
         let precise_clock = Clock::new_system_frozen();
         let fast_clock = precise_clock.clone().with_fast_instant(true);
 
@@ -638,243 +583,15 @@ mod tests {
         _ = fast_clock.instant();
     }
 
-    #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.
-    #[test]
-    fn test_system_time() {
-        let now = std::time::SystemTime::now();
-
-        let clock = Clock::new_system_frozen();
-        let system_time = clock.system_time();
-        assert!(system_time >= now);
-    }
-
-    #[test]
-    fn test_system_time_with_control() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-
-        let system_time = clock.system_time();
-        assert_eq!(system_time, control.system_time());
-
-        () = control.advance(Duration::from_secs(10));
-
-        assert_eq!(clock.system_time(), control.system_time());
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_timers_advancing() {
-        let clock = Clock::new_tokio();
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_timers_advancing_after_relocate() {
-        // Relocation must be a no-op for Tokio clocks: the background driver task drives a
-        // shared timer set, so a relocated clone must still observe timers being advanced.
-        let clock = Clock::new_tokio();
-        let mut clock = clock;
-        _ = Relocator::between_numa_nodes().relocate(&mut clock);
-        clock.delay(Duration::from_millis(15)).await;
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[tokio::test]
-    async fn tokio_ensure_future_finished_when_clock_dropped() {
-        let (clock, handle) = Clock::new_tokio_core();
-
-        clock.delay(Duration::from_millis(15)).await;
-
-        drop(clock);
-
-        handle.await.unwrap();
-    }
-
-    #[test]
-    fn new_frozen_ok() {
-        let clock = Clock::new_frozen();
-
-        let now = clock.system_time();
-        let instant = clock.instant();
-
-        sleep(Duration::from_micros(1));
-
-        // The frozen clock should return the same timestamp and instant on every call
-        assert_eq!(now, clock.system_time());
-        assert_eq!(instant, clock.instant());
-    }
-
-    #[test]
-    fn new_frozen_at_ok() {
-        let specific_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let clock = Clock::new_frozen_at(specific_time);
-
-        let timestamp = clock.system_time();
-        let system_time = clock.system_time();
-
-        sleep(Duration::from_micros(1));
-
-        // The frozen clock should return the same timestamp and system time on every call
-        assert_eq!(system_time, specific_time);
-        assert_eq!(timestamp, clock.system_time());
-        assert_eq!(system_time, clock.system_time());
-    }
-
-    #[test]
-    #[should_panic(expected = "target type cannot represent the current SystemTime")]
-    fn system_time_as_panics_on_conversion_failure() {
-        /// A newtype that always fails conversion from `SystemTime`.
-        struct AlwaysFailsConversion;
-
-        impl TryFrom<SystemTime> for AlwaysFailsConversion {
-            type Error = &'static str;
-
-            fn try_from(_: SystemTime) -> Result<Self, Self::Error> {
-                Err("conversion always fails")
-            }
-        }
-
-        let clock = Clock::new_frozen();
-        let _: AlwaysFailsConversion = clock.system_time_as();
-    }
-
-    #[test]
-    fn as_ref_ok() {
-        let clock = Clock::new_frozen();
-        let _: &Clock = clock.as_ref();
-    }
-
-    #[test]
-    fn owners_count() {
-        let (clock, driver) = InactiveClock::default().activate();
-
-        assert!(!clock.state.is_unique());
-        drop(clock);
-        assert!(driver.state.is_unique());
-    }
-
-    #[test]
-    fn owners_count_clock_control() {
-        let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
-
-        assert!(!driver.state.is_unique());
-        drop(clock);
-        assert!(driver.state.is_unique());
-    }
-
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn thread_aware() {
-        // root clock
-        let root = InactiveClock::default();
-
-        let mut inactive_1 = root.clone();
-        let mut inactive_2 = root;
-        let (source, thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
-        let thread_1 = source.as_ref().unwrap();
-        inactive_1.relocate(source.as_ref(), thread_1);
-
-        let (clock_1, mut driver_1) = inactive_1.activate();
-        let (clock_2, mut driver_2) = inactive_2.activate();
-
-        // register the timer on clock 1
-        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
-        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
-        assert_eq!(clock_1.state.timers_len(), 1);
-        assert_eq!(clock_2.state.timers_len(), 0);
-        assert_eq!(driver_1.state.timers_len(), 1);
-        assert_eq!(driver_2.state.timers_len(), 0);
-        {
-            let mut relocated_clock = clock_1.clone();
-            relocated_clock.relocate(source.as_ref(), &thread_2);
-            assert_eq!(relocated_clock.state.timers_len(), 0);
-        }
-
-        // register the timer on clock 2
-        let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
-        _ = fut_2.poll_unpin(&mut Context::from_waker(Waker::noop()));
-        assert_eq!(clock_1.state.timers_len(), 1);
-        assert_eq!(clock_2.state.timers_len(), 1);
-        assert_eq!(driver_1.state.timers_len(), 1);
-        assert_eq!(driver_2.state.timers_len(), 1);
-
-        // advance timers
-        driver_1.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
-        assert_eq!(driver_1.state.timers_len(), 0);
-        assert_eq!(driver_2.state.timers_len(), 1);
-        driver_2.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
-        assert_eq!(driver_2.state.timers_len(), 0);
-
-        drop(fut_1);
-        drop(fut_2);
-
-        // drop clock
-        drop(clock_1);
-        driver_1.advance_timers(Instant::now()).unwrap_err();
-        driver_2.advance_timers(Instant::now()).unwrap();
-        drop(clock_2);
-        driver_2.advance_timers(Instant::now()).unwrap_err();
-    }
-
-    #[test]
-    fn thread_aware_clock_control() {
-        // root clock
-        let root: InactiveClock = ClockControl::default().into();
-
-        let mut inactive_1 = root.clone();
-        let mut inactive_2 = root;
-        let (source, _thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
-        let thread_1 = source.as_ref().unwrap();
-        inactive_1.relocate(source.as_ref(), thread_1);
-
-        let (clock_1, driver_1) = inactive_1.activate();
-        let (clock_2, driver_2) = inactive_2.activate();
-
-        // register the timer on clock 1 also affects clock 2 because clock control is shared
-        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
-        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
-        assert_eq!(clock_1.state.timers_len(), 1);
-        assert_eq!(clock_2.state.timers_len(), 1);
-        assert_eq!(driver_1.state.timers_len(), 1);
-        assert_eq!(driver_2.state.timers_len(), 1);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn debug_system_clock() {
+    fn private_system_constructor_debug_output_reports_an_inactive_driver() {
+        // No supported public API creates a system clock without activating its driver.
         let clock = Clock::new_system_frozen();
 
-        insta::assert_debug_snapshot!(clock);
-    }
-
-    #[tokio::test]
-    #[cfg_attr(miri, ignore)]
-    async fn debug_alive_system_clock() {
-        let clock = Clock::new_tokio();
-
-        clock.delay(Duration::from_millis(1)).await;
-
-        insta::assert_debug_snapshot!(clock);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn debug_controlled_clock() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        insta::assert_debug_snapshot!(clock);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn debug_clock_with_timers() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-
-        control.register_timer(Instant::now() + Duration::from_secs(100), Waker::noop().clone());
-        control.register_timer(Instant::now() + Duration::from_secs(200), Waker::noop().clone());
-
-        insta::assert_debug_snapshot!(clock);
+        assert_eq!(
+            format!("{clock:#?}"),
+            "Clock {\n    kind: \"system\",\n    timers: 0,\n    alive: false,\n    ..\n}"
+        );
     }
 }

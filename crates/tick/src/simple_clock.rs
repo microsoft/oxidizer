@@ -250,28 +250,12 @@ impl AsRef<Self> for SimpleClock {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
-    use crate::ClockControl;
-
-    #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
-    }
 
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
-    fn instant_advances() {
-        let clock = SimpleClock::new_system();
-        let first = clock.instant();
-        let second = clock.instant();
-        assert!(second >= first);
-    }
-
-    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
-    #[test]
-    fn configured_fast_instant_is_clone_local() {
+    fn private_time_kind_tracks_clone_local_fast_instant_configuration() {
+        // The selected private `TimeKind` variant is not observable through the public API.
         let precise_clock = SimpleClock::new_system();
         let fast_clock = precise_clock.clone().with_fast_instant(true);
         let precise_again = fast_clock.clone().with_fast_instant(false);
@@ -282,86 +266,8 @@ mod tests {
 
         _ = fast_clock.system_time();
         _ = fast_clock.instant();
-    }
 
-    #[test]
-    fn fast_instant_configuration_does_not_affect_controlled_clock() {
-        let control = ClockControl::new();
-        let clock = control.to_simple_clock().with_fast_instant(true);
-        let start = clock.instant();
-
-        control.advance(Duration::from_secs(5));
-
-        assert_eq!(clock.instant().duration_since(start), Duration::from_secs(5));
-    }
-
-    #[test]
-    fn controlled_time_is_governed_by_clock_control() {
-        let control = ClockControl::new();
-        let clock = control.to_simple_clock();
-
-        let start = clock.system_time();
-        control.advance(Duration::from_secs(5));
-
-        assert_eq!(clock.system_time(), start.checked_add(Duration::from_secs(5)).unwrap());
-    }
-
-    #[test]
-    fn stopwatch_from_simple_clock() {
-        let control = ClockControl::new();
-        let clock = control.to_simple_clock();
-
-        let watch = clock.stopwatch();
-        control.advance(Duration::from_secs(1));
-
-        assert_eq!(watch.elapsed(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn new_frozen_does_not_advance() {
-        let clock = SimpleClock::new_frozen();
-
-        let system_time = clock.system_time();
-        let instant = clock.instant();
-
-        assert_eq!(system_time, clock.system_time());
-        assert_eq!(instant, clock.instant());
-    }
-
-    #[test]
-    fn new_frozen_at_uses_given_time() {
-        let specific = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let clock = SimpleClock::new_frozen_at(specific);
-
-        assert_eq!(clock.system_time(), specific);
-    }
-
-    #[test]
-    fn from_clock_control_is_controlled() {
-        let control = ClockControl::new();
-        let owned: SimpleClock = SimpleClock::from(control.clone());
-        let borrowed: SimpleClock = SimpleClock::from(&control);
-
-        let start = owned.system_time();
-        control.advance(Duration::from_secs(3));
-
-        let expected = start.checked_add(Duration::from_secs(3)).unwrap();
-        assert_eq!(owned.system_time(), expected);
-        assert_eq!(borrowed.system_time(), expected);
-    }
-
-    #[test]
-    fn from_clock_preserves_controlled_time() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-
-        let from_ref: SimpleClock = SimpleClock::from(&clock);
-        let from_owned: SimpleClock = SimpleClock::from(clock);
-
-        control.advance(Duration::from_secs(2));
-        let expected = control.to_simple_clock().system_time();
-
-        assert_eq!(from_ref.system_time(), expected);
-        assert_eq!(from_owned.system_time(), expected);
+        let controlled_clock = SimpleClock::new_frozen().with_fast_instant(true);
+        assert!(!controlled_clock.uses_fast_instant());
     }
 }

@@ -20,11 +20,16 @@ use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
-/// If we have nothing to do, we wait for something to happen for this long before executing
-/// another executor cycle (just in case something has showed up that we did not notice).
-const SUSPEND_SLEEP_DURATION: Duration = Duration::from_millis(1);
+/// Maximum idle wait before a fail-safe executor cycle.
+const SUSPEND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 const COMMANDS_PER_CYCLE: usize = 256;
+
+fn suspend_wait(next_timer: Option<Instant>, now: Instant) -> Duration {
+    next_timer
+        .map_or(SUSPEND_POLL_INTERVAL, |deadline| deadline.saturating_duration_since(now))
+        .min(SUSPEND_POLL_INTERVAL)
+}
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
@@ -88,6 +93,8 @@ pub(crate) struct AsyncWorker {
     clock_driver: ClockDriver,
 
     signal: Arc<WorkerSignal>,
+    #[cfg(test)]
+    now_override: Option<Instant>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -101,11 +108,12 @@ impl AsyncWorker {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
-        let (clock, clock_driver) = clock.activate();
+        let worker_waker = WorkerSignal::waker(&signal);
+        let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let shutdown_signal = dispatcher.shutdown_signal();
 
         let executor = Executor::builder()
-            .owner_waker(WorkerSignal::waker(&signal))
+            .owner_waker(worker_waker)
             .sink(blocking_worker.sink().clone())
             .build();
         let tasks = executor.tasks();
@@ -122,6 +130,8 @@ impl AsyncWorker {
             clock_driver,
             blocking_worker,
             signal,
+            #[cfg(test)]
+            now_override: None,
             _single_threaded: PhantomData,
         }
     }
@@ -163,16 +173,44 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
 
-        // Advances the timers registered with the clock.
-        _ = self.clock_driver.advance_timers(Instant::now());
+        let advance_now = {
+            #[cfg(test)]
+            {
+                self.now_for_test()
+            }
+            #[cfg(not(test))]
+            {
+                Instant::now()
+            }
+        };
+        let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
-            // Retain the donor's timer cadence, including externally controlled clocks.
             // A notification arriving before this wait is retained by WorkerSignal.
-            self.signal.wait(SUSPEND_SLEEP_DURATION);
+            let wait_now = {
+                #[cfg(test)]
+                {
+                    self.now_for_test()
+                }
+                #[cfg(not(test))]
+                {
+                    Instant::now()
+                }
+            };
+            self.signal.wait(suspend_wait(next_timer, wait_now));
         }
 
         ControlFlow::Continue(())
+    }
+
+    #[cfg(test)]
+    fn now_for_test(&self) -> Instant {
+        self.now_override.unwrap_or_else(Instant::now)
+    }
+
+    #[cfg(test)]
+    fn set_now_for_test(&mut self, now: Instant) {
+        self.now_override = Some(now);
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
@@ -247,6 +285,7 @@ mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
     #[cfg(not(miri))]
     use std::task::{Wake, Waker};
     use std::thread;
@@ -266,6 +305,77 @@ mod tests {
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::BoxedRemoteFutureFactory;
+
+    #[test]
+    fn private_suspend_wait_uses_timer_deadline_and_caps_fail_safe_polling() {
+        // The exact wait calculation is private worker-loop policy; public timer wake and
+        // completion behavior is covered by integration tests in `tests/time.rs`.
+        let now = Instant::now();
+
+        assert_eq!(suspend_wait(None, now), SUSPEND_POLL_INTERVAL);
+        assert_eq!(
+            suspend_wait(Some(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1)), now),
+            SUSPEND_POLL_INTERVAL
+        );
+        assert_eq!(suspend_wait(Some(now + Duration::from_millis(20)), now), Duration::from_millis(20));
+        assert_eq!(
+            suspend_wait(
+                Some(
+                    now.checked_sub(Duration::from_millis(1))
+                        .expect("the current instant supports a 1 ms subtraction")
+                ),
+                now
+            ),
+            Duration::ZERO
+        );
+    }
+    #[test]
+    fn earlier_timer_notification_interrupts_an_established_worker_wait() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::clone(&signal),
+        );
+        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let fixed_now = Instant::now();
+        worker.set_now_for_test(fixed_now);
+        let long_timer = clock.register_system_timer_at_for_test(fixed_now + Duration::from_secs(5));
+
+        // Consume the notification produced by the first timer registration.
+        assert!(worker.execute_step().is_continue());
+
+        let (wait_started, wait_observed) = mpsc::channel();
+        signal.observe_next_blocking_wait(wait_started);
+        let (wait_completed, wait_outcome) = mpsc::channel();
+        signal.observe_next_wait_completion(wait_completed);
+        signal.require_next_wait_notification(testing_aids::TEST_TIMEOUT);
+        let (release_short_timer, hold_short_timer) = mpsc::channel();
+        let registering_clock = clock.clone();
+        let registering = thread::spawn(move || {
+            assert_eq!(
+                wait_observed.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(),
+                SUSPEND_POLL_INTERVAL
+            );
+            let short_timer = registering_clock.register_system_timer_at_for_test(fixed_now + Duration::from_millis(20));
+            hold_short_timer.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+            drop(short_timer);
+        });
+
+        // The short registration must notify the worker out of its established long wait.
+        assert!(worker.execute_step().is_continue());
+        assert!(wait_outcome.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap());
+
+        release_short_timer.send(()).unwrap();
+        registering.join().unwrap();
+        drop(long_timer);
+        drop(clock);
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker.run();
+    }
 
     trait TestTaskSetExt {
         fn add_test<F, R>(&self, future: F) -> ExecutorJoinHandle<R>
