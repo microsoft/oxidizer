@@ -322,10 +322,13 @@ mod tests {
         let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
         let mut context = std::task::Context::from_waker(Waker::noop());
         assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_pending());
-        control.advance(Duration::from_mins(2));
+        let control = control.auto_advance_timers(true);
+        WorkerSignal::waker(&signal).wake_by_ref();
 
         assert!(worker.execute_step().is_continue());
-        assert_eq!(worker.clock_driver.advance_timers(before_registration).unwrap(), None);
+        let _control = control.auto_advance_timers(false);
+        assert_eq!(time.instant().duration_since(before_registration), Duration::from_mins(1));
+        assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_ready());
 
         drop(delay);
         drop(clock);
