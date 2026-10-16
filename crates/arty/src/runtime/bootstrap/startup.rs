@@ -25,9 +25,9 @@ use crate::runtime::telemetry::events::{
 };
 use crate::runtime::thread::spawn;
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
+use crate::runtime::worker::{AsyncWorker, WorkerClock};
 
 pub(crate) fn build(
     processor_config: RuntimeConfig,
@@ -207,9 +207,11 @@ impl AsyncWorkerStartInfo {
             BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
 
         let signal = Arc::new(WorkerSignal::default());
+        let worker_waker = WorkerSignal::waker(&signal);
+        let clock = WorkerClock::activate(clock, worker_waker.clone());
 
         worker_endpoint_tx
-            .send((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
+            .send((worker_waker, current.clone(), Arc::clone(&blocking_worker)))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have

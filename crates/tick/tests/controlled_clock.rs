@@ -461,10 +461,10 @@ fn controlled_clock_relocation_keeps_shared_time_and_timers() {
     inactive_1.relocate(source.as_ref(), thread_1);
     let (clock_1, _driver_1) = inactive_1.activate(Waker::noop().clone());
     let (clock_2, _driver_2) = inactive_2.activate(Waker::noop().clone());
-    let first_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
-    let second_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
-    let first_waker = Waker::from(Arc::clone(&first_wakes));
-    let second_waker = Waker::from(Arc::clone(&second_wakes));
+    let first_notifications = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let second_notifications = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let first_waker = Waker::from(Arc::clone(&first_notifications));
+    let second_waker = Waker::from(Arc::clone(&second_notifications));
     let mut first_context = Context::from_waker(&first_waker);
     let mut second_context = Context::from_waker(&second_waker);
     let mut first_delay = std::pin::pin!(clock_1.delay(Duration::from_secs(1)));
@@ -476,7 +476,10 @@ fn controlled_clock_relocation_keeps_shared_time_and_timers() {
     control.advance(Duration::from_secs(1));
 
     assert_eq!(
-        (first_wakes.0.load(Ordering::Relaxed), second_wakes.0.load(Ordering::Relaxed)),
+        (
+            first_notifications.0.load(Ordering::Relaxed),
+            second_notifications.0.load(Ordering::Relaxed)
+        ),
         (1, 1)
     );
     assert_eq!(

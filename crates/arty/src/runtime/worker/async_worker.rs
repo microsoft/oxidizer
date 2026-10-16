@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::Waker;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
@@ -13,6 +14,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::Thread;
 use tick::runtime::{ClockDriver, InactiveClock};
+use tick::{Clock, SimpleClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
@@ -29,6 +31,27 @@ fn suspend_wait(next_timer: Option<Instant>, now: Instant) -> Duration {
     next_timer
         .map_or(SUSPEND_POLL_INTERVAL, |deadline| deadline.saturating_duration_since(now))
         .min(SUSPEND_POLL_INTERVAL)
+}
+
+#[derive(Debug)]
+pub(crate) struct WorkerClock {
+    clock: Clock,
+    driver: ClockDriver,
+    time: SimpleClock,
+}
+
+impl WorkerClock {
+    pub(crate) fn activate(clock: InactiveClock, waker: Waker) -> Self {
+        let (clock, driver) = clock.activate(waker);
+        let time = clock.simple_clock().clone();
+        Self { clock, driver, time }
+    }
+
+    #[cfg(test)]
+    fn activate_with_time(clock: InactiveClock, waker: Waker, time: SimpleClock) -> Self {
+        let (clock, driver) = clock.activate(waker);
+        Self { clock, driver, time }
+    }
 }
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
@@ -92,9 +115,8 @@ pub(crate) struct AsyncWorker {
     // This drives moves the timers registered with the clock forward.
     clock_driver: ClockDriver,
 
+    time: SimpleClock,
     signal: Arc<WorkerSignal>,
-    #[cfg(test)]
-    now_override: Option<Instant>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -105,12 +127,16 @@ impl AsyncWorker {
         thread: Thread,
         sink: Sink,
         blocking_worker: Arc<BlockingWorker>,
-        clock: InactiveClock,
+        clock: WorkerClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
-        let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let shutdown_signal = dispatcher.shutdown_signal();
+        let WorkerClock {
+            clock,
+            driver: clock_driver,
+            time,
+        } = clock;
 
         let executor = Executor::builder()
             .owner_waker(worker_waker)
@@ -128,10 +154,9 @@ impl AsyncWorker {
             executor: Some(executor),
             tasks,
             clock_driver,
+            time,
             blocking_worker,
             signal,
-            #[cfg(test)]
-            now_override: None,
             _single_threaded: PhantomData,
         }
     }
@@ -153,13 +178,13 @@ impl AsyncWorker {
 
         if self.shutdown_signal.load(Ordering::Acquire) {
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         }
 
         let Some(executor) = self.executor.as_ref() else {
             // Executor drop cancels tasks before final timer callbacks can observe their state.
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         };
 
@@ -169,48 +194,20 @@ impl AsyncWorker {
             // An alternate low-level owner initiated executor shutdown. Complete the surrounding
             // worker shutdown before final timer callbacks run.
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(Instant::now());
+            _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
         }
 
-        let advance_now = {
-            #[cfg(test)]
-            {
-                self.now_for_test()
-            }
-            #[cfg(not(test))]
-            {
-                Instant::now()
-            }
-        };
+        let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
-            let wait_now = {
-                #[cfg(test)]
-                {
-                    self.now_for_test()
-                }
-                #[cfg(not(test))]
-                {
-                    Instant::now()
-                }
-            };
+            let wait_now = self.time.instant();
             self.signal.wait(suspend_wait(next_timer, wait_now));
         }
 
         ControlFlow::Continue(())
-    }
-
-    #[cfg(test)]
-    fn now_for_test(&self) -> Instant {
-        self.now_override.unwrap_or_else(Instant::now)
-    }
-
-    #[cfg(test)]
-    fn set_now_for_test(&mut self, now: Instant) {
-        self.now_override = Some(now);
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
@@ -285,9 +282,8 @@ mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::mpsc;
     #[cfg(not(miri))]
-    use std::task::{Wake, Waker};
+    use std::task::Wake;
     use std::thread;
 
     use arty_executor::{JoinHandle as ExecutorJoinHandle, TaskOptions};
@@ -330,48 +326,29 @@ mod tests {
         );
     }
     #[test]
-    fn earlier_timer_notification_interrupts_an_established_worker_wait() {
+    fn injected_time_advances_worker_timers_without_elapsed_wall_time() {
         let (command_tx, command_rx) = channel::unbounded();
         let signal = Arc::new(WorkerSignal::default());
-        let mut worker = test_worker(
+        let control = ClockControl::new();
+        let time = control.to_simple_clock();
+        let mut worker = test_worker_with_time(
             command_tx.clone(),
             command_rx,
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
             InactiveClock::default(),
+            Some(time.clone()),
             Arc::clone(&signal),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
-        let fixed_now = Instant::now();
-        worker.set_now_for_test(fixed_now);
-        let long_timer = clock.register_system_timer_at_for_test(fixed_now + Duration::from_secs(5));
+        let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
+        let mut context = std::task::Context::from_waker(Waker::noop());
+        assert!(std::future::Future::poll(delay.as_mut(), &mut context).is_pending());
+        control.advance(Duration::from_mins(2));
 
-        // Consume the notification produced by the first timer registration.
         assert!(worker.execute_step().is_continue());
+        assert_eq!(worker.clock_driver.advance_timers(time.instant()).unwrap(), None);
 
-        let (wait_started, wait_observed) = mpsc::channel();
-        signal.observe_next_blocking_wait(wait_started);
-        let (wait_completed, wait_outcome) = mpsc::channel();
-        signal.observe_next_wait_completion(wait_completed);
-        signal.require_next_wait_notification(testing_aids::TEST_TIMEOUT);
-        let (release_short_timer, hold_short_timer) = mpsc::channel();
-        let registering_clock = clock.clone();
-        let registering = thread::spawn(move || {
-            assert_eq!(
-                wait_observed.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(),
-                SUSPEND_POLL_INTERVAL
-            );
-            let short_timer = registering_clock.register_system_timer_at_for_test(fixed_now + Duration::from_millis(20));
-            hold_short_timer.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
-            drop(short_timer);
-        });
-
-        // The short registration must notify the worker out of its established long wait.
-        assert!(worker.execute_step().is_continue());
-        assert!(wait_outcome.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap());
-
-        release_short_timer.send(()).unwrap();
-        registering.join().unwrap();
-        drop(long_timer);
+        drop(delay);
         drop(clock);
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
         worker.run();
@@ -407,6 +384,17 @@ mod tests {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> AsyncWorker {
+        test_worker_with_time(command_tx, command_rx, blocking_worker, clock, None, signal)
+    }
+
+    fn test_worker_with_time(
+        command_tx: channel::Sender<AsyncWorkerCommand>,
+        command_rx: channel::Receiver<AsyncWorkerCommand>,
+        blocking_worker: Arc<BlockingWorker>,
+        clock: InactiveClock,
+        time: Option<SimpleClock>,
+        signal: Arc<WorkerSignal>,
+    ) -> AsyncWorker {
         let sink = Sink::noop();
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint = WorkerEndpoint {
@@ -422,6 +410,12 @@ mod tests {
             sink.clone(),
             Arc::clone(&shutdown_signal),
         )));
+
+        let worker_waker = WorkerSignal::waker(&signal);
+        let clock = match time {
+            Some(time) => WorkerClock::activate_with_time(clock, worker_waker, time),
+            None => WorkerClock::activate(clock, worker_waker),
+        };
 
         AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_worker, clock, signal)
     }

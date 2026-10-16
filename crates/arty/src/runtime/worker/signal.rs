@@ -14,12 +14,6 @@ use performables::sync::mutex::Mutex;
 pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
-    #[cfg(test)]
-    wait_observer: Mutex<Option<std::sync::mpsc::Sender<Duration>>>,
-    #[cfg(test)]
-    wait_completion_observer: Mutex<Option<std::sync::mpsc::Sender<bool>>>,
-    #[cfg(test)]
-    notification_wait_safety_timeout: Mutex<Option<Duration>>,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -49,29 +43,6 @@ impl WorkerSignal {
     pub(crate) fn wait(&self, timeout: Duration) {
         let start = std::time::Instant::now();
         let mut notified = Some(self.notified.lock());
-        #[cfg(test)]
-        if !**notified.as_ref().expect("the wait always starts with its notification guard") {
-            self.report_blocking_wait(timeout);
-        }
-        #[cfg(test)]
-        if let Some(safety_timeout) = self.notification_wait_safety_timeout.lock().take() {
-            let started = std::time::Instant::now();
-            while !**notified.as_ref().expect("the test wait retains its notification guard") {
-                let remaining = safety_timeout.saturating_sub(started.elapsed());
-                assert!(!remaining.is_zero(), "test wait must be released by notification");
-                let (guard, elapsed) = self.ready.wait_timeout(
-                    notified
-                        .take()
-                        .expect("the previous test wait always replaced its notification guard"),
-                    remaining,
-                );
-                notified = Some(guard);
-                assert!(!elapsed.timed_out(), "test wait must be released by notification");
-            }
-            self.report_wait_completion(true);
-            **notified.as_mut().expect("the test wait retains its final notification guard") = false;
-            return;
-        }
         wait_until_deadline(
             &mut notified,
             timeout,
@@ -93,40 +64,7 @@ impl WorkerSignal {
             },
         );
         let mut notified = notified.expect("the final timed wait always replaced its notification guard");
-        #[cfg(test)]
-        self.report_wait_completion(*notified);
         *notified = false;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn observe_next_blocking_wait(&self, observer: std::sync::mpsc::Sender<Duration>) {
-        *self.wait_observer.lock() = Some(observer);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn observe_next_wait_completion(&self, observer: std::sync::mpsc::Sender<bool>) {
-        *self.wait_completion_observer.lock() = Some(observer);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn require_next_wait_notification(&self, safety_timeout: Duration) {
-        *self.notification_wait_safety_timeout.lock() = Some(safety_timeout);
-    }
-
-    #[cfg(test)]
-    fn report_blocking_wait(&self, timeout: Duration) {
-        let observer = self.wait_observer.lock().take();
-        if let Some(observer) = observer {
-            _ = observer.send(timeout);
-        }
-    }
-
-    #[cfg(test)]
-    fn report_wait_completion(&self, was_notified: bool) {
-        let observer = self.wait_completion_observer.lock().take();
-        if let Some(observer) = observer {
-            _ = observer.send(was_notified);
-        }
     }
 
     pub(crate) fn waker(signal: &Arc<Self>) -> Waker {
@@ -189,9 +127,6 @@ mod tests {
 
     #[test]
     fn remote_wake_releases_a_waiter() {
-        if is_mutation_testing() {
-            return;
-        }
         let signal = Arc::new(WorkerSignal::default());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
@@ -202,6 +137,10 @@ mod tests {
             done_tx.send(()).unwrap();
         });
         ready_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
         WorkerSignal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         worker.join().unwrap();

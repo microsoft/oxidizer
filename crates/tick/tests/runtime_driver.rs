@@ -203,6 +203,24 @@ fn all_live_drivers_receive_first_timer_and_final_owner_notifications() {
 }
 
 #[test]
+fn registering_an_earlier_timer_notifies_live_drivers_again() {
+    let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+    let (clock, _driver) = InactiveClock::default().activate(Waker::from(Arc::clone(&wake_count)));
+    let mut context = Context::from_waker(Waker::noop());
+    let mut long_delay = std::pin::pin!(clock.delay(Duration::from_mins(2)));
+    assert!(long_delay.as_mut().poll(&mut context).is_pending());
+    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
+
+    let mut later_delay = std::pin::pin!(clock.delay(Duration::from_mins(3)));
+    assert!(later_delay.as_mut().poll(&mut context).is_pending());
+    assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
+
+    let mut earlier_delay = std::pin::pin!(clock.delay(Duration::from_mins(1)));
+    assert!(earlier_delay.as_mut().poll(&mut context).is_pending());
+    assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
+}
+
+#[test]
 fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock() {
     let root = InactiveClock::default();
     let (owned_clock, first_driver) = root.clone().activate(Waker::noop().clone());

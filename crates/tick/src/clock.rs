@@ -186,19 +186,6 @@ pub struct Clock {
     time: SimpleClock,
 }
 
-#[cfg(any(feature = "test-util", test))]
-struct TestTimerRegistration<'a> {
-    clock: &'a Clock,
-    key: TimerKey,
-}
-
-#[cfg(any(feature = "test-util", test))]
-impl Drop for TestTimerRegistration<'_> {
-    fn drop(&mut self) {
-        self.clock.unregister_timer(self.key);
-    }
-}
-
 impl std::fmt::Debug for Clock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match &self.state {
@@ -468,30 +455,6 @@ impl Clock {
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
         crate::Stopwatch::new(self)
-    }
-
-    /// Registers a system timer at an absolute deadline for runtime integration tests.
-    ///
-    /// The returned guard unregisters the timer when dropped.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this clock is controlled rather than system-backed.
-    #[doc(hidden)]
-    #[cfg(any(feature = "test-util", test))]
-    #[must_use]
-    #[expect(
-        clippy::panic,
-        reason = "the test-only absolute registration helper is valid only for system clocks"
-    )]
-    pub fn register_system_timer_at_for_test(&self, when: Instant) -> impl Drop + '_ {
-        let ClockState::System(storage) = self.clock_state() else {
-            panic!("absolute system timer registration requires a system clock");
-        };
-        TestTimerRegistration {
-            clock: self,
-            key: storage.register_timer(when, Waker::noop().clone()),
-        }
     }
 
     /// Returns time in the same comparison domain used to advance this clock's timers.
