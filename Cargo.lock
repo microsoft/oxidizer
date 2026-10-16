@@ -5905,6 +5905,7 @@ dependencies = [
  "proc-macro2",
  "serial_test",
  "syn 3.0.5",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
