@@ -40,7 +40,10 @@ const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
+#[cfg(not(miri))]
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(miri)]
+const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const RETIRED_RING_BUDGET_BYTES: usize = 268_435_456;
 #[cfg(test)]
@@ -2663,7 +2666,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_configuration()
         });
         drop(LateTelemetryUser);
 
@@ -3781,7 +3784,7 @@ mod tests {
 
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
-            ..Default::default()
+            ..test_configuration()
         });
         assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));
