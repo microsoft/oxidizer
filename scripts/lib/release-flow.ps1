@@ -1137,6 +1137,42 @@ function Format-ConventionalCommits {
 
 # --- SCRIPT FUNCTIONS ---
 
+function Update-LocalDependencyVersions {
+    param(
+        [string]$ManifestPath,
+        [string]$PackageCargoToml,
+        [string]$Version
+    )
+
+    $content = Get-Content -LiteralPath $ManifestPath -Raw
+    $manifestDirectory = Split-Path $ManifestPath -Parent
+    $targetManifest = [System.IO.Path]::GetFullPath($PackageCargoToml)
+    # Only dependency tables participate; metadata and registry-only consumers
+    # must not follow the version of a local package with the same name.
+    $tables = '(?ms)(^\[(?:workspace\.|target\.[^\r\n]+\.)?(?:dependencies|dev-dependencies|build-dependencies)\][^\r\n]*(?:\r?\n|\z))(?<body>.*?)(?=^\[|\z)'
+    $updated = [regex]::Replace($content, $tables, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($table)
+        $body = [regex]::Replace($table.Groups['body'].Value, '(?m)^[ \t]*[-\w"'']+[ \t]*=[ \t]*\{[^{}]*\}', [System.Text.RegularExpressions.MatchEvaluator]{
+            param($dependency)
+            $pathMatch = [regex]::Match($dependency.Value, '(?:\{|,)\s*path\s*=\s*["''](?<path>[^"'']+)["'']')
+            if (-not $pathMatch.Success) { return $dependency.Value }
+            $dependencyManifest = [System.IO.Path]::GetFullPath(
+                (Join-Path $manifestDirectory $pathMatch.Groups['path'].Value 'Cargo.toml'))
+            if ($dependencyManifest -ne $targetManifest) { return $dependency.Value }
+
+            # Keep exact pins exact; all other inline-table fields stay intact.
+            return [regex]::Replace($dependency.Value,
+                '((?:\{|,)\s*version\s*=\s*["'']=?)[^"'']+',
+                ('${1}' + $Version))
+        })
+        return $table.Groups[1].Value + $body
+    })
+    if ($updated -cne $content) {
+        Write-Host "📝 Updating local dependency in '$ManifestPath'..."
+        Set-Content -LiteralPath $ManifestPath -Value $updated -NoNewline -Encoding utf8
+    }
+}
+
 function Update-PackageVersion {
     param(
         [string]$packageName,
@@ -1161,29 +1197,14 @@ function Update-PackageVersion {
     $packageContent = $script:CargoPackageVersionRegex.Replace($packageContent, ('${1}' + $version), 1)
     Set-Content -LiteralPath $packageCargoToml -Value $packageContent -NoNewline -Encoding utf8
 
-    Write-Host "📝 Updating '$rootCargoToml'..."
-
-    function Get-EscapedRegexSpecialChars($str) {
-        # Escape all regex metacharacters: . $ ^ { [ ( | ) * + ? \ /
-        # The replacement string `\$1` produces a literal backslash followed by
-        # the matched metacharacter — `\` is a literal in .NET replacement-string
-        # syntax (not an escape) and `$1` is the group-1 backreference. Do NOT
-        # use `\\$1` here: that double-escapes (e.g. `1.2.3` -> `1\\.2\\.3`).
-        return ($str -replace $script:RegexEscapeRegex, '\$1')
+    # Do not ask Cargo for metadata between coordinated bumps: exact local
+    # requirements can temporarily disagree with their package versions.
+    $repoRoot = Split-Path $rootCargoToml -Parent
+    $manifests = @($rootCargoToml) + @(Get-ChildItem -Path (Join-Path $repoRoot 'crates\*\Cargo.toml') -File |
+        Select-Object -ExpandProperty FullName)
+    foreach ($manifest in $manifests) {
+        Update-LocalDependencyVersions -ManifestPath $manifest -PackageCargoToml $packageCargoToml -Version $version
     }
-
-    $escapedPackageName = Get-EscapedRegexSpecialChars($packageName)
-    $packageNamePattern = $escapedPackageName.Replace('_', '[-_]')
-    # Anchor the lookbehind to the start of a line (multiline mode) so the
-    # package name cannot match as a suffix of another crate's name. Without
-    # `^`, releasing e.g. `bar` would also rewrite `foo_bar = { ..., version
-    # = "..." }` because the regex engine can satisfy the lookbehind by
-    # matching `bar` against the trailing 3 chars of `foo_bar`. Workspace
-    # dependency declarations in the root Cargo.toml are conventionally one
-    # per line and flush-left, matching the layout produced by the test
-    # fixture's `Write-RootCargoToml`.
-    $regex = '(?m)(?<=^' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
-    (Get-Content -LiteralPath $rootCargoToml -Raw) -replace $regex, $version | Set-Content -LiteralPath $rootCargoToml -NoNewline -Encoding utf8
 
     return $version
 }

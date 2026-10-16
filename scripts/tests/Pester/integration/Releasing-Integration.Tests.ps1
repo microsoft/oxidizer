@@ -893,6 +893,81 @@ publish = true
         $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
     }
 
+    It 'coordinates local family pins without upgrading published consumers (<Order>)' -ForEach @(
+        @{ Order = 'dependencies-first'; Family = @('ohno_macros_impl', 'ohno_macros', 'ohno') }
+        @{ Order = 'owners-first'; Family = @('ohno', 'ohno_macros', 'ohno_macros_impl') }
+    ) {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Spec @{
+            Packages = @(
+                @{ Name = 'ohno'; Version = '0.5.2' }
+                @{ Name = 'ohno_macros'; Version = '0.5.2' }
+                @{ Name = 'ohno_macros_impl'; Version = '0.5.2' }
+                @{ Name = 'consumer'; Version = '0.1.0' }
+            )
+        } -Path (Join-Path $TestDrive "uvc-family-$Order")
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Set-Content -LiteralPath $rootCargo -NoNewline -Value @'
+[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+ohno = { version = "0.5.2", default-features = false }
+published_alias = { package = "ohno_macros", version = "=0.5.2" }
+unrelated = { path = "crates/consumer", version = "0.1.0" }
+'@
+        $rootBefore = Get-Content -LiteralPath $rootCargo -Raw
+        $ohnoCargo = Join-Path $ws.Path 'crates\ohno\Cargo.toml'
+        Add-Content -LiteralPath $ohnoCargo -Value @'
+
+[dependencies]
+ohno_macros = { path = "../ohno_macros", version = "=0.5.2", default-features = false }
+unrelated = { path = "../consumer", version = "0.1.0" }
+
+[package.metadata.example]
+ohno_macros = { path = "../ohno_macros", version = "=0.5.2" }
+'@
+        $macrosCargo = Join-Path $ws.Path 'crates\ohno_macros\Cargo.toml'
+        Add-Content -LiteralPath $macrosCargo -Value @'
+
+[dependencies]
+ohno_macros_impl = { version = "=0.5.2", path = "../ohno_macros_impl", default-features = false }
+'@
+        $consumerCargo = Join-Path $ws.Path 'crates\consumer\Cargo.toml'
+        Add-Content -LiteralPath $consumerCargo -Value @'
+
+[dependencies]
+ohno = { version = "0.5.2", default-features = false }
+
+[dev-dependencies]
+renamed = { package = "ohno_macros_impl", path = "../ohno_macros_impl", version = "=0.5.2" }
+
+[target.'cfg(windows)'.build-dependencies]
+helper = { package = "ohno_macros", version = "0.5.2", path = "../ohno_macros" }
+'@
+
+        foreach ($name in $Family) {
+            Update-PackageVersion -packageName $name -version '0.5.3' `
+                -packageCargoToml (Join-Path $ws.Path "crates\$name\Cargo.toml") -rootCargoToml $rootCargo | Out-Null
+        }
+
+        foreach ($name in $Family) {
+            Get-CurrentVersion -cargoTomlPath (Join-Path $ws.Path "crates\$name\Cargo.toml") | Should -Be '0.5.3'
+        }
+        (Get-Content -LiteralPath $rootCargo -Raw) | Should -BeExactly $rootBefore
+        $ohnoContent = Get-Content -LiteralPath $ohnoCargo -Raw
+        $ohnoContent | Should -Match 'ohno_macros = \{ path = "../ohno_macros", version = "=0\.5\.3", default-features = false \}'
+        $ohnoContent | Should -Match 'unrelated = \{ path = "../consumer", version = "0\.1\.0" \}'
+        $ohnoContent | Should -Match '(?s)\[package.metadata.example\].*version = "=0\.5\.2"'
+        (Get-Content -LiteralPath $macrosCargo -Raw) |
+            Should -Match 'ohno_macros_impl = \{ version = "=0\.5\.3", path = "../ohno_macros_impl", default-features = false \}'
+        $consumerContent = Get-Content -LiteralPath $consumerCargo -Raw
+        $consumerContent | Should -Match 'ohno = \{ version = "0\.5\.2", default-features = false \}'
+        $consumerContent | Should -Match 'renamed = \{ package = "ohno_macros_impl", path = "../ohno_macros_impl", version = "=0\.5\.3" \}'
+        $consumerContent | Should -Match 'helper = \{ package = "ohno_macros", version = "0\.5\.3", path = "../ohno_macros" \}'
+        Get-CurrentVersion -cargoTomlPath $consumerCargo | Should -Be '0.1.0'
+    }
+
     It 'does not rewrite the inline version of a sibling crate whose name has the target as a suffix' {
         # The root-Cargo.toml rewrite previously used an un-anchored lookbehind:
         # `(?<=NAME\s*=\s*\{[^\}]*?version\s*=\s*")`. Releasing e.g. `bar` would

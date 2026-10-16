@@ -96,7 +96,7 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
                 # Impact emits version-qualified specs (name@version);
                 # strip the @version to recover the bare package name.
-                $name = ($pkg[$i + 1] -split '@', 2)[0]
+                $name = (($pkg[$i + 1] -split '#')[-1] -split '@', 2)[0]
                 if ($libPkgs[$name]) { $packages += $name }
                 $i++
             }
@@ -149,7 +149,7 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
         }
 
         Write-Host "anvil-semver-check: $p (baseline $base)"
-        $outputLines = @(& cargo @stableArgs semver-checks --package $p --baseline-rev $base 2>&1)
+        $outputLines = @(& cargo @stableArgs semver-checks --manifest-path $libPkgs[$p].manifest_path --baseline-rev $base 2>&1)
         $semverExit = $LASTEXITCODE
         $output = ($outputLines | Out-String)
         if ($semverExit -eq 100) {

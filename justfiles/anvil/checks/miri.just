@@ -176,7 +176,7 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
                 exit 1
             }
             $packageSpec = $packageArgs[++$i]
-            $packageName = ($packageSpec -split '@', 2)[0]
+            $packageName = (($packageSpec -split '#')[-1] -split '@', 2)[0]
             if ($excludedPackages.Contains($packageName)) { continue }
             $filtered.Add('--package')
             $filtered.Add($packageSpec)

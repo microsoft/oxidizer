@@ -51,7 +51,7 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
         $parts = @(-split $include)
         for ($i = 0; $i -lt $parts.Count; $i++) {
             if ($parts[$i] -eq '--package' -and ++$i -lt $parts.Count) {
-                $names.Add(($parts[$i] -split '@', 2)[0])
+                $names.Add((($parts[$i] -split '#')[-1] -split '@', 2)[0])
             }
         }
         @($names)
@@ -69,7 +69,8 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
                     Write-Host "anvil-examples: $($p.name)::$($target.name) skipped by package metadata"
                     continue
                 }
-                [pscustomobject]@{ package = $p.name; example = $target.name }
+                $source = ([string]$p.id -split '#', 2)[0]
+                [pscustomobject]@{ package = "$source#$($p.name)@$($p.version)"; example = $target.name }
             }
         }
     )

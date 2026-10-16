@@ -59,7 +59,7 @@ anvil-external-types: anvil-external-types-validate-prereqs anvil-impact
                 # Impact emits version-qualified specs (name@version);
                 # strip the @version to recover the bare package name
                 # this manifest-path map keys on.
-                $name = ($pkg[$i + 1] -split '@', 2)[0]
+                $name = (($pkg[$i + 1] -split '#')[-1] -split '@', 2)[0]
                 if ($libPkgs.ContainsKey($name)) { $packages += $name }
                 $i++
             }
