@@ -63,6 +63,15 @@ struct Registry {
     failure: Option<Arc<str>>,
 }
 
+impl Registry {
+    fn check(&self) -> Result<(), DriverError> {
+        match &self.failure {
+            Some(message) => Err(DriverError::from_message(message.as_ref())),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Shared registry of thread-neutral I/O contexts for one Arty runtime.
 ///
 /// This type is unstable Arty implementation infrastructure. Applications and
@@ -143,7 +152,7 @@ impl IoRuntime {
         let context_type = TypeId::of::<C>();
         let slot = {
             let mut registry = self.registry();
-            Self::check_failure(&registry)?;
+            registry.check()?;
             let primary_available = registry.contexts.is_empty();
             Arc::clone(registry.contexts.entry(context_type).or_insert_with(|| {
                 Arc::new(ContextSlot {
@@ -170,7 +179,7 @@ impl IoRuntime {
     }
 
     pub(crate) fn check_failed(&self) -> Result<(), DriverError> {
-        Self::check_failure(&self.registry())
+        self.registry().check()
     }
 
     pub(crate) fn fail(&self, error: &DriverError) {
@@ -186,13 +195,6 @@ impl IoRuntime {
     #[cfg(test)]
     fn set_resolution_hook(&mut self, hook: Arc<dyn Fn(TypeId) + Send + Sync>) {
         self.resolution_hook = Some(hook);
-    }
-
-    fn check_failure(registry: &Registry) -> Result<(), DriverError> {
-        match &registry.failure {
-            Some(message) => Err(DriverError::from_message(message.as_ref())),
-            None => Ok(()),
-        }
     }
 
     fn registry(&self) -> MutexGuard<'_, Registry> {

@@ -70,8 +70,10 @@ need a separate wake for later completions because its next `execute_cycle`
 call performs the worker's I/O wait.
 
 `Driver::waker` serves the opposite direction. The runtime calls it to make a
-waiting `execute_cycle` return promptly. A wake immediately before the wait must
-remain latched for that wait.
+waiting `execute_cycle` return promptly. Any wake before or during a wait applies
+to that wait. If no wait is active, the wake remains latched for the next wait,
+regardless of how much time passes before the wait starts. The driver may process
+ready completions after waking; the requirement is that it stop waiting promptly.
 
 ## Processing completions
 

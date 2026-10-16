@@ -84,6 +84,38 @@ impl IoContext for ReentrantContext {
 }
 
 #[derive(Clone)]
+struct HandledFailureContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for HandledFailureContext {
+    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+        assert!(source.is_none());
+    }
+}
+
+impl IoContext for HandledFailureContext {
+    type ContextOptions = (IoRuntime, Arc<State>);
+    type Driver = TestDriver;
+
+    fn context((runtime, state): Self::ContextOptions) -> Self {
+        state.fail_initialization.store(true, Ordering::SeqCst);
+        let host = host(&runtime);
+        let _ = host.context::<Context<true>>(&state);
+        state.fail_initialization.store(false, Ordering::SeqCst);
+        Self { state }
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.state.roles.lock().unwrap().push((Kind::First, options.role()));
+        Ok(TestDriver {
+            kind: Kind::First,
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
+#[derive(Clone)]
 struct FormattingFailureContext {
     state: Arc<State>,
 }
@@ -458,6 +490,23 @@ fn context_construction_can_reenter_the_runtime_registry() {
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
         [DriverRole::Secondary, DriverRole::Primary]
     );
+}
+
+#[test]
+fn handled_inner_failure_rejects_outer_retrieval_and_keeps_driver_owned() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+
+    let Err(error) = host.context::<HandledFailureContext>(&(runtime, Arc::clone(&state))) else {
+        panic!("the outer retrieval should observe the runtime failure");
+    };
+    assert_eq!(error.to_string(), "initialization failed");
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 0);
+
+    drop(host);
+
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]

@@ -46,11 +46,43 @@ struct LocalContext {
     context_name: &'static str,
 }
 
+impl LocalContext {
+    fn clone_context<C>(&self) -> C
+    where
+        C: IoContext,
+    {
+        self.context
+            .downcast_ref::<C>()
+            .expect("worker-local I/O contexts are stored under their own TypeId")
+            .clone()
+    }
+
+    fn try_clone_context<C>(&self) -> Option<C>
+    where
+        C: IoContext,
+    {
+        self.context.downcast_ref::<C>().cloned()
+    }
+
+    fn execute_cycle(&mut self, max_wait: Duration, sink: &Sink) -> Result<(), DriverError> {
+        self.driver.execute_cycle(&mut Cycle::new(max_wait)).inspect_err(|error| {
+            emit!(
+                sink,
+                IoDriverCycleFailed {
+                    context: IoContextName(self.context_name),
+                    role: IoDriverRoleLabel::from(self.role),
+                    error: IoDriverErrorMessage::new(error),
+                }
+            );
+        })
+    }
+}
+
 struct InitializationGuard<'a>(&'a Cell<bool>);
 
 impl Drop for InitializationGuard<'_> {
     fn drop(&mut self) {
-        assert!(self.0.replace(false), "worker-local I/O initialization guard must be active");
+        debug_assert!(self.0.replace(false), "worker-local I/O initialization guard must be active");
     }
 }
 
@@ -172,9 +204,10 @@ impl DriverHost {
             .primary
             .borrow()
             .as_ref()
-            .and_then(Self::try_clone_context::<C>)
-            .or_else(|| self.secondaries.borrow().iter().find_map(Self::try_clone_context::<C>))
+            .and_then(LocalContext::try_clone_context::<C>)
+            .or_else(|| self.secondaries.borrow().iter().find_map(LocalContext::try_clone_context::<C>))
         {
+            self.runtime.check_failed()?;
             return Ok(context);
         }
         if self.initializing.replace(true) {
@@ -192,7 +225,7 @@ impl DriverHost {
                 return Err(error);
             }
         };
-        let context = Self::clone_context::<C>(&local);
+        let context = local.clone_context::<C>();
         match local.role {
             DriverRole::Primary => {
                 assert!(
@@ -202,6 +235,7 @@ impl DriverHost {
             }
             DriverRole::Secondary => self.secondaries.borrow_mut().push(local),
         }
+        self.runtime.check_failed()?;
         Ok(context)
     }
 
@@ -238,24 +272,6 @@ impl DriverHost {
         })
     }
 
-    fn clone_context<C>(local: &LocalContext) -> C
-    where
-        C: IoContext,
-    {
-        local
-            .context
-            .downcast_ref::<C>()
-            .expect("worker-local I/O contexts are stored under their own TypeId")
-            .clone()
-    }
-
-    fn try_clone_context<C>(local: &LocalContext) -> Option<C>
-    where
-        C: IoContext,
-    {
-        local.context.downcast_ref::<C>().cloned()
-    }
-
     /// Executes one driver cycle, running secondary drivers before the primary.
     ///
     /// # Errors
@@ -268,25 +284,12 @@ impl DriverHost {
     /// invariants.
     pub fn execute_cycle(&self, max_wait: Duration) -> Result<(), DriverError> {
         for local in self.secondaries.borrow_mut().iter_mut() {
-            Self::execute_driver(local, Duration::ZERO, self.runtime.sink())?;
+            local.execute_cycle(Duration::ZERO, self.runtime.sink())?;
         }
         if let Some(primary) = self.primary.borrow_mut().as_mut() {
-            Self::execute_driver(primary, max_wait, self.runtime.sink())?;
+            primary.execute_cycle(max_wait, self.runtime.sink())?;
         }
         Ok(())
-    }
-
-    fn execute_driver(local: &mut LocalContext, max_wait: Duration, sink: &Sink) -> Result<(), DriverError> {
-        local.driver.execute_cycle(&mut Cycle::new(max_wait)).inspect_err(|error| {
-            emit!(
-                sink,
-                IoDriverCycleFailed {
-                    context: IoContextName(local.context_name),
-                    role: IoDriverRoleLabel::from(local.role),
-                    error: IoDriverErrorMessage::new(error),
-                }
-            );
-        })
     }
 }
 
