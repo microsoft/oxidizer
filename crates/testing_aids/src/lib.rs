@@ -29,6 +29,9 @@ pub use macro_expansion::*;
 pub use metrics::*;
 pub use yielding::*;
 
+#[cfg(test)]
+crate::init_tracing!();
+
 /// If something (whatever) does not happen in a test within this time, the test will fail.
 ///
 /// We are conservative here and allow much time - this is only to break out of infinite loops, not for any

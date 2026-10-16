@@ -36,13 +36,14 @@ use crate::is_mutation_testing;
 /// invoked, which means the test binary is missing its `#[ctor::ctor]`
 /// process-initialization function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
-    if is_mutation_testing() {
+    let mutation_testing = is_mutation_testing();
+    if mutation_testing {
         // Suppress diagnostic output, but leave the initialized formatter enabled.
         return;
     }
 
     assert_initialized();
-    STDOUT_ENABLED.store(true, Ordering::Relaxed);
+    enable_stdout(&STDOUT_ENABLED, mutation_testing);
 }
 
 /// Enables logging of test output to the standard output stream and to a specific log file.
@@ -70,13 +71,14 @@ pub fn write_to_stdout() {
 /// is missing its `#[ctor::ctor]` process-initialization function. See
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
-    if is_mutation_testing() {
+    let mutation_testing = is_mutation_testing();
+    if mutation_testing {
         // Suppress diagnostic output, but leave the initialized formatter enabled.
         return FileGuard::fake();
     }
 
     assert_initialized();
-    STDOUT_ENABLED.store(true, Ordering::Relaxed);
+    enable_stdout(&STDOUT_ENABLED, mutation_testing);
 
     start_log_file_scope(file_name)
 }
@@ -150,8 +152,7 @@ fn ensure_initialized() {
         // Filter writers, not the layer: interest and formatting must remain enabled
         // even when no sink wants output. Tee the rendered bytes to avoid invoking
         // user formatters again for each sink.
-        let writer = StdoutWriterFactory
-            .with_max_level(Level::INFO)
+        let writer = stdout_writer(std::io::stdout, || STDOUT_ENABLED.load(Ordering::Relaxed))
             .and(LogFileWriter.with_filter(|_| file_active()))
             .and(BufferWriterFactory.with_filter(|_| buffer_active()));
 
@@ -213,40 +214,18 @@ pub(crate) fn assert_initialized() {
 /// helpers.
 static STDOUT_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Produces writers to stdout when stdout logging is enabled, discarding otherwise.
-#[derive(Debug)]
-struct StdoutWriterFactory;
-
-impl<'a> MakeWriter<'a> for StdoutWriterFactory {
-    type Writer = StdoutWriter;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        StdoutWriter {
-            enabled: STDOUT_ENABLED.load(Ordering::Relaxed),
-        }
+fn enable_stdout(enabled: &AtomicBool, mutation_testing: bool) {
+    if !mutation_testing {
+        enabled.store(true, Ordering::Relaxed);
     }
 }
 
-/// Writes to stdout when enabled, or discards output otherwise.
-#[derive(Debug)]
-struct StdoutWriter {
-    enabled: bool,
-}
-
-impl Write for StdoutWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.enabled {
-            std::io::stdout().write_all(buf)?;
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if self.enabled {
-            std::io::stdout().flush()?;
-        }
-        Ok(())
-    }
+fn stdout_writer<W, E>(writer: W, enabled: E) -> impl for<'a> MakeWriter<'a>
+where
+    W: for<'a> MakeWriter<'a>,
+    E: Fn() -> bool,
+{
+    writer.with_max_level(Level::INFO).with_filter(move |_| enabled())
 }
 
 /// Enables logging of test output to the standard output stream and captures every
@@ -289,9 +268,7 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
     // test, so a disabled buffer would break those tests rather than merely omit
     // diagnostic output. The stdout tee, however, is purely diagnostic, so we silence
     // it under mutation testing to avoid the output overhead.
-    if !is_mutation_testing() {
-        STDOUT_ENABLED.store(true, Ordering::Relaxed);
-    }
+    enable_stdout(&STDOUT_ENABLED, is_mutation_testing());
 
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
@@ -627,6 +604,56 @@ impl Write for LogWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdout_route_filters_levels_after_activation() {
+        assert_stdout_route(
+            false,
+            &[
+                "ERROR stdout-routing-test: after-ERROR",
+                " WARN stdout-routing-test: after-WARN",
+                " INFO stdout-routing-test: after-INFO",
+            ],
+        );
+    }
+
+    #[test]
+    fn stdout_route_stays_silent_during_mutation_testing() {
+        assert_stdout_route(true, &[]);
+    }
+
+    fn assert_stdout_route(mutation_testing: bool, expected: &[&str]) {
+        let enabled = Arc::new(AtomicBool::new(false));
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let writer = stdout_writer(
+            {
+                let buffer = Arc::clone(&buffer);
+                move || BufferWriter {
+                    buffer: Some(Arc::clone(&buffer)),
+                    pending: Vec::new(),
+                }
+            },
+            {
+                let enabled = Arc::clone(&enabled);
+                move || enabled.load(Ordering::Relaxed)
+            },
+        );
+        let _guard = tracing_subscriber::registry().with(formatting_layer(writer)).set_default();
+
+        emit_levels("before");
+        assert_eq!(*buffer.lock().unwrap(), Vec::<String>::new());
+        enable_stdout(&enabled, mutation_testing);
+        emit_levels("after");
+        assert_eq!(*buffer.lock().unwrap(), expected);
+    }
+
+    fn emit_levels(phase: &str) {
+        tracing::error!(target: "stdout-routing-test", "{phase}-ERROR");
+        tracing::warn!(target: "stdout-routing-test", "{phase}-WARN");
+        tracing::info!(target: "stdout-routing-test", "{phase}-INFO");
+        tracing::debug!(target: "stdout-routing-test", "{phase}-DEBUG");
+        tracing::trace!(target: "stdout-routing-test", "{phase}-TRACE");
+    }
 
     fn new_writer() -> (BufferWriter, Arc<Mutex<Vec<String>>>) {
         let buffer = Arc::new(Mutex::new(Vec::new()));
