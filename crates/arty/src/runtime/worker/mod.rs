@@ -7,4 +7,4 @@ mod async_worker;
 pub(super) mod protocol;
 pub(super) mod signal;
 
-pub(super) use async_worker::{AsyncWorker, WorkerClock};
+pub(super) use async_worker::AsyncWorker;

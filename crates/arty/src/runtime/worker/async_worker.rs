@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::Waker;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
@@ -13,8 +12,8 @@ use observed::Sink;
 use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::Thread;
+use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
-use tick::{Clock, SimpleClock};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
@@ -31,27 +30,6 @@ fn suspend_wait(next_timer: Option<Instant>, now: Instant) -> Duration {
     next_timer
         .map_or(SUSPEND_POLL_INTERVAL, |deadline| deadline.saturating_duration_since(now))
         .min(SUSPEND_POLL_INTERVAL)
-}
-
-#[derive(Debug)]
-pub(crate) struct WorkerClock {
-    clock: Clock,
-    driver: ClockDriver,
-    time: SimpleClock,
-}
-
-impl WorkerClock {
-    pub(crate) fn activate(clock: InactiveClock, waker: Waker) -> Self {
-        let (clock, driver) = clock.activate(waker);
-        let time = clock.simple_clock().clone();
-        Self { clock, driver, time }
-    }
-
-    #[cfg(test)]
-    fn activate_with_time(clock: InactiveClock, waker: Waker, time: SimpleClock) -> Self {
-        let (clock, driver) = clock.activate(waker);
-        Self { clock, driver, time }
-    }
 }
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
@@ -127,16 +105,13 @@ impl AsyncWorker {
         thread: Thread,
         sink: Sink,
         blocking_worker: Arc<BlockingWorker>,
-        clock: WorkerClock,
+        clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
         let shutdown_signal = dispatcher.shutdown_signal();
-        let WorkerClock {
-            clock,
-            driver: clock_driver,
-            time,
-        } = clock;
+        let (clock, clock_driver) = clock.activate(worker_waker.clone());
+        let time = clock.simple_clock().clone();
 
         let executor = Executor::builder()
             .owner_waker(worker_waker)
@@ -203,8 +178,7 @@ impl AsyncWorker {
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
-            let wait_now = self.time.instant();
-            self.signal.wait(suspend_wait(next_timer, wait_now));
+            self.signal.wait(suspend_wait(next_timer, advance_now));
         }
 
         ControlFlow::Continue(())
@@ -284,6 +258,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     #[cfg(not(miri))]
     use std::task::Wake;
+    use std::task::Waker;
     use std::thread;
 
     use arty_executor::{JoinHandle as ExecutorJoinHandle, TaskOptions};
@@ -331,12 +306,11 @@ mod tests {
         let signal = Arc::new(WorkerSignal::default());
         let control = ClockControl::new();
         let time = control.to_simple_clock();
-        let mut worker = test_worker_with_time(
+        let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-            InactiveClock::default(),
-            Some(time.clone()),
+            InactiveClock::from(control.clone()),
             Arc::clone(&signal),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -385,17 +359,6 @@ mod tests {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> AsyncWorker {
-        test_worker_with_time(command_tx, command_rx, blocking_worker, clock, None, signal)
-    }
-
-    fn test_worker_with_time(
-        command_tx: channel::Sender<AsyncWorkerCommand>,
-        command_rx: channel::Receiver<AsyncWorkerCommand>,
-        blocking_worker: Arc<BlockingWorker>,
-        clock: InactiveClock,
-        time: Option<SimpleClock>,
-        signal: Arc<WorkerSignal>,
-    ) -> AsyncWorker {
         let sink = Sink::noop();
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint = WorkerEndpoint {
@@ -411,12 +374,6 @@ mod tests {
             sink.clone(),
             Arc::clone(&shutdown_signal),
         )));
-
-        let worker_waker = WorkerSignal::waker(&signal);
-        let clock = match time {
-            Some(time) => WorkerClock::activate_with_time(clock, worker_waker, time),
-            None => WorkerClock::activate(clock, worker_waker),
-        };
 
         AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_worker, clock, signal)
     }

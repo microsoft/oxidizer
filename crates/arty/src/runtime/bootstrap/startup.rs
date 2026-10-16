@@ -25,9 +25,9 @@ use crate::runtime::telemetry::events::{
 };
 use crate::runtime::thread::spawn;
 use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
-use crate::runtime::worker::{AsyncWorker, WorkerClock};
 
 pub(crate) fn build(
     processor_config: RuntimeConfig,
@@ -208,7 +208,6 @@ impl AsyncWorkerStartInfo {
 
         let signal = Arc::new(WorkerSignal::default());
         let worker_waker = WorkerSignal::waker(&signal);
-        let clock = WorkerClock::activate(clock, worker_waker.clone());
 
         worker_endpoint_tx
             .send((worker_waker, current.clone(), Arc::clone(&blocking_worker)))
