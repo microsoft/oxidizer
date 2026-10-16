@@ -258,11 +258,13 @@ impl ExecutorCore {
             Self::abort_prepared_tasks(&state_exclusive, aborted_count);
         }
 
+        // Releasing task storage can run user-defined destructors from captured context. Do this
+        // before borrowing admission state so those destructors may submit through a retained
+        // TaskSet without conflicting with this cycle's bookkeeping.
+        Self::drop_completed_tasks(&mut state_exclusive, true);
+
         {
             let state_reentrant = self.reentrancy_safe.borrow();
-
-            Self::drop_completed_tasks(&mut state_exclusive, true);
-
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
             } else if self.has_work_to_do(&state_exclusive, &state_reentrant) {
