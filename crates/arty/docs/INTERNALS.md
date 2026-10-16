@@ -41,8 +41,8 @@ operation. Joining a task or a different runtime does not join that runtime's
 workers. Cancellation can also destroy captured runtime owners on the worker,
 so each nested runtime needs its own completion barrier.
 
-The consuming-owner cases live in `runtime/handle/worker_wait_guards.rs` because
-the public API does not expose a completion handle after consuming the owner.
+The consuming-owner cases live in `runtime/handle/worker_wait_guards_tests.rs`
+because the public API does not expose a completion handle after consuming the owner.
 The public cancellation test retains its runtime owner outside the cancelled
 task and calls `stop` from the test thread. Both forms keep the worker wait
 guards active and join every runtime before returning.

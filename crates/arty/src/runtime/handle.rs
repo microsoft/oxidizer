@@ -204,7 +204,7 @@ impl Drop for Runtime {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod worker_wait_guards;
+mod worker_wait_guards_tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
