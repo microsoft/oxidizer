@@ -243,11 +243,10 @@ fn submission_during_shutdown_returns_shutdown_error() {
 
 #[test]
 fn task_created_processor_may_submit_a_nested_task() {
-    let sink = Sink::new(
-        "arty-executor-reentrant-telemetry",
-        vec![Arc::new(ReentrantSubmissionProcessor)],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("arty-executor-reentrant-telemetry")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(ReentrantSubmissionProcessor)])
+        .build();
     let executor = Executor::builder().sink(sink.clone()).build();
     let tasks = executor.tasks();
     let nested_completed = Rc::new(Cell::new(false));
@@ -274,11 +273,10 @@ fn default_options_emit_lifecycle_events_without_context_enrichment() {
 
 #[test]
 fn task_created_processor_may_complete_and_release_the_new_task() {
-    let sink = Sink::new(
-        "arty-executor-reentrant-cycle",
-        vec![Arc::new(ReentrantCycleProcessor)],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("arty-executor-reentrant-cycle")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(ReentrantCycleProcessor)])
+        .build();
     let executor = Rc::new(Executor::builder().sink(sink).build());
     REENTRANT_TELEMETRY_EXECUTOR.set(Some(Rc::clone(&executor)));
 
@@ -372,11 +370,10 @@ fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
 
 #[test]
 fn owner_drop_during_spawn_telemetry_cancels_task_and_rejects_nested_submission() {
-    let sink = Sink::new(
-        "arty-executor-owner-drop",
-        vec![Arc::new(OwnerDropProcessor)],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("arty-executor-owner-drop")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(OwnerDropProcessor)])
+        .build();
     let executor = Executor::builder().sink(sink).build();
     let tasks = executor.tasks();
     let nested = Rc::new(RefCell::new(None));

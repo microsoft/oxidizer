@@ -22,12 +22,12 @@
   attributes as `Event` (`#[dimension(...)]`, `#[if_none(...)]`, `#[data_class]`, `#[unredacted]`);
   enrichment can opt into metric dimensions via `#[dimension(metric = "...")]` but cannot define a metric instrument
 - **Per-sink enrichment** - `.enrich_for(&sink, target, entries)` targets context to a specific sink
-- **Enrichment isolation** - library sinks can ignore untargeted enrichments via `Sink::new_isolated(ID, processors, clock)`
+- **Enrichment isolation** - library sinks can ignore untargeted enrichments via `SinkBuilder::isolated_enrichment()`
 - **Cross-thread context transfer** - `sink.transfer_context()` captures enrichment state for cross-thread propagation
 
 ## Sink Lifecycle
 
-- **Direct constructors** - `Sink::new(ID, processors, clock)` and `Sink::new_isolated(ID, processors, clock)` for foundation-level construction; `clock` is anything `AsRef<tick::SimpleClock>` (both `tick::SimpleClock` and `tick::Clock`) and stamps every event's timestamp
+- **Builder construction** - `Sink::builder(ID).build()` constructs a sink. Optional settings: `processors(...)` (callable once), `clock(...)`, `isolated_enrichment()`, and `event_sampler(...)`. The clock stamps every event's timestamp; it accepts a `tick::SimpleClock`, or a `tick::Clock` by value or by reference, and defaults to `SimpleClock::new_system()`
 - **O(1) clone** - `Sink` cloning is cheap
 - **Composite sinks** - `Sink::composite([a, b, …])` returns a sink that dispatches every event through each child in turn; each leaf must appear exactly once, and a duplicate - listed twice or reached through overlapping nested composites - panics
 - **Noop sink** - `Sink::noop()` creates a sink with no processors for testing
@@ -35,7 +35,7 @@
 ## Emission & Routing
 
 - **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's interested processors via `EventProcessor::process`
-- **Per-Sink event sampling** - `Sink::with_event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked, and the last sampler attached wins; see `EventSampler::sample` for the invocation contract
+- **Per-Sink event sampling** - `SinkBuilder::event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked; the sampler is fixed once the sink is built, and each sink in a composite decides with its own sampler; see `EventSampler::sample` for the invocation contract
 - **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped getters do not evaluate, convert, or redact their values, but field enumeration and visitor work still occur. Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
 - **Allocation-free static keys** - all field, enrichment, and interop keys are `&'static str`, so `Key`/`FieldDescriptor`/`LogFieldEntry`/`MetricFieldEntry` are `Copy` and snapshotting consumers (e.g. snapshotting/replay processors) retain keys with zero allocation. The `tracing` bridge forwards `tracing`'s `&'static` field/target/file names directly instead of cloning them.
 - **Interest-based lazy construction** - processors implement the required `is_interested(&EventDescription)`, asked at most once per emission for each Sink; if every processor returns `false`, the event closure is never called
