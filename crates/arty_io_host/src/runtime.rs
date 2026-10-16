@@ -2,11 +2,12 @@
 // Licensed under the MIT License.
 
 use std::any::{Any, TypeId};
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Waker;
 
-use arty_io_core::{DriverRole, IoContext};
+use arty_io_core::{DriverError, DriverRole, IoContext};
 use foldhash::HashMap;
 use observed::Sink;
 use thread_aware_core::{Thread, ThreadAware};
@@ -34,13 +35,29 @@ where
 }
 
 struct RegisteredContext {
-    context: Box<dyn ErasedContext>,
+    context: Mutex<Box<dyn ErasedContext>>,
     role: DriverRole,
+}
+
+impl RegisteredContext {
+    fn clone_context<C>(&self) -> C
+    where
+        C: IoContext,
+    {
+        *self
+            .context
+            .lock()
+            .expect("a poisoned I/O context indicates a runtime invariant failure")
+            .clone_context()
+            .downcast::<C>()
+            .expect("I/O contexts are stored under their own TypeId")
+    }
 }
 
 #[derive(Default)]
 struct Registry {
-    contexts: HashMap<TypeId, RegisteredContext>,
+    contexts: HashMap<TypeId, Arc<RegisteredContext>>,
+    failure: Option<Arc<str>>,
 }
 
 /// Shared registry of thread-neutral I/O contexts for one Arty runtime.
@@ -95,58 +112,88 @@ impl IoRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if this runtime clone has not been relocated onto its worker.
+    /// Panics if this runtime clone has not been relocated onto the current
+    /// worker thread.
     #[must_use]
-    pub fn driver_host(&self, owner_waker: Waker) -> DriverHost {
+    pub fn driver_host(self, owner_waker: Waker) -> DriverHost {
         let thread = self
             .thread
             .clone()
             .expect("IoRuntime must be relocated onto its worker before creating a driver host");
-        DriverHost::new(self.clone(), thread, owner_waker, self.sink.clone())
+        assert_eq!(
+            thread.id(),
+            std::thread::current().id(),
+            "IoRuntime must create its driver host on the thread it was relocated onto"
+        );
+        DriverHost::new(self, thread, owner_waker)
     }
 
-    pub(crate) fn get_context<C>(&self, options: &C::ContextOptions) -> Resolution<C>
+    pub(crate) fn resolve_context<C>(&self, options: &C::ContextOptions) -> Result<Resolution<C>, DriverError>
     where
         C: IoContext,
         C::ContextOptions: Clone,
     {
-        let context_type = TypeId::of::<C>();
-        let mut registry = self.registry();
-        if let Some(registered) = registry.contexts.get(&context_type) {
-            let context = registered
-                .context
-                .clone_context()
-                .downcast::<C>()
-                .expect("I/O contexts are stored under their own TypeId");
-            return Resolution {
-                context: *context,
+        if let Some(registered) = self.registered_context::<C>()? {
+            return Ok(Resolution {
+                context: registered.clone_context::<C>(),
                 role: registered.role,
-            };
+            });
         }
 
-        let role = if registry.contexts.is_empty() {
-            DriverRole::Primary
-        } else {
-            DriverRole::Secondary
+        let candidate = C::context(options.clone());
+        let registered = {
+            let mut registry = self.registry();
+            Self::check_failure(&registry)?;
+            let primary_available = registry.contexts.is_empty();
+            match registry.contexts.entry(TypeId::of::<C>()) {
+                Entry::Occupied(entry) => Arc::clone(entry.get()),
+                Entry::Vacant(entry) => {
+                    let registered = Arc::new(RegisteredContext {
+                        context: Mutex::new(Box::new(NeutralContext(candidate))),
+                        role: if primary_available {
+                            DriverRole::Primary
+                        } else {
+                            DriverRole::Secondary
+                        },
+                    });
+                    entry.insert(Arc::clone(&registered));
+                    registered
+                }
+            }
         };
-        let context = C::context(options.clone());
-        registry.contexts.insert(
-            context_type,
-            RegisteredContext {
-                context: Box::new(NeutralContext(context)),
-                role,
-            },
-        );
-        let registered = registry
-            .contexts
-            .get(&context_type)
-            .expect("the context was inserted immediately above");
-        let context = registered
-            .context
-            .clone_context()
-            .downcast::<C>()
-            .expect("I/O contexts are stored under their own TypeId");
-        Resolution { context: *context, role }
+        Ok(Resolution {
+            context: registered.clone_context::<C>(),
+            role: registered.role,
+        })
+    }
+
+    pub(crate) fn check_failed(&self) -> Result<(), DriverError> {
+        Self::check_failure(&self.registry())
+    }
+
+    pub(crate) fn fail(&self, error: &DriverError) {
+        let mut registry = self.registry();
+        registry.failure.get_or_insert_with(|| Arc::from(error.to_string()));
+    }
+
+    pub(crate) const fn sink(&self) -> &Sink {
+        &self.sink
+    }
+
+    fn registered_context<C>(&self) -> Result<Option<Arc<RegisteredContext>>, DriverError>
+    where
+        C: IoContext,
+    {
+        let registry = self.registry();
+        Self::check_failure(&registry)?;
+        Ok(registry.contexts.get(&TypeId::of::<C>()).cloned())
+    }
+
+    fn check_failure(registry: &Registry) -> Result<(), DriverError> {
+        match &registry.failure {
+            Some(message) => Err(DriverError::from_message(message.as_ref())),
+            None => Ok(()),
+        }
     }
 
     fn registry(&self) -> MutexGuard<'_, Registry> {

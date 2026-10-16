@@ -26,3 +26,21 @@ fn approved_public_constructors_are_available() {
 fn driver_host_requires_a_relocated_runtime() {
     let _ = IoRuntime::new(observed::Sink::noop()).driver_host(Waker::noop().clone());
 }
+
+#[test]
+fn driver_host_requires_the_relocation_destination_thread() {
+    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let mut runtime = IoRuntime::new(observed::Sink::noop());
+    runtime.relocate(None, &thread);
+
+    let panicked = std::thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = runtime.driver_host(Waker::noop().clone());
+        }))
+        .is_err()
+    })
+    .join()
+    .unwrap();
+
+    assert!(panicked);
+}

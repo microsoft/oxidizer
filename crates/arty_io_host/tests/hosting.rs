@@ -27,7 +27,9 @@ struct State {
     roles: Mutex<Vec<(Kind, DriverRole)>>,
     cycles: Mutex<Vec<(Kind, Duration)>>,
     driver_waker: Mutex<Option<Waker>>,
+    context_calls: AtomicUsize,
     shutdowns: AtomicUsize,
+    panic_context: AtomicBool,
     fail_initialization: AtomicBool,
     fail_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
@@ -45,11 +47,46 @@ impl<const SECOND: bool> ThreadAware for Context<SECOND> {
     }
 }
 
+#[derive(Clone)]
+struct ReentrantContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for ReentrantContext {
+    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+        assert!(source.is_none());
+    }
+}
+
+impl IoContext for ReentrantContext {
+    type ContextOptions = (IoRuntime, Arc<State>);
+    type Driver = TestDriver;
+
+    fn context((runtime, state): Self::ContextOptions) -> Self {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let mut worker_runtime = runtime;
+        worker_runtime.relocate(None, &thread);
+        let host = worker_runtime.driver_host(Waker::noop().clone());
+        let _ = host.context::<Context<true>>(&state).unwrap();
+        Self { state }
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.state.roles.lock().unwrap().push((Kind::First, options.role()));
+        Ok(TestDriver {
+            kind: Kind::First,
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
 impl<const SECOND: bool> IoContext for Context<SECOND> {
     type ContextOptions = Arc<State>;
     type Driver = TestDriver;
 
     fn context(options: Self::ContextOptions) -> Self {
+        options.context_calls.fetch_add(1, Ordering::SeqCst);
+        assert!(!options.panic_context.load(Ordering::SeqCst), "context construction failed");
         Self { state: options }
     }
 
@@ -232,6 +269,7 @@ fn worker_local_drivers_are_created_lazily() {
 
     let _ = second.context::<Context<false>>(&state).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 2);
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -274,6 +312,60 @@ fn driver_initialization_failures_are_returned_to_the_runtime() {
     };
 
     assert_eq!(error.to_string(), "initialization failed");
+
+    state.fail_initialization.store(false, Ordering::SeqCst);
+    let Err(retry_error) = host.context::<Context<false>>(&state) else {
+        panic!("runtime failure should reject later retrievals");
+    };
+    assert_eq!(retry_error.to_string(), "initialization failed");
+}
+
+#[test]
+fn runtime_failure_rejects_cached_context_retrievals() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(&state).unwrap();
+    state.fail_initialization.store(true, Ordering::SeqCst);
+    let Err(error) = host.context::<Context<true>>(&state) else {
+        panic!("driver initialization should fail");
+    };
+    assert_eq!(error.to_string(), "initialization failed");
+
+    state.fail_initialization.store(false, Ordering::SeqCst);
+    let Err(cached_error) = host.context::<Context<false>>(&state) else {
+        panic!("runtime failure should reject cached retrievals");
+    };
+    assert_eq!(cached_error.to_string(), "initialization failed");
+}
+
+#[test]
+fn context_construction_panics_do_not_poison_the_registry() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    state.panic_context.store(true, Ordering::SeqCst);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = host.context::<Context<false>>(&state);
+    }));
+    assert!(result.is_err());
+
+    state.panic_context.store(false, Ordering::SeqCst);
+    let _ = host.context::<Context<false>>(&state).unwrap();
+    assert_eq!(state.roles.lock().unwrap().last().unwrap().1, DriverRole::Primary);
+}
+
+#[test]
+fn context_construction_can_reenter_the_runtime_registry() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+
+    let _ = host.context::<ReentrantContext>(&(runtime, Arc::clone(&state))).unwrap();
+
+    assert_eq!(
+        state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
+        [DriverRole::Primary, DriverRole::Secondary]
+    );
 }
 
 #[test]

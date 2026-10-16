@@ -115,7 +115,6 @@ pub struct DriverHost {
     runtime: IoRuntime,
     thread: Thread,
     owner_waker: Waker,
-    sink: Sink,
     interrupt: Arc<DriverInterrupt>,
     primary: RefCell<Option<LocalContext>>,
     secondaries: RefCell<Vec<LocalContext>>,
@@ -130,12 +129,11 @@ impl fmt::Debug for DriverHost {
 }
 
 impl DriverHost {
-    pub(crate) fn new(runtime: IoRuntime, thread: Thread, owner_waker: Waker, sink: Sink) -> Self {
+    pub(crate) fn new(runtime: IoRuntime, thread: Thread, owner_waker: Waker) -> Self {
         Self {
             runtime,
             thread,
             owner_waker,
-            sink,
             interrupt: Arc::new(DriverInterrupt::default()),
             primary: RefCell::new(None),
             secondaries: RefCell::new(Vec::new()),
@@ -169,6 +167,7 @@ impl DriverHost {
         C: IoContext,
         C::ContextOptions: Clone,
     {
+        self.runtime.check_failed()?;
         if let Some(context) = self
             .primary
             .borrow()
@@ -184,9 +183,15 @@ impl DriverHost {
             ));
         }
         let _initialization = InitializationGuard(&self.initializing);
-        let Resolution { mut context, role } = self.runtime.get_context::<C>(options);
+        let Resolution { mut context, role } = self.runtime.resolve_context::<C>(options)?;
         context.relocate(None, &self.thread);
-        let local = self.create_local_driver::<C>(context, role)?;
+        let local = match self.create_local_driver::<C>(context, role) {
+            Ok(local) => local,
+            Err(error) => {
+                self.runtime.fail(&error);
+                return Err(error);
+            }
+        };
         let context = Self::clone_context::<C>(&local);
         match local.role {
             DriverRole::Primary => {
@@ -207,7 +212,7 @@ impl DriverHost {
         let options = DriverOptions::new(self.thread.clone(), self.owner_waker.clone(), role);
         let driver = context.driver(options).inspect_err(|error| {
             emit!(
-                &self.sink,
+                self.runtime.sink(),
                 IoDriverInitializationFailed {
                     context: IoContextName(type_name::<C>()),
                     role: IoDriverRoleLabel::from(role),
@@ -219,7 +224,7 @@ impl DriverHost {
             self.interrupt.set(driver.waker());
         }
         emit!(
-            &self.sink,
+            self.runtime.sink(),
             IoDriverInitialized {
                 context: IoContextName(type_name::<C>()),
                 role: IoDriverRoleLabel::from(role),
@@ -263,10 +268,10 @@ impl DriverHost {
     /// invariants.
     pub fn execute_cycle(&self, max_wait: Duration) -> Result<(), DriverError> {
         for local in self.secondaries.borrow_mut().iter_mut() {
-            Self::execute_driver(local, Duration::ZERO, &self.sink)?;
+            Self::execute_driver(local, Duration::ZERO, self.runtime.sink())?;
         }
         if let Some(primary) = self.primary.borrow_mut().as_mut() {
-            Self::execute_driver(primary, max_wait, &self.sink)?;
+            Self::execute_driver(primary, max_wait, self.runtime.sink())?;
         }
         Ok(())
     }
@@ -294,7 +299,7 @@ impl Drop for DriverHost {
         for local in secondaries.into_iter().chain(primary) {
             if let Err(error) = local.driver.shutdown() {
                 emit!(
-                    &self.sink,
+                    self.runtime.sink(),
                     IoDriverShutdownFailed {
                         context: IoContextName(local.context_name),
                         role: IoDriverRoleLabel::from(local.role),
