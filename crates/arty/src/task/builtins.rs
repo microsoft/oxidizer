@@ -9,7 +9,7 @@ use observed::emit;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
-use crate::runtime::context::RuntimeBuiltins;
+use crate::runtime::dispatch::DispatcherClient;
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
 use crate::task::scheduler::Scheduler;
@@ -215,12 +215,12 @@ impl ThreadAware for Builtins {
 }
 
 impl Builtins {
-    pub(crate) fn sync_init(builtins: RuntimeBuiltins) -> Self {
+    pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, thread: Thread, sink: Sink) -> Self {
         Self {
-            scheduler: builtins.task_scheduler,
-            thread: builtins.thread,
-            clock: builtins.clock,
-            sink: builtins.sink,
+            scheduler: Scheduler::new(dispatcher, thread.clone()),
+            thread,
+            clock,
+            sink,
         }
     }
 }

@@ -3,14 +3,14 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::TaskSet;
+use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::prepare_remote_on_worker;
+use crate::task::execution::DeferredTask;
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -101,6 +101,18 @@ impl Scheduler {
         ACTIVE_WORKER.set(false);
     }
 
+    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient) {
+        _ = CURRENT_WORKER.try_with(|current| {
+            let current = current.borrow();
+            let Some(current) = current.as_ref() else {
+                return;
+            };
+            if dispatcher.owns(&current.thread) {
+                current.tasks.begin_shutdown();
+            }
+        });
+    }
+
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
         let worker_index = dispatcher
             .worker_index(current.id())
@@ -177,7 +189,7 @@ impl Scheduler {
         R: Send + 'static,
     {
         if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown();
+            return JoinHandle::shutdown(self.dispatcher.remote_results());
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -201,21 +213,13 @@ impl Scheduler {
             }
             let sink = current.builtins.sink().clone();
             let parent_task_enrichment = sink.transfer_context();
-            let join_handle = prepare_remote_on_worker(
-                future_factory,
-                current.builtins.clone(),
-                parent_task_enrichment,
-                sink.clone(),
-                self.dispatcher.shutdown_signal(),
-                &current.tasks,
-            );
-            observed::emit!(
-                &sink,
-                crate::runtime::telemetry::events::TaskSpawned {
-                    placement: crate::runtime::telemetry::events::PlacementLabel("same_thread"),
-                }
-            );
-            Ok(join_handle)
+            let builtins = current.builtins.clone();
+            let (result_tx, result_rx) = self.dispatcher.remote_results().channel();
+            let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
+            let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
+            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
+            current.tasks.add_with_remote_result(inner, options, result_tx);
+            Ok(JoinHandle::new(result_rx))
         })
     }
 
@@ -372,9 +376,6 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown();
-        }
         self.binding.blocking_worker.spawn_blocking(body)
     }
 
@@ -404,7 +405,10 @@ impl AsRef<Self> for Scheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::future::Future as _;
+    use std::pin::pin;
     use std::sync::mpsc;
+    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
     use super::*;
@@ -424,6 +428,29 @@ mod tests {
             .unwrap();
 
         assert!(registered);
+        runtime.stop().unwrap();
+    }
+
+    #[test]
+    fn current_executor_shutdown_rejects_direct_submissions_immediately() {
+        let runtime = crate::runtime::Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let rejected = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher);
+                let mut task = pin!(cx.scheduler().spawn(async |_| 42));
+
+                matches!(
+                    task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                    Poll::Ready(Err(error)) if error.is_shutdown()
+                )
+            })
+            .unwrap();
+
+        assert!(rejected);
         runtime.stop().unwrap();
     }
 

@@ -99,7 +99,7 @@ impl BlockingPoolPolicy {
     }
 
     /// Telemetry label identifying the pool mode (`per_worker` / `shared`).
-    pub(in crate::runtime) const fn mode_label(&self) -> &'static str {
+    pub(crate) const fn mode_label(&self) -> &'static str {
         match self.mode {
             Mode::PerWorker => "per_worker",
             Mode::Shared => "shared",
@@ -108,7 +108,7 @@ impl BlockingPoolPolicy {
 
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(in crate::runtime) fn into_pools(self) -> Result<BlockingPools, Error> {
+    pub(crate) fn into_pools(self) -> Result<BlockingPools, Error> {
         match self.mode {
             Mode::PerWorker => {
                 let max_workers = validated_max(self.max_workers)?;

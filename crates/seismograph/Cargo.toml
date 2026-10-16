@@ -17,7 +17,7 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 
 [package.metadata.docs.rs]
@@ -25,18 +25,16 @@ all-features = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "getrandom::error::Error",
     "seismograph_protocol::Error",
     "seismograph_protocol::io::MonitorIo",
     "seismograph_protocol::monitor::MonitorDescriptor",
 ]
 
 [features]
-monitor = ["dep:getrandom", "dep:seismograph_protocol"]
+monitor = ["dep:seismograph_protocol"]
 test-util = ["monitor", "seismograph_protocol/test-util"]
 
 [dependencies]
-getrandom = { workspace = true, optional = true }
 seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

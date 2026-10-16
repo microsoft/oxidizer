@@ -34,6 +34,7 @@ use seismograph_protocol::monitor::InstanceId;
 use seismograph_protocol::monitor::{MonitorDescriptor, MonitorEndpoint};
 use seismograph_protocol::transport::{Connection, Listener};
 
+use crate::Error;
 use crate::recorder::SuppressionGuard;
 
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -137,7 +138,7 @@ impl Builder {
     ///     .name("worker")
     ///     .io(MonitorIo::new_native())
     ///     .start()?;
-    /// # Ok::<(), seismograph::monitor::Error>(())
+    /// # Ok::<(), seismograph::Error>(())
     /// ```
     #[must_use]
     pub fn io(mut self, io: MonitorIo) -> Self {
@@ -167,7 +168,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when user storage is unavailable, ownership or
+    /// Returns [`crate::Error`] when user storage is unavailable, ownership or
     /// permissions are unsafe, or identity generation, binding, discovery
     /// publication, or listener-thread creation fails.
     ///
@@ -176,7 +177,7 @@ impl Builder {
     /// With `test-util`, panics if an explicitly selected isolated native test
     /// directory cannot be created or secured.
     pub fn start(self) -> Result<Monitor, Error> {
-        self.start_with(spawn_listener_thread)
+        self.start_with(spawn_listener_thread).map_err(Error::monitor)
     }
 
     /// Uses an isolated, correctly protected temporary registry for native tests.
@@ -200,27 +201,27 @@ impl Builder {
             Arc<ActiveClients>,
             Arc<Mutex<Option<String>>>,
             &Path,
-        ) -> Result<JoinHandle<()>, Error>,
-    ) -> Result<Monitor, Error> {
+        ) -> Result<JoinHandle<()>, StartupFailure>,
+    ) -> Result<Monitor, StartupFailure> {
         let io = self.io.unwrap_or_else(MonitorIo::new_native);
         let name = match self.name {
             Some(name) => name,
             None => default_application_name(&io)?,
         };
         if name.is_empty() || self.instance.as_ref().is_some_and(String::is_empty) {
-            return Err(Error::InvalidIdentity);
+            return Err(StartupFailure::InvalidIdentity);
         }
 
-        let instance_id = io.instance_id().map_err(Error::Protocol)?;
+        let instance_id = io.instance_id().map_err(StartupFailure::Protocol)?;
         #[cfg(any(test, feature = "test-util"))]
         let fixture = self.isolated.then(seismograph_protocol::testing::Directory::new);
         #[cfg(any(test, feature = "test-util"))]
         let directory = match &fixture {
             Some(fixture) => fixture.open(),
-            None => Directory::current(&io).map_err(Error::Protocol)?,
+            None => Directory::current(&io).map_err(StartupFailure::Protocol)?,
         };
         #[cfg(not(any(test, feature = "test-util")))]
-        let directory = Directory::current(&io).map_err(Error::Protocol)?;
+        let directory = Directory::current(&io).map_err(StartupFailure::Protocol)?;
         let process_id = io.process_id();
         let owner = directory.owner().clone();
         let descriptor = MonitorDescriptor {
@@ -231,9 +232,9 @@ impl Builder {
             endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, process_id, instance_id),
             owner,
         };
-        let listener = Listener::bind(&io, &descriptor).map_err(Error::Bind)?;
-        listener.set_nonblocking(true).map_err(Error::ConfigureListener)?;
-        let descriptor_path = io.publish_descriptor(&directory, &descriptor).map_err(Error::Protocol)?;
+        let listener = Listener::bind(&io, &descriptor).map_err(StartupFailure::Bind)?;
+        listener.set_nonblocking(true).map_err(StartupFailure::ConfigureListener)?;
+        let descriptor_path = io.publish_descriptor(&directory, &descriptor).map_err(StartupFailure::Protocol)?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let active_clients = Arc::new(ActiveClients::new());
@@ -271,13 +272,13 @@ impl Builder {
     }
 }
 
-fn default_application_name(io: &MonitorIo) -> Result<String, Error> {
+fn default_application_name(io: &MonitorIo) -> Result<String, StartupFailure> {
     let path = io
         .current_exe()
-        .map_err(|source| Error::Protocol(seismograph_protocol::Error::Io(source)))?;
+        .map_err(|source| StartupFailure::Protocol(seismograph_protocol::Error::Io(source)))?;
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .ok_or(Error::InvalidIdentity)
+        .ok_or(StartupFailure::InvalidIdentity)
 }
 
 struct ActiveClients {
@@ -405,11 +406,11 @@ fn spawn_listener_thread(
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
     _descriptor_path: &Path,
-) -> Result<JoinHandle<()>, Error> {
+) -> Result<JoinHandle<()>, StartupFailure> {
     thread::Builder::new()
         .name("seismograph-monitor".into())
         .spawn(move || run_listener(&io, &listener, &descriptor, &stop, &active_clients, &last_error))
-        .map_err(Error::Spawn)
+        .map_err(StartupFailure::Spawn)
 }
 
 fn spawn_client_thread(
@@ -886,67 +887,37 @@ impl fmt::Display for ClientError {
 
 /// Monitor startup failure.
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum StartupFailure {
     /// Application or instance name is empty.
     InvalidIdentity,
     /// Native local listener could not be bound.
     Bind(io::Error),
     /// Listener socket options could not be configured.
     ConfigureListener(io::Error),
-    /// Secure random identity generation failed.
-    Random(getrandom::Error),
     /// Protocol discovery operation failed.
     Protocol(seismograph_protocol::Error),
-    /// Descriptor could not be published.
-    Publish {
-        /// Descriptor path.
-        path: PathBuf,
-        /// Encoding or filesystem failure.
-        source: seismograph_protocol::Error,
-    },
-    /// Temporary descriptor could not be atomically renamed.
-    Rename {
-        /// Temporary path.
-        from: PathBuf,
-        /// Published path.
-        to: PathBuf,
-        /// Filesystem failure.
-        source: io::Error,
-    },
     /// Listener thread could not be created.
     Spawn(io::Error),
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for StartupFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidIdentity => f.write_str("monitor application and instance names must not be empty"),
             Self::Bind(error) => write!(f, "failed to bind Seismograph local monitor: {error}"),
             Self::ConfigureListener(error) => write!(f, "failed to configure Seismograph monitor listener: {error}"),
-            Self::Random(error) => write!(f, "failed to generate Seismograph monitor identity: {error}"),
             Self::Protocol(error) => write!(f, "Seismograph monitor protocol failed: {error}"),
-            Self::Publish { path, source } => {
-                write!(f, "failed to publish monitor descriptor {}: {source}", path.display())
-            }
-            Self::Rename { from, to, source } => {
-                write!(
-                    f,
-                    "failed to publish monitor descriptor {} as {}: {source}",
-                    from.display(),
-                    to.display()
-                )
-            }
             Self::Spawn(error) => write!(f, "failed to start Seismograph monitor thread: {error}"),
         }
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for StartupFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Bind(error) | Self::ConfigureListener(error) | Self::Rename { source: error, .. } | Self::Spawn(error) => Some(error),
-            Self::Protocol(error) | Self::Publish { source: error, .. } => Some(error),
-            Self::Random(_) | Self::InvalidIdentity => None,
+            Self::Bind(error) | Self::ConfigureListener(error) | Self::Spawn(error) => Some(error),
+            Self::Protocol(error) => Some(error),
+            Self::InvalidIdentity => None,
         }
     }
 }
@@ -1421,14 +1392,14 @@ mod tests {
         let default = Builder::default();
         assert_eq!((&BUILDER.name, &BUILDER.instance), (&default.name, &default.instance));
 
-        assert!(matches!(
-            Monitor::builder().isolated().name("").start(),
-            Err(Error::InvalidIdentity)
-        ));
-        assert!(matches!(
-            Monitor::builder().isolated().name("valid").instance("").start(),
-            Err(Error::InvalidIdentity)
-        ));
+        for builder in [
+            Monitor::builder().isolated().name(""),
+            Monitor::builder().isolated().name("valid").instance(""),
+        ] {
+            let error: crate::Error = builder.start().unwrap_err();
+            assert_eq!(error.to_string(), "monitor application and instance names must not be empty");
+            assert!(std::error::Error::source(&error).is_none());
+        }
         assert_eq!(
             default_application_name(&MonitorIo::new_native()).unwrap(),
             std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned()
@@ -1845,38 +1816,35 @@ mod tests {
             assert_eq!(error.to_string(), expected);
         }
 
-        let path = PathBuf::from("monitor");
         let startup_cases = [
-            Error::InvalidIdentity,
-            Error::Bind(io_error()),
-            Error::ConfigureListener(io_error()),
-            Error::Random(getrandom::Error::UNSUPPORTED),
-            Error::Protocol(protocol_error()),
-            Error::Publish {
-                path: path.clone(),
-                source: protocol_error(),
-            },
-            Error::Rename {
-                from: PathBuf::from("temporary"),
-                to: path,
-                source: io_error(),
-            },
-            Error::Spawn(io_error()),
+            StartupFailure::InvalidIdentity,
+            StartupFailure::Bind(io_error()),
+            StartupFailure::ConfigureListener(io_error()),
+            StartupFailure::Protocol(protocol_error()),
+            StartupFailure::Spawn(io_error()),
         ];
         let expected = [
             "monitor application and instance names must not be empty".to_owned(),
             "failed to bind Seismograph local monitor: socket failed".to_owned(),
             "failed to configure Seismograph monitor listener: socket failed".to_owned(),
-            format!("failed to generate Seismograph monitor identity: {}", getrandom::Error::UNSUPPORTED),
             "Seismograph monitor protocol failed: invalid Seismograph monitor message".to_owned(),
-            "failed to publish monitor descriptor monitor: invalid Seismograph monitor message".to_owned(),
-            "failed to publish monitor descriptor temporary as monitor: socket failed".to_owned(),
             "failed to start Seismograph monitor thread: socket failed".to_owned(),
         ];
-        for (error, expected) in startup_cases.into_iter().zip(expected) {
+        let expected_sources = [
+            None,
+            Some("socket failed"),
+            Some("socket failed"),
+            Some("invalid Seismograph monitor message"),
+            Some("socket failed"),
+        ];
+        for ((failure, expected), expected_source) in startup_cases.into_iter().zip(expected).zip(expected_sources) {
+            let error = Error::monitor(failure);
             assert_eq!(error.to_string(), expected);
-            let expected_source = !matches!(error, Error::InvalidIdentity | Error::Random(_));
-            assert_eq!(std::error::Error::source(&error).is_some(), expected_source);
+            assert_eq!(format!("{error:?}"), format!("Error({expected})"));
+            assert_eq!(
+                std::error::Error::source(&error).map(ToString::to_string).as_deref(),
+                expected_source
+            );
         }
     }
 
@@ -1889,10 +1857,19 @@ mod tests {
             .name("spawn-failure")
             .start_with(|_io, _listener, _descriptor, _stop, _client, _last_error, descriptor_path| {
                 assert!(observed.file_bytes(descriptor_path).is_some());
-                Err(Error::Spawn(io::Error::other("injected")))
+                Err(StartupFailure::Spawn(io::Error::other("injected")))
             })
+            .map_err(Error::monitor)
             .unwrap_err();
-        assert!(matches!(error, Error::Spawn(_)));
+        assert_eq!(error.to_string(), "failed to start Seismograph monitor thread: injected");
+        assert_eq!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<io::Error>()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::Other
+        );
         assert_eq!(Directory::current(&io).unwrap().descriptors().unwrap().count(), 0);
         assert!(
             control

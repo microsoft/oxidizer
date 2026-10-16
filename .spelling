@@ -6,6 +6,7 @@ XDG
 cancellable
 nonblocking
 pathname
+macOS
 Arty's
 quickstart
 rethrow

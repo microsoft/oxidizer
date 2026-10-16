@@ -4,7 +4,7 @@
 [package]
 name = "fakeable_impl"
 description = "Implementation details for the fakeable procedural macros."
-version = "0.2.0"
+version = "0.2.1"
 autotests = false
 readme = "README.md"
 keywords = ["oxidizer", "fake", "mock", "testing"]

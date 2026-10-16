@@ -9,7 +9,7 @@
 //! and their impl blocks to automatically generate a wrapper structure that can switch
 //! between real and fake implementations at runtime. The fake implementation is only
 //! compiled when the specified feature flag (default: "test-util") is enabled or during
-//! test builds.
+//! unit test builds. Set `fakes_feature = false` for unit tests only.
 //!
 //! # Stability
 //!
@@ -97,7 +97,8 @@ use proc_macro::TokenStream;
 ///
 /// - **`fake_impl`** (required): Specifies the type of the fake implementation
 /// - **`fake_constructor`** (optional): Name of the constructor method for fake instances (default: "fake")
-/// - **`fakes_feature`** (optional): Feature flag name for enabling fakes (default: "test-util")
+/// - **`fakes_feature`** (optional): Consumer feature name for enabling fakes (default: "test-util"),
+///   or `false` to enable fakes only under `cfg(test)`
 ///
 /// ```rust
 /// # #[cfg(feature = "mockall")]
@@ -124,11 +125,17 @@ use proc_macro::TokenStream;
 ///
 /// ## For Impl Blocks
 ///
-/// - **`fakes_feature`** (optional): Feature flag name for enabling fakes (default: "test-util")
+/// - **`fakes_feature`** (optional): Consumer feature name for enabling fakes (default: "test-util"),
+///   or `false` for unit tests only; use the same value on the struct and every impl
 /// - **`generate_mockall_fake = true`** (optional): Generate a Mockall fake; requires the
 ///   `mockall` feature and a direct consumer dependency on `mockall`
 /// - **`mockall_fake_module`** (optional): Module for the generated mock (default: `"fakes"`);
 ///   use `"."` to emit it in the current module
+/// - **`mockall_fake_visibility`** (optional): Rust visibility string for the mock container
+///   (default: `"pub"`); use `"pub(crate)"` for internal adapters or `""` for private mocks.
+///   Requires `generate_mockall_fake = true`. For a named module it controls the module's
+///   visibility; the mock type is public inside that module. With `"."`, it controls the
+///   mock type directly. Relative visibility is resolved in the module containing the impl block.
 ///
 /// `fakes_attribute` is accepted as a deprecated alias for `fakes_feature` for compatibility with
 /// the imported experimental API.
@@ -177,15 +184,104 @@ use proc_macro::TokenStream;
 /// - Code is also included in test builds (`#[cfg(test)]`)
 /// - This allows fakes to be used in tests without needing to enable features in production
 ///
+/// ## Unit Tests Only
+///
+/// Set `fakes_feature = false` on the struct and every annotated impl to emit only
+/// `cfg(test)` gates, with no consumer feature declaration or cfg-checking workaround.
+/// Integration tests and other dependent crates cannot access these fakes, even
+/// when a consumer's `test-util` feature is enabled.
+///
+/// When `fakeable` is a dev-dependency, also use `cfg_attr(test, ...)` so the macro
+/// itself is not needed in normal builds:
+///
+/// ```
+/// #[cfg_attr(test, fakeable::fakeable(fake_impl = fakes::FakeReader, fakes_feature = false))]
+/// struct Reader;
+///
+/// #[cfg_attr(test, fakeable::fakeable(fakes_feature = false))]
+/// impl Reader {
+///     pub(crate) fn new() -> Self {
+///         Self {}
+///     }
+///     pub(crate) fn read(&self) -> u32 {
+///         42
+///     }
+/// }
+///
+/// #[cfg(test)]
+/// mod fakes {
+///     pub(crate) struct FakeReader;
+///     impl FakeReader {
+///         pub(crate) fn read(&self) -> u32 {
+///             7
+///         }
+///     }
+/// }
+///
+/// assert_eq!(Reader::new().read(), 42);
+/// ```
+///
+/// ## Internal Adapters with Mockall
+///
+/// Generated mocks support `pub` and `pub(crate)` methods, retaining their
+/// visibility on the mock. Constructors still create real instances; private
+/// helpers are not mocked. Enable the `mockall` feature and declare `mockall` as a
+/// direct dev-dependency to use its argument matchers, call counts, ordered
+/// sequences, and scripted results without writing a separate fake.
+/// Set `mockall_fake_visibility` explicitly to keep the generated container internal.
+/// Visibility is not inferred from methods: adding, removing, or gating a method must
+/// not silently change the container's API. Choose a visibility that also permits use
+/// in the wrapper's fake constructor; a public wrapper with a public fake constructor
+/// needs an accessible fake type.
+///
+/// ```rust
+/// # #[cfg(feature = "mockall")]
+/// # mod example {
+/// #[fakeable::fakeable(fake_impl = fakes::MockReader, fakes_feature = false)]
+/// pub(crate) struct Reader;
+///
+/// #[fakeable::fakeable(
+///     generate_mockall_fake = true,
+///     fakes_feature = false,
+///     mockall_fake_visibility = "pub(crate)"
+/// )]
+/// impl Reader {
+///     pub(crate) fn read(&self, key: &str) -> usize {
+///         key.len()
+///     }
+/// }
+///
+/// # #[cfg(test)]
+/// # fn example() {
+/// let mut mock = fakes::MockReader::new();
+/// mock.expect_read()
+///     .with(mockall::predicate::eq("answer"))
+///     .times(1)
+///     .return_const(7usize);
+/// assert_eq!(Reader::fake(mock).read("answer"), 7);
+/// # }
+/// # }
+/// ```
+///
+/// # Lints
+///
+/// Generated real impls allow `clippy::unused_self`: an otherwise stateless
+/// operation may need a receiver to select its fake implementation. The allowance
+/// covers the whole real impl, including private helpers that are not delegated.
+/// Explicit lint attributes on the original impl or its methods take precedence.
+/// This allowance applies only when the macro expands. With `cfg_attr(test, ...)`,
+/// normal builds still lint the implementation without macro expansion.
+///
 /// # Limitations
 ///
-/// - Mockall generation rejects mutable methods and methods with restricted visibility because
-///   it cannot generate a fake that matches the wrapper's delegated method set.
+/// - Mockall generation rejects mutable methods and method visibility other than `pub` or
+///   `pub(crate)`; use a manual fake for other visibility scopes.
 /// - Mockall generation rejects consuming receivers, const methods, methods returning `Self`, and
 ///   signatures with multiple nested elided references; use a manual fake for those method shapes.
 /// - Mockall generation preserves method `cfg`/`cfg_attr` attributes and rejects nested elided
 ///   references beneath implicit higher-ranked function-pointer or trait-object binders.
 ///   Diagnostics for unsupported cfg-gated methods carry the same gating attributes.
+///   Unsupported methods without cfg attributes produce errors even when fake storage is disabled.
 /// - Generated Mockall signatures require async method futures to be `Send`; use a manual fake for
 ///   async methods whose futures are not `Send`.
 /// - Mockall generation rejects generic impl blocks; use a manual fake for generic services.

@@ -7,8 +7,8 @@
 
 use std::any::type_name;
 use std::cell::RefCell;
-use std::sync::Arc;
 
+use performables::arc::Arc;
 use smallvec::{SmallVec, smallvec};
 use thread_aware::{Thread, ThreadAware};
 use thread_local::ThreadLocal;

@@ -8,12 +8,15 @@
 
 use std::alloc::Layout;
 use std::cell::Cell;
-use std::sync::Mutex;
 use std::sync::atomic::{Ordering, fence};
+#[cfg(not(target_os = "macos"))]
+use std::sync::{Mutex, MutexGuard};
 
 use crate::backend;
 use crate::classes::Request;
 use crate::core::Owner;
+#[cfg(target_os = "macos")]
+use crate::hal::{Mutex, MutexGuard};
 
 std::thread_local! {
     static CURRENT: Cell<usize> = const { Cell::new(0) };
@@ -91,7 +94,7 @@ static POOL: Mutex<Pool> = Mutex::new(Pool {
     count: 0,
 });
 
-fn lock_pool() -> std::sync::MutexGuard<'static, Pool> {
+fn lock_pool() -> MutexGuard<'static, Pool> {
     match POOL.lock() {
         Ok(guard) => guard,
         Err(_) => crate::abort::abort(),
@@ -348,6 +351,7 @@ pub(crate) unsafe fn usable_size(ptr: *mut u8) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::classes;
@@ -405,6 +409,59 @@ mod tests {
             assert_ne!(current.get(), 0);
             assert_eq!(lock_pool().count, 1);
         });
+    }
+
+    #[test]
+    fn zeroed_allocation_clears_a_reused_range_when_decommit_fails() {
+        const CHILD: &str = "RALLOCATOR_DIRTY_REUSE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "thread::tests::zeroed_allocation_clears_a_reused_range_when_decommit_fails",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        let layout = Layout::from_size_align(4 << 20, 16384).unwrap();
+        let dirty = allocate(layout);
+        if dirty.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        } else {
+            // SAFETY: This checked, live allocation owns every byte in the layout.
+            unsafe { dirty.write_bytes(0x5a, layout.size()) };
+        }
+        crate::hal::fail_next(crate::hal::Failure::Decommit);
+        // SAFETY: The initialized allocation is uniquely owned and retired once.
+        unsafe { deallocate(dirty) };
+        let retained = allocate(layout);
+        if retained.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        assert_eq!(retained, dirty);
+        // SAFETY: The allocation is live again. Its first cache line may have
+        // been used for intrusive return linkage; the remaining bytes are ours.
+        let start = unsafe { retained.add(64) };
+        // SAFETY: This live range covers exactly the payload after that line.
+        let payload = unsafe { std::slice::from_raw_parts(start, layout.size() - 64) };
+        assert!(payload.iter().all(|&byte| byte == 0x5a));
+        crate::hal::fail_next(crate::hal::Failure::Decommit);
+        // SAFETY: No payload access remains when this live range is retired.
+        unsafe { deallocate(retained) };
+        let cleared = allocate_zeroed(layout);
+        if cleared.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        assert_eq!(cleared, retained);
+        // SAFETY: This is the same retained range; alloc_zeroed must initialize
+        // the complete layout even though both discard operations failed.
+        let payload = unsafe { std::slice::from_raw_parts(cleared, layout.size()) };
+        assert!(payload.iter().all(|&byte| byte == 0));
+        // SAFETY: This test owns the cleared range and retires it exactly once.
+        unsafe { deallocate(cleared) };
     }
 
     #[test]

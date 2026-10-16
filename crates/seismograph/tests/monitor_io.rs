@@ -37,14 +37,14 @@ fn startup_failures_are_injectable_without_host_registry_setup() {
         );
         let error = Monitor::builder().io(io.clone()).start().unwrap_err();
         assert!(error.to_string().contains("injected startup failure"), "{operation:?}: {error}");
-        match (operation, &error) {
-            (IoOperation::Bind, seismograph::monitor::Error::Bind(source))
-            | (IoOperation::ConfigureListener, seismograph::monitor::Error::ConfigureListener(source)) => {
-                assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
-            }
-            (IoOperation::Bind | IoOperation::ConfigureListener, error) => panic!("unexpected startup error: {error}"),
-            (_, error) => assert!(matches!(error, seismograph::monitor::Error::Protocol(_))),
-        }
+        let source = std::error::Error::source(&error).unwrap();
+        let source = if matches!(operation, IoOperation::Bind | IoOperation::ConfigureListener) {
+            source.downcast_ref::<io::Error>().unwrap()
+        } else {
+            let protocol = source.downcast_ref::<seismograph_protocol::Error>().unwrap();
+            std::error::Error::source(protocol).unwrap().downcast_ref::<io::Error>().unwrap()
+        };
+        assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(Directory::current(&io).unwrap().descriptors().unwrap().count(), 0);
     }
 }

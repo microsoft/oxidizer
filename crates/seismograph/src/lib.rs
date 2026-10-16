@@ -4,42 +4,41 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! High-performance process telemetry with extensible snapshot sources.
+//! Runtime telemetry for Rust applications.
 //!
-//! Instrumented crates record bounded events while registered sources contribute
-//! point-in-time state to a portable [`snapshot()`].
+//! `seismograph` collects allocation, synchronization, I/O, cache, and task events
+//! to help investigate memory use, contention, and scheduling. Crates such as
+//! `rallocator` and `performables` provide instrumentation.
 //!
-//! Snapshot capture defaults to retaining active-thread buffers and recording
-//! policy. [`snapshot::EventBufferDisposition::Stop`] captures the retained
-//! events, disables all six recording classes, and releases event-ring storage.
-//! Unlike legacy `Release`, it does not restart recording. Later source/encoding
-//! failures do not undo completed cleanup. [`recorder::clear_event_buffers()`]
-//! independently empties event rings without copying a snapshot or invoking
-//! sources, preserving recording policies and active-thread allocations.
-//! These operations leave process-lifetime recorder metadata registered.
+//! Recording is off by default, with sampling and optional backtraces to control
+//! its cost. Events are kept in bounded per-thread buffers. Snapshots combine
+//! those events with state supplied by registered sources, such as allocators
+//! and runtimes.
 //!
-//! ```
-//! use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
+//! # Usage
+//!
+//! Enable the event categories you need, run your workload, then capture a
+//! snapshot. For ownership and synchronization events:
+//!
+//! ```rust
 //! use seismograph::recorder::{Configuration, RecordingPolicy};
 //!
 //! seismograph::recorder(Configuration {
-//!     arc_dereferences: RecordingPolicy::all(false),
+//!     general_events: RecordingPolicy::all(false),
 //!     ..Default::default()
 //! });
-//! seismograph::record(EventClass::ArcDereference, || {
-//!     Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
-//! });
 //!
-//! let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-//! let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
-//! assert!(
-//!     decoded
-//!         .events
-//!         .events
-//!         .iter()
-//!         .any(|event| event.object_id() == Some(ObjectId::new(42)))
-//! );
+//! // Run application code that uses instrumented libraries.
+//! let snapshot = seismograph::snapshot(Default::default())?;
+//! # let _decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
+//! # seismograph::recorder(Configuration::default());
+//! # Ok::<(), seismograph::Error>(())
 //! ```
+//!
+//! Inspect saved snapshots with `seismograph view` from the
+//! [Seismograph CLI](https://crates.io/crates/seismograph_cli).
+//!
+//! # Live monitoring
 //!
 //! Applications built with the `monitor` feature can publish an OS-authorized local
 //! endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
@@ -85,17 +84,27 @@ pub mod snapshot;
 #[doc(hidden)]
 pub mod system;
 
-/// Opaque error reported by seismograph operations.
+/// Opaque error reported by snapshot operations or monitor startup.
+///
+/// [`std::error::Error::source`] exposes the underlying cause when available.
 pub struct Error {
     kind: ErrorKind,
 }
 
 enum ErrorKind {
     Message(&'static str),
-    SourceFailed { source: snapshot::SourceId, error: Box<Error> },
+    SourceFailed {
+        source: snapshot::SourceId,
+        error: Box<Error>,
+    },
     DuplicateSource(snapshot::SourceId),
     InvalidFormat,
-    WriteFile { path: PathBuf, source: std::io::Error },
+    WriteFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[cfg(feature = "monitor")]
+    Monitor(monitor::StartupFailure),
 }
 
 impl Error {
@@ -137,6 +146,13 @@ impl Error {
             kind: ErrorKind::WriteFile { path, source },
         }
     }
+
+    #[cfg(feature = "monitor")]
+    fn monitor(failure: monitor::StartupFailure) -> Self {
+        Self {
+            kind: ErrorKind::Monitor(failure),
+        }
+    }
 }
 
 impl fmt::Debug for Error {
@@ -159,6 +175,8 @@ impl fmt::Display for Error {
             ErrorKind::WriteFile { path, source } => {
                 write!(f, "failed to write seismograph snapshot to {}: {source}", path.display())
             }
+            #[cfg(feature = "monitor")]
+            ErrorKind::Monitor(failure) => fmt::Display::fmt(failure, f),
         }
     }
 }
@@ -168,6 +186,8 @@ impl std::error::Error for Error {
         match &self.kind {
             ErrorKind::SourceFailed { error, .. } => Some(error),
             ErrorKind::WriteFile { source, .. } => Some(source),
+            #[cfg(feature = "monitor")]
+            ErrorKind::Monitor(failure) => std::error::Error::source(failure),
             _ => None,
         }
     }

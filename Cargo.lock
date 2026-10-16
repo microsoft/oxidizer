@@ -263,7 +263,6 @@ dependencies = [
  "gungraun",
  "many_cpus",
  "metabench",
- "mockall",
  "mutants",
  "nonempty",
  "observed",
@@ -287,6 +286,7 @@ version = "0.1.3"
 dependencies = [
  "alloc_tracker",
  "criterion",
+ "data_privacy",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
@@ -295,14 +295,14 @@ dependencies = [
  "mockall",
  "mutants",
  "nm",
+ "observed",
+ "observed_testing",
  "pin-project",
  "plurality",
  "scopeguard",
  "static_assertions",
  "testing_aids",
  "tick",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -327,6 +327,7 @@ version = "0.4.0"
 dependencies = [
  "darling",
  "insta",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 3.0.5",
@@ -1869,7 +1870,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "fakeable_impl",
  "mockall",
@@ -1878,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable_impl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -4256,9 +4257,11 @@ dependencies = [
  "seismograph",
  "seismograph_protocol",
  "serde",
+ "static_assertions",
  "testing_aids",
  "thread_aware",
  "thread_aware_core",
+ "trybuild",
 ]
 
 [[package]]
@@ -4659,9 +4662,9 @@ dependencies = [
 
 [[package]]
 name = "quinn"
-version = "0.11.11"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
+checksum = "4051e23e9185c255a7e33ef59cdbca87a22d359052eecd22fc6b901fb37d9d11"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -4680,9 +4683,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -5181,9 +5184,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -5374,7 +5377,6 @@ dependencies = [
 name = "seismograph"
 version = "0.2.0"
 dependencies = [
- "getrandom 0.4.3",
  "libc",
  "mutants",
  "seismograph_protocol",
@@ -5822,7 +5824,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

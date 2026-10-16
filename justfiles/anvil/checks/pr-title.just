@@ -10,12 +10,11 @@
 #
 # Validates that $env:PR_TITLE matches the accepted title syntax when it
 # holds a value; no-op when unset or empty. Cloud workflows inject PR_TITLE
-# explicitly: GH Actions from ${{ github.event.pull_request.title }}; ADO
-# resolves it via the REST API in steps/group.yml (ADO has no PR-title
-# predefined variable) and publishes an empty value only outside PR builds,
-# failing closed when a known PR's title cannot be retrieved. Local runs have
-# no reliable way to recover the PR title, so an unset or empty value defers
-# the check rather than failing it.
+# explicitly: both GH Actions and ADO resolve the current title via their REST
+# APIs, fail closed when a known PR's title cannot be retrieved, and publish an
+# empty value only outside PR builds. Local runs have no reliable way to recover
+# the PR title, so an unset or empty value defers the check rather than failing
+# it.
 # It does NOT tolerate a non-empty-but-wrong value: a misconfigured cloud
 # variable (e.g. an unexpanded pipeline macro) is a real error and fails
 # the check loudly rather than silently passing.

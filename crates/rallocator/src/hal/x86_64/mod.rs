@@ -16,11 +16,11 @@ pub(crate) fn prefetch(address: usize) {
     }
 }
 
-/// Non-faulting hint supported by the baseline Linux x86-64 instruction set.
-#[cfg(target_os = "linux")]
+/// Non-faulting hint supported by baseline Linux and macOS x86-64.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn prefetch(address: usize) {
     // SAFETY: PREFETCHT0 is an x86-64 baseline, non-faulting hint. Unlike the
-    // Windows hardware contract, Linux does not require PREFETCHW support.
+    // Windows hardware contract, these platforms do not require PREFETCHW.
     unsafe {
         std::arch::asm!(
             "prefetcht0 [{address}]",
