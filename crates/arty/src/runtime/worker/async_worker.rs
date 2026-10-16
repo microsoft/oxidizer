@@ -178,7 +178,11 @@ impl AsyncWorker {
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
-            self.signal.wait(suspend_wait(next_timer, advance_now));
+            // Timer advancement invokes wakers synchronously, so account for that work before
+            // starting a relative deadline wait. No-deadline clocks retain the bounded fallback
+            // without an additional time sample.
+            let wait_now = next_timer.map_or(advance_now, |_| self.time.instant());
+            self.signal.wait(suspend_wait(next_timer, wait_now));
         }
 
         ControlFlow::Continue(())
