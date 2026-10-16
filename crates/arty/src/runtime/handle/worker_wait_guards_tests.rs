@@ -11,10 +11,24 @@ use std::sync::mpsc;
 
 use thread_aware::Unaware;
 
+use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
 
 thread_local! {
+    static BLOCKING_THREAD_GUARD: RefCell<Option<BlockingThreadGuard>> = const { RefCell::new(None) };
     static RUNTIME_OWNER: RefCell<Option<ThreadLocalRuntimeOwner>> = const { RefCell::new(None) };
+}
+
+struct BlockingThreadGuard {
+    dispatcher: DispatcherClient,
+    guarded: mpsc::Sender<bool>,
+}
+
+impl Drop for BlockingThreadGuard {
+    #[mutants::skip] // Test stimulus, not runtime behavior.
+    fn drop(&mut self) {
+        self.guarded.send(self.dispatcher.is_current_blocking_thread()).unwrap();
+    }
 }
 
 struct ThreadLocalRuntimeOwner {
@@ -63,7 +77,37 @@ fn async_worker_stop_returns_without_self_joining() {
 }
 
 #[test]
+fn blocking_thread_teardown_retains_wait_guard() {
+    let runtime = runtime();
+    let dispatcher = runtime.scheduler.dispatcher.clone();
+    let scheduler = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+        .join()
+        .unwrap();
+    let (guarded, received) = mpsc::channel();
+
+    scheduler
+        .spawn_blocking(move || {
+            BLOCKING_THREAD_GUARD.with(|guard| {
+                assert!(guard.replace(Some(BlockingThreadGuard { dispatcher, guarded })).is_none());
+            });
+        })
+        .join()
+        .unwrap();
+
+    runtime.stop().unwrap();
+    assert!(received.try_recv().unwrap());
+}
+
+#[test]
 fn blocking_thread_local_owner_drop_returns_without_self_joining() {
+    if testing_aids::is_mutation_testing() {
+        // Predicate mutations are covered without deadlocking by
+        // `blocking_thread_teardown_retains_wait_guard`.
+        return;
+    }
+
     testing_aids::execute_or_abandon(|| {
         let runtime = runtime();
         let dispatcher = runtime.scheduler.dispatcher.clone();
