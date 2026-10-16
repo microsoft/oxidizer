@@ -5,10 +5,12 @@
 
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
 use std::time::Duration;
+use std::{error, fmt};
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use arty_io_host::{DriverHost, IoRuntime};
@@ -28,6 +30,7 @@ struct State {
     cycles: Mutex<Vec<(Kind, Duration)>>,
     driver_waker: Mutex<Option<Waker>>,
     context_calls: AtomicUsize,
+    format_calls: AtomicUsize,
     shutdowns: AtomicUsize,
     panic_context: AtomicBool,
     fail_initialization: AtomicBool,
@@ -78,6 +81,75 @@ impl IoContext for ReentrantContext {
             state: Arc::clone(&self.state),
         })
     }
+}
+
+#[derive(Clone)]
+struct FormattingFailureContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for FormattingFailureContext {
+    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+        assert!(source.is_none());
+    }
+}
+
+impl IoContext for FormattingFailureContext {
+    type ContextOptions = Arc<State>;
+    type Driver = FormattingFailureDriver;
+
+    fn context(options: Self::ContextOptions) -> Self {
+        Self { state: options }
+    }
+
+    fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        Err(DriverError::from_source(ReentrantFormatError {
+            state: Arc::clone(&self.state),
+        }))
+    }
+}
+
+struct FormattingFailureDriver;
+
+impl Driver for FormattingFailureDriver {
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
+    }
+
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    fn shutdown(self) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+struct ReentrantFormatError {
+    state: Arc<State>,
+}
+
+impl fmt::Debug for ReentrantFormatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReentrantFormatError").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for ReentrantFormatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.state.format_calls.fetch_add(1, Ordering::SeqCst);
+        FORMAT_RUNTIME.with_borrow(|runtime| {
+            let host = host(runtime.as_ref().expect("the formatter test installs its runtime"));
+            let _ = host.context::<Context<true>>(&self.state).unwrap();
+        });
+        f.write_str("formatting failed")
+    }
+}
+
+impl error::Error for ReentrantFormatError {}
+
+thread_local! {
+    static FORMAT_RUNTIME: RefCell<Option<IoRuntime>> = const { RefCell::new(None) };
 }
 
 impl<const SECOND: bool> IoContext for Context<SECOND> {
@@ -336,6 +408,26 @@ fn runtime_failure_rejects_cached_context_retrievals() {
         panic!("runtime failure should reject cached retrievals");
     };
     assert_eq!(cached_error.to_string(), "initialization failed");
+}
+
+#[test]
+fn failure_formatting_can_reenter_context_retrieval() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    FORMAT_RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
+
+    let Err(_error) = host.context::<FormattingFailureContext>(&state) else {
+        panic!("driver initialization should fail");
+    };
+    FORMAT_RUNTIME.with_borrow_mut(Option::take);
+
+    assert!(state.format_calls.load(Ordering::SeqCst) >= 2);
+    assert_eq!(state.roles.lock().unwrap().last().unwrap().1, DriverRole::Secondary);
+    let Err(stored_error) = host.context::<Context<false>>(&state) else {
+        panic!("runtime failure should reject later retrievals");
+    };
+    assert_eq!(stored_error.to_string(), "formatting failed");
 }
 
 #[test]

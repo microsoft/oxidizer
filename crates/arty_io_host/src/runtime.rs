@@ -174,8 +174,9 @@ impl IoRuntime {
     }
 
     pub(crate) fn fail(&self, error: &DriverError) {
+        let message: Arc<str> = Arc::from(error.to_string());
         let mut registry = self.registry();
-        registry.failure.get_or_insert_with(|| Arc::from(error.to_string()));
+        registry.failure.get_or_insert(message);
     }
 
     pub(crate) const fn sink(&self) -> &Sink {
