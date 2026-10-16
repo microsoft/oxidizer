@@ -2342,21 +2342,23 @@ mod tests {
     }
 
     #[cfg(feature = "monitor")]
-    fn monitor_connection() -> (crate::monitor::Monitor, std::net::TcpStream) {
+    fn monitor_connection() -> (crate::monitor::Monitor, seismograph_protocol::transport::Connection) {
         use seismograph_protocol::message::{Request, Response};
 
-        let monitor = crate::monitor::Monitor::builder().name("recorder-timeout").start().unwrap();
-        let mut stream = std::net::TcpStream::connect(monitor.descriptor().socket_address()).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        stream.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
-        seismograph_protocol::write_request(
-            &mut stream,
-            1,
-            &Request::Hello {
-                authentication: monitor.descriptor().authentication,
-            },
+        let monitor = crate::monitor::Monitor::builder()
+            .isolated()
+            .name("recorder-timeout")
+            .start()
+            .unwrap();
+        let mut stream = seismograph_protocol::transport::Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            monitor.descriptor(),
+            Duration::from_secs(2),
         )
         .unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
+        seismograph_protocol::write_request(&mut stream, 1, &Request::Hello).unwrap();
         assert!(matches!(
             seismograph_protocol::read_response(&mut stream).unwrap(),
             (1, Response::Hello { .. })

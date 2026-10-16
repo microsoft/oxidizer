@@ -1,35 +1,44 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Feature-gated localhost monitor server.
+//! Feature-gated local monitor server.
 //!
-//! Each monitor binds an ephemeral `127.0.0.1` port and publishes an
-//! authenticated descriptor in the current user's runtime directory. This
-//! allows many instrumented processes to coexist without fixed-port
-//! coordination.
+//! Each monitor publishes a Unix socket or local Windows named pipe in the
+//! user's private registry. The owning user and root/elevated administrators
+//! can connect through OS access control; no authentication token is needed.
+//!
+//! Startup initializes the private registry without elevation. Unix prefers
+//! `$XDG_RUNTIME_DIR/seismograph` with a private temporary fallback; Windows
+//! uses local application data. Existing unsafe permissions are rejected.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
+#[cfg(test)]
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use std::{fmt, fs, io};
+use std::{fmt, io};
 
+use seismograph_protocol::discovery::Directory;
+use seismograph_protocol::io::MonitorIo;
 #[cfg(test)]
 use seismograph_protocol::message::SnapshotOptions;
 use seismograph_protocol::message::{
     EventBufferDisposition, EventClassCounts, RecorderActivity, RecorderStatistics, RecordingConfiguration, Request, Response,
     ThreadRecorderStatistics,
 };
-use seismograph_protocol::monitor::{AuthenticationToken, InstanceId, MonitorDescriptor};
+#[cfg(test)]
+use seismograph_protocol::monitor::InstanceId;
+use seismograph_protocol::monitor::{MonitorDescriptor, MonitorEndpoint};
+use seismograph_protocol::transport::{Connection, Listener};
 
 use crate::Error;
 use crate::recorder::SuppressionGuard;
 
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
-const CLIENT_AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
+const CLIENT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Abandoned interactive clients should release their worker and socket promptly.
 const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -37,14 +46,18 @@ const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONCURRENT_CLIENTS: usize = 16;
 static SNAPSHOT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
-/// Running localhost monitor.
+/// Running OS-authorized local monitor.
 pub struct Monitor {
     descriptor: MonitorDescriptor,
     descriptor_path: PathBuf,
+    io: MonitorIo,
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
+    _directory: Directory,
+    #[cfg(any(test, feature = "test-util"))]
+    _fixture: Option<seismograph_protocol::testing::Directory>,
 }
 
 impl Monitor {
@@ -54,6 +67,9 @@ impl Monitor {
         Builder {
             name: None,
             instance: None,
+            io: None,
+            #[cfg(any(test, feature = "test-util"))]
+            isolated: false,
         }
     }
 
@@ -83,22 +99,57 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         self.active_clients.shutdown_all();
-        let _ = TcpStream::connect(self.descriptor.socket_address());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            eprintln!("seismograph: monitor listener thread panicked");
         }
-        let _ = fs::remove_file(&self.descriptor_path);
+        if let Err(error) = self.io.remove_descriptor(&self.descriptor_path) {
+            eprintln!("seismograph: failed to remove monitor descriptor: {error}");
+        }
     }
 }
 
-/// Builder for a localhost monitor.
+/// Builder for an OS-authorized local monitor.
 #[derive(Debug, Default)]
 pub struct Builder {
     name: Option<String>,
     instance: Option<String>,
+    io: Option<MonitorIo>,
+    #[cfg(any(test, feature = "test-util"))]
+    isolated: bool,
 }
 
 impl Builder {
+    /// Selects the I/O capability shared by this monitor and its workers.
+    ///
+    /// Omitting this uses native local I/O. Enable `seismograph_protocol`'s
+    /// `test-util` feature on a dev-dependency to inject a mocked instance
+    /// with deterministic errors and controlled deadlines.
+    /// Replaces a previously selected isolated native fixture.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use seismograph::monitor::Monitor;
+    /// use seismograph_protocol::io::MonitorIo;
+    ///
+    /// let monitor = Monitor::builder()
+    ///     .name("worker")
+    ///     .io(MonitorIo::new_native())
+    ///     .start()?;
+    /// # Ok::<(), seismograph::Error>(())
+    /// ```
+    #[must_use]
+    pub fn io(mut self, io: MonitorIo) -> Self {
+        self.io = Some(io);
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            self.isolated = false;
+        }
+        self
+    }
+
     /// Sets the human-readable application name.
     #[must_use]
     pub fn name(mut self, name: impl Into<String>) -> Self {
@@ -113,20 +164,38 @@ impl Builder {
         self
     }
 
-    /// Starts the localhost listener and publishes its discovery descriptor.
+    /// Starts the local listener and publishes its discovery descriptor.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error`] when identity generation, binding, discovery
+    /// Returns [`crate::Error`] when user storage is unavailable, ownership or
+    /// permissions are unsafe, or identity generation, binding, discovery
     /// publication, or listener-thread creation fails.
+    ///
+    /// # Panics
+    ///
+    /// With `test-util`, panics if an explicitly selected isolated native test
+    /// directory cannot be created or secured.
     pub fn start(self) -> Result<Monitor, Error> {
         self.start_with(spawn_listener_thread).map_err(Error::monitor)
+    }
+
+    /// Uses an isolated, correctly protected temporary registry for native tests.
+    /// Replaces a previously selected I/O capability with native I/O.
+    #[cfg(any(test, feature = "test-util"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+    #[must_use]
+    pub fn isolated(mut self) -> Self {
+        self.isolated = true;
+        self.io = None;
+        self
     }
 
     fn start_with(
         self,
         spawn: impl FnOnce(
-            TcpListener,
+            MonitorIo,
+            Listener,
             MonitorDescriptor,
             Arc<AtomicBool>,
             Arc<ActiveClients>,
@@ -134,97 +203,82 @@ impl Builder {
             &Path,
         ) -> Result<JoinHandle<()>, StartupFailure>,
     ) -> Result<Monitor, StartupFailure> {
-        let name = self.name.unwrap_or_else(default_application_name);
+        let io = self.io.unwrap_or_else(MonitorIo::new_native);
+        let name = match self.name {
+            Some(name) => name,
+            None => default_application_name(&io)?,
+        };
         if name.is_empty() || self.instance.as_ref().is_some_and(String::is_empty) {
             return Err(StartupFailure::InvalidIdentity);
         }
 
-        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(StartupFailure::Bind)?;
-        listener.set_nonblocking(true).map_err(StartupFailure::ConfigureListener)?;
-        let port = listener.local_addr().map_err(StartupFailure::ReadAddress)?.port();
-
-        let mut instance_id = [0; 16];
-        getrandom::fill(&mut instance_id).map_err(StartupFailure::Random)?;
-        let mut authentication = [0; 32];
-        getrandom::fill(&mut authentication).map_err(StartupFailure::Random)?;
+        let instance_id = io.instance_id().map_err(StartupFailure::Protocol)?;
+        #[cfg(any(test, feature = "test-util"))]
+        let fixture = self.isolated.then(seismograph_protocol::testing::Directory::new);
+        #[cfg(any(test, feature = "test-util"))]
+        let directory = match &fixture {
+            Some(fixture) => fixture.open(),
+            None => Directory::current(&io).map_err(StartupFailure::Protocol)?,
+        };
+        #[cfg(not(any(test, feature = "test-util")))]
+        let directory = Directory::current(&io).map_err(StartupFailure::Protocol)?;
+        let process_id = io.process_id();
+        let owner = directory.owner().clone();
         let descriptor = MonitorDescriptor {
             name,
             instance: self.instance,
-            process_id: std::process::id(),
-            instance_id: InstanceId::from_bytes(instance_id),
-            port,
-            authentication: AuthenticationToken::from_bytes(authentication),
+            process_id,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, process_id, instance_id),
+            owner,
         };
-
-        let directory = seismograph_protocol::monitor_directory().map_err(StartupFailure::Protocol)?;
-        create_monitor_directory(&directory)?;
-        let descriptor_path = publish_descriptor(&directory, &descriptor)?;
+        let listener = Listener::bind(&io, &descriptor).map_err(StartupFailure::Bind)?;
+        listener.set_nonblocking(true).map_err(StartupFailure::ConfigureListener)?;
+        let descriptor_path = io.publish_descriptor(&directory, &descriptor).map_err(StartupFailure::Protocol)?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let active_clients = Arc::new(ActiveClients::new());
         let last_error = Arc::new(Mutex::new(None));
-        let thread = spawn(
+        let thread = match spawn(
+            io.clone(),
             listener,
             descriptor.clone(),
             Arc::clone(&stop),
             Arc::clone(&active_clients),
             Arc::clone(&last_error),
             &descriptor_path,
-        )?;
+        ) {
+            Ok(thread) => thread,
+            Err(error) => {
+                if let Err(cleanup) = io.remove_descriptor(&descriptor_path) {
+                    eprintln!("seismograph: failed to clean up unpublished monitor: {cleanup}");
+                }
+                return Err(error);
+            }
+        };
 
         Ok(Monitor {
             descriptor,
             descriptor_path,
+            io,
             stop,
             active_clients,
             last_error,
             thread: Some(thread),
+            _directory: directory,
+            #[cfg(any(test, feature = "test-util"))]
+            _fixture: fixture,
         })
     }
 }
 
-fn default_application_name() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "application".into())
-}
-
-fn create_monitor_directory(path: &Path) -> Result<(), StartupFailure> {
-    fs::create_dir_all(path).map_err(|source| StartupFailure::CreateDirectory {
-        path: path.to_owned(),
-        source,
-    })?;
-    #[cfg(unix)]
-    restrict_monitor_directory(path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-#[cfg_attr(coverage_nightly, coverage(off))] // Portable tests cannot inject chmod failure.
-#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Unix-only source that cannot execute there.
-fn restrict_monitor_directory(path: &Path) -> Result<(), StartupFailure> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| StartupFailure::SetPermissions {
-        path: path.to_owned(),
-        source,
-    })
-}
-
-fn publish_descriptor(directory: &Path, descriptor: &MonitorDescriptor) -> Result<PathBuf, StartupFailure> {
-    let descriptor_path = directory.join(descriptor.file_name());
-    let temporary_path = descriptor_path.with_extension("monitor.tmp");
-    descriptor.write_file(&temporary_path).map_err(|source| StartupFailure::Publish {
-        path: temporary_path.clone(),
-        source,
-    })?;
-    fs::rename(&temporary_path, &descriptor_path).map_err(|source| StartupFailure::Rename {
-        from: temporary_path,
-        to: descriptor_path.clone(),
-        source,
-    })?;
-    Ok(descriptor_path)
+fn default_application_name(io: &MonitorIo) -> Result<String, StartupFailure> {
+    let path = io
+        .current_exe()
+        .map_err(|source| StartupFailure::Protocol(seismograph_protocol::Error::Io(source)))?;
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or(StartupFailure::InvalidIdentity)
 }
 
 struct ActiveClients {
@@ -234,7 +288,7 @@ struct ActiveClients {
 struct ActiveClientsState {
     accepting: bool,
     next_id: u64,
-    streams: HashMap<u64, TcpStream>,
+    streams: HashMap<u64, Connection>,
 }
 
 impl ActiveClients {
@@ -248,7 +302,7 @@ impl ActiveClients {
         }
     }
 
-    fn register(self: &Arc<Self>, stream: &TcpStream) -> Result<Option<ActiveClient>, io::Error> {
+    fn register(self: &Arc<Self>, stream: &Connection) -> Result<Option<ActiveClient>, io::Error> {
         let tracked_stream = stream.try_clone()?;
         let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !state.accepting || state.streams.len() >= MAX_CONCURRENT_CLIENTS {
@@ -273,7 +327,9 @@ impl ActiveClients {
             state.streams.drain().map(|(_id, stream)| stream).collect::<Vec<_>>()
         };
         for stream in streams {
-            let _ = stream.shutdown(Shutdown::Both);
+            if let Err(error) = stream.close() {
+                eprintln!("seismograph: failed to close monitor client: {error}");
+            }
         }
     }
 }
@@ -294,9 +350,9 @@ impl Drop for ActiveClient {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))] // OS accept and accepted-socket setup failures cannot be injected portably; request dispatch is tested through connected streams.
 fn run_listener(
-    listener: &TcpListener,
+    io: &MonitorIo,
+    listener: &Listener,
     descriptor: &MonitorDescriptor,
     stop: &Arc<AtomicBool>,
     active_clients: &Arc<ActiveClients>,
@@ -308,15 +364,13 @@ fn run_listener(
             break;
         }
         match listener.accept() {
-            Ok((stream, _peer)) => {
-                if let Err(error) = stream.set_nonblocking(false) {
-                    set_last_error(last_error, &error);
-                    continue;
-                }
+            Ok(stream) => {
                 let registration = match active_clients.register(&stream) {
                     Ok(Some(registration)) => registration,
                     Ok(None) => {
-                        let _ = stream.shutdown(Shutdown::Both);
+                        if let Err(error) = stream.close() {
+                            set_last_error(last_error, &error);
+                        }
                         continue;
                     }
                     Err(error) => {
@@ -324,11 +378,13 @@ fn run_listener(
                         continue;
                     }
                 };
-                spawn_client_thread(stream, descriptor.clone(), Arc::clone(stop), registration, last_error);
+                spawn_client_thread(io.clone(), stream, descriptor.clone(), Arc::clone(stop), registration, last_error);
             }
             Err(error) => {
-                if listener_accept_should_retry(error.kind()) {
-                    thread::sleep(ACCEPT_RETRY_DELAY);
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    set_last_error(last_error, &error);
+                } else if listener_accept_should_retry(error.kind()) {
+                    io.wait(ACCEPT_RETRY_DELAY);
                 } else {
                     set_last_error(last_error, &error);
                     break;
@@ -339,49 +395,40 @@ fn run_listener(
 }
 
 const fn listener_accept_should_retry(kind: io::ErrorKind) -> bool {
-    matches!(kind, io::ErrorKind::WouldBlock)
+    matches!(kind, io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted)
 }
 
 fn spawn_listener_thread(
-    listener: TcpListener,
+    io: MonitorIo,
+    listener: Listener,
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
-    descriptor_path: &Path,
+    _descriptor_path: &Path,
 ) -> Result<JoinHandle<()>, StartupFailure> {
-    spawn_listener_thread_with(
-        move || run_listener(&listener, &descriptor, &stop, &active_clients, &last_error),
-        descriptor_path,
-        |operation| thread::Builder::new().name("seismograph-monitor".into()).spawn(operation),
-    )
-}
-
-fn spawn_listener_thread_with(
-    operation: impl FnOnce() + Send + 'static,
-    descriptor_path: &Path,
-    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>,
-) -> Result<JoinHandle<()>, StartupFailure> {
-    spawn(Box::new(operation)).map_err(|source| {
-        let _ = fs::remove_file(descriptor_path);
-        StartupFailure::Spawn(source)
-    })
+    thread::Builder::new()
+        .name("seismograph-monitor".into())
+        .spawn(move || run_listener(&io, &listener, &descriptor, &stop, &active_clients, &last_error))
+        .map_err(StartupFailure::Spawn)
 }
 
 fn spawn_client_thread(
-    stream: TcpStream,
+    io: MonitorIo,
+    stream: Connection,
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     registration: ActiveClient,
     last_error: &Arc<Mutex<Option<String>>>,
 ) {
-    spawn_client_thread_with(stream, descriptor, stop, registration, last_error, |operation| {
+    spawn_client_thread_with(io, stream, descriptor, stop, registration, last_error, |operation| {
         thread::Builder::new().name("seismograph-monitor-client".into()).spawn(operation)
     });
 }
 
 fn spawn_client_thread_with(
-    stream: TcpStream,
+    io: MonitorIo,
+    stream: Connection,
     descriptor: MonitorDescriptor,
     stop: Arc<AtomicBool>,
     registration: ActiveClient,
@@ -392,7 +439,7 @@ fn spawn_client_thread_with(
     let spawn_result = spawn(Box::new(move || {
         let _registration = registration;
         let _suppression = SuppressionGuard::enter();
-        if let Err(error) = handle_client(stream, &descriptor, &stop) {
+        if let Err(error) = handle_client(&io, stream, &descriptor, &stop) {
             set_last_error(&worker_last_error, &error);
         }
     }));
@@ -405,28 +452,24 @@ fn set_last_error(last_error: &Mutex<Option<String>>, error: &impl fmt::Display)
     *last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.to_string());
 }
 
-fn handle_client(stream: TcpStream, descriptor: &MonitorDescriptor, stop: &AtomicBool) -> Result<(), ClientError> {
-    handle_client_with_timeouts(stream, descriptor, stop, CLIENT_AUTHENTICATION_TIMEOUT, CLIENT_IDLE_TIMEOUT)
+fn handle_client(io: &MonitorIo, stream: Connection, descriptor: &MonitorDescriptor, stop: &AtomicBool) -> Result<(), ClientError> {
+    handle_client_with_timeouts(io, stream, descriptor, stop, CLIENT_HANDSHAKE_TIMEOUT, CLIENT_IDLE_TIMEOUT)
 }
 
 fn handle_client_with_timeouts(
-    mut stream: TcpStream,
+    io: &MonitorIo,
+    mut stream: Connection,
     descriptor: &MonitorDescriptor,
     stop: &AtomicBool,
-    authentication_timeout: Duration,
+    handshake_timeout: Duration,
     idle_timeout: Duration,
 ) -> Result<(), ClientError> {
     stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
 
-    let (request_id, request) = read_request_with_timeout(&mut stream, stop, authentication_timeout, ReadTimeout::Authentication)?;
-    let Request::Hello { authentication } = request else {
+    let (request_id, request) = read_request_with_timeout(io, &mut stream, stop, handshake_timeout, ReadTimeout::Handshake)?;
+    let Request::Hello = request else {
         return Err(ClientError::HandshakeRequired);
     };
-    if !tokens_equal(authentication, descriptor.authentication) {
-        seismograph_protocol::write_response(&mut stream, request_id, &Response::Error("authentication failed".into()))
-            .map_err(ClientError::Protocol)?;
-        return Err(ClientError::Authentication);
-    }
     let configuration = crate::recorder::configuration();
     seismograph_protocol::write_response(
         &mut stream,
@@ -449,35 +492,37 @@ fn handle_client_with_timeouts(
         if stop.load(Ordering::Acquire) {
             break;
         }
-        let (request_id, request) = match read_request_with_timeout(&mut stream, stop, idle_timeout, ReadTimeout::Idle) {
+        let (request_id, request) = match read_request_with_timeout(io, &mut stream, stop, idle_timeout, ReadTimeout::Idle) {
             Ok(request) => request,
             Err(ClientError::Stopped | ClientError::Disconnected | ClientError::IdleTimedOut) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let response = authenticated_response_with_guard(&request);
-        let mut writer = DeadlineWriter::new(&mut stream, CLIENT_WRITE_TIMEOUT);
+        let response = connected_response_with_guard(&request);
+        let mut writer = DeadlineWriter::new(io, &mut stream, CLIENT_WRITE_TIMEOUT);
         seismograph_protocol::write_response(&mut writer, request_id, &response.response).map_err(ClientError::Protocol)?;
     }
     Ok(())
 }
 
 struct DeadlineWriter<'a> {
-    stream: &'a mut TcpStream,
+    io: MonitorIo,
+    stream: &'a mut Connection,
     deadline: Instant,
 }
 
 impl<'a> DeadlineWriter<'a> {
-    fn new(stream: &'a mut TcpStream, timeout: Duration) -> Self {
+    fn new(io: &MonitorIo, stream: &'a mut Connection, timeout: Duration) -> Self {
         Self {
+            io: io.clone(),
             stream,
-            deadline: Instant::now() + timeout,
+            deadline: io.instant() + timeout,
         }
     }
 
     fn apply_remaining_timeout(&self) -> io::Result<()> {
         let remaining = self
             .deadline
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(self.io.instant())
             .filter(|remaining| !remaining.is_zero())
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "Seismograph monitor response write timed out"))?;
         self.stream.set_write_timeout(Some(remaining))
@@ -497,29 +542,29 @@ impl io::Write for DeadlineWriter<'_> {
 }
 
 #[cfg(test)]
-fn authenticated_response(request: &Request) -> Response {
-    authenticated_response_with_guard(request).response
+fn connected_response(request: &Request) -> Response {
+    connected_response_with_guard(request).response
 }
 
-struct AuthenticatedResponse {
+struct ConnectedResponse {
     response: Response,
     _snapshot_guard: Option<SnapshotRequestGuard>,
 }
 
-fn authenticated_response_with_guard(request: &Request) -> AuthenticatedResponse {
+fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
     match request {
-        Request::ReadServerVersion => AuthenticatedResponse {
+        Request::ReadServerVersion => ConnectedResponse {
             response: Response::ServerVersion(env!("CARGO_PKG_VERSION").into()),
             _snapshot_guard: None,
         },
         Request::CaptureSnapshotAndStop => {
             let Ok(guard) = SnapshotRequestGuard::acquire() else {
-                return AuthenticatedResponse {
+                return ConnectedResponse {
                     response: Response::Error("a seismograph snapshot is already in progress".into()),
                     _snapshot_guard: None,
                 };
             };
-            AuthenticatedResponse {
+            ConnectedResponse {
                 response: snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions {
                     event_buffers: crate::snapshot::EventBufferDisposition::Stop,
                 })),
@@ -528,29 +573,29 @@ fn authenticated_response_with_guard(request: &Request) -> AuthenticatedResponse
         }
         Request::ClearEventBuffers => {
             let Ok(_snapshot) = SnapshotRequestGuard::acquire() else {
-                return AuthenticatedResponse {
+                return ConnectedResponse {
                     response: Response::Error("a seismograph snapshot is already in progress".into()),
                     _snapshot_guard: None,
                 };
             };
-            AuthenticatedResponse {
+            ConnectedResponse {
                 response: crate::recorder::clear_event_buffers()
                     .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
                 _snapshot_guard: None,
             }
         }
-        Request::Hello { .. } => AuthenticatedResponse {
-            response: Response::Error("already authenticated".into()),
+        Request::Hello => ConnectedResponse {
+            response: Response::Error("handshake already completed".into()),
             _snapshot_guard: None,
         },
-        Request::SetRecording(configuration) => AuthenticatedResponse {
+        Request::SetRecording(configuration) => ConnectedResponse {
             response: apply_recording_configuration(*configuration)
                 .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
             _snapshot_guard: None,
         },
         Request::SetCacheRecording(policy) => {
             let configuration = crate::recorder::configuration();
-            AuthenticatedResponse {
+            ConnectedResponse {
                 response: crate::recorder::try_configure(crate::recorder::Configuration {
                     cache: recorder_policy(*policy),
                     ..configuration
@@ -561,7 +606,7 @@ fn authenticated_response_with_guard(request: &Request) -> AuthenticatedResponse
         }
         Request::CaptureSnapshot(options) => {
             let Ok(guard) = SnapshotRequestGuard::acquire() else {
-                return AuthenticatedResponse {
+                return ConnectedResponse {
                     response: Response::Error("a seismograph snapshot is already in progress".into()),
                     _snapshot_guard: None,
                 };
@@ -571,22 +616,22 @@ fn authenticated_response_with_guard(request: &Request) -> AuthenticatedResponse
                 EventBufferDisposition::Clear => crate::snapshot::EventBufferDisposition::Clear,
                 EventBufferDisposition::Release => crate::snapshot::EventBufferDisposition::Release,
             };
-            AuthenticatedResponse {
+            ConnectedResponse {
                 response: snapshot_response(crate::snapshot(crate::snapshot::SnapshotOptions { event_buffers })),
                 _snapshot_guard: Some(guard),
             }
         }
-        Request::ReadRecorderStatistics => AuthenticatedResponse {
+        Request::ReadRecorderStatistics => ConnectedResponse {
             response: recorder_statistics_response(),
             _snapshot_guard: None,
         },
-        Request::ReadRecorderActivity => AuthenticatedResponse {
+        Request::ReadRecorderActivity => ConnectedResponse {
             response: recorder_activity_response(),
             _snapshot_guard: None,
         },
         Request::ReadCacheRecording => {
             let policy = protocol_recording_policy(crate::recorder::configuration().cache);
-            AuthenticatedResponse {
+            ConnectedResponse {
                 response: Response::CacheRecording(policy),
                 _snapshot_guard: None,
             }
@@ -744,13 +789,14 @@ fn snapshot_response(snapshot: Result<crate::snapshot::Snapshot, crate::Error>) 
 }
 
 struct DeadlineReader<'a> {
-    stream: &'a mut TcpStream,
+    io: MonitorIo,
+    stream: &'a mut Connection,
     deadline: Instant,
 }
 
 impl io::Read for DeadlineReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        let remaining = self.deadline.saturating_duration_since(self.io.instant());
         if remaining.is_zero() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor frame read timed out"));
         }
@@ -760,21 +806,27 @@ impl io::Read for DeadlineReader<'_> {
 }
 
 fn read_request_with_timeout(
-    stream: &mut TcpStream,
+    io: &MonitorIo,
+    stream: &mut Connection,
     stop: &AtomicBool,
     timeout: Duration,
     timeout_kind: ReadTimeout,
 ) -> Result<(u64, Request), ClientError> {
-    let deadline = Instant::now()
+    let deadline = io
+        .instant()
         .checked_add(timeout)
         .ok_or_else(|| ClientError::Io(io::Error::new(io::ErrorKind::InvalidInput, "monitor read timeout is too large")))?;
-    let mut reader = DeadlineReader { stream, deadline };
+    let mut reader = DeadlineReader {
+        io: io.clone(),
+        stream,
+        deadline,
+    };
     seismograph_protocol::read_request(&mut reader).map_err(|error| classify_read_error(error, stop.load(Ordering::Acquire), timeout_kind))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReadTimeout {
-    Authentication,
+    Handshake,
     Idle,
 }
 
@@ -788,7 +840,7 @@ fn classify_read_error(error: seismograph_protocol::Error, stopped: bool, timeou
             ClientError::Stopped
         } else {
             match timeout {
-                ReadTimeout::Authentication => ClientError::AuthenticationTimedOut,
+                ReadTimeout::Handshake => ClientError::HandshakeTimedOut,
                 ReadTimeout::Idle => ClientError::IdleTimedOut,
             }
         }
@@ -808,21 +860,12 @@ fn classify_read_error(error: seismograph_protocol::Error, stopped: bool, timeou
     }
 }
 
-fn tokens_equal(left: AuthenticationToken, right: AuthenticationToken) -> bool {
-    left.as_bytes()
-        .into_iter()
-        .zip(right.as_bytes())
-        .fold(0_u8, |difference, (left, right)| difference | (left ^ right))
-        == 0
-}
-
 #[derive(Debug)]
 enum ClientError {
     Io(io::Error),
     Protocol(seismograph_protocol::Error),
     HandshakeRequired,
-    Authentication,
-    AuthenticationTimedOut,
+    HandshakeTimedOut,
     IdleTimedOut,
     Disconnected,
     Stopped,
@@ -834,8 +877,7 @@ impl fmt::Display for ClientError {
             Self::Io(error) => write!(f, "{error}"),
             Self::Protocol(error) => write!(f, "{error}"),
             Self::HandshakeRequired => f.write_str("monitor handshake is required"),
-            Self::Authentication => f.write_str("monitor authentication failed"),
-            Self::AuthenticationTimedOut => f.write_str("monitor authentication timed out"),
+            Self::HandshakeTimedOut => f.write_str("monitor handshake timed out"),
             Self::IdleTimedOut => f.write_str("monitor client idle timeout expired"),
             Self::Disconnected => f.write_str("monitor client disconnected"),
             Self::Stopped => f.write_str("monitor stopped"),
@@ -848,47 +890,12 @@ impl fmt::Display for ClientError {
 pub(crate) enum StartupFailure {
     /// Application or instance name is empty.
     InvalidIdentity,
-    /// Listener could not bind to localhost.
+    /// Native local listener could not be bound.
     Bind(io::Error),
     /// Listener socket options could not be configured.
     ConfigureListener(io::Error),
-    /// Listener address could not be read.
-    ReadAddress(io::Error),
-    /// Secure random identity generation failed.
-    Random(getrandom::Error),
     /// Protocol discovery operation failed.
     Protocol(seismograph_protocol::Error),
-    /// Discovery directory could not be created.
-    CreateDirectory {
-        /// Directory being created.
-        path: PathBuf,
-        /// Filesystem failure.
-        source: io::Error,
-    },
-    /// Discovery directory permissions could not be restricted.
-    #[cfg(any(unix, test))]
-    SetPermissions {
-        /// Directory being secured.
-        path: PathBuf,
-        /// Filesystem failure.
-        source: io::Error,
-    },
-    /// Descriptor could not be published.
-    Publish {
-        /// Descriptor path.
-        path: PathBuf,
-        /// Encoding or filesystem failure.
-        source: seismograph_protocol::Error,
-    },
-    /// Temporary descriptor could not be atomically renamed.
-    Rename {
-        /// Temporary path.
-        from: PathBuf,
-        /// Published path.
-        to: PathBuf,
-        /// Filesystem failure.
-        source: io::Error,
-    },
     /// Listener thread could not be created.
     Spawn(io::Error),
 }
@@ -897,29 +904,9 @@ impl fmt::Display for StartupFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidIdentity => f.write_str("monitor application and instance names must not be empty"),
-            Self::Bind(error) => write!(f, "failed to bind Seismograph monitor to localhost: {error}"),
+            Self::Bind(error) => write!(f, "failed to bind Seismograph local monitor: {error}"),
             Self::ConfigureListener(error) => write!(f, "failed to configure Seismograph monitor listener: {error}"),
-            Self::ReadAddress(error) => write!(f, "failed to read Seismograph monitor address: {error}"),
-            Self::Random(error) => write!(f, "failed to generate Seismograph monitor identity: {error}"),
             Self::Protocol(error) => write!(f, "Seismograph monitor protocol failed: {error}"),
-            Self::CreateDirectory { path, source } => {
-                write!(f, "failed to create monitor directory {}: {source}", path.display())
-            }
-            #[cfg(any(unix, test))]
-            Self::SetPermissions { path, source } => {
-                write!(f, "failed to secure monitor directory {}: {source}", path.display())
-            }
-            Self::Publish { path, source } => {
-                write!(f, "failed to publish monitor descriptor {}: {source}", path.display())
-            }
-            Self::Rename { from, to, source } => {
-                write!(
-                    f,
-                    "failed to publish monitor descriptor {} as {}: {source}",
-                    from.display(),
-                    to.display()
-                )
-            }
             Self::Spawn(error) => write!(f, "failed to start Seismograph monitor thread: {error}"),
         }
     }
@@ -928,21 +915,19 @@ impl fmt::Display for StartupFailure {
 impl std::error::Error for StartupFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Bind(error)
-            | Self::ConfigureListener(error)
-            | Self::ReadAddress(error)
-            | Self::CreateDirectory { source: error, .. }
-            | Self::Rename { source: error, .. }
-            | Self::Spawn(error) => Some(error),
-            #[cfg(any(unix, test))]
-            Self::SetPermissions { source, .. } => Some(source),
-            Self::Protocol(error) | Self::Publish { source: error, .. } => Some(error),
-            Self::Random(_) | Self::InvalidIdentity => None,
+            Self::Bind(error) | Self::ConfigureListener(error) | Self::Spawn(error) => Some(error),
+            Self::Protocol(error) => Some(error),
+            Self::InvalidIdentity => None,
         }
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod io_tests;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::io::{Read as _, Write as _};
 
@@ -974,7 +959,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn authenticated_activity_reports_live_threads_without_snapshot_capture() {
+    fn connected_activity_reports_live_threads_without_snapshot_capture() {
         use crate::recorder::event::{EventClass, EventKind, ObjectId, Record};
         use crate::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
 
@@ -995,9 +980,9 @@ mod tests {
         let _snapshot = SnapshotRequestGuard::acquire().unwrap();
         let (mut client, server) = connected_pair();
         let descriptor = test_descriptor();
-        let authentication = descriptor.authentication;
-        let worker = thread::spawn(move || handle_client(server, &descriptor, &AtomicBool::new(false)));
-        seismograph_protocol::write_request(&mut client, 1, &Request::Hello { authentication }).unwrap();
+
+        let worker = thread::spawn(move || handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(false)));
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
         assert!(matches!(
             seismograph_protocol::read_response(&mut client).unwrap(),
             (1, Response::Hello { .. })
@@ -1037,7 +1022,7 @@ mod tests {
         );
         let after = crate::recorder::try_activity().unwrap();
         assert_eq!((after.statistics, after.threads), (before.statistics, before.threads));
-        client.shutdown(Shutdown::Both).unwrap();
+        client.close().unwrap();
         worker.join().unwrap().unwrap();
         crate::recorder::configure(Configuration::default());
         crate::recorder::clear_event_buffers().unwrap();
@@ -1056,10 +1041,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            authenticated_response(&Request::SetRecording(configuration)),
-            Response::Acknowledged
-        );
+        assert_eq!(connected_response(&Request::SetRecording(configuration)), Response::Acknowledged);
         crate::record(EventClass::RuntimeTask, || {
             Some(Record::runtime(
                 EventTimestamp::now(),
@@ -1076,10 +1058,10 @@ mod tests {
             ))
         });
         assert_eq!(
-            authenticated_response(&Request::SetRecording(RecordingConfiguration::default())),
+            connected_response(&Request::SetRecording(RecordingConfiguration::default())),
             Response::Acknowledged
         );
-        let statistics = recorder_statistics(&authenticated_response(&Request::ReadRecorderStatistics));
+        let statistics = recorder_statistics(&connected_response(&Request::ReadRecorderStatistics));
         let snapshot = crate::snapshot(crate::snapshot::SnapshotOptions::default()).unwrap();
         let decoded = crate::snapshot::decode(snapshot.as_bytes()).unwrap();
         assert_eq!(
@@ -1097,15 +1079,15 @@ mod tests {
     #[test]
     fn concurrent_snapshot_is_rejected_until_the_current_request_finishes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
-        let active = authenticated_response_with_guard(&Request::CaptureSnapshot(SnapshotOptions::default()));
+        let active = connected_response_with_guard(&Request::CaptureSnapshot(SnapshotOptions::default()));
         assert!(matches!(active.response, Response::Snapshot(_)));
         let rejected = [
-            authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default())),
-            authenticated_response(&Request::CaptureSnapshotAndStop),
-            authenticated_response(&Request::ClearEventBuffers),
+            connected_response(&Request::CaptureSnapshot(SnapshotOptions::default())),
+            connected_response(&Request::CaptureSnapshotAndStop),
+            connected_response(&Request::ClearEventBuffers),
         ];
         drop(active);
-        let resumed = authenticated_response(&Request::CaptureSnapshot(SnapshotOptions::default()));
+        let resumed = connected_response(&Request::CaptureSnapshot(SnapshotOptions::default()));
         assert_eq!(
             (rejected, matches!(resumed, Response::Snapshot(_))),
             (
@@ -1139,12 +1121,20 @@ mod tests {
         let (mut client, mut server) = connected_pair();
         seismograph_protocol::write_request(&mut client, 1, &Request::ReadRecorderStatistics).unwrap();
         let error = DeadlineReader {
+            io: MonitorIo::new_native(),
             stream: &mut server,
             deadline: Instant::now(),
         }
         .read(&mut [0; 1])
         .unwrap_err();
-        let request = read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle).unwrap();
+        let request = read_request_with_timeout(
+            &MonitorIo::new_native(),
+            &mut server,
+            &AtomicBool::new(false),
+            Duration::from_secs(1),
+            ReadTimeout::Idle,
+        )
+        .unwrap();
         assert_eq!(
             (error.kind(), request),
             (io::ErrorKind::TimedOut, (1, Request::ReadRecorderStatistics))
@@ -1173,6 +1163,7 @@ mod tests {
         let registration = clients.register(&stream).unwrap().unwrap();
         let last_error = Arc::new(Mutex::new(None));
         spawn_client_thread_with(
+            MonitorIo::new_native(),
             stream,
             test_descriptor(),
             Arc::new(AtomicBool::new(false)),
@@ -1190,29 +1181,19 @@ mod tests {
         );
     }
 
-    fn connected_pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        (client, server)
+    fn connected_pair() -> (Connection, Connection) {
+        seismograph_protocol::testing::connected_pair()
     }
 
-    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    #[cfg_attr(miri, ignore = "requires native local IPC")]
     #[test]
-    fn authenticated_connection_reports_the_seismograph_crate_version_before_capture() {
+    fn connected_connection_reports_the_seismograph_crate_version_before_capture() {
         let descriptor = test_descriptor();
         let (mut client, server) = connected_pair();
         client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let worker_descriptor = descriptor.clone();
-        let worker = thread::spawn(move || handle_client(server, &worker_descriptor, &AtomicBool::new(false)));
-        seismograph_protocol::write_request(
-            &mut client,
-            1,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
-        )
-        .unwrap();
+        let worker = thread::spawn(move || handle_client(&MonitorIo::new_native(), server, &worker_descriptor, &AtomicBool::new(false)));
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
         assert!(matches!(
             seismograph_protocol::read_response(&mut client).unwrap(),
             (1, Response::Hello { instance_id, .. }) if instance_id == descriptor.instance_id
@@ -1222,7 +1203,7 @@ mod tests {
             seismograph_protocol::read_response(&mut client).unwrap(),
             (2, Response::ServerVersion(env!("CARGO_PKG_VERSION").into()))
         );
-        client.shutdown(Shutdown::Both).unwrap();
+        client.close().unwrap();
         worker.join().unwrap().unwrap();
     }
 
@@ -1232,12 +1213,19 @@ mod tests {
             instance: None,
             process_id: 1,
             instance_id: InstanceId::from_bytes([1; 16]),
-            port: 1,
-            authentication: AuthenticationToken::from_bytes([2; 32]),
+
+            owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+            endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                &std::env::temp_dir(),
+                &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                1,
+                InstanceId::from_bytes([1; 16]),
+            ),
         }
     }
 
-    fn connection_is_closed(stream: &mut TcpStream) -> bool {
+    fn connection_is_closed(stream: &mut Connection) -> bool {
         stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
         let mut byte = [0];
         match stream.read(&mut byte) {
@@ -1272,10 +1260,10 @@ mod tests {
     #[test]
     fn connection_check_does_not_mistake_pending_data_or_would_block_for_disconnect() {
         let (mut client, mut server) = connected_pair();
-        server.set_nonblocking(true).unwrap();
+        server.set_read_timeout(Some(Duration::from_millis(1))).unwrap();
         let idle_is_closed = connection_is_closed(&mut server);
         client.write_all(&[1]).unwrap();
-        server.set_nonblocking(false).unwrap();
+
         let readable_is_closed = connection_is_closed(&mut server);
         assert_eq!((idle_is_closed, readable_is_closed), (false, false));
     }
@@ -1283,32 +1271,24 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     #[expect(
-        clippy::too_many_lines,
         clippy::useless_let_if_seq,
         reason = "The end-to-end monitor scenario stays together; default initialization keeps impossible response-shape branches out of line coverage"
     )]
     fn monitor_configures_recording_and_returns_snapshot() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
-        let monitor = Monitor::builder().name("monitor-test").instance("one").start().unwrap();
+        let monitor = Monitor::builder().isolated().name("monitor-test").instance("one").start().unwrap();
         let descriptor = monitor.descriptor().clone();
-        assert!(
-            seismograph_protocol::monitor_directory()
-                .unwrap()
-                .join(descriptor.file_name())
-                .exists()
-        );
+        assert!(monitor.descriptor_path.exists());
 
-        let mut stream = TcpStream::connect(descriptor.socket_address()).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
-        seismograph_protocol::write_request(
-            &mut stream,
-            1,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
+        let mut stream = Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            &descriptor,
+            Duration::from_secs(2),
         )
         .unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        seismograph_protocol::write_request(&mut stream, 1, &Request::Hello).unwrap();
         let response = seismograph_protocol::read_response(&mut stream)
             .unwrap_or_else(|error| panic!("{error}; server error: {:?}", monitor.last_error()));
         assert!(matches!(response, (1, Response::Hello { .. })));
@@ -1399,7 +1379,7 @@ mod tests {
         );
 
         crate::recorder(crate::recorder::Configuration::default());
-        let path = seismograph_protocol::monitor_directory().unwrap().join(descriptor.file_name());
+        let path = monitor.descriptor_path.clone();
         drop(monitor);
         assert!(!path.exists());
         let _ = fs::remove_file(path);
@@ -1412,23 +1392,31 @@ mod tests {
         let default = Builder::default();
         assert_eq!((&BUILDER.name, &BUILDER.instance), (&default.name, &default.instance));
 
-        for builder in [Monitor::builder().name(""), Monitor::builder().name("valid").instance("")] {
+        for builder in [
+            Monitor::builder().isolated().name(""),
+            Monitor::builder().isolated().name("valid").instance(""),
+        ] {
             let error: crate::Error = builder.start().unwrap_err();
             assert_eq!(error.to_string(), "monitor application and instance names must not be empty");
             assert!(std::error::Error::source(&error).is_none());
         }
         assert_eq!(
-            default_application_name(),
+            default_application_name(&MonitorIo::new_native()).unwrap(),
             std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned()
         );
 
-        let monitor = Monitor::builder().name("monitor-debug").start().unwrap();
+        let monitor = Monitor::builder().isolated().name("monitor-debug").start().unwrap();
         assert_eq!(monitor.last_error(), None);
         let debug = format!("{monitor:?}");
         assert!(debug.contains("Monitor"));
         assert!(debug.contains("descriptor_path"));
 
-        let mut stream = TcpStream::connect(monitor.descriptor().socket_address()).unwrap();
+        let mut stream = Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            monitor.descriptor(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
         seismograph_protocol::write_request(&mut stream, 1, &Request::ReadRecorderStatistics).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
@@ -1443,43 +1431,48 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn handshakes_are_required_and_authenticated() {
+    fn handshakes_require_no_authentication_secret() {
+        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let descriptor = test_descriptor();
 
         let (mut client, server) = connected_pair();
         seismograph_protocol::write_request(&mut client, 1, &Request::ReadRecorderStatistics).unwrap();
         assert!(matches!(
-            handle_client(server, &descriptor, &AtomicBool::new(false)),
+            handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(false)),
             Err(ClientError::HandshakeRequired)
         ));
 
         let (mut client, server) = connected_pair();
-        seismograph_protocol::write_request(
-            &mut client,
-            2,
-            &Request::Hello {
-                authentication: AuthenticationToken::from_bytes([3; 32]),
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            handle_client(server, &descriptor, &AtomicBool::new(false)),
-            Err(ClientError::Authentication)
-        ));
+        seismograph_protocol::write_request(&mut client, 2, &Request::Hello).unwrap();
+        handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(true)).unwrap();
         assert_eq!(
             seismograph_protocol::read_response(&mut client).unwrap(),
-            (2, Response::Error("authentication failed".into()))
+            (
+                2,
+                Response::Hello {
+                    instance_id: descriptor.instance_id,
+                    recording: {
+                        let configuration = crate::recorder::configuration();
+                        protocol_recording_configuration(
+                            configuration.allocations,
+                            configuration.general_events,
+                            configuration.arc_dereferences,
+                            configuration.runtime_tasks,
+                            configuration.io,
+                            configuration.event_capacity_per_thread.get(),
+                        )
+                    },
+                }
+            )
         );
     }
 
     #[test]
-    fn authenticated_requests_handle_repeat_hello_and_all_snapshot_modes() {
+    fn connected_requests_handle_repeat_hello_and_all_snapshot_modes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         assert_eq!(
-            authenticated_response(&Request::Hello {
-                authentication: AuthenticationToken::from_bytes([2; 32]),
-            }),
-            Response::Error("already authenticated".into())
+            connected_response(&Request::Hello),
+            Response::Error("handshake already completed".into())
         );
 
         for event_buffers in [
@@ -1488,7 +1481,7 @@ mod tests {
             EventBufferDisposition::Release,
         ] {
             assert!(matches!(
-                authenticated_response(&Request::CaptureSnapshot(SnapshotOptions { event_buffers })),
+                connected_response(&Request::CaptureSnapshot(SnapshotOptions { event_buffers })),
                 Response::Snapshot(_)
             ));
         }
@@ -1503,10 +1496,10 @@ mod tests {
 
     #[cfg_attr(
         miri,
-        ignore = "native tests cover the TCP authentication path; Miri retains the socket-free lifecycle tests"
+        ignore = "native tests cover the local IPC handshake path; Miri retains the socket-free lifecycle tests"
     )]
     #[test]
-    fn lifecycle_commands_require_authentication() {
+    fn lifecycle_commands_require_a_completed_handshake() {
         for request in [
             Request::CaptureSnapshotAndStop,
             Request::ClearEventBuffers,
@@ -1516,7 +1509,7 @@ mod tests {
             seismograph_protocol::write_request(&mut client, 1, &request).unwrap();
             let descriptor = test_descriptor();
             assert!(matches!(
-                handle_client(server, &descriptor, &AtomicBool::new(false)),
+                handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(false)),
                 Err(ClientError::HandshakeRequired)
             ));
         }
@@ -1537,12 +1530,12 @@ mod tests {
         crate::record(crate::recorder::event::EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
-        assert_eq!(authenticated_response(&Request::ClearEventBuffers), Response::Acknowledged);
+        assert_eq!(connected_response(&Request::ClearEventBuffers), Response::Acknowledged);
         assert_eq!(crate::recorder::configuration(), configuration);
         crate::record(crate::recorder::event::EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
-        let bytes = snapshot_bytes(authenticated_response(&Request::CaptureSnapshotAndStop));
+        let bytes = snapshot_bytes(connected_response(&Request::CaptureSnapshotAndStop));
         let decoded = crate::snapshot::decode(&bytes).unwrap();
         assert_eq!(decoded.events.events.len(), 1);
         assert!(!crate::recorder::recording_enabled());
@@ -1554,23 +1547,36 @@ mod tests {
     fn stopped_client_and_protocol_failures_are_reported() {
         let (mut client, mut server) = connected_pair();
         assert!(matches!(
-            read_request_with_timeout(&mut server, &AtomicBool::new(true), Duration::from_millis(1), ReadTimeout::Idle),
+            read_request_with_timeout(
+                &MonitorIo::new_native(),
+                &mut server,
+                &AtomicBool::new(true),
+                Duration::from_millis(1),
+                ReadTimeout::Idle
+            ),
             Err(ClientError::Stopped)
         ));
 
         client.write_all(b"not a protocol frame").unwrap();
-        client.shutdown(Shutdown::Write).unwrap();
+        client.close().unwrap();
         assert!(matches!(
-            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle),
+            read_request_with_timeout(
+                &MonitorIo::new_native(),
+                &mut server,
+                &AtomicBool::new(false),
+                Duration::from_secs(1),
+                ReadTimeout::Idle
+            ),
             Err(ClientError::Protocol(_))
         ));
     }
 
-    #[cfg_attr(miri, ignore = "requires real TCP sockets; native and careful suites cover response deadlines")]
+    #[cfg_attr(miri, ignore = "requires native local IPC; native and careful suites cover response deadlines")]
     #[test]
     fn response_write_deadline_is_absolute() {
         let (_client, mut server) = connected_pair();
         let writer = DeadlineWriter {
+            io: MonitorIo::new_native(),
             stream: &mut server,
             deadline: Instant::now(),
         };
@@ -1580,30 +1586,48 @@ mod tests {
         let (client, mut server) = connected_pair();
         drop(client);
         assert!(matches!(
-            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_secs(1), ReadTimeout::Idle),
+            read_request_with_timeout(
+                &MonitorIo::new_native(),
+                &mut server,
+                &AtomicBool::new(false),
+                Duration::from_secs(1),
+                ReadTimeout::Idle
+            ),
             Err(ClientError::Disconnected)
         ));
 
         let (_client, mut server) = connected_pair();
         assert!(matches!(
-            read_request_with_timeout(&mut server, &AtomicBool::new(false), Duration::from_millis(1), ReadTimeout::Idle),
+            read_request_with_timeout(
+                &MonitorIo::new_native(),
+                &mut server,
+                &AtomicBool::new(false),
+                Duration::from_millis(1),
+                ReadTimeout::Idle
+            ),
             Err(ClientError::IdleTimedOut)
         ));
 
         let (client, mut server) = connected_pair();
-        server.shutdown(Shutdown::Read).unwrap();
+        server.close().unwrap();
         drop(client);
         assert!(matches!(
-            read_request_with_timeout(&mut server, &AtomicBool::new(true), Duration::from_secs(1), ReadTimeout::Idle),
+            read_request_with_timeout(
+                &MonitorIo::new_native(),
+                &mut server,
+                &AtomicBool::new(true),
+                Duration::from_secs(1),
+                ReadTimeout::Idle
+            ),
             Err(ClientError::Stopped | ClientError::Disconnected)
         ));
     }
 
-    #[cfg_attr(miri, ignore = "requires real TCP sockets; native and careful suites cover response deadlines")]
+    #[cfg_attr(miri, ignore = "requires native local IPC; native and careful suites cover response deadlines")]
     #[test]
     fn response_flush_respects_the_absolute_deadline() {
         let (_client, mut server) = connected_pair();
-        let mut writer = DeadlineWriter::new(&mut server, Duration::from_secs(1));
+        let mut writer = DeadlineWriter::new(&MonitorIo::new_native(), &mut server, Duration::from_secs(1));
         writer.flush().unwrap();
         writer.deadline = Instant::now();
 
@@ -1612,11 +1636,12 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn partial_authentication_frame_timeout_closes_connection() {
+    fn partial_handshake_frame_timeout_closes_connection() {
         let descriptor = test_descriptor();
         let (mut client, server) = connected_pair();
         let worker = thread::spawn(move || {
             handle_client_with_timeouts(
+                &MonitorIo::new_native(),
                 server,
                 &descriptor,
                 &AtomicBool::new(false),
@@ -1629,7 +1654,7 @@ mod tests {
         let result = worker.join().unwrap();
         assert_eq!(
             (
-                matches!(result, Err(ClientError::AuthenticationTimedOut)),
+                matches!(result, Err(ClientError::HandshakeTimedOut)),
                 connection_is_closed(&mut client),
             ),
             (true, true)
@@ -1638,12 +1663,13 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn authenticated_idle_timeout_closes_connection() {
+    fn connected_idle_timeout_closes_connection() {
         let descriptor = test_descriptor();
-        let authentication = descriptor.authentication;
+
         let (mut client, server) = connected_pair();
         let worker = thread::spawn(move || {
             handle_client_with_timeouts(
+                &MonitorIo::new_native(),
                 server,
                 &descriptor,
                 &AtomicBool::new(false),
@@ -1652,7 +1678,7 @@ mod tests {
             )
         });
 
-        seismograph_protocol::write_request(&mut client, 1, &Request::Hello { authentication }).unwrap();
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
         let hello = seismograph_protocol::read_response(&mut client).unwrap();
         let result = worker.join().unwrap();
         assert_eq!(
@@ -1668,23 +1694,26 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn blocked_client_does_not_block_another_client() {
-        let monitor = Monitor::builder().name("monitor-concurrent-clients").start().unwrap();
+        let monitor = Monitor::builder().isolated().name("monitor-concurrent-clients").start().unwrap();
         let descriptor = monitor.descriptor().clone();
-        let mut blocked = TcpStream::connect(descriptor.socket_address()).unwrap();
+        let mut blocked = Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            &descriptor,
+            Duration::from_secs(2),
+        )
+        .unwrap();
         blocked.write_all(b"SGMP").unwrap();
         wait_for_active_clients(&monitor, 1);
 
-        let mut responsive = TcpStream::connect(descriptor.socket_address()).unwrap();
-        responsive.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        responsive.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
-        seismograph_protocol::write_request(
-            &mut responsive,
-            1,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
+        let mut responsive = Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            &descriptor,
+            Duration::from_secs(2),
         )
         .unwrap();
+        responsive.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        responsive.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+        seismograph_protocol::write_request(&mut responsive, 1, &Request::Hello).unwrap();
 
         let response_received = matches!(
             seismograph_protocol::read_response(&mut responsive),
@@ -1695,7 +1724,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "requires real TCP sockets")]
+    #[cfg_attr(miri, ignore = "requires native local IPC")]
     fn active_client_limit_rejects_excess_connections() {
         let clients = Arc::new(ActiveClients::new());
         let mut registrations = Vec::new();
@@ -1728,15 +1757,6 @@ mod tests {
         assert_eq!(configuration.event_capacity_per_thread, u32::MAX);
         assert_eq!(configuration.allocations.sampling_one_in, 7);
         assert_eq!(recorder_policy(configuration.allocations), policy);
-        assert!(tokens_equal(
-            AuthenticationToken::from_bytes([1; 32]),
-            AuthenticationToken::from_bytes([1; 32])
-        ));
-        assert!(!tokens_equal(
-            AuthenticationToken::from_bytes([1; 32]),
-            AuthenticationToken::from_bytes([2; 32])
-        ));
-
         assert_eq!(
             snapshot_response(Err(crate::Error::new("capture failed"))),
             Response::Error("capture failed".into())
@@ -1748,9 +1768,9 @@ mod tests {
             classify_read_error(
                 seismograph_protocol::Error::Io(io::Error::new(io::ErrorKind::TimedOut, "timeout")),
                 false,
-                ReadTimeout::Authentication
+                ReadTimeout::Handshake
             ),
-            ClientError::AuthenticationTimedOut
+            ClientError::HandshakeTimedOut
         ));
         assert!(matches!(
             classify_read_error(
@@ -1778,8 +1798,7 @@ mod tests {
             ClientError::Io(io_error()),
             ClientError::Protocol(protocol_error()),
             ClientError::HandshakeRequired,
-            ClientError::Authentication,
-            ClientError::AuthenticationTimedOut,
+            ClientError::HandshakeTimedOut,
             ClientError::IdleTimedOut,
             ClientError::Disconnected,
             ClientError::Stopped,
@@ -1788,8 +1807,7 @@ mod tests {
             "socket failed",
             "invalid Seismograph monitor message",
             "monitor handshake is required",
-            "monitor authentication failed",
-            "monitor authentication timed out",
+            "monitor handshake timed out",
             "monitor client idle timeout expired",
             "monitor client disconnected",
             "monitor stopped",
@@ -1798,57 +1816,25 @@ mod tests {
             assert_eq!(error.to_string(), expected);
         }
 
-        let path = PathBuf::from("monitor");
         let startup_cases = [
             StartupFailure::InvalidIdentity,
             StartupFailure::Bind(io_error()),
             StartupFailure::ConfigureListener(io_error()),
-            StartupFailure::ReadAddress(io_error()),
-            StartupFailure::Random(getrandom::Error::UNSUPPORTED),
             StartupFailure::Protocol(protocol_error()),
-            StartupFailure::CreateDirectory {
-                path: path.clone(),
-                source: io_error(),
-            },
-            StartupFailure::SetPermissions {
-                path: path.clone(),
-                source: io_error(),
-            },
-            StartupFailure::Publish {
-                path: path.clone(),
-                source: protocol_error(),
-            },
-            StartupFailure::Rename {
-                from: PathBuf::from("temporary"),
-                to: path,
-                source: io_error(),
-            },
             StartupFailure::Spawn(io_error()),
         ];
         let expected = [
             "monitor application and instance names must not be empty".to_owned(),
-            "failed to bind Seismograph monitor to localhost: socket failed".to_owned(),
+            "failed to bind Seismograph local monitor: socket failed".to_owned(),
             "failed to configure Seismograph monitor listener: socket failed".to_owned(),
-            "failed to read Seismograph monitor address: socket failed".to_owned(),
-            format!("failed to generate Seismograph monitor identity: {}", getrandom::Error::UNSUPPORTED),
             "Seismograph monitor protocol failed: invalid Seismograph monitor message".to_owned(),
-            "failed to create monitor directory monitor: socket failed".to_owned(),
-            "failed to secure monitor directory monitor: socket failed".to_owned(),
-            "failed to publish monitor descriptor monitor: invalid Seismograph monitor message".to_owned(),
-            "failed to publish monitor descriptor temporary as monitor: socket failed".to_owned(),
             "failed to start Seismograph monitor thread: socket failed".to_owned(),
         ];
         let expected_sources = [
             None,
             Some("socket failed"),
             Some("socket failed"),
-            Some("socket failed"),
-            None,
             Some("invalid Seismograph monitor message"),
-            Some("socket failed"),
-            Some("socket failed"),
-            Some("invalid Seismograph monitor message"),
-            Some("socket failed"),
             Some("socket failed"),
         ];
         for ((failure, expected), expected_source) in startup_cases.into_iter().zip(expected).zip(expected_sources) {
@@ -1862,103 +1848,15 @@ mod tests {
         }
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
-    fn monitor_directory_creation_failure_preserves_path() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join(format!("seismograph-monitor-file-{}", std::process::id()));
-        fs::write(&path, b"not a directory").unwrap();
-        let error = create_monitor_directory(&path).unwrap_err();
-        fs::remove_file(&path).unwrap();
-        let error = Error::monitor(error);
-        assert!(error.to_string().contains(&path.display().to_string()));
-        assert!(std::error::Error::source(&error).unwrap().downcast_ref::<io::Error>().is_some());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore)]
-    #[cfg_attr(coverage_nightly, coverage(off))] // DrvFS may report fixed modes; native Unix filesystems take the strict assertion.
-    fn monitor_directory_permissions_are_restricted() {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join(format!("seismograph-monitor-permissions-{}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        let initial_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-
-        create_monitor_directory(&path).unwrap();
-        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        fs::remove_dir(&path).unwrap();
-
-        if initial_mode == 0o755 {
-            assert_eq!(mode, 0o700);
-        } else {
-            assert_eq!(mode, initial_mode);
-        }
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn descriptor_publication_reports_write_and_rename_failures() {
-        let descriptor = MonitorDescriptor {
-            name: "test".into(),
-            instance: None,
-            process_id: 1,
-            instance_id: InstanceId::from_bytes([1; 16]),
-            port: 1,
-            authentication: AuthenticationToken::from_bytes([2; 32]),
-        };
-        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join(format!("seismograph-publish-{}", std::process::id()));
-        let missing = base.join("missing");
-        assert!(matches!(
-            publish_descriptor(&missing, &descriptor),
-            Err(StartupFailure::Publish { .. })
-        ));
-
-        fs::create_dir_all(&base).unwrap();
-        let destination = base.join(descriptor.file_name());
-        fs::create_dir(&destination).unwrap();
-        assert!(matches!(publish_descriptor(&base, &descriptor), Err(StartupFailure::Rename { .. })));
-        fs::remove_dir(destination).unwrap();
-        let _ = fs::remove_file(base.join(descriptor.file_name()).with_extension("monitor.tmp"));
-        fs::remove_dir(base).unwrap();
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn listener_spawn_failure_removes_published_descriptor() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join(format!("seismograph-spawn-{}", std::process::id()));
-        fs::write(&path, b"descriptor").unwrap();
-        assert!(matches!(
-            spawn_listener_thread_with(|| {}, &path, |_operation| Err(io::Error::other("injected"))),
-            Err(StartupFailure::Spawn(_))
-        ));
-        assert!(!path.exists());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_propagates_listener_spawn_failure() {
+    fn builder_cleans_up_after_listener_spawn_failure() {
+        let (io, control) = MonitorIo::new_mocked();
+        let observed = control.clone();
         let error = Monitor::builder()
+            .io(io.clone())
             .name("spawn-failure")
-            .start_with(|_listener, _descriptor, _stop, _client, _last_error, descriptor_path| {
-                fs::remove_file(descriptor_path).unwrap();
+            .start_with(|_io, _listener, _descriptor, _stop, _client, _last_error, descriptor_path| {
+                assert!(observed.file_bytes(descriptor_path).is_some());
                 Err(StartupFailure::Spawn(io::Error::other("injected")))
             })
             .map_err(Error::monitor)
@@ -1972,46 +1870,46 @@ mod tests {
                 .kind(),
             io::ErrorKind::Other
         );
+        assert_eq!(Directory::current(&io).unwrap().descriptors().unwrap().count(), 0);
+        assert!(
+            control
+                .operations()
+                .contains(&seismograph_protocol::io::IoOperation::RemoveDescriptor)
+        );
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn authenticated_client_stops_after_handshake_and_propagates_bad_frames() {
+    fn connected_client_stops_after_handshake_and_propagates_bad_frames() {
         let descriptor = MonitorDescriptor {
             name: "test".into(),
             instance: None,
             process_id: 1,
             instance_id: InstanceId::from_bytes([1; 16]),
-            port: 1,
-            authentication: AuthenticationToken::from_bytes([2; 32]),
+
+            owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+            endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                &std::env::temp_dir(),
+                &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                1,
+                InstanceId::from_bytes([1; 16]),
+            ),
         };
 
         let (mut client, server) = connected_pair();
-        seismograph_protocol::write_request(
-            &mut client,
-            1,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
-        )
-        .unwrap();
-        handle_client(server, &descriptor, &AtomicBool::new(true)).unwrap();
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
+        handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(true)).unwrap();
         assert!(matches!(
             seismograph_protocol::read_response(&mut client).unwrap(),
             (1, Response::Hello { .. })
         ));
 
         let (mut client, server) = connected_pair();
-        let server_descriptor = descriptor.clone();
-        let server_thread = thread::spawn(move || handle_client(server, &server_descriptor, &AtomicBool::new(false)));
-        seismograph_protocol::write_request(
-            &mut client,
-            2,
-            &Request::Hello {
-                authentication: descriptor.authentication,
-            },
-        )
-        .unwrap();
+        let server_descriptor = descriptor;
+        let server_thread =
+            thread::spawn(move || handle_client(&MonitorIo::new_native(), server, &server_descriptor, &AtomicBool::new(false)));
+        seismograph_protocol::write_request(&mut client, 2, &Request::Hello).unwrap();
         let _hello = seismograph_protocol::read_response(&mut client).unwrap();
         client.write_all(&[0; 20]).unwrap();
         assert!(matches!(server_thread.join().unwrap(), Err(ClientError::Protocol(_))));

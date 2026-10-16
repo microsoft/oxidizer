@@ -40,13 +40,24 @@ The crate offers:
 
 See [`arc`][__link4] and [`sync`][__link5] for the available types and their full APIs.
 
+## Live monitor integration workload
+
+Run `cargo +1.95.0 test -p performables --features seismograph --test seismograph_monitor live_monitor -- --ignored --nocapture`
+in one terminal, then `cargo +1.95.0 run -p seismograph_cli -- monitor`
+in another terminal using the same checkout and OS environment.
+Select `performables-integration`,
+press Enter to connect, and press `s` to capture. The Primitives and Threads
+tabs show real mutex and Arc activity from three named worker threads.
+Press Enter in the workload terminal to stop it and remove its endpoint.
+No administrator setup or application changes are required.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEWLxBG1R_bUbennpOCnOulkbhCiln7flkhsbllVBCnf-UodhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5nVHt1dSna4bHfOGWaJtq14bHOIGlWKWIO0bQioiH0BVu5ZhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
  [__link1]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread
  [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerNuma
