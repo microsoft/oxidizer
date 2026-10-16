@@ -102,7 +102,9 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
     }
 
     /// Overrides the server name used for native TLS certificate validation
-    /// and `SNI` when connecting to `endpoint`.
+    /// and Server Name Indication (`SNI`) when connecting to `endpoint`.
+    ///
+    /// `SNI` is the server name sent to the peer during the TLS handshake.
     ///
     /// The HTTP request, connection destination, `Host` header, and connection
     /// pool key continue to use the real endpoint. Only the name passed to

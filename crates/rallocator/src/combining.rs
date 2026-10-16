@@ -345,6 +345,10 @@ mod tests {
             next: AtomicPtr::new(std::ptr::null_mut()),
             invoke: unreachable_invoke,
         };
+        // This fixture is single-threaded, so these orderings are not needed
+        // for synchronization here. They intentionally mirror the production
+        // queue protocol: Release publishes the tail, Acquire observes links
+        // and completion, and AcqRel clears the fixture's published tail.
         shared.last.store(&raw mut predecessor, Ordering::Release);
 
         // SAFETY: Both stationary stack nodes remain alive throughout attach.

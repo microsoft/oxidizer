@@ -185,4 +185,12 @@ mod tests {
             Some("loopback.example.test")
         );
     }
+
+    #[test]
+    fn native_tls_backend_is_unwind_safe() {
+        static_assertions::assert_impl_all!(
+            NativeTlsBackend: std::panic::UnwindSafe,
+            std::panic::RefUnwindSafe
+        );
+    }
 }

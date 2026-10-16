@@ -21,6 +21,39 @@ use crate::{Connect, HyperIo};
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type RecordedErrorKind = Arc<Mutex<Option<std::io::ErrorKind>>>;
 
+#[derive(Debug)]
+struct HttpsRequired;
+
+impl std::fmt::Display for HttpsRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("https required but URI was not https")
+    }
+}
+
+impl std::error::Error for HttpsRequired {}
+
+#[derive(Debug)]
+struct UnsupportedScheme(String);
+
+impl std::fmt::Display for UnsupportedScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unsupported URI scheme: {}", self.0)
+    }
+}
+
+impl std::error::Error for UnsupportedScheme {}
+
+#[derive(Debug)]
+struct MissingScheme;
+
+impl std::fmt::Display for MissingScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("URI scheme is required")
+    }
+}
+
+impl std::error::Error for MissingScheme {}
+
 #[cfg_attr(
     windows,
     expect(
@@ -111,6 +144,12 @@ pub(crate) struct RecordingIo<S> {
     inner: S,
     error_kind: RecordedErrorKind,
 }
+
+// Some native TLS backends, notably Schannel, do not retain the underlying
+// transport error in the returned TLS error chain. Recording it at the I/O
+// boundary preserves transient error classification. A handshake failure
+// without a recorded I/O error is treated as nonretryable, as for TLS alerts
+// and certificate or protocol validation failures.
 
 impl<S: Read + Unpin> Read for RecordingIo<S> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
@@ -235,9 +274,9 @@ where
         let is_https = match req.scheme_str() {
             Some("https") => true,
             Some("http") if !self.force_https => false,
-            Some("http") => return error("https required but URI was not https"),
-            Some(scheme) => return error(format!("unsupported URI scheme: {scheme}")),
-            None => return error("URI scheme is required"),
+            Some("http") => return error(HttpsRequired),
+            Some(scheme) => return error(UnsupportedScheme(scheme.to_owned())),
+            None => return error(MissingScheme),
         };
 
         let server_name = server_name(&self.backend, &req);
@@ -308,6 +347,7 @@ fn server_name(backend: &fetch_tls::NativeTlsBackend, destination: &Uri) -> Stri
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::error::Error as _;
     use std::io::{Read as _, Write as _};
     use std::net::{SocketAddr, TcpListener as StdTcpListener};
 
@@ -567,7 +607,11 @@ mod tests {
             panic!("unsupported scheme should be rejected");
         };
 
-        assert!(error.to_string().contains("unsupported URI scheme: ftp"), "got: {error}");
+        let cause = error
+            .source()
+            .and_then(|source| source.downcast_ref::<UnsupportedScheme>())
+            .expect("unsupported scheme cause should be preserved");
+        assert_eq!(cause.0, "ftp");
     }
 
     #[cfg_attr(miri, ignore)]
@@ -579,7 +623,7 @@ mod tests {
             panic!("plain HTTP should be rejected");
         };
 
-        assert!(error.to_string().contains("https required"), "got: {error}");
+        assert!(error.downcast_ref::<HttpsRequired>().is_some(), "got: {error}");
     }
 
     #[cfg_attr(miri, ignore)]
@@ -595,7 +639,7 @@ mod tests {
             panic!("missing scheme should be rejected");
         };
 
-        assert!(error.to_string().contains("URI scheme is required"), "got: {error}");
+        assert!(error.downcast_ref::<MissingScheme>().is_some(), "got: {error}");
     }
 
     #[cfg_attr(miri, ignore)]
@@ -759,8 +803,7 @@ mod tests {
         let acceptor = server.acceptor(&["http/1.1"]);
         let peer = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let _stream = acceptor.accept(stream).await.unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = acceptor.accept(stream).await;
         });
         let connector = RecordingTcpConnector {
             address: server.address,
