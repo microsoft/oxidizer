@@ -22,8 +22,9 @@
 //! work where applicable, and task count at one and eight workers, but these are
 //! coordination workloads rather than claims about general runtime performance.
 //!
-//! Callgrind is intentionally omitted because it cannot model the scheduling
-//! and cross-worker contention these workloads are intended to expose.
+//! Gungraun results are available as a coarse instruction-path diagnostic, but
+//! Callgrind cannot model the scheduling and cross-worker contention these
+//! workloads are intended to expose. Use Criterion for runtime comparisons.
 
 use std::hint::black_box;
 use std::pin::Pin;
