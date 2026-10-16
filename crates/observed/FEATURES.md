@@ -35,10 +35,10 @@
 ## Emission & Routing
 
 - **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's interested processors via `EventProcessor::process`
-- **Per-Sink event sampling** - `SinkBuilder::event_sampler` attaches a synchronous gate before processor delivery; the sampler is fixed once the sink is built, and each sink in a composite decides with its own sampler; see `EventSampler::sample` for the invocation contract
+- **Per-Sink event sampling** - `SinkBuilder::event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked; the sampler is fixed once the sink is built, and each sink in a composite decides with its own sampler; see `EventSampler::sample` for the invocation contract
 - **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped getters do not evaluate, convert, or redact their values, but field enumeration and visitor work still occur. Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
 - **Allocation-free static keys** - all field, enrichment, and interop keys are `&'static str`, so `Key`/`FieldDescriptor`/`LogFieldEntry`/`MetricFieldEntry` are `Copy` and snapshotting consumers (e.g. snapshotting/replay processors) retain keys with zero allocation. The `tracing` bridge forwards `tracing`'s `&'static` field/target/file names directly instead of cloning them.
-- **Interest-based lazy construction** - processors implement the required `is_interested(&EventDescription)`; if all return `false` the event closure is never called. It runs both as the construction gate and again while routing, so it may be called more than once per emission - keep it cheap, and keep the answer stable across those calls
+- **Interest-based lazy construction** - processors implement the required `is_interested(&EventDescription)`, asked at most once per emission for each Sink; if every processor returns `false`, the event closure is never called
 - **Per-processor filtering** - a processor that answers `false` from `is_interested` never receives the event, even when a peer accepted it
 - **OpenTelemetry integration** - built on `opentelemetry_sdk` log and metric providers (value-layer only; no OTel Context dependency)
 - **Foreign event interoperability** - the `interop` module exposes the type-erased `DynEvent` trait and `emit_dyn_event` entry point for bridging events from other telemetry crates (e.g. `tracing`, `log`) that cannot implement the typed `Event` trait. These adapted events flow through the sink's normal pipeline (enrichment, interest checks, processors). `interop` types are **not** re-exported at the crate root; reach them via `observed::interop::{DynEvent, emit_dyn_event}`.
@@ -57,6 +57,9 @@ emit!(sink, MyEvent { a: expensive() })
 -> sink.emit::<MyEvent, _>(|| MyEvent { a: expensive() }, source_location)
   │
   ├── noop check: if sink.is_noop() -> early exit (no processors)
+  │
+  ├── sampler check: an attached EventSampler returns Continue or Drop
+  │     -> if Drop, early exit (event closure NOT called)
   │
   ├── interest check: any processor interested in MyEvent::DESCRIPTION?
   │     -> if none interested, early exit (event closure NOT called)

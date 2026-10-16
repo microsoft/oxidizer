@@ -3,7 +3,7 @@
 
 //! Runtime assembly and the two-sided worker startup protocol.
 
-pub(in crate::runtime) mod pools;
+pub(crate) mod pools;
 mod startup;
 
-pub(in crate::runtime) use startup::build;
+pub(crate) use startup::build;

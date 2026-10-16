@@ -2,6 +2,10 @@
 source: crates/fakeable_impl/src/../tests/output_verification.rs
 expression: "testing_aids :: render_expansion(&result)"
 ---
+#[allow(
+    clippy::unused_self,
+    reason = "Instance receivers select the real or fake implementation"
+)]
 impl __fakeable__MyService::MyService {
     pub async fn process<T>(&self, value: T) -> T
     where

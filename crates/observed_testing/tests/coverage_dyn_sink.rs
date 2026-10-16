@@ -134,6 +134,29 @@ impl Enrichment for EmptyEnrichment {
 }
 
 #[test]
+fn standard_arc_processor_delegates_interest_filter() {
+    let processor: Arc<dyn EventProcessor> = Arc::new(MockProcessor::with_filter(EventDescription::is_log));
+    let no_signals = EventDescription::new("no.signals", None, None, None, false, false);
+
+    assert!(EventProcessor::is_interested(&processor, &DynProbe.description()));
+    assert!(!EventProcessor::is_interested(&processor, &no_signals));
+}
+
+#[test]
+fn standard_arc_processor_delivers_synthetic_events() {
+    let mock = MockProcessor::new();
+    let processor: Arc<dyn EventProcessor> = Arc::new(mock.clone());
+    let view = EventView::new_synthetic(&DynProbe, SystemTime::UNIX_EPOCH);
+
+    EventProcessor::process(&processor, &view);
+
+    assert_eq!(
+        mock.single_event(),
+        ExpectedEvent::new("dyn.probe", Severity::Info).body("probe body"),
+    );
+}
+
+#[test]
 fn dyn_event_dispatch_reads_every_accessor() {
     let saw = Arc::new(AtomicBool::new(false));
     let mock = MockProcessor::new();

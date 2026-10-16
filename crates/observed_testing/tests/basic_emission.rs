@@ -302,11 +302,11 @@ fn borrowed_classified_fields() {
 /// Telemetry emitted while an event's fields are being built must still reach
 /// its own sink.
 ///
-/// The reentrancy guard exists to stop a *processor* re-entering the pipeline.
-/// A field initializer is ordinary user code that may call a helper which emits
-/// telemetry of its own, so the guard is taken only for processor dispatch --
-/// taking it earlier would silently drop that helper's events, even when they
-/// target a completely unrelated sink.
+/// The reentrancy guard exists to stop a sampler or processor re-entering the
+/// pipeline. A field initializer is ordinary user code that may call a helper
+/// which emits telemetry of its own, so the guard is released while the event
+/// is built -- holding it would silently drop that helper's events, even when
+/// they target a completely unrelated sink.
 #[test]
 fn helper_telemetry_during_field_initialization_is_not_dropped() {
     fn compute_value(helper: &Sink) -> i64 {

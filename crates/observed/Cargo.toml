@@ -54,6 +54,7 @@ tick = { workspace = true }
 all_the_time = { workspace = true }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
+mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }

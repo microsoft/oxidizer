@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
+use arty_executor::TaskPlacement;
+use arty_executor::remote::Pool as RemotePool;
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
@@ -14,19 +16,19 @@ use thread_aware::Thread;
 
 use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::telemetry::events::{PlacementLabel, RuntimeStopped, RuntimeStopping, TaskSpawned};
-use crate::runtime::thread::waiter::WaitForShutdown;
-use crate::runtime::worker::protocol::AsyncWorkerCommand;
+use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
+use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedTaskFactory};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
 
 #[derive(Debug)]
-pub(in crate::runtime) struct WorkerEndpoint {
-    pub(in crate::runtime) command_tx: channel::Sender<AsyncWorkerCommand>,
-    pub(in crate::runtime) waker: Waker,
-    pub(in crate::runtime) thread: Thread,
-    pub(in crate::runtime) blocking_worker: Arc<BlockingWorker>,
+pub(crate) struct WorkerEndpoint {
+    pub(crate) command_tx: channel::Sender<AsyncWorkerCommand>,
+    pub(crate) waker: Waker,
+    pub(crate) thread: Thread,
+    pub(crate) blocking_worker: Arc<BlockingWorker>,
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -51,8 +53,8 @@ impl From<WorkerIndex> for usize {
 ///
 /// Commands are received as function calls to the dispatcher and delivered via message channels.
 #[derive(Debug)]
-pub(in crate::runtime) struct DispatcherCore<WFS> {
-    wait_for_shutdown: WFS,
+pub(crate) struct DispatcherCore {
+    wait_for_shutdown: ThreadWaiter,
 
     /// We record whether shutdown has started, both to avoid double-shutdown and to execute
     /// special-case logic in some situations that need special handling during shutdown.
@@ -71,16 +73,18 @@ pub(in crate::runtime) struct DispatcherCore<WFS> {
     /// Sink for runtime telemetry. Enrichment context is captured from it at spawn time and
     /// restored on every poll of spawned futures.
     sink: observed::Sink,
+
+    remote_results: RemotePool,
 }
 
-impl<WFS> DispatcherCore<WFS> {
+impl DispatcherCore {
     #[cfg(test)]
-    pub(in crate::runtime) fn new(wait_for_shutdown: WFS, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
+    pub(crate) fn new(wait_for_shutdown: ThreadWaiter, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
         Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
     }
 
-    pub(in crate::runtime) fn new_with_shutdown(
-        wait_for_shutdown: WFS,
+    pub(crate) fn new_with_shutdown(
+        wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown_started: Arc<AtomicBool>,
@@ -108,12 +112,13 @@ impl<WFS> DispatcherCore<WFS> {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             sink,
+            remote_results: RemotePool::new(),
         }
     }
 
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
-    pub(in crate::runtime) fn stop(&self) {
+    pub(crate) fn stop(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
@@ -136,20 +141,20 @@ impl<WFS> DispatcherCore<WFS> {
         WorkerIndex(self.next_async_worker_index.fetch_add(1, Ordering::Relaxed) % self.worker_endpoints.len())
     }
 
-    pub(in crate::runtime) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), "any", future_factory)
+        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
-    pub(in crate::runtime) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
+    pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.worker_indices.get(&thread_id).copied()
     }
 
-    pub(in crate::runtime) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
+    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
     where
         M: FnMut() -> FF,
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -157,33 +162,37 @@ impl<WFS> DispatcherCore<WFS> {
         R: Send + 'static,
     {
         (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), "any", make_factory()))
+            .map(|index| self.enqueue(WorkerIndex(index), TaskPlacement::Any, make_factory()))
             .collect()
     }
 
-    pub(in crate::runtime) fn owns(&self, thread: &Thread) -> bool {
+    pub(crate) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(in crate::runtime) fn shutdown_signal(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.shutdown_started)
-    }
-
-    pub(in crate::runtime) fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         self.shutdown_started.load(Ordering::Acquire)
     }
 
-    pub(in crate::runtime) fn is_current_blocking_task(&self) -> bool {
+    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shutdown_started)
+    }
+
+    pub(crate) fn remote_results(&self) -> &RemotePool {
+        &self.remote_results
+    }
+
+    pub(crate) fn is_current_blocking_task(&self) -> bool {
         self.worker_endpoints
             .iter()
             .any(|endpoint| endpoint.blocking_worker.is_current_task())
     }
 
-    pub(in crate::runtime) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
         self.blocking_worker(self.next_worker_index())
     }
 
-    pub(in crate::runtime) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
+    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
         Arc::clone(
             &self
                 .worker_endpoints
@@ -193,23 +202,24 @@ impl<WFS> DispatcherCore<WFS> {
         )
     }
 
-    pub(in crate::runtime) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, "same_thread", future_factory)
+        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: &'static str, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
         if self.is_shutting_down() {
-            return JoinHandle::shutdown();
+            drop(future_factory);
+            return JoinHandle::shutdown(&self.remote_results);
         }
         let endpoint = self
             .worker_endpoints
@@ -218,40 +228,28 @@ impl<WFS> DispatcherCore<WFS> {
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
         let (future_factory, join_handle) = prepare_remote(
+            &self.remote_results,
             future_factory,
             parent_task_enrichment,
-            self.sink.clone(),
+            placement,
             Arc::clone(&self.shutdown_started),
         );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
-            future_factory: Some(future_factory),
+        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
+            future_factory: QueuedTaskFactory::new(future_factory),
         });
 
-        if send_result.is_ok() {
-            emit!(
-                &self.sink,
-                TaskSpawned {
-                    placement: PlacementLabel(placement),
-                }
-            );
-        }
         endpoint.waker.wake_by_ref();
 
         join_handle
     }
-}
 
-impl<WFS> DispatcherCore<WFS>
-where
-    WFS: WaitForShutdown,
-{
     /// Waits for the runtime to shut down and all worker threads to exit.
     ///
     /// Safe to call multiple times.
-    pub(in crate::runtime) fn join(&self) -> Result<(), Error> {
+    pub(crate) fn join(&self) -> Result<(), Error> {
         let outcome = self.wait_for_shutdown.wait();
         if !self.stopped_reported.swap(true, Ordering::Relaxed) {
             emit!(&self.sink, RuntimeStopped);
@@ -271,8 +269,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
-    use crate::runtime::dispatch::test_threads;
-    use crate::runtime::thread::waiter::MockWaitForShutdown;
+    use crate::runtime::dispatch::{DispatcherClient, test_threads};
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
@@ -293,7 +290,7 @@ mod tests {
         let (second_tx, _second_rx) = channel::unbounded();
 
         DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &first), endpoint(second_tx, &second)]).unwrap(),
             observed::Sink::noop(),
         );
@@ -304,10 +301,10 @@ mod tests {
         // We dispatch two tasks to the only worker.
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
@@ -330,10 +327,10 @@ mod tests {
 
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -351,10 +348,10 @@ mod tests {
     fn round_robin_repeats_without_resetting() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -374,7 +371,7 @@ mod tests {
         let (first_tx, first_rx) = channel::unbounded();
         let (second_tx, second_rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
         );
@@ -390,7 +387,7 @@ mod tests {
         let threads = test_threads(2);
         let (tx, _rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            MockWaitForShutdown::new(),
+            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
         );
@@ -399,13 +396,31 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_signal_is_shared_with_dispatcher_client() {
+        let (tx, _rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let core = Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &threads[0])),
+            observed::Sink::noop(),
+        ));
+        let client = DispatcherClient::new(Arc::clone(&core));
+        let signal = client.shutdown_signal();
+
+        assert!(std::ptr::eq(core.remote_results(), std::ptr::addr_of!(core.remote_results)));
+        core.stop();
+
+        assert!(signal.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
@@ -432,10 +447,10 @@ mod tests {
         // we ignore any further spawn requests (they simply return disconnected join handles).
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = MockWaitForShutdown::new();
+        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
-        let dispatcher = DispatcherCore::<_>::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),

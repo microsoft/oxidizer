@@ -11,6 +11,8 @@ license: MIT
 This skill applies when reviewing pull requests. It does not apply to the coding
 agent when it writes code — see `AGENTS.md` for that.
 
+When reviewing tests, test helpers, or tests in `examples/`, apply [Test review rules](test-review.md).
+
 Every rule below exists because a review comment was filed, argued, and
 withdrawn. The cost of a wrong comment is not zero: the author has to reproduce
 your claim, disprove it, and write the rebuttal.

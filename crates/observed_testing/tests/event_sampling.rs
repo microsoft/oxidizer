@@ -8,7 +8,6 @@ use std::cell::Cell;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use data_privacy::{DataClass, Sensitive};
 use observed::interop::{DynEvent, emit_dyn_event};
@@ -16,7 +15,7 @@ use observed::metadata::{EventDescription, LogDescription};
 use observed::processing::FieldVisitorFn;
 use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, Severity, Sink, SinkId, emit, event};
 use observed_testing::types::{PiiString, PublicI64};
-use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID};
+use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID, test_emitter};
 
 const PII: DataClass = DataClass::new("test_taxonomy", "pii");
 
@@ -55,9 +54,9 @@ impl<F> EventSampler for ProbeSampler<F>
 where
     F: for<'a> Fn(&EventSamplingContext<'a>) -> EventSamplingDecision + Send + Sync + 'static,
 {
-    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    fn sample(&self, context: &EventSamplingContext<'_>) -> EventSamplingDecision {
         _ = self.calls.fetch_add(1, Ordering::Relaxed);
-        (self.decide)(event)
+        (self.decide)(context)
     }
 }
 
@@ -79,6 +78,26 @@ fn constant_sampler(decision: EventSamplingDecision) -> (impl EventSampler, Arc<
     probe_sampler(move |_| decision)
 }
 
+/// A processor that wants every event or none, counting how often it is asked.
+fn counting_processor(wants: bool) -> (MockProcessor, Arc<AtomicUsize>) {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let processor = MockProcessor::with_filter({
+        let asked = Arc::clone(&asked);
+        move |_| {
+            _ = asked.fetch_add(1, Ordering::Relaxed);
+            wants
+        }
+    });
+    (processor, asked)
+}
+
+fn user_action(action_code: i64) -> ExpectedEvent {
+    ExpectedEvent::new("user.action", Severity::Info)
+        .body("User acted")
+        .dimension("action_code", action_code)
+        .dimension("user", "Alice")
+}
+
 /// Builds a sink with one [`MockProcessor`] and the given sampler.
 fn sampled_emitter(id: SinkId, sampler: impl Into<Box<dyn EventSampler>>) -> (Sink, MockProcessor) {
     let processor = MockProcessor::new();
@@ -90,22 +109,17 @@ fn sampled_emitter(id: SinkId, sampler: impl Into<Box<dyn EventSampler>>) -> (Si
     (sink, processor)
 }
 
-/// A sampler whose clones share one call counter, so a single sampling state
-/// can span several sinks. Drops events for `drop_for` only.
-#[derive(Clone)]
+/// Samplers built around one `calls` counter share it, so one sampling state
+/// can span several sinks. Each sampler decides with its own `decision`.
 struct SharedSampler {
     calls: Arc<AtomicUsize>,
-    drop_for: SinkId,
+    decision: EventSamplingDecision,
 }
 
 impl EventSampler for SharedSampler {
-    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
         _ = self.calls.fetch_add(1, Ordering::Relaxed);
-        if event.sink_id() == self.drop_for {
-            EventSamplingDecision::Drop
-        } else {
-            EventSamplingDecision::Continue
-        }
+        self.decision
     }
 }
 
@@ -164,13 +178,7 @@ fn event_sampler_continues_borrowed_event() {
     );
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
-    assert_eq!(
-        processor.single_event(),
-        ExpectedEvent::new("user.action", Severity::Info)
-            .body("User acted")
-            .dimension("action_code", 42i64)
-            .dimension("user", "Alice"),
-    );
+    assert_eq!(processor.single_event(), user_action(42),);
 }
 
 #[test]
@@ -198,7 +206,26 @@ fn always_off_sampler_always_drops() {
 }
 
 #[test]
-fn event_sampler_is_not_called_without_processor_interest() {
+fn dropped_event_is_never_built() {
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
+    let (sink, processor) = sampled_emitter(TEST_ID, sampler);
+    let built = Cell::new(false);
+
+    emit!(sink, {
+        built.set(true);
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    });
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(!built.get());
+    assert!(processor.is_empty());
+}
+
+#[test]
+fn event_sampler_is_called_without_processor_interest() {
     let processor = MockProcessor::with_filter(|_| false);
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
     let sink = Sink::builder(TEST_ID)
@@ -215,7 +242,7 @@ fn event_sampler_is_not_called_without_processor_interest() {
         }
     );
 
-    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert!(processor.is_empty());
 }
 
@@ -224,31 +251,27 @@ struct SeenContext {
     name: &'static str,
     is_log: bool,
     contains_metrics: bool,
-    sink_id: SinkId,
-    timestamp: SystemTime,
+    processors_interested: bool,
 }
 
 #[test]
-fn event_sampler_receives_description_sink_id_and_timestamp() {
-    let id = SinkId::new("context");
-    let clock = tick::SimpleClock::new_frozen();
+fn event_sampler_receives_description_and_processor_interest() {
     let processor = MockProcessor::new();
     let seen: Arc<Mutex<Option<SeenContext>>> = Arc::new(Mutex::new(None));
 
     let recorder = Arc::clone(&seen);
-    let (sampler, calls) = probe_sampler(move |event| {
+    let (sampler, calls) = probe_sampler(move |context| {
         *recorder.lock().unwrap() = Some(SeenContext {
-            name: event.description().name(),
-            is_log: event.description().is_log(),
-            contains_metrics: event.description().contains_metrics(),
-            sink_id: event.sink_id(),
-            timestamp: event.timestamp(),
+            name: context.description().name(),
+            is_log: context.description().is_log(),
+            contains_metrics: context.description().contains_metrics(),
+            processors_interested: context.processors_interested(),
         });
         EventSamplingDecision::Continue
     });
 
-    let sink = Sink::builder(id)
-        .clock(clock.clone())
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(processor.clone())])
         .event_sampler(sampler)
         .build();
@@ -265,28 +288,22 @@ fn event_sampler_receives_description_sink_id_and_timestamp() {
     assert_eq!(seen.name, "http.server.request");
     assert!(seen.is_log);
     assert!(seen.contains_metrics);
-    assert_eq!(seen.sink_id, id);
-    assert_eq!(seen.timestamp, clock.system_time());
+    assert!(seen.processors_interested);
     assert_eq!(processor.len(), 1);
 }
 
 #[test]
-fn composite_leaves_decide_independently() {
-    let sampled_id = SinkId::new("sampled");
-    let other_id = SinkId::new("other");
+fn leaf_sampler_in_composite_decides_only_for_its_leaf() {
     let sampled_processor = MockProcessor::new();
     let other_processor = MockProcessor::new();
-    let (sampler, calls) = probe_sampler(move |event| {
-        assert_eq!(event.sink_id(), sampled_id);
-        EventSamplingDecision::Drop
-    });
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
 
-    let sampled_sink = Sink::builder(sampled_id)
+    let sampled_sink = Sink::builder(SinkId::new("sampled"))
         .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(sampled_processor.clone())])
         .event_sampler(sampler)
         .build();
-    let other_sink = Sink::builder(other_id)
+    let other_sink = Sink::builder(SinkId::new("other"))
         .clock(tick::SimpleClock::new_frozen())
         .processors(vec![Arc::new(other_processor.clone())])
         .build();
@@ -302,47 +319,132 @@ fn composite_leaves_decide_independently() {
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert!(sampled_processor.is_empty());
-    assert_eq!(
-        other_processor.single_event(),
-        ExpectedEvent::new("user.action", Severity::Info)
-            .body("User acted")
-            .dimension("action_code", 7i64)
-            .dimension("user", "Alice"),
-    );
+    assert_eq!(other_processor.single_event(), user_action(7));
 }
 
 #[test]
-fn composite_does_not_sample_uninterested_leaf() {
+fn continued_event_reaches_only_interested_processors() {
     let interested = MockProcessor::new();
     let uninterested = MockProcessor::with_filter(|_| false);
-    let (interested_sampler, interested_calls) = constant_sampler(EventSamplingDecision::Continue);
-    let (uninterested_sampler, uninterested_calls) = constant_sampler(EventSamplingDecision::Continue);
-
-    let composite = Sink::composite([
-        Sink::builder("interested")
-            .clock(tick::SimpleClock::new_frozen())
-            .processors(vec![Arc::new(interested.clone())])
-            .event_sampler(interested_sampler)
-            .build(),
-        Sink::builder("uninterested")
-            .clock(tick::SimpleClock::new_frozen())
-            .processors(vec![Arc::new(uninterested.clone())])
-            .event_sampler(uninterested_sampler)
-            .build(),
-    ]);
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(interested.clone()), Arc::new(uninterested.clone())])
+        .event_sampler(sampler)
+        .build();
 
     emit!(
-        composite,
+        sink,
         UserAction {
             user: PiiString("Alice".into()),
-            action_code: 3,
+            action_code: 4,
         }
     );
 
-    assert_eq!(interested_calls.load(Ordering::Relaxed), 1);
-    assert_eq!(uninterested_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(interested.single_event(), user_action(4));
+    assert!(uninterested.is_empty());
+}
+
+#[test]
+fn processors_are_asked_once_when_sampler_does_not_ask() {
+    let (interested, interested_asked) = counting_processor(true);
+    let (uninterested, uninterested_asked) = counting_processor(false);
+    let (sampler, _calls) = constant_sampler(EventSamplingDecision::Continue);
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(interested.clone()), Arc::new(uninterested.clone())])
+        .event_sampler(sampler)
+        .build();
+
+    emit!(
+        sink,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 5,
+        }
+    );
+
+    assert_eq!(interested_asked.load(Ordering::Relaxed), 1);
+    assert_eq!(uninterested_asked.load(Ordering::Relaxed), 1);
     assert_eq!(interested.len(), 1);
     assert!(uninterested.is_empty());
+}
+
+#[test]
+fn processors_are_asked_once_when_sampler_asks() {
+    let (interested, interested_asked) = counting_processor(true);
+    let (uninterested, uninterested_asked) = counting_processor(false);
+    let (sampler, _calls) = probe_sampler(|context| {
+        assert!(context.processors_interested());
+        assert!(context.processors_interested());
+        EventSamplingDecision::Continue
+    });
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(interested.clone()), Arc::new(uninterested.clone())])
+        .event_sampler(sampler)
+        .build();
+
+    emit!(
+        sink,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 6,
+        }
+    );
+
+    assert_eq!(interested_asked.load(Ordering::Relaxed), 1);
+    assert_eq!(uninterested_asked.load(Ordering::Relaxed), 1);
+    assert_eq!(interested.len(), 1);
+    assert!(uninterested.is_empty());
+}
+
+#[test]
+fn dropping_sampler_that_does_not_ask_skips_processors() {
+    let (processor, asked) = counting_processor(true);
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .event_sampler(sampler)
+        .build();
+
+    emit!(
+        sink,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(asked.load(Ordering::Relaxed), 0);
+    assert!(processor.is_empty());
+}
+
+#[test]
+fn continued_event_no_processor_wants_is_never_built() {
+    let processor = MockProcessor::with_filter(|_| false);
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
+    let sink = Sink::builder(TEST_ID)
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .event_sampler(sampler)
+        .build();
+    let built = Cell::new(false);
+
+    emit!(sink, {
+        built.set(true);
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    });
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(!built.get());
+    assert!(processor.is_empty());
 }
 
 #[test]
@@ -375,9 +477,8 @@ fn sampled_sink_accepts_stack_borrowing_event() {
 #[test]
 fn dynamic_borrowed_event_reaches_sampler() {
     let processor = MockProcessor::new();
-    let (sampler, calls) = probe_sampler(|event| {
-        assert_eq!(event.description().name(), "bridge.event");
-        assert_eq!(event.sink_id(), TEST_ID);
+    let (sampler, calls) = probe_sampler(|context| {
+        assert_eq!(context.description().name(), "bridge.event");
         EventSamplingDecision::Continue
     });
     let sink = Sink::builder(TEST_ID)
@@ -464,19 +565,24 @@ fn boxed_sampler_decides_for_sink() {
 }
 
 /// A composite has no sampler of its own. Sampling state spans the sinks in it
-/// by attaching clones of one sampler to each sink, which tells them apart by
-/// sink id.
+/// by giving each sink a sampler that shares the state.
 #[test]
 fn shared_sampler_state_spans_composite_leaves() {
-    let first_id = SinkId::new("first");
-    let second_id = SinkId::new("second");
     let calls = Arc::new(AtomicUsize::new(0));
-    let sampler = SharedSampler {
-        calls: Arc::clone(&calls),
-        drop_for: first_id,
-    };
-    let (first, first_processor) = sampled_emitter(first_id, sampler.clone());
-    let (second, second_processor) = sampled_emitter(second_id, sampler);
+    let (first, first_processor) = sampled_emitter(
+        SinkId::new("first"),
+        SharedSampler {
+            calls: Arc::clone(&calls),
+            decision: EventSamplingDecision::Drop,
+        },
+    );
+    let (second, second_processor) = sampled_emitter(
+        SinkId::new("second"),
+        SharedSampler {
+            calls: Arc::clone(&calls),
+            decision: EventSamplingDecision::Continue,
+        },
+    );
     let composite = Sink::composite([first, second]);
 
     emit!(
@@ -489,13 +595,30 @@ fn shared_sampler_state_spans_composite_leaves() {
 
     assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert!(first_processor.is_empty());
-    assert_eq!(
-        second_processor.single_event(),
-        ExpectedEvent::new("user.action", Severity::Info)
-            .body("User acted")
-            .dimension("action_code", 9i64)
-            .dimension("user", "Alice"),
+    assert_eq!(second_processor.single_event(), user_action(9));
+}
+
+#[test]
+fn nested_composite_keeps_leaf_samplers() {
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
+    let (first, first_processor) = sampled_emitter(SinkId::new("first"), sampler);
+    let (second, second_processor) = test_emitter(SinkId::new("second"));
+    let (outside, outside_processor) = test_emitter(SinkId::new("outside"));
+    let nested = Sink::composite([first, second]);
+    let composite = Sink::composite([nested, outside]);
+
+    emit!(
+        composite,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 2,
+        }
     );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(first_processor.is_empty());
+    assert_eq!(second_processor.single_event(), user_action(2));
+    assert_eq!(outside_processor.single_event(), user_action(2));
 }
 
 #[test]
@@ -517,4 +640,26 @@ fn processorless_leaf_never_calls_its_sampler() {
 
     assert!(!built.get());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn processorless_leaf_in_composite_never_samples() {
+    let (sampler, calls) = constant_sampler(EventSamplingDecision::Continue);
+    let processorless = Sink::builder("processorless")
+        .clock(tick::SimpleClock::new_frozen())
+        .event_sampler(sampler)
+        .build();
+    let (sink, processor) = test_emitter(TEST_ID);
+    let composite = Sink::composite([processorless, sink]);
+
+    emit!(
+        composite,
+        UserAction {
+            user: PiiString("Alice".into()),
+            action_code: 1,
+        }
+    );
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(processor.len(), 1);
 }

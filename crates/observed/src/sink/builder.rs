@@ -8,6 +8,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use performables::arc::Arc as PerformableArc;
 use tick::SimpleClock;
 
 use crate::processing::EventProcessor;
@@ -63,7 +64,7 @@ pub struct SinkBuilder<P = NotSet> {
     clock: SimpleClock,
     processors: Vec<Arc<dyn EventProcessor>>,
     isolated_enrichment: bool,
-    sampler: Option<Arc<dyn EventSampler>>,
+    sampler: Option<PerformableArc<dyn EventSampler>>,
     _state: PhantomData<P>,
 }
 
@@ -130,8 +131,9 @@ impl<P> SinkBuilder<P> {
     /// `Box<dyn EventSampler>`; a `Box<MySampler>` is not accepted, so pass
     /// `MySampler` itself instead.
     ///
-    /// A sink that is not interested in an event never calls the sampler. See
-    /// [`EventSampler::sample`] for the invocation and decision contract.
+    /// A sink with processors calls the sampler once per event, before asking
+    /// its processors. See [`EventSampler::sample`] for the invocation and
+    /// decision contract.
     ///
     /// The sampler is fixed once the sink is built. A
     /// [`composite`](Sink::composite) has no sampler of its own: each sink in
@@ -147,13 +149,13 @@ impl<P> SinkBuilder<P> {
     /// use observed::{EventSampler, Sink};
     /// # struct DropAll;
     /// # impl EventSampler for DropAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
     /// #         EventSamplingDecision::Drop
     /// #     }
     /// # }
     /// # struct KeepAll;
     /// # impl EventSampler for KeepAll {
-    /// #     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
     /// #         EventSamplingDecision::Continue
     /// #     }
     /// # }
@@ -168,11 +170,15 @@ impl<P> SinkBuilder<P> {
     /// ```
     #[must_use]
     pub fn event_sampler(mut self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
-        self.sampler = Some(Arc::from(sampler.into()));
+        self.sampler = Some(PerformableArc::from(sampler.into()));
         self
     }
 
     /// Builds the sink.
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than 64 processors were set.
     #[must_use]
     pub fn build(self) -> Sink {
         Sink::new(self.id, self.processors, self.clock, self.isolated_enrichment, self.sampler)
@@ -217,7 +223,7 @@ mod tests {
     struct KeepAll;
 
     impl EventSampler for KeepAll {
-        fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
+        fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
             EventSamplingDecision::Continue
         }
     }

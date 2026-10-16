@@ -57,8 +57,8 @@
 #     like-named crate is also a transitive dependency.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
-# Those three values are only meaningful when the resolver succeeded, so every
-# caller captures its exit code and propagates it before reading `$include`:
+# These resolver outputs are only meaningful when the resolver succeeded, so
+# every caller captures its exit code and propagates it before reading `$include`:
 #
 #   $impactExit = $LASTEXITCODE
 #   if ($impactExit -ne 0) { exit $impactExit }

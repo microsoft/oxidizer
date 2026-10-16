@@ -22,9 +22,6 @@ use http_headers::{DecodeError, DecodeErrorKind, DecodeMode, Field, FieldName, F
 use self::common::TestMap;
 
 mod common;
-#[cfg(all(miri, feature = "http"))]
-#[path = "../src/miri_http_map.rs"]
-mod miri_http_map;
 
 static REQUEST_ID: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-request-id"));
 static EMPTY: LazyLock<FieldName> = LazyLock::new(|| FieldName::from_static("x-empty"));
@@ -470,26 +467,22 @@ fn credentials_can_release_or_retain_their_allocation() {
 /// Covers the one storage limit only the adapted `http::HeaderMap` imposes.
 #[cfg(feature = "http")]
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "safe error mapping at http's 24,576-entry limit; native tests and cargo careful retain it"
+)]
 fn insert_reports_full_map_without_replacing_values() {
     use http::{HeaderMap, HeaderValue};
 
     let old = HeaderValue::from_static("old");
-    #[cfg(not(miri))]
     let mut map = HeaderMap::new();
-    #[cfg(miri)]
-    let mut map = HeaderMap::with_capacity(miri_http_map::CAPACITY);
     map.insert(REQUEST_ID.as_str(), old.clone());
     for index in 0_u64.. {
-        #[cfg(not(miri))]
         let name = HeaderName::try_from(format!("x-fill-{index}")).expect("generated header name is valid");
-        #[cfg(miri)]
-        let name = HeaderName::from_static(miri_http_map::name(usize::try_from(index).unwrap()));
         if map.try_insert(name, HeaderValue::from_static("fill")).is_err() {
             break;
         }
     }
-    #[cfg(miri)]
-    assert_eq!(map.len(), miri_http_map::CAPACITY);
 
     let result = RequestId::insert(&mut map, RequestId(FieldValue::from_static("new")));
     assert!(result.is_err());

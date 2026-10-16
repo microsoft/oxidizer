@@ -17,7 +17,9 @@ use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use observed::{Severity, Sink, emit, event};
+use observed::metadata::EventDescription;
+use observed::processing::{EventProcessor, EventView};
+use observed::{FlushError, Severity, Sink, emit, event};
 use observed_testing::events::ProbeEvent;
 use observed_testing::types::{PublicBool, PublicI64, PublicString};
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID};
@@ -323,6 +325,52 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
     );
     assert_eq!(captured[0], "test.probe");
     assert!(inner_processor.is_empty(), "reentrant event should be dropped, not forwarded");
+}
+
+#[test]
+fn reentrant_emit_from_is_interested_is_dropped() {
+    #[event("internal.heartbeat")]
+    #[trace]
+    struct Heartbeat;
+
+    struct ReentrantInterestProcessor {
+        own_sink: Mutex<Option<Sink>>,
+        events: Mutex<Vec<String>>,
+    }
+
+    impl EventProcessor for ReentrantInterestProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            // Taken, not cloned, so a missing guard fails the test with an extra event
+            // instead of recursing until the stack overflows.
+            let own_sink = self.own_sink.lock().expect("lock is not poisoned").take();
+            if let Some(own_sink) = own_sink {
+                emit!(own_sink, Heartbeat);
+            }
+            true
+        }
+
+        fn process(&self, event: &EventView<'_>) {
+            self.events.lock().expect("lock is not poisoned").push(event.name().to_owned());
+        }
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    let processor = Arc::new(ReentrantInterestProcessor {
+        own_sink: Mutex::new(None),
+        events: Mutex::new(Vec::new()),
+    });
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+        .build();
+    *processor.own_sink.lock().expect("lock is not poisoned") = Some(sink.clone());
+
+    emit!(sink, ProbeEvent::new(1));
+
+    assert_eq!(*processor.events.lock().expect("lock is not poisoned"), ["test.probe"]);
 }
 
 // ---------------------------------------------------------------------------

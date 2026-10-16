@@ -7,27 +7,28 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::thread;
 
-use arty_executor::{CycleOutcome, Executor};
+use arty_executor::{CycleOutcome, Executor, TaskOptions};
 
 fn main() {
-    // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
-    // an execution cycle indicates the `Shutdown` outcome. We do.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     // When our single task is done, it will set this signal to indicate that the app can exit.
     let shutdown_signal = Rc::new(Cell::new(false));
 
-    tasks.add({
-        let shutdown_signal = Rc::clone(&shutdown_signal);
+    tasks.add(
+        {
+            let shutdown_signal = Rc::clone(&shutdown_signal);
 
-        async move {
-            println!("Hello from the async task!");
+            async move {
+                println!("Hello from the async task!");
 
-            // Nothing more we need to do now.
-            shutdown_signal.set(true);
-        }
-    });
+                // Nothing more we need to do now.
+                shutdown_signal.set(true);
+            }
+        },
+        TaskOptions::default(),
+    );
 
     let mut shutdown_started = false;
 

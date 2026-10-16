@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::task::Waker;
 use std::thread;
 
-use arty_executor::TaskSet;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -19,7 +17,6 @@ use tick::runtime::InactiveClock;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
-use crate::runtime::context::RuntimeBuiltins;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
@@ -31,10 +28,8 @@ use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
-use crate::task::Builtins;
-use crate::task::scheduler::Scheduler;
 
-pub(in crate::runtime) fn build(
+pub(crate) fn build(
     processor_config: RuntimeConfig,
     clock: &InactiveClock,
     sink: Sink,
@@ -208,7 +203,8 @@ impl AsyncWorkerStartInfo {
         clock.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown_started);
+        let blocking_worker =
+            BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
 
         let signal = Arc::new(WorkerSignal::default());
 
@@ -220,35 +216,18 @@ impl AsyncWorkerStartInfo {
         // started. This command exists because bootstrap first needs to collect all the
         // thread JoinHandles before it can create the dispatcher logic that all the workers
         // will share to send commands to each other.
-        let start_signal = futures::executor::block_on(async {
-            start_rx
-                .await
-                .expect("RuntimeBuilder failed between initializing and starting a worker - impossible to continue worker execution")
-        });
+        let start_signal = futures::executor::block_on(start_rx)
+            .expect("RuntimeBuilder failed between initializing and starting a worker - impossible to continue worker execution");
 
-        let dispatcher = Rc::new(start_signal.dispatcher);
-        let shutdown_signal = dispatcher.shutdown_signal();
-
-        let thread_state_constructor = {
-            async move |tasks: TaskSet, clock| {
-                let builtins = Builtins::sync_init(RuntimeBuiltins::new(&dispatcher, clock, current, sink));
-                Scheduler::register_current(builtins.clone(), tasks);
-                builtins
-            }
-        };
-
-        // SAFETY: We are required to call `.run()` before dropping it, which we do.
-        let worker: AsyncWorker = unsafe {
-            AsyncWorker::new(
-                command_rx,
-                thread_state_constructor,
-                Arc::clone(&blocking_worker),
-                clock,
-                signal,
-                shutdown_signal,
-                success_tx,
-            )
-        };
+        let worker = AsyncWorker::new(
+            command_rx,
+            start_signal.dispatcher,
+            current,
+            sink,
+            Arc::clone(&blocking_worker),
+            clock,
+            signal,
+        );
 
         emit!(
             worker_sink,
@@ -257,6 +236,7 @@ impl AsyncWorkerStartInfo {
             }
         );
         emit!(worker_sink, AsyncWorkerActive { delta: 1 });
+        _ = success_tx.send(());
 
         // Incomplete executor teardown fails closed. A panic after safe retirement still
         // needs to join the blocking pool before the worker's failure is reported.
