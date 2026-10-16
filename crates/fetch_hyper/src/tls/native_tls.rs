@@ -21,9 +21,12 @@ use crate::{Connect, HyperIo};
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type RecordedErrorKind = Arc<Mutex<Option<std::io::ErrorKind>>>;
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "boxing the established connection adds a heap allocation to every successful native TLS connection"
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::large_enum_variant,
+        reason = "boxing the established connection adds a heap allocation to every successful native TLS connection"
+    )
 )]
 pub(crate) enum NativeTlsStream<S> {
     Http(S),
@@ -33,6 +36,7 @@ pub(crate) enum NativeTlsStream<S> {
 // Pure I/O forwarding preserves the behavior of the wrapped HTTP/TLS stream;
 // mutating these methods only creates equivalent behavior or artificial hangs.
 #[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
@@ -43,6 +47,7 @@ impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
 }
 
 #[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Write for NativeTlsStream<S> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         match self.get_mut() {
@@ -97,6 +102,7 @@ impl<S: HyperIo + Unpin> Connection for NativeTlsStream<S> {
 }
 
 #[cfg_attr(test, mutants::skip)] // Native TLS owns ALPN negotiation; this only maps its reported protocol into hyper metadata.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn negotiated_h2<S: std::io::Read + std::io::Write>(stream: &native_tls::TlsStream<S>) -> bool {
     stream.negotiated_alpn().unwrap_or(None).is_some_and(|protocol| protocol == b"h2")
 }
@@ -115,6 +121,7 @@ impl<S: Read + Unpin> Read for RecordingIo<S> {
 }
 
 impl<S: Write + Unpin> Write for RecordingIo<S> {
+    #[cfg_attr(test, mutants::skip)] // Returning artificial zero-progress writes makes native-tls spin without yielding.
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write(cx, buf);
         record_error_kind(&self.error_kind, &result);
@@ -122,6 +129,7 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     }
 
     #[cfg_attr(test, mutants::skip)] // Pure forwarding; native TLS handshakes use poll_write.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
         record_error_kind(&self.error_kind, &result);
@@ -129,11 +137,13 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     }
 
     #[cfg_attr(test, mutants::skip)] // Pure capability forwarding.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn is_write_vectored(&self) -> bool {
         self.inner.is_write_vectored()
     }
 
     #[cfg_attr(test, mutants::skip)] // Pure forwarding; the handshake's transient I/O path is covered through poll_read.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_flush(cx);
         record_error_kind(&self.error_kind, &result);
@@ -141,6 +151,7 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     }
 
     #[cfg_attr(test, mutants::skip)] // Pure forwarding after connection establishment.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_shutdown(cx);
         record_error_kind(&self.error_kind, &result);
@@ -148,6 +159,8 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Pure connection-metadata forwarding.
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Connection> Connection for RecordingIo<S> {
     fn connected(&self) -> Connected {
         self.inner.connected()
@@ -273,6 +286,7 @@ async fn connect_https<S: HyperIo + Unpin>(
 }
 
 #[cfg_attr(test, mutants::skip)] // Type-only adaptation after a successful platform TLS handshake.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn wrap_https_stream<S>(stream: tokio_native_tls::TlsStream<TokioIo<RecordingIo<S>>>) -> NativeTlsStream<S> {
     NativeTlsStream::Https(TokioIo::new(stream))
 }
@@ -297,16 +311,23 @@ mod tests {
     use std::io::{Read as _, Write as _};
     use std::net::{SocketAddr, TcpListener as StdTcpListener};
 
+    use anyspawn::Spawner;
     use bytes::Bytes;
-    use http::Version;
+    use fetch_options::TransportOptions;
+    use http::{Method, StatusCode, Version};
+    use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
     use layered::Service as _;
+    use rcgen::{CertificateParams, KeyPair, PKCS_RSA_SHA256};
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use seatbelt::{Recovery, RecoveryKind};
     use templated_uri::BaseUri;
     use tick::Clock;
-    use tokio::net::TcpStream;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::net::{TcpListener, TcpStream};
     use tower::Service as _;
 
     use super::*;
+    use crate::HyperTransportBuilder;
     use crate::testing::{FakeConnector, FakeStream, TestError};
     use crate::tls::connector::TlsConnector;
 
@@ -331,6 +352,55 @@ mod tests {
 
     fn fake_connector() -> FakeConnector {
         FakeConnector::new_success(Bytes::new(), Clock::new_frozen())
+    }
+
+    struct LoopbackTls {
+        address: SocketAddr,
+        root: native_tls::Certificate,
+        server_config: Arc<rustls::ServerConfig>,
+    }
+
+    impl LoopbackTls {
+        async fn new(server_name: &str) -> (Self, TcpListener) {
+            let leaf_key = KeyPair::generate_for(&PKCS_RSA_SHA256).unwrap();
+            let leaf = CertificateParams::new([server_name.to_owned()])
+                .unwrap()
+                .self_signed(&leaf_key)
+                .unwrap();
+            let root = native_tls::Certificate::from_der(leaf.der()).unwrap();
+            let private_key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
+            let server_config = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(vec![leaf.der().clone()], private_key)
+                .unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            (
+                Self {
+                    address,
+                    root,
+                    server_config: Arc::new(server_config),
+                },
+                listener,
+            )
+        }
+
+        fn backend(&self, endpoint: &str, server_name: &str, versions: &[Version]) -> fetch_tls::TlsBackend {
+            let options = fetch_tls::TlsOptions::builder_native_tls()
+                .root_certificate(self.root.clone())
+                .server_name_override(endpoint, server_name)
+                .supported_http_versions(versions)
+                .build();
+            fetch_tls::TlsBackendBuilder::new().build_backend(options).unwrap()
+        }
+
+        fn acceptor(&self, protocols: &[&str]) -> tokio_rustls::TlsAcceptor {
+            let mut config = (*self.server_config).clone();
+            config.alpn_protocols = protocols.iter().map(|protocol| protocol.as_bytes().to_vec()).collect();
+            tokio_rustls::TlsAcceptor::from(Arc::new(config))
+        }
     }
 
     struct ResetStream;
@@ -361,6 +431,34 @@ mod tests {
         }
     }
 
+    struct WriteResetStream;
+
+    impl hyper::rt::Read for WriteResetStream {
+        fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl Write for WriteResetStream {
+        fn poll_write(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &[u8]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::ErrorKind::ConnectionReset.into()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl Connection for WriteResetStream {
+        fn connected(&self) -> Connected {
+            Connected::new()
+        }
+    }
+
     #[derive(Clone)]
     struct ResetConnector;
 
@@ -369,6 +467,17 @@ mod tests {
 
         async fn execute(&self, _input: BaseUri) -> Self::Out {
             Ok(ResetStream)
+        }
+    }
+
+    #[derive(Clone)]
+    struct WriteResetConnector;
+
+    impl layered::Service<BaseUri> for WriteResetConnector {
+        type Out = http_extensions::Result<WriteResetStream>;
+
+        async fn execute(&self, _input: BaseUri) -> Self::Out {
+            Ok(WriteResetStream)
         }
     }
 
@@ -525,7 +634,10 @@ mod tests {
             server_name
         });
 
-        let Err(error) = connector.call(request).await else {
+        let Err(error) = tokio::time::timeout(std::time::Duration::from_secs(5), connector.call(request))
+            .await
+            .expect("native TLS handshake must not stall")
+        else {
             panic!("scripted TLS peer should fail after reading ClientHello");
         };
 
@@ -553,6 +665,159 @@ mod tests {
             error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
             RecoveryKind::Retry
         );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn handshake_write_reset_is_retryable_without_stalling() {
+        let fetch_tls::TlsBackend::NativeTls(backend) = native_tls_backend() else {
+            panic!("expected native TLS backend");
+        };
+        let mut connector = NativeTlsConnector::new(backend, WriteResetConnector, &RequestFilter::Https);
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            connector.call(Uri::from_static("https://example.com/")),
+        )
+        .await
+        .expect("handshake write errors must not stall");
+        let Err(error) = result else {
+            panic!("connection reset should fail the handshake");
+        };
+
+        assert_eq!(
+            error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
+            RecoveryKind::Retry
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn matching_override_succeeds_and_preserves_http_authority() {
+        let expected_server_name = "expected.example.test";
+        let (server, listener) = LoopbackTls::new(expected_server_name).await;
+        let endpoint = format!("localhost:{}", server.address.port());
+        let observed_host = Arc::new(Mutex::new(None));
+        let host_capture = Arc::clone(&observed_host);
+        let acceptor = server.acceptor(&["http/1.1"]);
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = acceptor.accept(stream).await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).await.unwrap();
+                assert_ne!(read, 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            let host = request
+                .lines()
+                .find_map(|line| line.strip_prefix("host: ").or_else(|| line.strip_prefix("Host: ")))
+                .unwrap()
+                .trim()
+                .to_owned();
+            *host_capture.lock().unwrap() = Some(host);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+        let destination = Arc::new(Mutex::new(None));
+        let connector = RecordingTcpConnector {
+            address: server.address,
+            destination: Arc::clone(&destination),
+        };
+        let mut transport_options = TransportOptions::default();
+        transport_options.supported_http_versions = vec![Version::HTTP_11];
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), Clock::new_tokio(), transport_options)
+            .body_builder(HttpBodyBuilder::new_fake())
+            .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
+        let body_builder = HttpBodyBuilder::new_fake();
+        let request = HttpRequestBuilder::new(&body_builder)
+            .method(Method::GET)
+            .uri(format!("https://{endpoint}/hello"))
+            .build()
+            .unwrap();
+
+        let response = tokio::time::timeout(std::time::Duration::from_secs(5), handler.execute(request))
+            .await
+            .expect("native TLS request must not stall")
+            .unwrap();
+        peer.await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(observed_host.lock().unwrap().as_deref(), Some(endpoint.as_str()));
+        assert_eq!(destination.lock().unwrap().as_ref().unwrap().authority().as_str(), endpoint);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mismatched_override_fails_certificate_validation() {
+        let (server, listener) = LoopbackTls::new("expected.example.test").await;
+        let endpoint = format!("localhost:{}", server.address.port());
+        let acceptor = server.acceptor(&["http/1.1"]);
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _stream = acceptor.accept(stream).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        });
+        let connector = RecordingTcpConnector {
+            address: server.address,
+            destination: Arc::new(Mutex::new(None)),
+        };
+        let fetch_tls::TlsBackend::NativeTls(backend) = server.backend(&endpoint, "wrong.example.test", &[Version::HTTP_11]) else {
+            panic!("expected native TLS backend");
+        };
+        let mut connector = NativeTlsConnector::new(backend, connector, &RequestFilter::Https);
+
+        let Err(error) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            connector.call(Uri::from_maybe_shared(format!("https://{endpoint}/")).unwrap()),
+        )
+        .await
+        .expect("native TLS handshake must not stall") else {
+            panic!("mismatched override must fail certificate validation");
+        };
+        peer.await.unwrap();
+
+        assert_eq!(
+            error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
+            RecoveryKind::Never
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn successful_h2_negotiation_sets_connection_metadata() {
+        let expected_server_name = "expected.example.test";
+        let (server, listener) = LoopbackTls::new(expected_server_name).await;
+        let endpoint = format!("localhost:{}", server.address.port());
+        let acceptor = server.acceptor(&["h2"]);
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _stream = acceptor.accept(stream).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        });
+        let connector = RecordingTcpConnector {
+            address: server.address,
+            destination: Arc::new(Mutex::new(None)),
+        };
+        let fetch_tls::TlsBackend::NativeTls(backend) = server.backend(&endpoint, expected_server_name, &[Version::HTTP_2]) else {
+            panic!("expected native TLS backend");
+        };
+        let mut connector = NativeTlsConnector::new(backend, connector, &RequestFilter::Https);
+
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            connector.call(Uri::from_maybe_shared(format!("https://{endpoint}/")).unwrap()),
+        )
+        .await
+        .expect("native TLS handshake must not stall")
+        .unwrap();
+
+        assert!(stream.connected().is_negotiated_h2());
+        peer.await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]

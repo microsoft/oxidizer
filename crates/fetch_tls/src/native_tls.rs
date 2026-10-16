@@ -17,12 +17,14 @@ use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKin
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct NativeTlsOptions {
+    root_certificates: Vec<native_tls::Certificate>,
     server_name_overrides: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for NativeTlsOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeTlsOptions")
+            .field("root_certificate_count", &self.root_certificates.len())
             .field("server_name_override_count", &self.server_name_overrides.len())
             .finish()
     }
@@ -43,6 +45,10 @@ impl NativeTlsOptions {
         builder
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
+
+        for certificate in self.root_certificates {
+            builder.add_root_certificate(certificate);
+        }
 
         if let Some(identity) = shared.client_identity.as_ref() {
             identity
@@ -89,6 +95,12 @@ impl From<TlsConnector> for TlsOptions {
 }
 
 impl TlsOptionsBuilder<NativeTlsOptions> {
+    /// Adds a trusted root certificate for native TLS server validation.
+    pub fn root_certificate(mut self, certificate: native_tls::Certificate) -> Self {
+        self.backend.root_certificates.push(certificate);
+        self
+    }
+
     /// Overrides the server name used for native TLS certificate validation
     /// and `SNI` when connecting to `endpoint`.
     ///
@@ -167,6 +179,7 @@ mod tests {
     fn builder_native_tls_starts_empty() {
         let builder = TlsOptions::builder_native_tls();
         assert!(builder.shared.client_identity.is_none());
+        assert!(builder.backend.root_certificates.is_empty());
         assert!(builder.backend.server_name_overrides.is_empty());
     }
 
@@ -284,6 +297,7 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
     fn debug_renders_presence_only() {
         let s = format!("{:?}", NativeTlsOptions::new());
         assert!(s.contains("NativeTlsOptions"));
+        assert!(s.contains("root_certificate_count: 0"));
         assert!(s.contains("server_name_override_count: 0"));
     }
 

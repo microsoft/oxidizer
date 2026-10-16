@@ -30,6 +30,7 @@ allowed_external_types = [
     "rustls::client::client_conn::ResolvesClientCert",
     "rustls::crypto::CryptoProvider",
     "rustls::verify::ServerCertVerifier",
+    "native_tls::Certificate",
     "native_tls::TlsConnector",
 ]
 
