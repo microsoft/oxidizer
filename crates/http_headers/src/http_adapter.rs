@@ -554,18 +554,12 @@ mod tests {
     fn saturated_map() -> http::HeaderMap {
         let mut map = http::HeaderMap::with_capacity(MAXIMUM_ENTRIES);
         map.insert(http::header::USER_AGENT, http::HeaderValue::from_static("original"));
-        #[cfg(not(miri))]
         let mut filler = String::new();
         for index in 0..MAXIMUM_ENTRIES - 1 {
-            #[cfg(not(miri))]
-            let name = {
-                filler.clear();
-                filler.push_str("x-fill-");
-                filler.push_str(&index.to_string());
-                http::HeaderName::from_bytes(filler.as_bytes()).expect("generated name is legal")
-            };
-            #[cfg(miri)]
-            let name = http::HeaderName::from_static(crate::miri_http_map::name(index));
+            filler.clear();
+            filler.push_str("x-fill-");
+            filler.push_str(&index.to_string());
+            let name = http::HeaderName::from_bytes(filler.as_bytes()).expect("generated name is legal");
             drop(map.insert(name, http::HeaderValue::from_static("v")));
         }
         assert_eq!(map.len(), MAXIMUM_ENTRIES);
@@ -574,6 +568,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "safe error mapping at http's 24,576-entry limit; native tests and cargo careful retain it"
+    )]
     fn capacity_exhaustion_reports_an_error_without_changing_the_map() {
         let mut map = saturated_map();
 

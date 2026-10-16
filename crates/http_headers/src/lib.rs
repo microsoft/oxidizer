@@ -520,8 +520,6 @@ mod field_value;
 pub mod headers;
 #[cfg(feature = "http")]
 mod http_adapter;
-#[cfg(all(test, miri, feature = "http"))]
-mod miri_http_map;
 #[cfg(feature = "serde")]
 mod serde_impls;
 pub mod sink;
