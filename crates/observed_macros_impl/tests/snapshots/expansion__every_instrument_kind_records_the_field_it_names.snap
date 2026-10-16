@@ -14,7 +14,7 @@ const _: () = {
             "operation",
             ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "operation",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -26,76 +26,88 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "hits",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("hits"),
+                        ::observed::__private::log_field("hits"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "hits",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "operation.hits",
                                     ::observed::metadata::InstrumentKind::Counter,
-                                )
-                                .description("completed operations")
-                                .unit("1")
-                                .value_kind(::observed::metadata::MetricValueKind::U64)
-                                .build(),
+                                    "completed operations",
+                                    "1",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::U64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "queue_delta",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("queue_delta"),
+                        ::observed::__private::log_field("queue_delta"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "queue_delta",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "operation",
                                     ::observed::metadata::InstrumentKind::UpDownCounter,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::I64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::I64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "level",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("level"),
+                        ::observed::__private::log_field("level"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "level",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "operation",
                                     ::observed::metadata::InstrumentKind::Gauge,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::F64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::F64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "duration_ms",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("duration_ms"),
+                        ::observed::__private::log_field("duration_ms"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "duration_ms",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "operation",
                                     ::observed::metadata::InstrumentKind::Histogram,
-                                )
-                                .description("")
-                                .unit("ms")
-                                .value_kind(::observed::metadata::MetricValueKind::F64)
-                                .build(),
+                                    "",
+                                    "ms",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::F64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),

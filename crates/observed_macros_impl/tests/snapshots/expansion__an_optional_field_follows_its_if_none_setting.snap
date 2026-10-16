@@ -16,7 +16,7 @@ const _: () = {
             "optional",
             ::core::option::Option::Some(::core::any::TypeId::of::<Optional<'static>>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "optional",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -28,44 +28,47 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "default_placeholder",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("default_placeholder"),
+                        ::observed::__private::log_field("default_placeholder"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "dropped",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("dropped"),
+                        ::observed::__private::log_field("dropped"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "custom_placeholder",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("custom_placeholder"),
+                        ::observed::__private::log_field("custom_placeholder"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "dimension",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("dimension"),
+                        ::observed::__private::log_field("dimension"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("opt.shard"),
+                        ::observed::__private::metric_field(
+                            "opt.shard",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "borrowed_inner",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("borrowed_inner"),
+                        ::observed::__private::log_field("borrowed_inner"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "classified",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified"),
+                        ::observed::__private::log_field("classified"),
                     ),
                     ::core::option::Option::None,
                 ),

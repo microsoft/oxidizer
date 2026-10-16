@@ -13,7 +13,7 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 
-use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValueKind};
+use observed::metadata::{EventDescription, InstrumentKind, MetricValueKind};
 use observed::processing::{FieldVisitorFn, MetricBindingError};
 use observed::{Event, event};
 use observed_perf_counters::{Error, PerfCounterProcessor, PerfCounterProcessorBuilder};
@@ -64,10 +64,19 @@ struct RequestCompleted {
 struct UntypedEvent;
 
 impl Event for UntypedEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new("untyped").with_metric(
-        MetricDescription::builder("count", InstrumentKind::Counter)
-            .value_kind(MetricValueKind::U64)
-            .build(),
+    const DESCRIPTION: EventDescription = observed::__private::event_description(
+        "untyped",
+        None,
+        None,
+        Some(observed::__private::metric_description(
+            "count",
+            InstrumentKind::Counter,
+            "",
+            "",
+            Some(MetricValueKind::U64),
+        )),
+        false,
+        &[],
     );
 
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -329,9 +338,15 @@ fn unsupported_numeric_types_and_missing_type_metadata_are_startup_errors() {
             &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
-                Some(observed::metadata::MetricFieldEntry::instrument(
+                Some(observed::__private::metric_field(
                     "value",
-                    MetricDescription::new("Unknown", InstrumentKind::Counter, "", ""),
+                    Some(observed::__private::metric_description(
+                        "Unknown",
+                        InstrumentKind::Counter,
+                        "",
+                        "",
+                        None,
+                    )),
                 )),
             )]),
         );

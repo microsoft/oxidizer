@@ -12,7 +12,7 @@ use std::time::SystemTime;
 
 use data_privacy::{DataClass, Sensitive};
 use observed::interop::{DynEvent, emit_dyn_event};
-use observed::metadata::{EventDescription, LogDescription};
+use observed::metadata::EventDescription;
 use observed::processing::FieldVisitorFn;
 use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, Severity, Sink, SinkId, emit, event};
 use observed_testing::types::{PiiString, PublicI64};
@@ -109,7 +109,14 @@ impl DynEvent for BridgedEvent<'_> {
     }
 
     fn description(&self) -> EventDescription {
-        EventDescription::new("bridge.event").with_log(LogDescription::new("bridge.event", Severity::Info, None))
+        observed::__private::event_description(
+            "bridge.event",
+            None,
+            Some(observed::__private::log_description("bridge.event", Severity::Info, None)),
+            None,
+            false,
+            &[],
+        )
     }
 }
 

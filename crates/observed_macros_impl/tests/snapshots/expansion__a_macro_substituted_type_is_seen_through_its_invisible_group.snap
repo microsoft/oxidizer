@@ -15,7 +15,7 @@ const _: () = {
                 ::core::any::TypeId::of::<FromMacro<'static>>(),
             ),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "macro.built",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -27,33 +27,36 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "hits",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("hits"),
+                        ::observed::__private::log_field("hits"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "hits",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "macro.built",
                                     ::observed::metadata::InstrumentKind::Counter,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::U64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::U64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "maybe",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("maybe"),
+                        ::observed::__private::log_field("maybe"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "label",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("label"),
+                        ::observed::__private::log_field("label"),
                     ),
                     ::core::option::Option::None,
                 ),

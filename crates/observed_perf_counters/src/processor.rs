@@ -346,7 +346,6 @@ mod tests {
     use std::time::SystemTime;
 
     use observed::interop::DynEvent;
-    use observed::metadata::MetricDescription;
     use observed::processing::{FieldVisitorFn, MetricReadError};
     use observed::{Sink, emit, event};
     use tick::SimpleClock;
@@ -659,11 +658,15 @@ mod tests {
             &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
-                Some(observed::metadata::MetricFieldEntry::instrument(
+                Some(observed::__private::metric_field(
                     "value",
-                    MetricDescription::builder("Missing", InstrumentKind::Counter)
-                        .value_kind(MetricValueKind::U64)
-                        .build(),
+                    Some(observed::__private::metric_description(
+                        "Missing",
+                        InstrumentKind::Counter,
+                        "",
+                        "",
+                        Some(MetricValueKind::U64),
+                    )),
                 )),
             )]),
         );

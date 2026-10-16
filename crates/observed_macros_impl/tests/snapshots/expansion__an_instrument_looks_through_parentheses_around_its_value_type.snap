@@ -18,16 +18,19 @@ const _: () = {
                     "v",
                     ::core::option::Option::None,
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "v",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "wrapped",
                                     ::observed::metadata::InstrumentKind::Counter,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::U64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::U64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),

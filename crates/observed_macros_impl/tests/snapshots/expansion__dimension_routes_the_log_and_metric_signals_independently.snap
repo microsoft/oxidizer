@@ -17,7 +17,7 @@ const _: () = {
             "request",
             ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "request",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -29,49 +29,61 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "explicit_default",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("explicit_default"),
+                        ::observed::__private::log_field("explicit_default"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "renamed",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                        ::observed::__private::log_field("renamed"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "shard",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("shard"),
+                        ::observed::__private::log_field("shard"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("shard"),
+                        ::observed::__private::metric_field(
+                            "shard",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "region",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("region"),
+                        ::observed::__private::log_field("region"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("region.key"),
+                        ::observed::__private::metric_field(
+                            "region.key",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "status",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("http.status"),
+                        ::observed::__private::log_field("http.status"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("status"),
+                        ::observed::__private::metric_field(
+                            "status",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
                 ::observed::__private::field_descriptor(
                     "internal",
                     ::core::option::Option::None,
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("internal"),
+                        ::observed::__private::metric_field(
+                            "internal",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
             ]),

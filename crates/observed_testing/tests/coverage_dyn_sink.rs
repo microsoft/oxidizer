@@ -17,7 +17,7 @@ use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use observed::__private::EnrichmentEntry;
 use observed::enrichment::{EnrichFutureExt, Enrichment};
 use observed::interop::{DynEvent, emit_dyn_event};
-use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, LogDescription, MetricDescription};
+use observed::metadata::{EventDescription, InstrumentKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn};
 use observed::{Severity, Sink, SinkId, Value, emit};
 use observed_testing::events::ProbeEvent;
@@ -54,7 +54,14 @@ impl DynEvent for DynProbe {
     }
 
     fn description(&self) -> EventDescription {
-        EventDescription::new("dyn.probe").with_log(LogDescription::new("dyn.probe", Severity::Info, None))
+        observed::__private::event_description(
+            "dyn.probe",
+            None,
+            Some(observed::__private::log_description("dyn.probe", Severity::Info, None)),
+            None,
+            false,
+            &[],
+        )
     }
 }
 
@@ -129,7 +136,7 @@ impl Enrichment for EmptyEnrichment {
 #[test]
 fn standard_arc_processor_delegates_interest_filter() {
     let processor: Arc<dyn EventProcessor> = Arc::new(MockProcessor::with_filter(EventDescription::is_log));
-    let no_signals = EventDescription::new("no.signals");
+    let no_signals = observed::__private::event_description("no.signals", None, None, None, false, &[]);
 
     assert!(EventProcessor::is_interested(&processor, &DynProbe.description()));
     assert!(!EventProcessor::is_interested(&processor, &no_signals));
@@ -219,7 +226,7 @@ fn a_dyn_event_without_a_log_signal_has_no_severity_and_never_reaches_logs() {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("dyn.undeclared")
+            observed::__private::event_description("dyn.undeclared", None, None, None, false, &[])
         }
     }
 
@@ -277,16 +284,26 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
         }
 
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            visitor(&FieldDescriptor::log_only("detail"), &|engine| {
-                observed::Value::from(observed::__private::RedactedToString::to_redacted_string(
-                    &PublicString("field-secret".to_owned()),
-                    engine,
-                ))
-            })
+            visitor(
+                &observed::__private::field_descriptor("detail", Some(observed::__private::log_field("detail")), None),
+                &|engine| {
+                    observed::Value::from(observed::__private::RedactedToString::to_redacted_string(
+                        &PublicString("field-secret".to_owned()),
+                        engine,
+                    ))
+                },
+            )
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("dyn.redaction").with_log(LogDescription::new("dyn.redaction", Severity::Info, None))
+            observed::__private::event_description(
+                "dyn.redaction",
+                None,
+                Some(observed::__private::log_description("dyn.redaction", Severity::Info, None)),
+                None,
+                false,
+                &[],
+            )
         }
     }
 
@@ -407,10 +424,10 @@ fn value_conversions_and_accessors() {
 
 #[test]
 fn metadata_accessors() {
-    let field = FieldDescriptor::log_only("count");
+    let field = observed::__private::field_descriptor("count", Some(observed::__private::log_field("count")), None);
     assert_eq!(field.field_name(), "count");
 
-    let metric = MetricDescription::new("http.requests", InstrumentKind::Counter, "request count", "{request}");
+    let metric = observed::__private::metric_description("http.requests", InstrumentKind::Counter, "request count", "{request}", None);
     assert_eq!(metric.description(), "request count");
     assert_eq!(metric.unit(), "{request}");
 }

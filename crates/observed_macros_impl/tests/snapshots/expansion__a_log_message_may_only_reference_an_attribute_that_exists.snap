@@ -71,7 +71,7 @@ const _: () = {
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "e",
                     ::observed::Severity::Info,
                     ::core::option::Option::Some("nothing to interpolate"),
@@ -83,14 +83,14 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "status",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("status"),
+                        ::observed::__private::log_field("status"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "original",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                        ::observed::__private::log_field("renamed"),
                     ),
                     ::core::option::Option::None,
                 ),
@@ -141,7 +141,7 @@ const _: () = {
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "e",
                     ::observed::Severity::Info,
                     ::core::option::Option::Some(
@@ -155,14 +155,14 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "status",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("status"),
+                        ::observed::__private::log_field("status"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "original",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                        ::observed::__private::log_field("renamed"),
                     ),
                     ::core::option::Option::None,
                 ),

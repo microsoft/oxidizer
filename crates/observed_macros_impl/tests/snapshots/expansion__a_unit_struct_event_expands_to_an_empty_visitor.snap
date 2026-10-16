@@ -9,7 +9,7 @@ const _: () = {
             "no.fields",
             ::core::option::Option::Some(::core::any::TypeId::of::<NoFields>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "no.fields",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,

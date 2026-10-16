@@ -38,7 +38,7 @@ const _: () = {
                 ::core::any::TypeId::of::<Generic<'static, T, N>>(),
             ),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "generic",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -50,49 +50,49 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "unredacted_value",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("unredacted_value"),
+                        ::observed::__private::log_field("unredacted_value"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "classified",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified"),
+                        ::observed::__private::log_field("classified"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "classified_ref",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified_ref"),
+                        ::observed::__private::log_field("classified_ref"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "defaulted",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("defaulted"),
+                        ::observed::__private::log_field("defaulted"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "optional",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("optional"),
+                        ::observed::__private::log_field("optional"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "matrix",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("matrix"),
+                        ::observed::__private::log_field("matrix"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "concrete",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("concrete"),
+                        ::observed::__private::log_field("concrete"),
                     ),
                     ::core::option::Option::None,
                 ),

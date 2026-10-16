@@ -11,7 +11,7 @@ const _: () = {
             "audit.write",
             ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "audit.write",
                     ::observed::Severity::Warn,
                     ::core::option::Option::None,
@@ -23,7 +23,7 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "attempts",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("attempts"),
+                        ::observed::__private::log_field("attempts"),
                     ),
                     ::core::option::Option::None,
                 ),

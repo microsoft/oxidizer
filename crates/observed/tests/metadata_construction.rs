@@ -1,62 +1,87 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public adapter construction and macro-owned field indexing.
+//! Generated metadata inspection and macro-owned field indexing.
 
-use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, LogDescription, MetricDescription};
+use observed::metadata::{InstrumentKind, MetricValueKind};
 use observed::{Event, Severity, event};
 
 #[test]
-fn dynamic_descriptions_enable_only_the_named_signals() {
-    let plain = EventDescription::new("bridge");
+fn generated_descriptions_expose_signal_metadata_without_consumer_construction() {
+    #[event("plain")]
+    struct Plain;
+    #[event("logged")]
+    #[warning]
+    struct Logged;
+    #[event("count")]
+    #[counter]
+    struct Count;
+    #[event("disabled", disabled)]
+    #[info]
+    struct Disabled;
+    let plain = Plain::DESCRIPTION;
     assert_eq!(
         (
             plain.name(),
-            plain.type_id(),
             plain.is_log(),
             plain.contains_metrics(),
             plain.is_disabled(),
             plain.fields().len()
         ),
-        ("bridge", None, false, false, false, 0),
+        ("plain", false, false, false, 0),
     );
-    let log = plain.with_log(LogDescription::new("bridge.log", Severity::Warn, None));
-    assert_eq!(log.log().unwrap().name(), "bridge.log");
-    assert!(!log.contains_metrics());
-    let metric = plain.with_metric(MetricDescription::new("bridge.count", InstrumentKind::Counter, "", ""));
-    assert_eq!(metric.metric().unwrap().instrument_name(), "bridge.count");
-    assert!(!metric.is_log());
-    let fields = plain.with_field_metrics();
-    assert!(fields.contains_metrics());
-    assert!(fields.metric().is_none());
-    assert!(plain.disabled().is_disabled());
-    assert_eq!(plain.disabled().name(), "bridge");
+    assert_eq!(plain.type_id(), Some(std::any::TypeId::of::<Plain>()));
+    assert_eq!(Logged::DESCRIPTION.log().unwrap().severity(), Severity::Warn);
+    assert!(!Logged::DESCRIPTION.contains_metrics());
+    assert_eq!(Count::DESCRIPTION.metric().unwrap().instrument_name(), "count");
+    assert!(!Count::DESCRIPTION.is_log());
+    assert!(Disabled::DESCRIPTION.is_disabled());
 }
 
 #[test]
-fn dynamic_fields_keep_signal_routes_without_claiming_static_positions() {
-    let log = FieldDescriptor::log_only("message");
+fn generated_fields_expose_routes_and_measurement_metadata() {
+    #[event("routed")]
+    #[info]
+    #[counter(bytes, name = "transferred.bytes", unit = "By", desc = "Transferred bytes")]
+    struct Routed {
+        #[unredacted]
+        message: &'static str,
+        #[unredacted]
+        #[dimension(log = "cloud.region", metric = "region")]
+        region: &'static str,
+        #[unredacted]
+        bytes: u64,
+    }
+    let fields = Routed::DESCRIPTION.fields();
+    let log = fields[0];
     assert_eq!(
         (log.field_name(), log.log().unwrap().key(), log.field_index()),
-        ("message", "message", None)
+        ("message", "message", Some(0))
     );
     assert!(log.metric().is_none());
-    let dimension = FieldDescriptor::dimension("region").with_log_key("cloud.region");
+    let dimension = fields[1];
     assert_eq!(dimension.field_name(), "region");
     assert_eq!(dimension.log().unwrap().key(), "cloud.region");
     assert_eq!(dimension.metric().unwrap().key(), "region");
     assert!(dimension.metric().unwrap().instrument_description().is_none());
-    assert_eq!(dimension.field_index(), None);
-    let measurement = FieldDescriptor::instrument(
-        "bytes",
-        MetricDescription::new("bridge.bytes", InstrumentKind::Counter, "Transferred bytes", "By"),
-    );
+    assert_eq!(dimension.field_index(), Some(1));
+    let measurement = fields[2].metric().unwrap().instrument_description().unwrap();
     assert_eq!(
-        measurement.metric().unwrap().instrument_description().unwrap().instrument_name(),
-        "bridge.bytes"
+        (
+            measurement.instrument_name(),
+            measurement.kind(),
+            measurement.description(),
+            measurement.unit(),
+            measurement.value_kind()
+        ),
+        (
+            "transferred.bytes",
+            InstrumentKind::Counter,
+            "Transferred bytes",
+            "By",
+            Some(MetricValueKind::U64)
+        )
     );
-    assert!(measurement.log().is_none());
-    assert_eq!(measurement.field_index(), None);
 }
 
 #[test]
@@ -90,19 +115,31 @@ fn macro_inventory_assigns_indices_once_and_keeps_optional_fields_in_the_invento
 
 #[test]
 fn the_hidden_indexer_reassigns_copied_descriptors_instead_of_retaining_stale_positions() {
+    let metric = observed::__private::metric_description(
+        std::hint::black_box("count"),
+        InstrumentKind::Counter,
+        "",
+        "",
+        Some(MetricValueKind::U64),
+    );
+    let instrument = observed::__private::metric_field("value", Some(metric));
+    assert_eq!(
+        (instrument.key(), instrument.instrument_description().unwrap().instrument_name()),
+        ("value", "count"),
+    );
     let field = observed::__private::field_descriptor(
         std::hint::black_box("source"),
         None,
-        Some(observed::metadata::MetricFieldEntry::dimension("region")),
+        Some(observed::__private::metric_field("region", None)),
     );
     assert_eq!(
         (field.field_name(), field.metric().unwrap().key(), field.field_index()),
         ("source", "region", None)
     );
     let original = observed::__private::event_fields([
-        FieldDescriptor::log_only("first"),
-        FieldDescriptor::log_only("second"),
-        FieldDescriptor::log_only("third"),
+        observed::__private::field_descriptor("first", Some(observed::__private::log_field("first")), None),
+        observed::__private::field_descriptor("second", None, None),
+        observed::__private::field_descriptor("third", None, None),
     ]);
     let reordered = observed::__private::event_fields([original[2], original[0]]);
     assert_eq!(
@@ -110,4 +147,14 @@ fn the_hidden_indexer_reassigns_copied_descriptors_instead_of_retaining_stale_po
         [("third", Some(0)), ("first", Some(1))],
     );
     assert!(observed::__private::event_fields([]).is_empty());
+}
+
+#[test]
+fn the_macro_source_factory_preserves_the_emission_location() {
+    let line = std::hint::black_box(42);
+    let location = observed::__private::source_location("emitter", "src/request.rs", line);
+    assert_eq!(
+        (location.crate_name(), location.file(), location.line()),
+        ("emitter", "src/request.rs", 42),
+    );
 }

@@ -14,11 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use data_privacy::RedactionEngine;
-use observed::__private::{event_description, event_fields, field_descriptor};
+use observed::__private::{event_description, event_fields, field_descriptor, log_field, metric_description, metric_field};
 use observed::interop::{DynEvent, emit_dyn_event};
-use observed::metadata::{
-    EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricFieldEntry, MetricValue, MetricValueKind,
-};
+use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricValue, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
 use observed::{Event, FlushError, Sink, Value, emit, event};
 use ohno::ErrorExt;
@@ -266,11 +264,15 @@ impl Event for NumericOnly {
         &event_fields([field_descriptor(
             "amount",
             None,
-            Some(MetricFieldEntry::instrument(
+            Some(metric_field(
                 "amount",
-                MetricDescription::builder("numeric", InstrumentKind::Counter)
-                    .value_kind(MetricValueKind::U64)
-                    .build(),
+                Some(metric_description(
+                    "numeric",
+                    InstrumentKind::Counter,
+                    "",
+                    "",
+                    Some(MetricValueKind::U64),
+                )),
             )),
         )]),
     );
@@ -363,34 +365,43 @@ fn bound_recording_never_evaluates_unbound_field_getters() {
             None,
             false,
             &event_fields([
-                FieldDescriptor::log_only("payload"),
+                field_descriptor("payload", Some(log_field("payload")), None),
                 field_descriptor(
                     "amount",
                     None,
-                    Some(MetricFieldEntry::instrument(
+                    Some(metric_field(
                         "amount",
-                        MetricDescription::builder("amount", InstrumentKind::Counter)
-                            .value_kind(MetricValueKind::U64)
-                            .build(),
+                        Some(metric_description(
+                            "amount",
+                            InstrumentKind::Counter,
+                            "",
+                            "",
+                            Some(MetricValueKind::U64),
+                        )),
                     )),
                 ),
             ]),
         );
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             const FOREIGN_FIELDS: &[FieldDescriptor] = &event_fields([
-                FieldDescriptor::log_only("first"),
-                FieldDescriptor::log_only("second"),
-                FieldDescriptor::log_only("foreign"),
+                field_descriptor("first", Some(log_field("first")), None),
+                field_descriptor("second", Some(log_field("second")), None),
+                field_descriptor("foreign", Some(log_field("foreign")), None),
             ]);
             visitor(&Self::DESCRIPTION.fields()[0], &|_| panic!("unbound field getter"))?;
-            visitor(&FieldDescriptor::log_only("runtime-only"), &|_| panic!("unindexed getter"))?;
+            visitor(&field_descriptor("runtime-only", Some(log_field("runtime-only")), None), &|_| {
+                panic!("unindexed getter")
+            })?;
             visitor(&FOREIGN_FIELDS[2], &|_| panic!("unknown getter"))?;
             visitor(&Self::DESCRIPTION.fields()[1], &|_| Value::U64(23))
         }
     }
     assert!(Guarded::DESCRIPTION.contains_metrics());
-    assert!(!EventDescription::new("guarded").contains_metrics());
-    assert_eq!(FieldDescriptor::log_only("enrichment").field_index(), None);
+    assert!(!event_description("guarded", None, None, None, false, &[]).contains_metrics());
+    assert_eq!(
+        field_descriptor("enrichment", Some(log_field("enrichment")), None).field_index(),
+        None
+    );
     let total = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<Guarded>(|_| Arc::clone(&total)).unwrap();
@@ -401,14 +412,14 @@ fn bound_recording_never_evaluates_unbound_field_getters() {
 #[test]
 fn runtime_field_inventory_determines_metric_presence() {
     const FIELDS: &[FieldDescriptor] = &event_fields([
-        FieldDescriptor::log_only("label"),
-        FieldDescriptor::dimension("region"),
+        field_descriptor("label", Some(log_field("label")), None),
+        field_descriptor("region", None, Some(metric_field("region", None))),
         field_descriptor(
             "amount",
             None,
-            Some(MetricFieldEntry::instrument(
+            Some(metric_field(
                 "amount",
-                MetricDescription::new("amount", InstrumentKind::Counter, "", ""),
+                Some(metric_description("amount", InstrumentKind::Counter, "", "", None)),
             )),
         ),
     ]);
@@ -428,9 +439,9 @@ fn fieldless_counters_record_one_without_visiting_unneeded_fields() {
             "count.only",
             Some(TypeId::of::<Self>()),
             None,
-            Some(MetricDescription::new("count", InstrumentKind::Counter, "", "")),
+            Some(metric_description("count", InstrumentKind::Counter, "", "", None)),
             false,
-            &event_fields([FieldDescriptor::log_only("unused")]),
+            &event_fields([field_descriptor("unused", Some(log_field("unused")), None)]),
         );
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             panic!("a fieldless counter needs no field values")
@@ -458,9 +469,9 @@ fn invalid_static_field_indices_fail_before_preparing_targets() {
             &[field_descriptor(
                 "value",
                 None,
-                Some(MetricFieldEntry::instrument(
+                Some(metric_field(
                     "value",
-                    MetricDescription::new("value", InstrumentKind::Counter, "", ""),
+                    Some(metric_description("value", InstrumentKind::Counter, "", "", None)),
                 )),
             )],
         );
@@ -507,9 +518,9 @@ fn unspecified_numeric_kind_accepts_measurements_and_unbound_events_are_ignored(
             &event_fields([field_descriptor(
                 "amount",
                 None,
-                Some(MetricFieldEntry::instrument(
+                Some(metric_field(
                     "amount",
-                    MetricDescription::new("numeric", InstrumentKind::Counter, "", ""),
+                    Some(metric_description("numeric", InstrumentKind::Counter, "", "", None)),
                 )),
             )]),
         );

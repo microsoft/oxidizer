@@ -894,7 +894,7 @@ fn log_description_expr(def: &EventDef) -> TokenStream {
     };
     quote! {
         ::core::option::Option::Some(
-            ::observed::metadata::LogDescription::new(
+            ::observed::__private::log_description(
                 #log_name,
                 ::observed::Severity::#severity,
                 #body_expr,
@@ -1004,11 +1004,13 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
         // A fieldless event-level metric is always a counter (records `1`).
         quote! {
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::builder(
+                ::observed::__private::metric_description(
                     #instrument_name,
                     ::observed::metadata::InstrumentKind::Counter,
-                ).description(#description).unit(#unit)
-                    .value_kind(::observed::metadata::MetricValueKind::U64).build()
+                    #description,
+                    #unit,
+                    ::core::option::Option::Some(::observed::metadata::MetricValueKind::U64),
+                )
             )
         }
     } else {
@@ -1067,7 +1069,7 @@ fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
     // Log routing
     let log_key = if has_log { field.log_key() } else { None };
     let log_entry = if let Some(key) = &log_key {
-        quote! { ::core::option::Option::Some(::observed::metadata::LogFieldEntry::new(#key)) }
+        quote! { ::core::option::Option::Some(::observed::__private::log_field(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -1085,17 +1087,19 @@ fn generate_field_descriptor(field: &FieldDef, has_log: bool) -> TokenStream {
             None => unreachable!("instrument value types are validated before code generation"),
         };
         quote! {
-            ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
+            ::core::option::Option::Some(::observed::__private::metric_field(
                 #default_key,
-                ::observed::metadata::MetricDescription::builder(
+                ::core::option::Option::Some(::observed::__private::metric_description(
                     #name,
                     ::observed::metadata::InstrumentKind::#kind,
-                ).description(#description).unit(#unit)
-                    .value_kind(::observed::metadata::MetricValueKind::#representation).build(),
+                    #description,
+                    #unit,
+                    ::core::option::Option::Some(::observed::metadata::MetricValueKind::#representation),
+                )),
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {
-        quote! { ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::dimension(#key)) }
+        quote! { ::core::option::Option::Some(::observed::__private::metric_field(#key, ::core::option::Option::None)) }
     } else {
         quote! { ::core::option::Option::None }
     };

@@ -94,40 +94,21 @@ pub struct MetricDescription {
 }
 
 impl MetricDescription {
-    /// Configures an instrument with optional description, unit, and numeric representation.
-    ///
-    /// The name and instrument kind are required. Description and unit default
-    /// to empty strings; numeric representation defaults to unspecified.
-    ///
-    /// ```
-    /// use observed::metadata::{InstrumentKind, MetricDescription, MetricValueKind};
-    ///
-    /// const BYTES: MetricDescription = MetricDescription::builder("bytes", InstrumentKind::Counter)
-    ///     .description("Bytes sent")
-    ///     .unit("By")
-    ///     .value_kind(MetricValueKind::U64)
-    ///     .build();
-    ///
-    /// assert_eq!(BYTES.unit(), "By");
-    /// ```
     #[must_use]
-    pub const fn builder(instrument_name: &'static str, kind: InstrumentKind) -> MetricDescriptionBuilder {
-        MetricDescriptionBuilder {
-            metric: Self {
-                instrument_name,
-                kind,
-                description: "",
-                unit: "",
-                value_kind: None,
-            },
+    pub(crate) const fn new(
+        instrument_name: &'static str,
+        kind: InstrumentKind,
+        description: &'static str,
+        unit: &'static str,
+        value_kind: Option<MetricValueKind>,
+    ) -> Self {
+        Self {
+            instrument_name,
+            kind,
+            description,
+            unit,
+            value_kind,
         }
-    }
-
-    /// Creates a new metric description. `description` and `unit` may be `""`
-    /// to leave them unset on the underlying instrument.
-    #[must_use]
-    pub const fn new(instrument_name: &'static str, kind: InstrumentKind, description: &'static str, unit: &'static str) -> Self {
-        Self::builder(instrument_name, kind).description(description).unit(unit).build()
     }
 
     /// Numeric representation, or `None` for legacy or unspecified metadata.
@@ -161,70 +142,28 @@ impl MetricDescription {
     }
 }
 
-/// Builds constant metric metadata with required name and instrument kind.
-///
-/// Start with [`MetricDescription::builder`]. Optional metadata is configured
-/// here rather than through mutating methods on [`MetricDescription`].
-#[derive(Debug, Clone, Copy)]
-pub struct MetricDescriptionBuilder {
-    metric: MetricDescription,
-}
-
-impl MetricDescriptionBuilder {
-    /// Sets the instrument's human-readable description.
-    #[must_use]
-    pub const fn description(mut self, description: &'static str) -> Self {
-        self.metric.description = description;
-        self
-    }
-
-    /// Sets the unit of measurement, such as `"By"` or `"ms"`.
-    #[must_use]
-    pub const fn unit(mut self, unit: &'static str) -> Self {
-        self.metric.unit = unit;
-        self
-    }
-
-    /// Declares the numeric representation of this instrument's measurement.
-    ///
-    /// Generated [`EventDescription`](crate::metadata::EventDescription) field metadata
-    /// includes this so backends can reject unsupported numeric types during startup.
-    #[must_use]
-    pub const fn value_kind(mut self, kind: MetricValueKind) -> Self {
-        self.metric.value_kind = Some(kind);
-        self
-    }
-
-    /// Finishes the instrument description without allocation.
-    #[must_use]
-    pub const fn build(self) -> MetricDescription {
-        self.metric
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::any::type_name;
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use super::*;
 
     static_assertions::assert_impl_all!(MetricValueKind: UnwindSafe, RefUnwindSafe);
     static_assertions::assert_impl_all!(MetricValue: UnwindSafe, RefUnwindSafe);
-    static_assertions::assert_impl_all!(MetricDescriptionBuilder: UnwindSafe, RefUnwindSafe);
+    static_assertions::assert_impl_all!(MetricDescription: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn runtime_description_preserves_the_selected_numeric_representation() {
         for kind in [MetricValueKind::U64, MetricValueKind::I64, MetricValueKind::F64] {
-            let metric = MetricDescription::builder("value", InstrumentKind::Gauge).value_kind(kind).build();
+            let metric = MetricDescription::new("value", InstrumentKind::Gauge, "", "", Some(kind));
             assert_eq!(metric.value_kind(), Some(kind));
         }
     }
 
     #[test]
-    fn builder_defaults_and_explicit_metadata_match_the_legacy_constructor() {
-        let defaults = MetricDescription::builder("count", InstrumentKind::Counter).build();
+    fn metadata_preserves_unspecified_representation_and_explicit_text() {
+        let defaults = MetricDescription::new("count", InstrumentKind::Counter, "", "", None);
         assert_eq!(
             (
                 defaults.instrument_name(),
@@ -235,11 +174,7 @@ mod tests {
             ),
             ("count", InstrumentKind::Counter, "", "", None),
         );
-        let builder = MetricDescription::builder("size", InstrumentKind::Histogram)
-            .description("size")
-            .unit("By");
-        let explicit = builder.build();
-        let legacy = MetricDescription::new("size", InstrumentKind::Histogram, "size", "By");
+        let explicit = MetricDescription::new("size", InstrumentKind::Histogram, "size", "By", None);
         assert_eq!(
             (
                 explicit.instrument_name(),
@@ -248,15 +183,8 @@ mod tests {
                 explicit.unit(),
                 explicit.value_kind()
             ),
-            (
-                legacy.instrument_name(),
-                legacy.kind(),
-                legacy.description(),
-                legacy.unit(),
-                legacy.value_kind()
-            ),
+            ("size", InstrumentKind::Histogram, "size", "By", None,),
         );
-        assert!(format!("{builder:?}").contains(type_name::<MetricDescriptionBuilder>().rsplit("::").next().unwrap()));
     }
 
     #[test]
@@ -281,7 +209,7 @@ mod tests {
     fn metric_description_reports_description_and_unit_verbatim() {
         // Both reach the exported instrument as-is, and they must not be
         // transposed with one another or with the instrument name.
-        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "server duration", "ms");
+        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "server duration", "ms", None);
 
         assert_eq!(desc.description(), "server duration");
         assert_eq!(desc.unit(), "ms");

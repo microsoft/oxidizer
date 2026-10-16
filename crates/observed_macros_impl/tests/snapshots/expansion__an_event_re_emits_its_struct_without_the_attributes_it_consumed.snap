@@ -16,7 +16,7 @@ const _: () = {
             "http.request",
             ::core::option::Option::Some(::core::any::TypeId::of::<HttpRequest>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "http.request.log",
                     ::observed::Severity::Info,
                     ::core::option::Option::Some("{method} handled as {status}"),
@@ -28,21 +28,21 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "method",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("method"),
+                        ::observed::__private::log_field("method"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "status",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("status"),
+                        ::observed::__private::log_field("status"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "user",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("user"),
+                        ::observed::__private::log_field("user"),
                     ),
                     ::core::option::Option::None,
                 ),

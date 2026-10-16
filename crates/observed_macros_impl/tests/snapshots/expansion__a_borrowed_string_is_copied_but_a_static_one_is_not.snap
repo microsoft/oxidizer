@@ -18,7 +18,7 @@ const _: () = {
             "strings",
             ::core::option::Option::Some(::core::any::TypeId::of::<Strings<'static>>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "strings",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -30,56 +30,56 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "borrowed",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("borrowed"),
+                        ::observed::__private::log_field("borrowed"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "qualified",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("qualified"),
+                        ::observed::__private::log_field("qualified"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "immortal",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("immortal"),
+                        ::observed::__private::log_field("immortal"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "numeric_ref",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("numeric_ref"),
+                        ::observed::__private::log_field("numeric_ref"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "owned",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("owned"),
+                        ::observed::__private::log_field("owned"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "redactable_ref",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("redactable_ref"),
+                        ::observed::__private::log_field("redactable_ref"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "parenthesized",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("parenthesized"),
+                        ::observed::__private::log_field("parenthesized"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "classified_ref",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("classified_ref"),
+                        ::observed::__private::log_field("classified_ref"),
                     ),
                     ::core::option::Option::None,
                 ),

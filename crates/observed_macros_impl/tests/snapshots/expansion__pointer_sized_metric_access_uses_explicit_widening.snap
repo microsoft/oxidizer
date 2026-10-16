@@ -19,16 +19,19 @@ const _: () = {
                     "bytes",
                     ::core::option::Option::None,
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "bytes",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "pointer.metrics",
                                     ::observed::metadata::InstrumentKind::Counter,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::U64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::U64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
@@ -36,16 +39,19 @@ const _: () = {
                     "delta",
                     ::core::option::Option::None,
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
+                        ::observed::__private::metric_field(
                             "delta",
-                            ::observed::metadata::MetricDescription::builder(
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
                                     "pointer.metrics",
                                     ::observed::metadata::InstrumentKind::UpDownCounter,
-                                )
-                                .description("")
-                                .unit("")
-                                .value_kind(::observed::metadata::MetricValueKind::I64)
-                                .build(),
+                                    "",
+                                    "",
+                                    ::core::option::Option::Some(
+                                        ::observed::metadata::MetricValueKind::I64,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),

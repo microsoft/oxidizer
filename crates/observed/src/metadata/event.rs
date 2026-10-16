@@ -12,8 +12,8 @@ use crate::metadata::metric::MetricDescription;
 /// Description of a telemetry event type.
 ///
 /// Available as a `const` on every type that implements [`crate::Event`],
-/// providing compile-time metadata about the event's shape. A dynamic adaptor
-/// constructs the same description at runtime and may omit Rust type identity.
+/// providing read-only metadata about the event's shape. Adapters can reuse an
+/// existing event description; construction belongs to the event macros.
 ///
 /// The event name is shared across all signals; per-signal metadata lives
 /// in `log` / `metric`.
@@ -29,58 +29,9 @@ pub struct EventDescription {
 }
 
 impl EventDescription {
-    /// Describes a dynamic event with no signals enabled.
-    ///
-    /// Add [`with_log`](Self::with_log) or [`with_metric`](Self::with_metric)
-    /// for the signals the adapter emits. Macro-generated events provide their
-    /// description automatically.
-    ///
-    /// ```
-    /// use observed::Severity;
-    /// use observed::metadata::{EventDescription, LogDescription};
-    ///
-    /// let description = EventDescription::new("bridge.request").with_log(LogDescription::new(
-    ///     "bridge.request",
-    ///     Severity::Info,
-    ///     None,
-    /// ));
-    /// assert!(description.is_log());
-    /// assert_eq!(description.type_id(), None);
-    /// ```
     #[must_use]
-    pub const fn new(name: &'static str) -> Self {
+    pub(crate) const fn new(name: &'static str) -> Self {
         Self::from_parts(name, None, None, None, false, false)
-    }
-
-    /// Enables the log signal described by `log`.
-    #[must_use]
-    pub const fn with_log(mut self, log: LogDescription) -> Self {
-        self.log = Some(log);
-        self
-    }
-
-    /// Enables an event-level metric that records one per emission.
-    #[must_use]
-    pub const fn with_metric(mut self, metric: MetricDescription) -> Self {
-        self.metric = Some(metric);
-        self
-    }
-
-    /// Declares that the dynamic adapter visits field-level measurements.
-    ///
-    /// This enables metric processor interest without requiring a static field
-    /// inventory. It does not opt the adapter into typed metric bindings.
-    #[must_use]
-    pub const fn with_field_metrics(mut self) -> Self {
-        self.has_field_metrics = true;
-        self
-    }
-
-    /// Marks the event disabled by default.
-    #[must_use]
-    pub const fn disabled(mut self) -> Self {
-        self.disabled = true;
-        self
     }
 
     pub(crate) const fn from_parts(
@@ -215,21 +166,35 @@ mod tests {
         assert!(!plain.is_disabled());
         assert!(!plain.contains_metrics());
 
-        let logged = EventDescription::new("logged").with_log(LogDescription::new("logged", Severity::Info, None));
+        let logged = EventDescription::from_parts(
+            "logged",
+            None,
+            Some(LogDescription::new("logged", Severity::Info, None)),
+            None,
+            false,
+            false,
+        );
         assert!(logged.is_log());
 
-        assert!(EventDescription::new("off").disabled().is_disabled());
+        assert!(EventDescription::from_parts("off", None, None, None, false, true).is_disabled());
     }
 
     #[test]
     fn an_event_level_or_field_level_metric_alone_makes_the_event_metric_producing() {
         // The two metric sources are alternatives, not requirements: an event
         // carrying only one of them still produces metric data points.
-        let event_metric = EventDescription::new("event.metric").with_metric(MetricDescription::new("m", InstrumentKind::Counter, "", ""));
+        let event_metric = EventDescription::from_parts(
+            "event.metric",
+            None,
+            None,
+            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "", None)),
+            false,
+            false,
+        );
         assert_eq!(event_metric.metric().expect("metric is set").instrument_name(), "m");
         assert!(event_metric.contains_metrics());
 
-        let field_metric = EventDescription::new("field.metric").with_field_metrics();
+        let field_metric = EventDescription::from_parts("field.metric", None, None, None, true, false);
         assert!(field_metric.metric().is_none());
         assert!(field_metric.contains_metrics());
     }

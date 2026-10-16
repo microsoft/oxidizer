@@ -516,6 +516,47 @@ pub mod __private {
     pub use crate::enrichment::EnrichmentEntry;
 
     #[must_use]
+    pub const fn log_description(
+        name: &'static str,
+        severity: crate::Severity,
+        body: Option<&'static str>,
+    ) -> crate::metadata::LogDescription {
+        crate::metadata::LogDescription::new(name, severity, body)
+    }
+
+    #[must_use]
+    pub const fn metric_description(
+        name: &'static str,
+        kind: crate::metadata::InstrumentKind,
+        description: &'static str,
+        unit: &'static str,
+        value_kind: Option<crate::metadata::MetricValueKind>,
+    ) -> crate::metadata::MetricDescription {
+        crate::metadata::MetricDescription::new(name, kind, description, unit, value_kind)
+    }
+
+    #[must_use]
+    pub const fn log_field(key: &'static str) -> crate::metadata::LogFieldEntry {
+        crate::metadata::LogFieldEntry::new(key)
+    }
+
+    #[must_use]
+    pub const fn metric_field(
+        key: &'static str,
+        instrument: Option<crate::metadata::MetricDescription>,
+    ) -> crate::metadata::MetricFieldEntry {
+        match instrument {
+            Some(instrument) => crate::metadata::MetricFieldEntry::instrument(key, instrument),
+            None => crate::metadata::MetricFieldEntry::dimension(key),
+        }
+    }
+
+    #[must_use]
+    pub const fn source_location(crate_name: &'static str, file: &'static str, line: u32) -> crate::metadata::SourceLocation {
+        crate::metadata::SourceLocation::new(crate_name, file, line)
+    }
+
+    #[must_use]
     pub const fn field_descriptor(
         name: &'static str,
         log: Option<crate::metadata::LogFieldEntry>,

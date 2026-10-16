@@ -77,7 +77,8 @@ pub trait DynEvent: Send + Sync {
     /// Returns the event description (metadata) for processor prefiltering.
     ///
     /// Compile-time events return `T::DESCRIPTION` (static metadata).
-    /// Dynamic events construct an `EventDescription` from runtime values.
+    /// Adapters reuse a description supplied by an existing event type.
+    /// Metadata construction is not a public adapter API.
     ///
     /// This must carry the event's complete signal metadata: a processor
     /// selects on it alone, so a signal omitted here means the event never

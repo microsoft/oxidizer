@@ -12,7 +12,7 @@ const _: () = {
             "raw",
             ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "raw",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -24,17 +24,20 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "type",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("type"),
+                        ::observed::__private::log_field("type"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "match",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("match"),
+                        ::observed::__private::log_field("match"),
                     ),
                     ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("match"),
+                        ::observed::__private::metric_field(
+                            "match",
+                            ::core::option::Option::None,
+                        ),
                     ),
                 ),
             ]),

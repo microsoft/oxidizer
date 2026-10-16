@@ -14,7 +14,7 @@ use std::ptr::{copy_nonoverlapping, null, null_mut};
 use std::sync::Mutex;
 use std::thread;
 
-use observed::metadata::{EventDescription, InstrumentKind, MetricDescription, MetricValueKind};
+use observed::metadata::{EventDescription, InstrumentKind, MetricValueKind};
 use observed::processing::{EventProcessor, FieldVisitorFn};
 use observed::{Event, Sink, emit, event};
 use observed_perf_counters::PerfCounterProcessor;
@@ -281,11 +281,15 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
             &observed::__private::event_fields([observed::__private::field_descriptor(
                 "value",
                 None,
-                Some(observed::metadata::MetricFieldEntry::instrument(
+                Some(observed::__private::metric_field(
                     "value",
-                    MetricDescription::builder("Malformed", InstrumentKind::Counter)
-                        .value_kind(MetricValueKind::U64)
-                        .build(),
+                    Some(observed::__private::metric_description(
+                        "Malformed",
+                        InstrumentKind::Counter,
+                        "",
+                        "",
+                        Some(MetricValueKind::U64),
+                    )),
                 )),
             )]),
         );

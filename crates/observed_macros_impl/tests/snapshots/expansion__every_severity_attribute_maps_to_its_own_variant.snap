@@ -16,7 +16,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Trace,
                     ::core::option::Option::None,
@@ -27,9 +27,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),
@@ -63,7 +61,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Debug,
                     ::core::option::Option::None,
@@ -74,9 +72,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),
@@ -110,7 +106,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -121,9 +117,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),
@@ -157,7 +151,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Warn,
                     ::core::option::Option::None,
@@ -168,9 +162,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),
@@ -204,7 +196,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Error,
                     ::core::option::Option::None,
@@ -215,9 +207,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),
@@ -251,7 +241,7 @@ const _: () = {
             "severity",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "severity",
                     ::observed::Severity::Fatal,
                     ::core::option::Option::None,
@@ -262,9 +252,7 @@ const _: () = {
             &::observed::__private::event_fields([
                 ::observed::__private::field_descriptor(
                     "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
+                    ::core::option::Option::Some(::observed::__private::log_field("v")),
                     ::core::option::Option::None,
                 ),
             ]),

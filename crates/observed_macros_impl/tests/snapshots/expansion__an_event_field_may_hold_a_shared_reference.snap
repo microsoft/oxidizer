@@ -15,7 +15,7 @@ const _: () = {
                 ::core::any::TypeId::of::<SharedRefs<'static>>(),
             ),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "shared.refs",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -27,21 +27,21 @@ const _: () = {
                 ::observed::__private::field_descriptor(
                     "plain",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("plain"),
+                        ::observed::__private::log_field("plain"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "nested",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("nested"),
+                        ::observed::__private::log_field("nested"),
                     ),
                     ::core::option::Option::None,
                 ),
                 ::observed::__private::field_descriptor(
                     "optional",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("optional"),
+                        ::observed::__private::log_field("optional"),
                     ),
                     ::core::option::Option::None,
                 ),

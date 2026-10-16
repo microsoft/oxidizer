@@ -215,8 +215,8 @@ impl<'a> EventView<'a> {
 
     /// Returns the event description (signals, metrics, etc.).
     ///
-    /// Typed events expose their compile-time description; dynamic events may
-    /// construct this metadata at runtime and omit Rust type identity. Match on
+    /// Typed events expose their compile-time description; adapters may reuse
+    /// descriptions without Rust type identity. Match on
     /// the canonical name when one processor must accept both sources.
     #[must_use]
     #[inline]

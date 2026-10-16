@@ -12,14 +12,15 @@ const _: () = {
             ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
             ::core::option::Option::None,
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::builder(
-                        "heartbeat.total",
-                        ::observed::metadata::InstrumentKind::Counter,
-                    )
-                    .description("heartbeats")
-                    .unit("1")
-                    .value_kind(::observed::metadata::MetricValueKind::U64)
-                    .build(),
+                ::observed::__private::metric_description(
+                    "heartbeat.total",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "heartbeats",
+                    "1",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricValueKind::U64,
+                    ),
+                ),
             ),
             false,
             &::observed::__private::event_fields([]),
