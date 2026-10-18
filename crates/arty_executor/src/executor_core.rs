@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::task;
+use std::thread::ThreadId;
 use std::time::Instant;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
@@ -29,9 +29,9 @@ impl ExecutorCore {
     /// The `owner_waker` is used by the executor to wake up its owner when more work has
     /// arrived for the executor and calling `execute_cycle()` is desirable.
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, sink: Sink) -> Self {
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId) -> Self {
         Self {
-            shared: ExecutorShared::new(owner_waker, sink),
+            shared: ExecutorShared::new(owner_waker, sink, thread_id),
             active: VecDeque::new(),
             tasks: TaskList::default(),
             clock: SimpleClock::new_system().with_fast_instant(true),
@@ -41,10 +41,6 @@ impl ExecutorCore {
 
     pub(crate) fn wake(&self) -> &WakeShared {
         self.shared.wake()
-    }
-
-    pub(crate) fn wake_handle(&self) -> Arc<WakeShared> {
-        self.shared.wake_handle()
     }
 
     pub(crate) fn shared(&self) -> &ExecutorShared {

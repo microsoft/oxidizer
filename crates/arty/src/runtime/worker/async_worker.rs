@@ -107,6 +107,7 @@ impl AsyncWorker {
         let executor = Executor::builder()
             .owner_waker(WorkerSignal::waker(&signal))
             .sink(blocking_worker.sink().clone())
+            .thread(thread.clone())
             .build();
         let tasks = executor.tasks();
 

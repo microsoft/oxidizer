@@ -17,7 +17,11 @@ keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["observed::context::transfer::Transfer", "observed::sink::core::Sink"]
+allowed_external_types = [
+    "observed::context::transfer::Transfer",
+    "observed::sink::core::Sink",
+    "thread_aware_core::thread::Thread",
+]
 
 [dependencies]
 data_privacy = { workspace = true }
@@ -28,6 +32,7 @@ pin-project = { workspace = true }
 plurality = { workspace = true }
 performables = { workspace = true }
 tick = { workspace = true, features = ["fast-instant"] }
+thread_aware_core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }

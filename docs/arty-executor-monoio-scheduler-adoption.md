@@ -71,6 +71,12 @@ Its fields are independently synchronized according to their actual needs:
 - logical task count and shutdown state use their dedicated field operations;
 - wake context and telemetry sink are immutable shared values.
 
+`WakeShared` is itself a cheaply cloneable handle around one internal `Arc`
+allocation. Callers clone the handle directly instead of wrapping it in
+`Arc<WakeShared>`, and `WakeSignal` has the same shape in tests and production.
+Test-only fake task ownership stays in test locals rather than adding a
+conditional owner field to every test `WakeSignal`.
+
 Owner drop marks the shared component shutting down before cancelling tasks, so
 stale `TaskSet` clones reject submissions even though they may retain shared
 pool/channel storage. This removes a `Weak::upgrade` from every spawn and keeps
@@ -79,17 +85,21 @@ pool/channel storage. This removes a `Weak::upgrade` from every spawn and keeps
 ### Per-thread registration
 
 `executor_context.rs` owns TLS identity, the local FIFO, cycle-active state, and
-the cycle guard. Executor construction registers the exact `WakeShared` pointer
-directly in this context, and `Executor::drop` uses an unwind-safe guard to
-unregister it.
+the cycle guard. `ExecutorBuilder` accepts a `thread_aware_core::Thread`,
+validates that it identifies the current OS thread, and retains only its
+`ThreadId`; standalone executors default directly to the current `ThreadId`.
+Executor construction registers that value in TLS, and `Executor::drop` uses an
+unwind-safe guard to unregister it.
 
 Construction panics when another executor is live on the same thread. Drop
 clears the registration through an unwind-safe guard. A later executor may then
 register on the same thread.
 
-Local/remote classification compares the wake context against this TLS pointer.
-No `ThreadId` lookup is performed. `WakeShared` delegates local queue operations
-to the executor context and contains no registration lifecycle logic.
+Local/remote classification compares the `ThreadId` carried by the cloned wake
+handle with the registered TLS value. This avoids both a raw identity pointer
+and repeated calls to `std::thread::current`. `WakeShared` delegates local queue
+operations to the executor context and contains no registration lifecycle
+logic.
 
 ### Pooled task ownership
 
@@ -515,7 +525,7 @@ CARGO_TARGET_DIR=... cargo bench --locked \
 ```
 
 All affected targets compile. Benchmark and allocation reports were generated.
-The final elementary run measured 71.22 ns for a pending cycle and 72.33 ns for
+The final elementary run measured 71.07 ns for a pending cycle and 73.80 ns for
 cloning a waker during a pending poll, both with 19 measured allocations in the
 full benchmark lifecycle.
 
@@ -531,7 +541,7 @@ were formatted with package-scoped `cargo fmt`.
 
 - The change contains a concentrated unsafe core around pooled Arc raw
   ownership, raw waker vtables, and intrusive task links. The unsafe surface is
-  documented and narrowed to 61 lexical unsafe blocks across `arty_executor`,
+  documented and narrowed to 60 lexical unsafe blocks across `arty_executor`,
   but Miri and CI runtime-analysis results remain required.
 - Multi-worker remote injection is now the dominant measured performance gap.
   The first follow-up to benchmark is edge-triggered worker notification:
