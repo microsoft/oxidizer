@@ -252,6 +252,9 @@ impl ExecutorCore {
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
     fn evaluate_shutdown_completion(&self) -> bool {
+        if !self.shared.is_shutting_down() {
+            return false;
+        }
         // During shutdown, no live task ownership remains in executor queues.
         debug_assert!(self.active.is_empty());
         debug_assert!(self.tasks.is_empty());

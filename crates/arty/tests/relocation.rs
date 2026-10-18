@@ -17,6 +17,45 @@ use futures::future::join_all;
 use support::JoinHandleExt as _;
 use thread_aware::{ThreadAware, ThreadBuilder};
 
+#[test]
+fn relocating_builtins_leaves_shared_source_clones_on_the_source_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (source, original, scheduler) = runtime
+        .scheduler()
+        .spawn_anywhere(
+            (),
+            |cx, ()| async move { (cx.thread().clone(), cx.clone(), cx.scheduler().clone()) },
+        )
+        .join()
+        .unwrap();
+    let (destination, relocated_scheduler) = runtime
+        .scheduler()
+        .spawn_anywhere(original.clone(), |_, relocated| async move {
+            (relocated.thread().clone(), relocated.scheduler().clone())
+        })
+        .join()
+        .unwrap();
+    assert_ne!(source, destination);
+    let original_thread = scheduler
+        .spawn(move |_| async move {
+            let original_thread = original.thread().clone();
+            assert_eq!(original_thread.id(), thread::current().id());
+            assert_eq!(
+                original.scheduler().spawn(async |_| thread::current().id()).await.unwrap(),
+                original_thread.id()
+            );
+            original_thread
+        })
+        .join()
+        .unwrap();
+    assert_eq!(original_thread, source);
+    assert_eq!(
+        relocated_scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
+        destination.id()
+    );
+    runtime.stop().unwrap();
+}
+
 #[cfg(not(miri))]
 #[test]
 fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {

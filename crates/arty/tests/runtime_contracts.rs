@@ -123,6 +123,35 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
 }
 
 #[test]
+fn worker_local_result_channels_remain_sendable_after_worker_shutdown() {
+    let runtime = runtime(2);
+    let (completed, completions) = mpsc::channel();
+    let children = (0..2)
+        .map(|_| {
+            runtime
+                .scheduler()
+                .spawn_anywhere(Unaware(completed.clone()), |cx, Unaware(completed)| async move {
+                    let child = cx.scheduler().spawn(async |_| 42);
+                    let value = child.await.unwrap();
+                    let child = cx.scheduler().spawn(move |_| {
+                        completed.send(()).unwrap();
+                        std::future::ready(value)
+                    });
+                    (child,)
+                })
+        })
+        .map(|parent| parent.join().unwrap().0)
+        .collect::<Vec<_>>();
+    for _ in &children {
+        completions.recv_timeout(TEST_TIMEOUT).unwrap();
+    }
+    runtime.stop().unwrap();
+    for child in children {
+        assert_eq!(thread::spawn(move || child.join().unwrap()).join().unwrap(), 42);
+    }
+}
+
+#[test]
 fn registered_work_and_timers_progress_while_producers_keep_submitting() {
     struct InFlight(Arc<AtomicUsize>);
 

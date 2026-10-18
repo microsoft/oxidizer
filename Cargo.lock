@@ -270,6 +270,7 @@ dependencies = [
  "ohno",
  "performables",
  "pin-project",
+ "plurality",
  "scopeguard",
  "static_assertions",
  "testing_aids",

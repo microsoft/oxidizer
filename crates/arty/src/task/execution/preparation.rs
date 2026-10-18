@@ -1,35 +1,37 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use arty_executor::remote::{Pool as RemotePool, Sender as RemoteSender};
 use arty_executor::{TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
 use observed::context::Transfer;
-use performables::arc::Arc;
 use pin_project::pin_project;
+use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
+
+thread_local! {
+    static FUTURE_FACTORIES: MultiPool = MultiPool::new();
+}
 
 #[pin_project]
 pub(crate) struct DeferredTask<FF, F> {
     factory: Option<(FF, Builtins)>,
     #[pin]
     future: Option<F>,
-    shutdown_signal: Arc<AtomicBool>,
     cancelled: bool,
 }
 
 impl<FF, F> DeferredTask<FF, F> {
-    pub(crate) fn new(factory: FF, builtins: Builtins, shutdown_signal: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(factory: FF, builtins: Builtins) -> Self {
         Self {
             factory: Some((factory, builtins)),
             future: None,
-            shutdown_signal,
             cancelled: false,
         }
     }
@@ -48,7 +50,14 @@ where
             return Poll::Pending;
         }
         if this.future.as_ref().get_ref().is_none() {
-            if this.shutdown_signal.load(Ordering::Acquire) {
+            if this
+                .factory
+                .as_ref()
+                .expect("an uninitialized deferred task retains its factory")
+                .1
+                .dispatcher()
+                .is_shutting_down()
+            {
                 *this.cancelled = true;
                 return Poll::Pending;
             }
@@ -103,22 +112,43 @@ fn discard_panicking_drop<T>(value: T) {
 /// itself must be `Send` to deliver it to the thread where the task is to be scheduled but this
 /// does not set any constraints on the future it creates - it may be single-threaded.
 ///
-/// The future factory is boxed up for transit between threads and has 'static to signal that it has
-/// no dependency on the stack of any specific thread.
+/// The factory occupies a reusable slot in the submitting thread's pool. Its owning handle can
+/// cross threads and outlive that pool, without depending on the submitting thread's stack.
 ///
 /// The factory registers the future it creates with the provided task set instead of returning it.
 /// This keeps the concrete future type visible at the point of registration, so the executor can
 /// store the future inline in its task storage pool. Returning the future would require erasing its
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
-pub(crate) type BoxedRemoteFutureFactory = Box<dyn FnOnce(Builtins, &TaskSet) + Send + 'static>;
+type ErasedRemoteFutureFactory = dyn Fn(Builtins, &TaskSet) + Send;
+
+pub(crate) struct RemoteFutureFactory {
+    inner: PoolBox<ErasedRemoteFutureFactory>,
+}
+
+impl RemoteFutureFactory {
+    pub(crate) fn new(factory: impl FnOnce(Builtins, &TaskSet) + Send + 'static) -> Self {
+        let factory = Cell::new(Some(factory));
+        // A pooled box cannot move an erased FnOnce out of its slot. Take the concrete
+        // closure through Cell instead, without requiring its captures to be Unpin.
+        let factory = move |builtins: Builtins, tasks: &TaskSet| {
+            factory.take().expect("a remote factory is registered exactly once")(builtins, tasks);
+        };
+        Self {
+            inner: FUTURE_FACTORIES.with(|pool| PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))),
+        }
+    }
+
+    pub(crate) fn register(self, builtins: Builtins, tasks: &TaskSet) {
+        (self.inner)(builtins, tasks);
+    }
+}
 
 pub(crate) fn prepare_remote<FF, F, R>(
     result_pool: &RemotePool,
     future_factory: FF,
     parent_task_enrichment: Option<Transfer>,
     placement: TaskPlacement,
-    shutdown_signal: Arc<AtomicBool>,
-) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
+) -> (RemoteFutureFactory, JoinHandle<R>)
 where
     FF: FnOnce(Builtins) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
@@ -126,10 +156,10 @@ where
 {
     let (result_tx, result_rx) = result_pool.channel();
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
-    let future_factory: BoxedRemoteFutureFactory = Box::new(move |cx, tasks| {
+    let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let inner = DeferredTask::new(future_factory, cx, shutdown_signal);
+        let inner = DeferredTask::new(future_factory, cx);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
@@ -190,6 +220,7 @@ mod tests {
     use std::pin::pin;
     use std::rc::Rc;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Wake, Waker};
 
     use arty_executor::{CycleOutcome, Executor};
@@ -203,6 +234,20 @@ mod tests {
         let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
         let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
         (runtime, builtins)
+    }
+
+    #[test]
+    fn remote_factory_reuses_its_pool_slot() {
+        fn factory(_: Builtins, _: &TaskSet) {}
+
+        let first = RemoteFutureFactory::new(factory);
+        let address = std::ptr::from_ref(&*first.inner).cast::<()>();
+        let chunks = FUTURE_FACTORIES.with(MultiPool::chunks_allocated);
+        drop(first);
+        let second = RemoteFutureFactory::new(factory);
+
+        assert_eq!(std::ptr::from_ref(&*second.inner).cast::<()>(), address);
+        assert_eq!(FUTURE_FACTORIES.with(MultiPool::chunks_allocated), chunks);
     }
 
     #[test]
@@ -225,12 +270,11 @@ mod tests {
             },
             Some(sink.transfer_context()),
             TaskPlacement::Any,
-            performables::arc::Arc::new(AtomicBool::new(false)),
         );
 
         let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
-        factory(builtins, &executor.tasks());
+        factory.register(builtins, &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
         run_to_completion(&mut executor);
         let result = block_on(handle).unwrap();
@@ -243,14 +287,13 @@ mod tests {
         let (runtime, builtins) = test_builtins();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
-        let shutdown = performables::arc::Arc::new(AtomicBool::new(true));
+        crate::runtime::RuntimeOperations::from(&builtins).request_stop();
         let mut task = pin!(DeferredTask::new(
             move |_| {
                 factory_invoked.store(true, Ordering::Release);
                 std::future::ready(())
             },
             builtins,
-            shutdown,
         ));
         let mut cx = Context::from_waker(Waker::noop());
 
@@ -303,11 +346,10 @@ mod tests {
             |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
             Some(sink.transfer_context()),
             TaskPlacement::Any,
-            performables::arc::Arc::new(AtomicBool::new(false)),
         );
         let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
-        factory(builtins, &executor.tasks());
+        factory.register(builtins, &executor.tasks());
         run_to_completion(&mut executor);
         assert!(block_on(handle).unwrap_err().is_panic());
     }
