@@ -32,14 +32,6 @@ impl TaskRef {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn mock() -> Self {
-        use crate::MockTypeErasedTask;
-
-        let pool = plurality::Pool::new();
-        Self::new(pool.alloc_arc_pin(MockTypeErasedTask::new()))
-    }
-
     pub(crate) fn pointer(&self) -> TaskPointer {
         self.pointer
     }
@@ -140,12 +132,12 @@ mod tests {
     use plurality::MultiPool;
 
     use super::*;
-    use crate::MockTypeErasedTask;
+    use crate::testing::new_test_task;
 
     #[test]
     fn raw_ownership_round_trip_preserves_identity() {
         let pool = MultiPool::new();
-        let task_ref = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
+        let task_ref = TaskRef::new(pool.alloc_arc_pin(new_test_task()));
         let pointer = task_ref.pointer();
         let owned = task_ref.into_owned_pointer();
         assert_eq!(owned, pointer);
@@ -157,8 +149,8 @@ mod tests {
     #[test]
     fn different_task_pointers_are_not_equal() {
         let pool = MultiPool::new();
-        let task_ref1 = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
-        let task_ref2 = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
+        let task_ref1 = TaskRef::new(pool.alloc_arc_pin(new_test_task()));
+        let task_ref2 = TaskRef::new(pool.alloc_arc_pin(new_test_task()));
 
         assert_ne!(task_ref1.pointer(), task_ref2.pointer());
 
