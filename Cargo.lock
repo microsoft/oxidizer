@@ -302,6 +302,7 @@ dependencies = [
  "scopeguard",
  "static_assertions",
  "testing_aids",
+ "thread_aware_core",
  "tick",
 ]
 

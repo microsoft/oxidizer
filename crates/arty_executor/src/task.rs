@@ -585,8 +585,18 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
+    use crate::TaskRef;
     use crate::remote::Pool as RemotePool;
     use crate::testing::TestSubjectFuture;
+
+    fn fake_wake_owner() -> TaskRef {
+        // SAFETY: Tests use the allocation only as stable task identity.
+        unsafe { TaskRef::fake() }
+    }
+
+    fn fake_wake_signal(owner: &TaskRef) -> WakeSignal {
+        WakeSignal::new_for_test(Waker::noop().clone(), owner)
+    }
 
     struct PinnedDropFuture {
         polled_at: Cell<*const Self>,
@@ -616,6 +626,7 @@ mod tests {
     }
 
     fn check_pinned_future_destruction(completes: bool) {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
         let dropped = Rc::new(Cell::new(false));
@@ -629,7 +640,7 @@ mod tests {
             tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         let result = task.poll();
         if completes {
@@ -652,13 +663,12 @@ mod tests {
 
     #[test]
     fn clear_queued_notification_forwards_to_the_wake_signal() {
+        let fake_task_ref = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let task = pin!(Task::new(pending::<u64>(), tx));
         let task = task.as_ref();
-        // SAFETY: Tests use this only as an opaque identity.
-        let fake_task_ref = unsafe { crate::TaskRef::fake() };
-        let signal = WakeSignal::new_for_test(Waker::noop().clone(), fake_task_ref);
+        let signal = WakeSignal::new_for_test(Waker::noop().clone(), &fake_task_ref);
         task.initialize(signal);
         // SAFETY: Initialization populated the pinned wake-signal slot.
         let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
@@ -759,6 +769,7 @@ mod tests {
 
     #[test]
     fn smoke_test() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
@@ -767,7 +778,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert!(task.has_payload());
 
@@ -787,6 +798,7 @@ mod tests {
 
     #[test]
     fn observed_task_reports_aggregate_poll_count_on_completion() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let (sink, processor) = test_emitter(TEST_ID);
@@ -808,7 +820,7 @@ mod tests {
             sink,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
@@ -822,6 +834,7 @@ mod tests {
 
     #[test]
     fn observed_remote_panic_reports_aggregate_poll_count() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let polls = Rc::new(Cell::new(0));
@@ -839,7 +852,7 @@ mod tests {
             result_tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
@@ -861,6 +874,7 @@ mod tests {
 
     #[test]
     fn cancellation_emits_no_terminal_task_event() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let (sink, processor) = test_emitter(TEST_ID);
@@ -871,7 +885,7 @@ mod tests {
             sink,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
         task.abort();
@@ -896,13 +910,14 @@ mod tests {
 
     #[test]
     fn cancellation_join_notification_panic_is_not_reported_as_a_task_panic() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let waker = Waker::from(Arc::new(PanickingJoinWake));
         assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());
         let task = pin!(Task::new_remote(pending::<u64>(), TaskOptions::default(), sink, result_tx));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
         task.abort();
@@ -914,19 +929,21 @@ mod tests {
 
     #[test]
     fn local_completion_notification_panic_follows_fail_fast_path() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (result_tx, mut result_rx) = event_pool.rent();
         let waker = Waker::from(Arc::new(PanickingJoinWake));
         assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());
         let task = pin!(Task::new(std::future::ready(42), result_tx));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
     }
 
     #[test]
     fn remote_poll_and_destructor_panics_are_both_contained() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let task = pin!(Task::new_remote(
             PanicOnPollAndDropFuture,
@@ -935,7 +952,7 @@ mod tests {
             result_tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert!(task.poll().is_ready());
 
@@ -948,6 +965,7 @@ mod tests {
 
     #[test]
     fn plain_task_panic_remains_unhandled() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<()>::new();
         let (tx, mut rx) = event_pool.rent();
         let task = pin!(Task::new(
@@ -957,7 +975,7 @@ mod tests {
             tx
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
         assert!(task.has_payload());
@@ -995,6 +1013,7 @@ mod tests {
         use std::cell::RefCell;
         use std::future::poll_fn;
 
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1016,7 +1035,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         // Each poll will stash a waker.
         _ = task.poll();
@@ -1040,6 +1059,7 @@ mod tests {
 
     #[test]
     fn future_and_event_dropped_after_abort() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
@@ -1051,7 +1071,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         task.abort();
 
@@ -1066,6 +1086,7 @@ mod tests {
 
     #[test]
     fn future_dropped_after_poll_complete() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1077,7 +1098,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         let result = task.poll();
         assert!(matches!(result, task::Poll::Ready(())));
@@ -1088,13 +1109,14 @@ mod tests {
 
     #[test]
     fn panic_while_dropping_completed_future_is_contained() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
         let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
 
@@ -1105,13 +1127,14 @@ mod tests {
 
     #[test]
     fn panic_while_dropping_aborted_future_is_contained() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
         let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.abort());
 
@@ -1122,6 +1145,7 @@ mod tests {
 
     #[test]
     fn poll_after_complete_panics() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1130,7 +1154,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         // The future is a trivial one that completes on the first poll.
         let task_result = task.poll();

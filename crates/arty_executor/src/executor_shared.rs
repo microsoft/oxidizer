@@ -5,8 +5,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::task::Waker;
+use std::thread::ThreadId;
 
 use observed::Sink;
 use plurality::MultiPool;
@@ -27,12 +27,12 @@ struct ExecutorSharedInner {
     task_count: Cell<usize>,
     join_events: JoinEventLake,
     shutting_down: Cell<bool>,
-    wake: Arc<WakeShared>,
+    wake: WakeShared,
     sink: Sink,
 }
 
 impl ExecutorShared {
-    pub(crate) fn new(owner_waker: Waker, sink: Sink) -> Self {
+    pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId) -> Self {
         Self {
             inner: Rc::new(ExecutorSharedInner {
                 new_tasks: RefCell::new(VecDeque::new()),
@@ -40,7 +40,7 @@ impl ExecutorShared {
                 task_count: Cell::new(0),
                 join_events: JoinEventLake::new(),
                 shutting_down: Cell::new(false),
-                wake: Arc::new(WakeShared::new(owner_waker)),
+                wake: WakeShared::new(owner_waker, thread_id),
                 sink,
             }),
         }
@@ -48,10 +48,6 @@ impl ExecutorShared {
 
     pub(crate) fn wake(&self) -> &WakeShared {
         &self.inner.wake
-    }
-
-    pub(crate) fn wake_handle(&self) -> Arc<WakeShared> {
-        Arc::clone(&self.inner.wake)
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -149,7 +145,7 @@ impl ExecutorShared {
         }
         let (task, output) = create(&self.inner.join_events, self.inner.sink.clone());
         let task_ref = TaskRef::new(self.inner.task_storage.alloc_arc_pin(task));
-        let wake_signal = WakeSignal::new(Arc::clone(&self.inner.wake), task_ref.pointer());
+        let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_ref.pointer());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.
         let task = unsafe { task_ref.as_task() };

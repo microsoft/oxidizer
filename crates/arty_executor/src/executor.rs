@@ -131,7 +131,7 @@ impl Executor {
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        struct ClearRegistration(std::sync::Arc<WakeShared>);
+        struct ClearRegistration(WakeShared);
 
         impl Drop for ClearRegistration {
             fn drop(&mut self) {
@@ -139,7 +139,7 @@ impl Drop for Executor {
             }
         }
 
-        let _clear_registration = ClearRegistration(self.core.wake_handle());
+        let _clear_registration = ClearRegistration(self.core.wake().clone());
         self.core.owner_dropped();
     }
 }
