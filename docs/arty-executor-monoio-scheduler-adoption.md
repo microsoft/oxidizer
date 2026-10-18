@@ -52,8 +52,7 @@ hashing, and context manipulation on elementary task and wake paths.
 
 `ExecutorCore` directly owns `ExclusiveState`, including:
 
-- active and completed task queues;
-- TLS wake-batch scratch storage;
+- the active task queue;
 - the intrusive pending-task inventory;
 - cycle clock and metrics state.
 
@@ -133,6 +132,11 @@ TLS `VecDeque`.
 The executor appends that queue directly to the active queue once per cycle,
 records the appended range, and releases the TLS borrow before clearing each
 task's notification state. No second owner scratch queue is required.
+
+Completed tasks are released immediately after their inline wake state and
+payload retire. Shutdown reuses the active queue as its temporary cancellation
+batch after releasing reentrant submission state, so no completed-task scratch
+queue is required either.
 
 TLS also tracks whether the owner is currently executing a cycle. A self-wake
 while already polling queues work but does not redundantly wake `WorkerSignal`.
@@ -361,6 +365,14 @@ Removed as unnecessary test-only architecture. Standalone wake tests now use
 the same TLS FIFO as production, with a small test constructor retaining the
 fake task allocation. This removes the alternate `AwakenedQueue` type, mutex,
 constructor shape, and fallback branches from production-adjacent code.
+
+### Owner scratch queues
+
+The TLS wake scratch queue and completed-task queue were removed after review.
+TLS wakes append directly to the active queue, and shutdown reuses the active
+queue for cancellation. Elementary benchmarks remained stable, while
+self-waking cases removed one measured allocation after completed tasks began
+releasing immediately.
 
 ### Separate `Cell<bool>` shutdown flag
 
