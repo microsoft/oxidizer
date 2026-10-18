@@ -254,7 +254,7 @@ impl AsyncWorker {
             match command_rx.try_recv() {
                 Ok(command) => match command {
                     AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                        future_factory.into_inner()(builtins.clone(), &self.tasks);
+                        future_factory.into_inner().register(builtins.clone(), &self.tasks);
                     }
                     AsyncWorkerCommand::AccessIo { access } => {
                         access.into_inner()(builtins);
@@ -336,7 +336,7 @@ mod tests {
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
-    use crate::task::execution::BoxedRemoteFutureFactory;
+    use crate::task::execution::RemoteFutureFactory;
 
     #[test]
     fn suspend_budget_requires_suspend_outcome_and_non_exhausted_batch() {
@@ -569,7 +569,7 @@ mod tests {
         }
     }
 
-    fn enqueue(factory: BoxedRemoteFutureFactory) -> AsyncWorkerCommand {
+    fn enqueue(factory: RemoteFutureFactory) -> AsyncWorkerCommand {
         AsyncWorkerCommand::EnqueueTask {
             future_factory: crate::runtime::worker::protocol::QueuedTaskFactory::new(factory),
         }
@@ -643,7 +643,7 @@ mod tests {
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {
-        enqueue(Box::new(move |_, _| {
+        enqueue(RemoteFutureFactory::new(move |_, _| {
             processed.fetch_add(1, Ordering::Relaxed);
             sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
         }))
@@ -756,7 +756,7 @@ mod tests {
                 let forbidden_after_queued_shutdown = self.queued_shutdown;
                 if self
                     .command_tx
-                    .send(enqueue(Box::new(move |_, _| {
+                    .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                         invocations.fetch_add(1, Ordering::Relaxed);
                         if forbidden_after_queued_shutdown {
                             forbidden.fetch_add(1, Ordering::Relaxed);
@@ -919,7 +919,7 @@ mod tests {
         assert!(!signal.is_notified());
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            command_tx.send(enqueue(Box::new(|_, _| {}))).unwrap();
+            command_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1027,7 +1027,7 @@ mod tests {
             let (inner_completed_tx, inner_completed_rx) = Event::boxed();
 
             command_tx
-                .send(enqueue(Box::new({
+                .send(enqueue(RemoteFutureFactory::new({
                     move |_: Builtins, tasks: &TaskSet| {
                         drop(tasks.add_test(async move {
                             inner_completed_tx.send(());
@@ -1079,7 +1079,7 @@ mod tests {
             });
 
             command_tx
-                .send(enqueue(Box::new({
+                .send(enqueue(RemoteFutureFactory::new({
                     move |_: Builtins, tasks: &TaskSet| {
                         drop(tasks.add_test(async move {
                             spawned_completed_tx.send(());
@@ -1133,7 +1133,7 @@ mod tests {
         let (completed_tx, completed_rx) = Event::boxed();
 
         // We ignore the result because the worker is shutting down and the channel might be closed already.
-        let _ = command_tx.send(enqueue(Box::new({
+        let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
             move |_: Builtins, tasks: &TaskSet| {
                 drop(tasks.add_test(async move {
                     completed_tx.send(14);
@@ -1163,7 +1163,7 @@ mod tests {
         );
 
         command_tx
-            .send(enqueue(Box::new(move |_, tasks| {
+            .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
                 drop(tasks.add_test(async move {
                     invoked_by_task.store(true, Ordering::Relaxed);
                 }));
@@ -1248,7 +1248,7 @@ mod tests {
             let invoked = Arc::clone(&invoked);
             let shutdown_signal = Arc::clone(&shutdown_signal);
             command_tx
-                .send(enqueue(Box::new(move |_, tasks| {
+                .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown_signal.store(true, Ordering::Release);
                     }

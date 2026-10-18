@@ -6,6 +6,7 @@
 use observed::Sink;
 #[cfg(debug_assertions)]
 use observed::emit;
+use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
@@ -52,7 +53,12 @@ use crate::task::scheduler::Scheduler;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Builtins {
-    pub(crate) scheduler: Scheduler,
+    inner: Arc<BuiltinsInner>,
+}
+
+#[derive(Debug, Clone)]
+struct BuiltinsInner {
+    scheduler: Scheduler,
     control: RuntimeControl,
     thread: Thread,
     clock: Clock,
@@ -88,7 +94,7 @@ impl Builtins {
     pub fn scheduler(&self) -> &Scheduler {
         self.validate();
 
-        &self.scheduler
+        &self.inner.scheduler
     }
 
     /// Returns runtime-wide control available to this task.
@@ -101,7 +107,7 @@ impl Builtins {
     pub fn control(&self) -> &RuntimeControl {
         self.validate();
 
-        &self.control
+        &self.inner.control
     }
 
     /// Returns the associated worker's coordinate, including its NUMA locality.
@@ -125,7 +131,7 @@ impl Builtins {
     pub fn thread(&self) -> &Thread {
         self.validate();
 
-        &self.thread
+        &self.inner.thread
     }
 
     /// Returns the associated worker's clock.
@@ -152,7 +158,7 @@ impl Builtins {
     pub fn clock(&self) -> &Clock {
         self.validate();
 
-        &self.clock
+        &self.inner.clock
     }
 
     /// Returns access to I/O contexts hosted by this runtime.
@@ -160,7 +166,7 @@ impl Builtins {
     #[inline]
     pub fn io(&self) -> &Io {
         self.validate();
-        &self.io
+        &self.inner.io
     }
 
     /// Returns this runtime's telemetry sink.
@@ -191,17 +197,17 @@ impl Builtins {
     pub fn sink(&self) -> &Sink {
         self.validate();
 
-        &self.sink
+        &self.inner.sink
     }
 
     #[cfg_attr(test, mutants::skip)]
     #[cfg(debug_assertions)]
     fn validate(&self) {
         let thread = std::thread::current();
-        if thread.id() != self.thread.id() {
+        if thread.id() != self.inner.thread.id() {
             let backtrace = std::backtrace::Backtrace::capture();
             emit!(
-                &self.sink,
+                &self.inner.sink,
                 BuiltinsThreadMismatch {
                     name: ThreadName::new(thread.name().unwrap_or_default()),
                     id: thread.id().into(),
@@ -222,34 +228,41 @@ impl Builtins {
 
 impl ThreadAware for Builtins {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        if self.thread == *destination {
+        if self.inner.thread == *destination {
             return;
         }
 
         // The scheduler validates runtime ownership before resolving a worker.
-        let Some(worker_index) = self.scheduler.resolve_worker_index(destination) else {
+        let Some(worker_index) = self.inner.scheduler.resolve_worker_index(destination) else {
             return;
         };
-        let source = self.thread.clone();
+        let inner = Arc::make_mut(&mut self.inner);
+        let source = inner.thread.clone();
 
-        self.scheduler.relocate_to_worker(destination, worker_index);
-        self.thread = destination.clone();
-        self.clock.relocate(Some(&source), destination);
-        self.io.relocate(Some(&source), destination);
-        self.sink.relocate(Some(&source), destination);
+        inner.scheduler.relocate_to_worker(destination, worker_index);
+        inner.thread = destination.clone();
+        inner.clock.relocate(Some(&source), destination);
+        inner.io.relocate(Some(&source), destination);
+        inner.sink.relocate(Some(&source), destination);
     }
 }
 
 impl Builtins {
     pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
         Self {
-            scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
-            control: RuntimeControl::new(dispatcher),
-            thread,
-            clock,
-            io,
-            sink,
+            inner: Arc::new(BuiltinsInner {
+                scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
+                control: RuntimeControl::new(dispatcher),
+                thread,
+                clock,
+                io,
+                sink,
+            }),
         }
+    }
+
+    pub(crate) fn dispatcher(&self) -> &DispatcherClient {
+        &self.inner.scheduler.dispatcher
     }
 }
 

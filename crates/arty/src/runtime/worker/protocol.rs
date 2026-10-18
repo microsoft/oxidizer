@@ -7,7 +7,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::discard_task_panic_payload;
 
 use crate::task::Builtins;
-use crate::task::execution::BoxedRemoteFutureFactory;
+use crate::task::execution::RemoteFutureFactory;
 
 pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
 
@@ -45,7 +45,7 @@ impl<T> Drop for QueuedClosure<T> {
 /// The closure includes every unregistered capture, such as the user's factory and its result
 /// sender. Captured endpoints retain their own disposal guards for paths that do not pass through
 /// this wrapper.
-pub(crate) type QueuedTaskFactory = QueuedClosure<BoxedRemoteFutureFactory>;
+pub(crate) type QueuedTaskFactory = QueuedClosure<RemoteFutureFactory>;
 
 /// Owns a synchronous I/O access closure until the destination worker invokes it.
 pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
@@ -124,11 +124,11 @@ mod tests {
         let executor = Executor::builder().build();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
-        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+        let factory = RemoteFutureFactory::new(move |_, _| {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        QueuedTaskFactory::new(factory).into_inner()(builtins, &executor.tasks());
+        QueuedTaskFactory::new(factory).into_inner().register(builtins, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -138,13 +138,7 @@ mod tests {
     fn queued_factory_disposal_contains_join_notification_panic() {
         let sink = Sink::noop();
         let result_pool = arty_executor::remote::Pool::new();
-        let (factory, join) = prepare_remote(
-            &result_pool,
-            |_| async { 42 },
-            Some(sink.transfer_context()),
-            TaskPlacement::Any,
-            performables::arc::Arc::new(AtomicBool::new(false)),
-        );
+        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, Some(sink.transfer_context()), TaskPlacement::Any);
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));
@@ -163,7 +157,7 @@ mod tests {
     fn queued_factory_disposal_contains_captured_destructor_panic() {
         let drops = Arc::new(AtomicUsize::new(0));
         let capture = PanicOnDrop(Arc::clone(&drops));
-        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+        let factory = RemoteFutureFactory::new(move |_, _| {
             let _ = &capture;
         });
 
