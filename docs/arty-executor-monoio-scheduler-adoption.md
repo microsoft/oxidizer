@@ -644,6 +644,43 @@ One drop guard keeps owner-thread cancellation and TLS unregistration
 unwind-safe, without retaining a second state-owning executor type.
 The public task, cycle and shutdown APIs are unchanged.
 
+### Unsafe reduction passes
+
+Three subsequent passes reduce authored unsafe blocks from 55 to 42, unsafe
+functions from 7 to 6, and manual unsafe implementations from 7 to 4. These
+counts include test code and exclude macro-generated and dependency code.
+
+- Wake metadata now uses `OnceCell` instead of a manually initialized
+  `UnsafeCell<Option<WakeSignal>>`. Its one-time initialization is checked by
+  the standard library, while the stable pinned borrow remains an explicit
+  ownership invariant.
+- Future storage uses checked `pin-project` projection and pinned `Option`
+  replacement instead of manual drop flags and unchecked mutable projection.
+  The previously unused dependency is reintroduced for this concrete purpose.
+  Tests verify pinned addresses and exact-once destruction even when a future
+  destructor panics.
+- Remote notifications carry only their existing owning `TaskRef`. The owner
+  promotes the notification and transfers that reference into the local queue,
+  avoiding a separate raw signal pointer, a manual `Send` implementation, and
+  an extra retain/release pair. Tests cover mixed consuming/borrowed wakes,
+  duplicate suppression, and first-notification ordering.
+- Intrusive-list tests use real pooled tasks instead of a fixture requiring
+  unsafe thread-safety implementations; a redundant unsafe test helper is
+  removed.
+
+The changes pass 280 scoped native tests, 90 executor Miri tests, workspace
+Anvil Clippy, formatting, README generation and spelling. Warmed release task
+paths remain allocation-free, and all seven elementary allocation probes keep
+the same allocation counts and byte totals.
+
+Three interleaved broad runs against `e1e8118b` measured eight-worker cache
+batches at 36.18 us before and 35.11 us after, and retained-waker batches at
+31.93 us before and 31.39 us after. Some elementary medians increased: borrowed
+self-wake +5.7%, cloned self-wake +8.2%, clone-during-poll +6.3%, and retired
+wake +11.9% (0.26 ns absolute). Late-run outliers, including Tokio controls,
+and a power-state change limit interpretation. These results are not a claim
+of performance equivalence; longer confirmation was not completed.
+
 ## Initial executor validation
 
 Executed locally:
