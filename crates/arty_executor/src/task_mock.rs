@@ -6,7 +6,7 @@ use std::task;
 
 use mockall::mock;
 
-use crate::{TaskCreatedReporter, TaskOptions, TypeErasedTask, WakeSignal};
+use crate::{TaskCreatedReporter, TaskLinks, TaskOptions, TypeErasedTask, WakeSignal};
 
 // Mockall is not able to express all methods on the trait (due to generics deficiency), so we mock
 // similar-enough methods that it does know how to mock and simply call these from a manual
@@ -15,8 +15,6 @@ mock! {
     #[derive(Debug)]
     pub TypeErasedTask {
         fn poll(self: Pin<&Self>) -> task::Poll<()>;
-        fn consume_awakened(&self) -> bool;
-        fn is_awakened(&self) -> bool;
         fn abort(self: Pin<&Self>);
         fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
         // Intentionally missing: inspect_waker_backtraces
@@ -28,16 +26,12 @@ impl TypeErasedTask for MockTypeErasedTask {
         self.poll()
     }
 
-    fn created_reporter(&self) -> TaskCreatedReporter {
+    fn created_reporter(&self) -> Option<TaskCreatedReporter> {
         TaskOptions::default().created_reporter(observed::Sink::noop())
     }
 
-    fn consume_awakened(&self) -> bool {
-        self.consume_awakened()
-    }
-
-    fn is_awakened(&self) -> bool {
-        self.is_awakened()
+    fn links(&self) -> &TaskLinks {
+        panic!("mock task links are not used")
     }
 
     fn clear_queued_notification(&self) {}

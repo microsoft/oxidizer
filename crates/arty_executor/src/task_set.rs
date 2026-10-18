@@ -4,7 +4,7 @@
 use std::rc::{Rc, Weak};
 
 use crate::remote::Sender as RemoteSender;
-use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
+use crate::{ExecutorShared, JoinEventLake, JoinHandle, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -16,7 +16,7 @@ use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
 pub struct TaskSet {
     // We only keep a weak reference, so even if the owner of this type does something odd, we do
     // not extend the lifetime of the `Executor`, which is governed by the `Executor` owner.
-    core: Weak<ExecutorCore>,
+    core: Weak<ExecutorShared>,
 
     // Retained independently so submissions after executor drop can still produce a valid
     // disconnected join handle.
@@ -24,7 +24,7 @@ pub struct TaskSet {
 }
 
 impl TaskSet {
-    pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
+    pub(crate) fn new(core: &Rc<ExecutorShared>) -> Self {
         Self {
             core: Rc::downgrade(core),
             join_events: core.join_event_lake(),

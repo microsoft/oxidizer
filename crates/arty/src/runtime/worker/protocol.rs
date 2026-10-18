@@ -141,7 +141,7 @@ mod tests {
         let (factory, join) = prepare_remote(
             &result_pool,
             |_| async { 42 },
-            sink.transfer_context(),
+            Some(sink.transfer_context()),
             TaskPlacement::Any,
             performables::arc::Arc::new(AtomicBool::new(false)),
         );

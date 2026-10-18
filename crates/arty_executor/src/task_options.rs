@@ -77,20 +77,24 @@ impl TaskOptions {
         f()
     }
 
-    pub(crate) fn created_reporter(&self, sink: Sink) -> TaskCreatedReporter {
-        TaskCreatedReporter {
+    pub(crate) fn created_reporter(&self, sink: Sink) -> Option<TaskCreatedReporter> {
+        (!sink.is_noop()).then(|| TaskCreatedReporter {
             context: self.context.clone(),
             placement: self.placement,
             sink,
-        }
+        })
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_succeeded(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_succeeded(sink, polls));
+        }
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_panicked(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_panicked(sink, polls));
+        }
     }
 }
 
