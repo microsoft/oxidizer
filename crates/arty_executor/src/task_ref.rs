@@ -1,29 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::ptr::{self, NonNull};
 
-use plurality::{Box as PoolBox, coerce};
+use plurality::{Arc as PoolArc, coerce};
 
 use crate::TypeErasedTask;
 
 /// Allows a task to be referenced by the executor and its resources released, without knowing
 /// the exact type of the task, only that it implements [`TypeErasedTask`].
 ///
-/// This acts like a super-powered pointer and enforces no ownership semantics - the caller is
-/// responsible for not using it once the task has been dropped.
-#[derive(Copy, Clone, Debug)]
+/// Clones retain the pinned pooled task allocation. Task methods remain owner-thread-only even
+/// when a waker or remote notification carries a strong reference across threads.
+#[derive(Clone)]
 pub(crate) struct TaskRef {
-    inner: NonNull<dyn TypeErasedTask>,
+    inner: Pin<PoolArc<dyn TypeErasedTask>>,
 }
 
 impl TaskRef {
-    pub(crate) fn new<T: TypeErasedTask + 'static>(inner: PoolBox<T>) -> Self {
-        let inner: PoolBox<dyn TypeErasedTask> = PoolBox::unsize(inner, coerce!(dyn TypeErasedTask));
+    pub(crate) fn new<T: TypeErasedTask + 'static>(inner: Pin<PoolArc<T>>) -> Self {
         Self {
-            inner: PoolBox::into_raw(inner),
+            inner: PoolArc::unsize_pin(inner, coerce!(dyn TypeErasedTask)),
         }
     }
 
@@ -37,14 +35,24 @@ impl TaskRef {
     pub(crate) unsafe fn fake() -> Self {
         use crate::MockTypeErasedTask;
 
-        let inner = NonNull::<MockTypeErasedTask>::dangling().as_ptr();
-        let inner: *mut dyn TypeErasedTask = inner;
+        let pool = plurality::Pool::new();
+        Self::new(pool.alloc_arc_pin(MockTypeErasedTask::new()))
+    }
 
-        // SAFETY: The typed dangling pointer is non-null, and the coercion above supplies valid
-        // trait-object metadata. The resulting pointer remains a placeholder and is never
-        // dereferenced or released.
-        let inner = unsafe { NonNull::new_unchecked(inner) };
-        Self { inner }
+    pub(crate) fn pointer(&self) -> TaskPointer {
+        TaskPointer {
+            inner: NonNull::from(&*self.inner),
+        }
+    }
+
+    pub(crate) fn into_owned_pointer(self) -> TaskPointer {
+        let Self { inner } = self;
+        // SAFETY: Extracting the Arc handle does not move or expose mutable access to its pinned
+        // pointee. Ownership immediately transfers into the raw strong pointer.
+        let inner = unsafe { Pin::into_inner_unchecked(inner) };
+        TaskPointer {
+            inner: PoolArc::into_raw(inner),
+        }
     }
 
     /// # Safety
@@ -58,94 +66,97 @@ impl TaskRef {
     /// The caller must guarantee that the referenced task is still alive.
     #[must_use]
     pub(crate) unsafe fn as_task(&self) -> Pin<&dyn TypeErasedTask> {
-        // SAFETY: Forwarding safety guarantees from the caller.
-        let task = unsafe { self.inner.as_ref() };
-
-        // SAFETY: Our tasks are always pinned, they just lose this metadata in their pointer form.
-        unsafe { Pin::new_unchecked(task) }
-    }
-
-    /// Drops the task and returns its slot to the pool.
-    ///
-    /// # Safety
-    ///
-    /// This may only be called on the same thread as the task was created on. That is, the
-    /// `TaskRef` may be passed from thread to thread but has to end up back on its original
-    /// thread to actually be used.
-    ///
-    /// The caller must ensure this is called exactly once for the referenced task and that no
-    /// references to it remain.
-    pub(crate) unsafe fn release(self) {
-        // SAFETY: Forwarding the caller's guarantee that this is the original raw pointer and is
-        // reconstructed exactly once after all references have expired.
-        drop(unsafe { PoolBox::<dyn TypeErasedTask>::from_raw(self.inner) });
+        self.inner.as_ref()
     }
 }
 
-// SAFETY: It is permissible to send `TaskRef` between threads for the purpose of passing the
-// reference around. However, methods must only be called on the original thread the task
-// was created on.
-unsafe impl Send for TaskRef {}
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TaskPointer {
+    inner: NonNull<dyn TypeErasedTask>,
+}
 
-impl PartialEq for TaskRef {
-    #[cfg_attr(test, mutants::skip)] // Liable to cause test timeouts, as collection logic gets wonky.
+impl TaskPointer {
+    pub(crate) unsafe fn increment_strong(self) {
+        // SAFETY: Forwarding the caller's live-allocation guarantee.
+        unsafe { PoolArc::<dyn TypeErasedTask>::increment_strong_count(self.inner) };
+    }
+
+    pub(crate) unsafe fn release_strong(self) {
+        // SAFETY: Forwarding the caller's ownership of exactly one raw strong reference.
+        unsafe { PoolArc::<dyn TypeErasedTask>::decrement_strong_count(self.inner) };
+    }
+
+    pub(crate) unsafe fn from_owned(self) -> TaskRef {
+        // SAFETY: Forwarding the caller's ownership of exactly one raw strong reference.
+        let inner = unsafe { PoolArc::<dyn TypeErasedTask>::from_raw(self.inner) };
+        // SAFETY: The task was pinned before its pointer was published and remains immovable.
+        let inner = unsafe { Pin::new_unchecked(inner) };
+        TaskRef { inner }
+    }
+
+    #[must_use]
+    pub(crate) unsafe fn as_task(&self) -> Pin<&dyn TypeErasedTask> {
+        // SAFETY: Forwarding the caller's owner-thread and live-allocation guarantees.
+        let task = unsafe { self.inner.as_ref() };
+        // SAFETY: Published task allocations are pinned for their entire lifetime.
+        unsafe { Pin::new_unchecked(task) }
+    }
+
+    pub(crate) unsafe fn retain(self) -> TaskRef {
+        // SAFETY: Forwarding the caller's live-allocation guarantee.
+        unsafe { self.increment_strong() };
+        // SAFETY: The increment above created exactly one raw strong reference.
+        unsafe { self.from_owned() }
+    }
+}
+
+// SAFETY: The pointer is dereferenced only through an unsafe owner-thread operation. Remote
+// threads use it solely as stable identity while a strong pooled owner keeps the allocation live.
+unsafe impl Send for TaskPointer {}
+// SAFETY: Same invariant as `Send`.
+unsafe impl Sync for TaskPointer {}
+
+impl PartialEq for TaskPointer {
     fn eq(&self, other: &Self) -> bool {
         ptr::addr_eq(self.inner.as_ptr(), other.inner.as_ptr())
     }
 }
 
-impl Eq for TaskRef {}
+impl Eq for TaskPointer {}
 
-impl Hash for TaskRef {
-    #[cfg_attr(test, mutants::skip)] // Liable to cause test timeouts, as collection logic gets wonky.
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.inner.as_ptr().cast::<()>().hash(state);
+impl std::fmt::Debug for TaskRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("TaskRef").field(&self.pointer()).finish()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::hash::DefaultHasher;
-
     use plurality::MultiPool;
 
     use super::*;
     use crate::MockTypeErasedTask;
 
     #[test]
-    fn same_task_refs_eq() {
+    fn raw_ownership_round_trip_preserves_identity() {
         let pool = MultiPool::new();
-        let task_ref1 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
-        let task_ref2 = task_ref1;
-
-        assert_eq!(task_ref1, task_ref2);
-
-        // Their hashes must also be equal.
-        let mut hasher1 = DefaultHasher::new();
-        task_ref1.hash(&mut hasher1);
-        let hash1 = hasher1.finish();
-
-        let mut hasher2 = DefaultHasher::new();
-        task_ref2.hash(&mut hasher2);
-        let hash2 = hasher2.finish();
-
-        assert_eq!(hash1, hash2);
-
-        // SAFETY: This is the only release of the pooled task and no references remain.
-        unsafe { task_ref1.release() };
+        let task_ref = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
+        let pointer = task_ref.pointer();
+        let owned = task_ref.into_owned_pointer();
+        assert_eq!(owned, pointer);
+        // SAFETY: `into_owned_pointer` transferred exactly one strong reference.
+        drop(unsafe { owned.from_owned() });
+        assert!(pool.is_empty());
     }
 
     #[test]
-    fn different_task_refs_not_eq() {
+    fn different_task_pointers_are_not_equal() {
         let pool = MultiPool::new();
-        let task_ref1 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
-        let task_ref2 = TaskRef::new(pool.alloc_box(MockTypeErasedTask::new()));
+        let task_ref1 = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
+        let task_ref2 = TaskRef::new(pool.alloc_arc_pin(MockTypeErasedTask::new()));
 
-        assert_ne!(task_ref1, task_ref2);
+        assert_ne!(task_ref1.pointer(), task_ref2.pointer());
 
-        // SAFETY: The first pooled task is released exactly once and no references remain.
-        unsafe { task_ref1.release() };
-        // SAFETY: The second pooled task is released exactly once and no references remain.
-        unsafe { task_ref2.release() };
+        drop((task_ref1, task_ref2));
     }
 }

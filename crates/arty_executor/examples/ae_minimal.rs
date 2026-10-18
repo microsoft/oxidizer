@@ -10,7 +10,7 @@ use std::thread;
 use arty_executor::{CycleOutcome, Executor, TaskOptions};
 
 fn main() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     // When our single task is done, it will set this signal to indicate that the app can exit.

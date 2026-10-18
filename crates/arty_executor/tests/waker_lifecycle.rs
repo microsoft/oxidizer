@@ -14,7 +14,7 @@ use arty_executor::{CycleOutcome, Executor, TaskOptions};
 
 #[test]
 fn retained_waker_is_noop_after_shutdown() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let retained = Rc::new(RefCell::new(None));
     let task = executor.tasks().add(
         poll_fn({
@@ -56,7 +56,7 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
         }
     }
 
-    let executor = Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build();
+    let mut executor = Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build();
     let retained = Rc::new(RefCell::new(None));
     let task = executor.tasks().add(
         poll_fn({

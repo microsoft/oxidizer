@@ -21,12 +21,10 @@ use observed_testing::{TEST_ID, test_emitter};
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_SUBMISSION: RefCell<Option<(TaskSet, Rc<Cell<bool>>)>> = const { RefCell::new(None) };
-    static REENTRANT_TELEMETRY_EXECUTOR: RefCell<Option<Rc<Executor>>> = const { RefCell::new(None) };
     static OWNER_DROP_TELEMETRY: RefCell<Option<OwnerDropState>> = const { RefCell::new(None) };
 }
 
 struct ReentrantSubmissionProcessor;
-struct ReentrantCycleProcessor;
 struct OwnerDropProcessor;
 
 struct OwnerDropState {
@@ -50,23 +48,6 @@ impl EventProcessor for ReentrantSubmissionProcessor {
             },
             TaskOptions::default(),
         ));
-    }
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
-    }
-}
-
-impl EventProcessor for ReentrantCycleProcessor {
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        description.name() == "arty.rt.task.spawned"
-    }
-
-    fn process(&self, _event: &EventView<'_>) {
-        let Some(executor) = REENTRANT_TELEMETRY_EXECUTOR.take() else {
-            return;
-        };
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     }
 
     fn flush(&self) -> Result<(), observed::FlushError> {
@@ -99,7 +80,7 @@ fn poll_once<R: 'static>(handle: &mut JoinHandle<R>) -> Poll<Result<R, JoinError
 
 #[test]
 fn completed_result_survives_executor_drop() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let mut handle = executor.tasks().add(async { 42 }, TaskOptions::default());
 
     assert!(executor.has_tasks());
@@ -112,7 +93,7 @@ fn completed_result_survives_executor_drop() {
 
 #[test]
 fn retained_handle_reports_shutdown_without_delaying_shutdown() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let mut handle = executor.tasks().add(pending::<()>(), TaskOptions::default());
 
     executor.begin_shutdown();
@@ -135,7 +116,7 @@ fn direct_executor_drop_cancels_tasks_safely() {
 
 #[test]
 fn task_set_shutdown_cancels_tasks_without_executor_drop() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let mut handle = tasks.add(pending::<()>(), TaskOptions::default());
 
@@ -154,9 +135,9 @@ fn executor_drop_during_thread_local_teardown_is_safe() {
             assert!(slot.replace(Some(Executor::builder().build())).is_none());
         });
         THREAD_LOCAL_EXECUTOR.with(|slot| {
-            let executor = slot.borrow();
+            let mut executor = slot.borrow_mut();
             assert_eq!(
-                executor.as_ref().expect("thread-local executor is initialized").execute_cycle(),
+                executor.as_mut().expect("thread-local executor is initialized").execute_cycle(),
                 CycleOutcome::Suspend
             );
         });
@@ -190,7 +171,7 @@ impl IntoFuture for IntoFutureProbe {
 
 #[test]
 fn rejected_submission_does_not_convert_the_future() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     executor.begin_shutdown();
     let converted = Arc::new(AtomicBool::new(false));
@@ -232,7 +213,7 @@ fn disconnected_remote_submission_contains_panicking_join_notification() {
 
 #[test]
 fn submission_during_shutdown_returns_shutdown_error() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     executor.begin_shutdown();
 
@@ -248,7 +229,7 @@ fn task_created_processor_may_submit_a_nested_task() {
         vec![Arc::new(ReentrantSubmissionProcessor)],
         tick::SimpleClock::new_frozen(),
     );
-    let executor = Executor::builder().sink(sink.clone()).build();
+    let mut executor = Executor::builder().sink(sink.clone()).build();
     let tasks = executor.tasks();
     let nested_completed = Rc::new(Cell::new(false));
     REENTRANT_TELEMETRY_SUBMISSION.set(Some((tasks.clone(), Rc::clone(&nested_completed))));
@@ -262,7 +243,7 @@ fn task_created_processor_may_submit_a_nested_task() {
 #[test]
 fn default_options_emit_lifecycle_events_without_context_enrichment() {
     let (sink, processor) = test_emitter(TEST_ID);
-    let executor = Executor::builder().sink(sink).build();
+    let mut executor = Executor::builder().sink(sink).build();
     let _handle = executor.tasks().add(async {}, TaskOptions::default());
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -270,22 +251,6 @@ fn default_options_emit_lifecycle_events_without_context_enrichment() {
     let events = processor.events();
     assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
     assert!(events.iter().any(|event| event.name() == "arty.rt.task.succeeded"));
-}
-
-#[test]
-fn task_created_processor_may_complete_and_release_the_new_task() {
-    let sink = Sink::new(
-        "arty-executor-reentrant-cycle",
-        vec![Arc::new(ReentrantCycleProcessor)],
-        tick::SimpleClock::new_frozen(),
-    );
-    let executor = Rc::new(Executor::builder().sink(sink).build());
-    REENTRANT_TELEMETRY_EXECUTOR.set(Some(Rc::clone(&executor)));
-
-    let mut handle = executor.tasks().add(async { 42 }, TaskOptions::default());
-
-    assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
-    assert!(!executor.has_tasks());
 }
 
 struct ReentrantIntoFuture {
@@ -313,7 +278,7 @@ impl IntoFuture for ReentrantIntoFuture {
 
 #[test]
 fn into_future_conversion_may_submit_a_nested_task() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let nested_completed = Rc::new(Cell::new(false));
     let mut handle = tasks.add(
@@ -394,7 +359,7 @@ fn owner_drop_during_spawn_telemetry_cancels_task_and_rejects_nested_submission(
 }
 
 struct ShutdownDuringIntoFuture {
-    executor: Rc<Executor>,
+    tasks: TaskSet,
 }
 
 impl IntoFuture for ShutdownDuringIntoFuture {
@@ -402,20 +367,16 @@ impl IntoFuture for ShutdownDuringIntoFuture {
     type IntoFuture = std::future::Ready<usize>;
 
     fn into_future(self) -> Self::IntoFuture {
-        self.executor.begin_shutdown();
+        self.tasks.begin_shutdown();
         std::future::ready(42)
     }
 }
 
 #[test]
 fn shutdown_during_into_future_conversion_rejects_the_outer_task() {
-    let executor = Rc::new(Executor::builder().build());
-    let mut handle = executor.tasks().add(
-        ShutdownDuringIntoFuture {
-            executor: Rc::clone(&executor),
-        },
-        TaskOptions::default(),
-    );
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let mut handle = tasks.add(ShutdownDuringIntoFuture { tasks: tasks.clone() }, TaskOptions::default());
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
@@ -443,7 +404,7 @@ impl Drop for SubmitOnDrop {
 
 #[test]
 fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let submitted = Rc::new(RefCell::new(None));
     let _outer_handle = tasks.add(
@@ -469,7 +430,7 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
 fn shutdown_retires_a_batch_of_queued_tasks() {
     const TASK_COUNT: usize = 32;
 
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let wakers = Rc::new(RefCell::new(Vec::new()));
     let mut handles = Vec::new();

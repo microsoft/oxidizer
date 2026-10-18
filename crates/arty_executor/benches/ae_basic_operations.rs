@@ -122,7 +122,7 @@ fn clone_waker_state() -> CloneWakerState {
 }
 
 fn retained_waker_after_executor_drop() -> Waker {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let captured = Rc::new(RefCell::new(None));
     let handle = tasks.add(
@@ -145,9 +145,9 @@ fn retained_waker_after_executor_drop() -> Waker {
 }
 
 #[metabench::benchmark(EXECUTE_CYCLE, CYCLE, "execute_cycle")]
-#[bench::idle(&cycle_state(false))]
-#[bench::pending_task(&cycle_state(true))]
-fn execute_cycle(state: &CycleState) -> CycleOutcome {
+#[bench::idle(&mut cycle_state(false))]
+#[bench::pending_task(&mut cycle_state(true))]
+fn execute_cycle(state: &mut CycleState) -> CycleOutcome {
     state.executor.execute_cycle()
 }
 
@@ -158,9 +158,9 @@ fn add_task(state: &ExecutorState) -> JoinHandle<()> {
 }
 
 #[metabench::benchmark(SELF_WAKING_TASK, TASK, "self_waking_task")]
-#[bench::borrowed_waker_polls_4(&self_waking_state(false))]
-#[bench::cloned_waker_polls_4(&self_waking_state(true))]
-fn self_waking_task(state: &SelfWakingState) -> CycleOutcome {
+#[bench::borrowed_waker_polls_4(&mut self_waking_state(false))]
+#[bench::cloned_waker_polls_4(&mut self_waking_state(true))]
+fn self_waking_task(state: &mut SelfWakingState) -> CycleOutcome {
     let mut outcome = CycleOutcome::Suspend;
     for _ in 0..SELF_WAKING_POLL_COUNT {
         outcome = state.executor.execute_cycle();
@@ -169,8 +169,8 @@ fn self_waking_task(state: &SelfWakingState) -> CycleOutcome {
 }
 
 #[metabench::benchmark(CLONE_WAKER_DURING_CYCLE, WAKER, "clone_during_cycle")]
-#[bench::pending_task(&clone_waker_state())]
-fn clone_waker_during_cycle(state: &CloneWakerState) -> CycleOutcome {
+#[bench::pending_task(&mut clone_waker_state())]
+fn clone_waker_during_cycle(state: &mut CloneWakerState) -> CycleOutcome {
     state.executor.execute_cycle()
 }
 
@@ -182,25 +182,31 @@ fn retained_waker_after_drop(waker: &Waker) {
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut cycle = criterion.benchmark_group(CYCLE);
-    let idle = cycle_state(false);
-    cycle.bench_function(BenchmarkId::new(EXECUTE_CYCLE.benchmark_name(), "idle"), |bencher| {
-        bencher.iter(|| execute_cycle(black_box(&idle)));
-    });
     cycle.bench_function(BenchmarkId::new(EXECUTE_CYCLE.benchmark_name(), "pending_task"), |bencher| {
-        bencher.iter_batched_ref(|| cycle_state(true), |state| execute_cycle(black_box(state)), BatchSize::SmallInput);
+        bencher.iter_batched_ref(
+            || cycle_state(true),
+            |state| execute_cycle(black_box(state)),
+            BatchSize::PerIteration,
+        );
     });
+    {
+        let mut idle = cycle_state(false);
+        cycle.bench_function(BenchmarkId::new(EXECUTE_CYCLE.benchmark_name(), "idle"), |bencher| {
+            bencher.iter(|| execute_cycle(black_box(&mut idle)));
+        });
+    }
     cycle.finish();
 
     let mut task = criterion.benchmark_group(TASK);
     task.bench_function(BenchmarkId::new(ADD_TASK.benchmark_name(), "ready"), |bencher| {
-        bencher.iter_batched_ref(executor_state, |state| add_task(black_box(state)), BatchSize::SmallInput);
+        bencher.iter_batched_ref(executor_state, |state| add_task(black_box(state)), BatchSize::PerIteration);
     });
     for (case, clone_waker) in [("borrowed_waker_polls_4", false), ("cloned_waker_polls_4", true)] {
         task.bench_function(BenchmarkId::new(SELF_WAKING_TASK.benchmark_name(), case), |bencher| {
             bencher.iter_batched_ref(
                 || self_waking_state(clone_waker),
                 |state| self_waking_task(black_box(state)),
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
@@ -213,7 +219,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             bencher.iter_batched_ref(
                 clone_waker_state,
                 |state| clone_waker_during_cycle(black_box(state)),
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         },
     );
