@@ -50,25 +50,31 @@ hashing, and context manipulation on elementary task and wake paths.
 
 `Executor` directly owns `ExecutorCore`.
 
-`ExecutorCore` directly owns `ExclusiveState`, including:
+`ExecutorCore` directly owns its owner-only fields:
 
 - the active task queue;
 - the intrusive pending-task inventory;
 - cycle clock and metrics state.
 
-`execute_cycle`, `begin_shutdown`, and owner-drop cleanup use mutable core
-access. The former `RefCell<ExclusiveState>` is removed.
+There is no `ExclusiveState` wrapper. `execute_cycle`, `begin_shutdown`, and
+owner-drop cleanup use mutable core access directly.
 
-`ExecutorShared` contains only state needed by reentrant task submissions:
+`ExecutorShared` lives in its own module as a cloneable handle around internal
+`Rc` state. `ExecutorCore` owns the primary handle and `TaskSet` holds a strong
+clone; the intrusive `TaskList` does not own `ExecutorShared`. Tasks retain only
+the narrower `WakeShared` needed by wakers. `ExecutorShared` exposes
+operation-level `&self` APIs rather than `Ref`/`RefMut`.
+Its fields are independently synchronized according to their actual needs:
 
-- newly registered tasks;
-- the heterogeneous task pool;
-- logical live-task count;
-- join-event storage;
-- shutdown state;
-- wake context and telemetry sink.
+- only the newly registered task queue uses `RefCell` for reentrant mutation;
+- `MultiPool` and `JoinEventLake` use their existing shared-reference APIs;
+- logical task count and shutdown state use their dedicated field operations;
+- wake context and telemetry sink are immutable shared values.
 
-`TaskSet` holds `Weak<ExecutorShared>`, so it does not extend executor lifetime.
+Owner drop marks the shared component shutting down before cancelling tasks, so
+stale `TaskSet` clones reject submissions even though they may retain shared
+pool/channel storage. This removes a `Weak::upgrade` from every spawn and keeps
+`Rc` manipulation inside the shared module.
 
 ### Per-thread registration
 
@@ -373,6 +379,13 @@ TLS wakes append directly to the active queue, and shutdown reuses the active
 queue for cancellation. Elementary benchmarks remained stable, while
 self-waking cases removed one measured allocation after completed tasks began
 releasing immediately.
+
+### Shared-state grouping
+
+The former `ReentrantState` aggregate and borrow accessors were removed.
+`ExecutorShared` now provides named operations such as accepting/draining new
+tasks, task-count retirement, shutdown requests, wake access, and completion
+queries. No `Ref` or `RefMut` escapes the shared component.
 
 ### Separate `Cell<bool>` shutdown flag
 

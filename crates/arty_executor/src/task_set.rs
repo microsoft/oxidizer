@@ -1,10 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::rc::{Rc, Weak};
-
 use crate::remote::Sender as RemoteSender;
-use crate::{ExecutorShared, JoinEventLake, JoinHandle, TaskOptions};
+use crate::{ExecutorShared, JoinHandle, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -14,21 +12,12 @@ use crate::{ExecutorShared, JoinEventLake, JoinHandle, TaskOptions};
 /// Every clone is functionally identical.
 #[derive(Clone, Debug)]
 pub struct TaskSet {
-    // We only keep a weak reference, so even if the owner of this type does something odd, we do
-    // not extend the lifetime of the `Executor`, which is governed by the `Executor` owner.
-    core: Weak<ExecutorShared>,
-
-    // Retained independently so submissions after executor drop can still produce a valid
-    // disconnected join handle.
-    join_events: JoinEventLake,
+    shared: ExecutorShared,
 }
 
 impl TaskSet {
-    pub(crate) fn new(core: &Rc<ExecutorShared>) -> Self {
-        Self {
-            core: Rc::downgrade(core),
-            join_events: core.join_event_lake(),
-        }
+    pub(crate) fn new(core: &ExecutorShared) -> Self {
+        Self { shared: core.clone() }
     }
 
     /// Registers a future and its runtime integration options as a new task.
@@ -43,11 +32,7 @@ impl TaskSet {
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        let Some(core) = self.core.upgrade() else {
-            return self.join_events.disconnected();
-        };
-
-        core.add_task(future, options)
+        self.shared.add_task(future, options)
     }
 
     /// Registers a task whose result is delivered to a cross-thread receiver.
@@ -62,18 +47,12 @@ impl TaskSet {
         F: IntoFuture<Output = R> + 'static,
         R: Send + 'static,
     {
-        let Some(core) = self.core.upgrade() else {
-            return;
-        };
-
-        core.add_remote_task(future, options, result_tx);
+        self.shared.add_remote_task(future, options, result_tx);
     }
 
     /// Begins executor shutdown without borrowing executor-owned polling state.
     pub fn begin_shutdown(&self) {
-        if let Some(core) = self.core.upgrade() {
-            core.request_shutdown();
-        }
+        self.shared.request_shutdown();
     }
 }
 
