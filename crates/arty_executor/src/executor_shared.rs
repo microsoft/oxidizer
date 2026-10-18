@@ -46,10 +46,6 @@ impl ExecutorShared {
         }
     }
 
-    pub(crate) fn register_current(&self) {
-        self.inner.wake.register_current();
-    }
-
     pub(crate) fn wake(&self) -> &WakeShared {
         &self.inner.wake
     }

@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::{PhantomData, PhantomPinned};
 use std::mem::ManuallyDrop;
@@ -14,28 +13,12 @@ use std::task::{RawWaker, RawWakerVTable, Waker};
 
 use performables::sync::channel;
 
-use crate::{TaskPointer, TaskRef};
+use crate::{TaskPointer, TaskRef, executor_context};
 
 const TASK_ACTIVE: u8 = 1 << 0;
 const TASK_LOCAL_NOTIFIED: u8 = 1 << 1;
 const TASK_REMOTE_NOTIFIED: u8 = 1 << 2;
 const TASK_NOTIFIED: u8 = TASK_LOCAL_NOTIFIED | TASK_REMOTE_NOTIFIED;
-
-thread_local! {
-    static CURRENT_EXECUTOR: RefCell<CurrentExecutorState> = const {
-        RefCell::new(CurrentExecutorState {
-            owner: std::ptr::null(),
-            awakened: VecDeque::new(),
-            executing: false,
-        })
-    };
-}
-
-struct CurrentExecutorState {
-    owner: *const WakeShared,
-    awakened: VecDeque<TaskRef>,
-    executing: bool,
-}
 
 #[derive(Debug)]
 pub(crate) struct WakeShared {
@@ -56,88 +39,36 @@ impl WakeShared {
         }
     }
 
-    pub(crate) fn register_current(&self) {
-        let this = std::ptr::from_ref(self);
-        CURRENT_EXECUTOR.with_borrow_mut(|current| {
-            assert!(current.owner.is_null(), "only one live Executor may exist on a thread");
-            current.owner = this;
-            current.awakened = VecDeque::with_capacity(crate::AWAKENED_CAPACITY);
-            current.executing = false;
-        });
-    }
-
-    pub(crate) fn unregister_current(&self) {
-        let this = std::ptr::from_ref(self);
-        _ = CURRENT_EXECUTOR.try_with(|current| {
-            let mut current = current.borrow_mut();
-            assert_eq!(current.owner, this, "the current thread must unregister its own Executor");
-            current.owner = std::ptr::null();
-            current.awakened.clear();
-            current.executing = false;
-        });
-    }
-
     fn is_current(&self) -> bool {
-        if self.tls_is_current() {
-            return true;
-        }
-        #[cfg(test)]
-        {
-            return CURRENT_EXECUTOR.with_borrow(|current| current.owner.is_null());
-        }
-        #[cfg(not(test))]
-        false
+        executor_context::is_current(self)
     }
 
-    fn tls_is_current(&self) -> bool {
-        CURRENT_EXECUTOR
-            .try_with(|current| current.borrow().owner == std::ptr::from_ref(self))
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn enter_cycle(&self) -> WakeCycle {
-        CURRENT_EXECUTOR.with_borrow_mut(|current| {
-            assert_eq!(current.owner, std::ptr::from_ref(self));
-            assert!(!current.executing, "Executor::execute_cycle cannot be called reentrantly");
-            current.executing = true;
-        });
-        WakeCycle(std::ptr::from_ref(self))
+    pub(crate) fn enter_cycle(&self) -> executor_context::CycleGuard {
+        executor_context::enter_cycle(self)
     }
 
     fn is_executing(&self) -> bool {
-        CURRENT_EXECUTOR.with_borrow(|current| current.owner == std::ptr::from_ref(self) && current.executing)
+        executor_context::is_executing(self)
     }
 
     fn enqueue_local(&self, task_ref: TaskRef) -> Result<(), TaskRef> {
-        if self.is_current() {
-            CURRENT_EXECUTOR.with_borrow_mut(|current| current.awakened.push_back(task_ref));
-            return Ok(());
-        }
-        Err(task_ref)
+        executor_context::enqueue(self, task_ref)
     }
 
     pub(crate) fn append_local_wakes(&self, target: &mut VecDeque<TaskRef>) {
-        if self.is_current() {
-            CURRENT_EXECUTOR.with_borrow_mut(|current| target.append(&mut current.awakened));
-        }
+        executor_context::append_wakes(self, target);
     }
 
     pub(crate) fn has_local_wakes(&self) -> bool {
-        self.is_current() && CURRENT_EXECUTOR.with_borrow(|current| !current.awakened.is_empty())
+        executor_context::has_wakes(self)
     }
 
     fn remove_local_notification(&self, task_ref: TaskPointer) {
-        if self.is_current() {
-            CURRENT_EXECUTOR.with_borrow_mut(|current| {
-                current.awakened.retain(|queued| queued.pointer() != task_ref);
-            });
-        }
+        executor_context::remove_wake(self, task_ref);
     }
 
     pub(crate) fn clear_local_wakes(&self) {
-        if self.is_current() {
-            CURRENT_EXECUTOR.with_borrow_mut(|current| current.awakened.clear());
-        }
+        executor_context::clear_wakes(self);
     }
 
     pub(crate) fn drain_remote_wakes(&self) {
@@ -318,19 +249,6 @@ impl WakeSignal {
         // SAFETY: The borrowed signal is embedded in a live task; the increment transfers
         // independent ownership to the cloned waker.
         unsafe { self.task_ref.increment_strong() };
-    }
-}
-
-pub(crate) struct WakeCycle(*const WakeShared);
-
-impl Drop for WakeCycle {
-    fn drop(&mut self) {
-        _ = CURRENT_EXECUTOR.try_with(|current| {
-            let mut current = current.borrow_mut();
-            if current.owner == self.0 {
-                current.executing = false;
-            }
-        });
     }
 }
 

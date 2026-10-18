@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet, WakeShared, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -71,7 +71,7 @@ impl Executor {
 
     #[must_use]
     pub(crate) fn new(core: ExecutorCore) -> Self {
-        core.register_current();
+        executor_context::register(core.wake());
         Self { core }
     }
 
@@ -131,6 +131,15 @@ impl Executor {
 
 impl Drop for Executor {
     fn drop(&mut self) {
+        struct ClearRegistration(std::sync::Arc<WakeShared>);
+
+        impl Drop for ClearRegistration {
+            fn drop(&mut self) {
+                executor_context::unregister(&self.0);
+            }
+        }
+
+        let _clear_registration = ClearRegistration(self.core.wake_handle());
         self.core.owner_dropped();
     }
 }
@@ -149,8 +158,9 @@ mod tests {
     use testing_aids::YieldFuture;
 
     use super::*;
+    use crate::executor_context::AWAKENED_CAPACITY;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
-    use crate::{AWAKENED_CAPACITY, JoinHandle, TaskOptions};
+    use crate::{JoinHandle, TaskOptions};
 
     trait TestTaskSetExt {
         fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
