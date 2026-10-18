@@ -79,6 +79,36 @@ fn poll_once<R: 'static>(handle: &mut JoinHandle<R>) -> Poll<Result<R, JoinError
 }
 
 #[test]
+fn failed_construction_preserves_existing_executor_notifications() {
+    let mut executor = Executor::builder().build();
+    let ready = Rc::new(Cell::new(false));
+    let retained = Rc::new(RefCell::new(None));
+    let mut handle = executor.tasks().add(
+        poll_fn({
+            let ready = Rc::clone(&ready);
+            let retained = Rc::clone(&retained);
+            move |cx| {
+                if ready.get() {
+                    Poll::Ready(42)
+                } else {
+                    *retained.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }),
+        TaskOptions::default(),
+    );
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    ready.set(true);
+    retained.borrow().as_ref().unwrap().wake_by_ref();
+
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Executor::builder().build())).unwrap_err();
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
+}
+
+#[test]
 fn completed_result_survives_executor_drop() {
     let mut executor = Executor::builder().build();
     let mut handle = executor.tasks().add(async { 42 }, TaskOptions::default());
