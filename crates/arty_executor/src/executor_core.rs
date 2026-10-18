@@ -66,57 +66,64 @@ impl ExecutorCore {
 
     #[must_use]
     pub(crate) fn execute_cycle(&mut self) -> CycleOutcome {
-        let shared = &self.shared;
-        let _cycle = shared.wake().enter_cycle();
-
-        let cycle_start_timestamp = self.clock.instant();
-
-        if let Some(last_cycle_ended) = self.last_cycle_ended {
-            let cycle_gap = cycle_start_timestamp.saturating_duration_since(last_cycle_ended);
-            CYCLE_GAP_MILLIS.with(|x| x.observe_millis(cycle_gap));
-        }
-
-        let accepted = shared.accept_new_tasks(&mut self.active);
-        if accepted != 0 {
-            TASKS_ACCEPTED.with(|x| x.observe(accepted));
-        }
-        Self::activate_awakened_tasks(shared.wake(), &mut self.active);
-
-        Self::poll_active_tasks(shared, &mut self.active, &mut self.tasks);
-
-        if shared.is_shutting_down() {
-            let aborted_count = Self::prepare_task_abort(shared, &mut self.active, &mut self.tasks);
-            Self::abort_prepared_tasks(&mut self.active, aborted_count, true);
-        }
-
-        let outcome = if Self::evaluate_shutdown_completion(shared, &self.active, &self.tasks) {
-            CycleOutcome::Shutdown
-        } else if Self::has_work_to_do(shared, &self.active) {
-            // We want to be immediately called again because we may have more work to do.
-            CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
-            CycleOutcome::Continue
-        } else {
-            // We have no work to do, feel free to take a while before coming back to us.
-            // We will try to trigger the owner's waker if more work arrives, though this is
-            // not guaranteed.
-            CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
-            CycleOutcome::Suspend
-        };
-
-        let cycle_end_timestamp = self.clock.instant();
-
-        let cycle_duration = cycle_end_timestamp.saturating_duration_since(cycle_start_timestamp);
-        self.last_cycle_ended = Some(cycle_end_timestamp);
-        CYCLE_DURATION_MILLIS.with(|x| x.observe_millis(cycle_duration));
-
-        // Publish metrics from this cycle.
-        EXECUTOR_PUSHER.with(MetricsPusher::push);
-
+        let _cycle = self.shared.wake().enter_cycle();
+        let cycle_started = self.start_cycle();
+        self.accept_new_tasks();
+        self.activate_awakened_tasks();
+        self.poll_active_tasks();
+        self.cancel_if_shutting_down();
+        let outcome = self.cycle_outcome();
+        self.finish_cycle(cycle_started);
         outcome
     }
 
-    fn activate_awakened_tasks(wake: &WakeShared, active: &mut VecDeque<TaskRef>) {
-        wake.drain_remote_wakes();
+    fn start_cycle(&mut self) -> Instant {
+        let started = self.clock.instant();
+        if let Some(last_ended) = self.last_cycle_ended {
+            CYCLE_GAP_MILLIS.with(|event| {
+                event.observe_millis(started.saturating_duration_since(last_ended));
+            });
+        }
+        started
+    }
+
+    fn finish_cycle(&mut self, started: Instant) {
+        let ended = self.clock.instant();
+        self.last_cycle_ended = Some(ended);
+        CYCLE_DURATION_MILLIS.with(|event| {
+            event.observe_millis(ended.saturating_duration_since(started));
+        });
+        EXECUTOR_PUSHER.with(MetricsPusher::push);
+    }
+
+    fn accept_new_tasks(&mut self) {
+        let accepted = self.shared.accept_new_tasks(&mut self.active);
+        if accepted != 0 {
+            TASKS_ACCEPTED.with(|event| event.observe(accepted));
+        }
+    }
+
+    fn cancel_if_shutting_down(&mut self) {
+        if self.shared.is_shutting_down() {
+            let aborted_count = self.prepare_task_abort();
+            self.abort_prepared_tasks(aborted_count, true);
+        }
+    }
+
+    fn cycle_outcome(&self) -> CycleOutcome {
+        if self.evaluate_shutdown_completion() {
+            CycleOutcome::Shutdown
+        } else if self.has_work_to_do() {
+            CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
+            CycleOutcome::Continue
+        } else {
+            CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
+            CycleOutcome::Suspend
+        }
+    }
+
+    fn activate_awakened_tasks(&mut self) {
+        self.shared.wake().drain_remote_wakes();
 
         // Remote notifications are converted to local notifications before inspecting either
         // activation path:
@@ -127,9 +134,9 @@ impl ExecutorCore {
         // spurious wake signals may be sent when the task is already active (the signal
         // may come from a caller who has no idea if the task is already awake or not).
 
-        let first_awakened = active.len();
-        wake.append_local_wakes(active);
-        for task_ref in active.range(first_awakened..) {
+        let first_awakened = self.active.len();
+        self.shared.wake().append_local_wakes(&mut self.active);
+        for task_ref in self.active.range(first_awakened..) {
             // SAFETY: Retirement removes every queued notification before task storage is
             // released, so every queued reference still targets a live task.
             unsafe { task_ref.as_task() }.clear_queued_notification();
@@ -137,11 +144,11 @@ impl ExecutorCore {
         }
     }
 
-    fn poll_active_tasks(shared: &ExecutorShared, active: &mut VecDeque<TaskRef>, tasks: &mut TaskList) {
+    fn poll_active_tasks(&mut self) {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
-        while let Some(task_ref) = active.pop_front() {
+        while let Some(task_ref) = self.active.pop_front() {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -152,10 +159,10 @@ impl ExecutorCore {
             let pointer = task_ref.pointer();
             let linked = task.links().linked.get();
 
-            if shared.is_shutting_down() {
+            if self.shared.is_shutting_down() {
                 task.abort();
-                shared.decrement_task_count(1);
-                drop(tasks.remove(pointer));
+                self.shared.decrement_task_count(1);
+                drop(self.tasks.remove(pointer));
                 completed_count = completed_count.saturating_add(1);
                 continue;
             }
@@ -163,25 +170,25 @@ impl ExecutorCore {
             match task.poll() {
                 task::Poll::Ready(()) => {
                     if linked {
-                        drop(tasks.remove(pointer));
+                        drop(self.tasks.remove(pointer));
                     }
-                    shared.decrement_task_count(1);
+                    self.shared.decrement_task_count(1);
                     completed_count = completed_count.saturating_add(1);
                 }
                 task::Poll::Pending => {
                     pending_count = pending_count.saturating_add(1);
                     if !linked {
-                        tasks.insert(task_ref);
+                        self.tasks.insert(task_ref);
                     }
                 }
             }
         }
 
-        Self::record_poll_metrics(pending_count, completed_count);
+        self.record_poll_metrics(pending_count, completed_count);
     }
 
     #[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
-    fn record_poll_metrics(pending_count: usize, completed_count: usize) {
+    fn record_poll_metrics(&self, pending_count: usize, completed_count: usize) {
         if pending_count != 0 {
             TASKS_INACTIVATED.with(|x| x.observe(pending_count));
         }
@@ -195,7 +202,7 @@ impl ExecutorCore {
     /// Whether an immediately performed `execute_cycle()` would do any useful work.
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
-    fn has_work_to_do(shared: &ExecutorShared, active: &VecDeque<TaskRef>) -> bool {
+    fn has_work_to_do(&self) -> bool {
         // Work for us means there is a task that we can poll (either because it is new
         // or because it has been awakened).
 
@@ -203,16 +210,16 @@ impl ExecutorCore {
         // the "active" list during an execution cycle, so this should never happen. We assert it
         // here just in case we missed something and it does happen, or starts to happen in the
         // future after some refactoring (as we would then need to react to it).
-        debug_assert!(active.is_empty(), "Active tasks should not be present at this point");
+        debug_assert!(self.active.is_empty(), "Active tasks should not be present at this point");
 
-        shared.has_new_tasks() || shared.wake().has_local_wakes() || shared.wake().has_remote_wakes()
+        self.shared.has_new_tasks() || self.shared.wake().has_local_wakes() || self.shared.wake().has_remote_wakes()
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     pub(crate) fn begin_shutdown(&mut self) {
         self.shared.begin_shutdown();
-        let aborted_count = Self::prepare_task_abort(&self.shared, &mut self.active, &mut self.tasks);
-        Self::abort_prepared_tasks(&mut self.active, aborted_count, true);
+        let aborted_count = self.prepare_task_abort();
+        self.abort_prepared_tasks(aborted_count, true);
     }
 
     pub(crate) fn owner_dropped(&mut self) {
@@ -227,25 +234,25 @@ impl ExecutorCore {
         let _clear_registration = ClearRegistration(self.shared.wake_handle());
         self.shared.request_shutdown();
 
-        let aborted_count = Self::prepare_task_abort(&self.shared, &mut self.active, &mut self.tasks);
-        Self::abort_prepared_tasks(&mut self.active, aborted_count, false);
+        let aborted_count = self.prepare_task_abort();
+        self.abort_prepared_tasks(aborted_count, false);
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
             // Executor cleanup must remain safe after metrics TLS has been destroyed.
         }
     }
 
-    fn prepare_task_abort(shared: &ExecutorShared, active: &mut VecDeque<TaskRef>, tasks: &mut TaskList) -> usize {
-        shared.wake().clear_local_wakes();
+    fn prepare_task_abort(&mut self) -> usize {
+        self.shared.wake().clear_local_wakes();
 
-        for task_ref in active.iter() {
-            drop(tasks.remove(task_ref.pointer()));
+        for task_ref in &self.active {
+            drop(self.tasks.remove(task_ref.pointer()));
         }
-        shared.drain_new_tasks(active);
-        while let Some(task_ref) = tasks.pop_front() {
-            active.push_back(task_ref);
+        self.shared.drain_new_tasks(&mut self.active);
+        while let Some(task_ref) = self.tasks.pop_front() {
+            self.active.push_back(task_ref);
         }
-        let aborted_count = active.len();
-        shared.decrement_task_count(aborted_count);
+        let aborted_count = self.active.len();
+        self.shared.decrement_task_count(aborted_count);
         match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
             Ok(Ok(())) => {}
             Ok(Err(_access_error)) | Err(_access_error) => {
@@ -256,8 +263,8 @@ impl ExecutorCore {
         aborted_count
     }
 
-    fn abort_prepared_tasks(active: &mut VecDeque<TaskRef>, aborted_count: usize, record_drop_metric: bool) {
-        while let Some(task_ref) = active.pop_front() {
+    fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool) {
+        while let Some(task_ref) = self.active.pop_front() {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -276,12 +283,12 @@ impl ExecutorCore {
     /// Returns whether we are at the end of a successful shutdown process.
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
-    fn evaluate_shutdown_completion(shared: &ExecutorShared, active: &VecDeque<TaskRef>, tasks: &TaskList) -> bool {
+    fn evaluate_shutdown_completion(&self) -> bool {
         // During shutdown, no live task ownership remains in executor queues.
-        debug_assert!(active.is_empty());
-        debug_assert!(tasks.is_empty());
+        debug_assert!(self.active.is_empty());
+        debug_assert!(self.tasks.is_empty());
 
-        shared.shutdown_complete()
+        self.shared.shutdown_complete()
     }
 }
 
@@ -289,8 +296,8 @@ impl ExecutorCore {
 impl Drop for ExecutorCore {
     fn drop(&mut self) {
         self.shared.request_shutdown();
-        let aborted_count = Self::prepare_task_abort(&self.shared, &mut self.active, &mut self.tasks);
-        Self::abort_prepared_tasks(&mut self.active, aborted_count, false);
+        let aborted_count = self.prepare_task_abort();
+        self.abort_prepared_tasks(aborted_count, false);
         match EXECUTOR_PUSHER.try_with(MetricsPusher::push) {
             Ok(()) => {}
             Err(_access_error) => {
