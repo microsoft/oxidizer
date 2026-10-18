@@ -116,15 +116,6 @@ impl ExecutorCore {
     fn activate_awakened_tasks(&mut self) {
         self.shared.wake().drain_remote_wakes();
 
-        // Remote notifications are converted to local notifications before inspecting either
-        // activation path:
-        // 1. receive an explicit wake signal via the `awakened` set (preferred, fast).
-        // 2. probe embedded wake signals after local queue contention/capacity fallback (slower).
-        //
-        // Note that the same task may be awakened via both channels simultaneously, and that
-        // spurious wake signals may be sent when the task is already active (the signal
-        // may come from a caller who has no idea if the task is already awake or not).
-
         let first_awakened = self.active.len();
         self.shared.wake().append_local_wakes(&mut self.active);
         for task_ref in self.active.range(first_awakened..) {
@@ -225,7 +216,6 @@ impl ExecutorCore {
 
     fn prepare_task_abort(&mut self) -> usize {
         self.shared.wake().clear_local_wakes();
-
         for task_ref in &self.active {
             drop(self.tasks.remove(task_ref.pointer()));
         }

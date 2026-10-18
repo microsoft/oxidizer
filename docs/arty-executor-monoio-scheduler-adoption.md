@@ -365,6 +365,22 @@ vector storage and benchmarks regressed:
 - clone during poll: 74.68 ns to 81.90 ns;
 - one additional measured allocation in affected cases.
 
+### Pointer-only runnable queues
+
+Implemented and reverted. The intrusive list remained the sole strong owner
+while active and TLS queues stored non-owning task pointers. This removed
+logical task counting, but forced a retain from the intrusive owner whenever a
+task became runnable. Representative elementary benchmarks regressed:
+
+- pending cycle: 72.72 ns to 81.85 ns;
+- clone during poll: 73.83 ns to 82.88 ns;
+- one additional measured allocation in affected cases.
+
+The final model therefore retains `TaskRef` in runnable queues, keeps the
+intrusive list as pending-task ownership, and tracks logical task count
+separately from pool occupancy. This is required because retained inert wakers
+can keep empty pooled allocations alive after the logical task has completed.
+
 ### `UnsafeCell` TLS queue
 
 Implemented and reverted. Removing `RefCell` borrow checks did not produce a
@@ -499,6 +515,9 @@ CARGO_TARGET_DIR=... cargo bench --locked \
 ```
 
 All affected targets compile. Benchmark and allocation reports were generated.
+The final elementary run measured 71.22 ns for a pending cycle and 72.33 ns for
+cloning a waker during a pending poll, both with 19 measured allocations in the
+full benchmark lifecycle.
 
 Tests were compiled but not executed, following the requested minimal local
 validation policy. CI remains responsible for comprehensive native tests,
@@ -512,12 +531,27 @@ were formatted with package-scoped `cargo fmt`.
 
 - The change contains a concentrated unsafe core around pooled Arc raw
   ownership, raw waker vtables, and intrusive task links. The unsafe surface is
-  documented and narrowed, but Miri and CI runtime-analysis results remain
-  required.
+  documented and narrowed to 61 lexical unsafe blocks across `arty_executor`,
+  but Miri and CI runtime-analysis results remain required.
 - Multi-worker remote injection is now the dominant measured performance gap.
-  Future work should focus on batching worker wakeups, reducing per-task boxed
-  command transport, or introducing a shared injection queue without weakening
-  thread-aware placement semantics.
+  The first follow-up to benchmark is edge-triggered worker notification:
+  `WorkerSignal` coalesces the parked state but currently acquires its mutex and
+  notifies for every submitted command. A pending-command transition could
+  amortize that work across a burst, but the check-to-park race must be proven
+  free of lost wakeups.
+- A batch drain API on `performables::channel` could amortize queue-state
+  inspection for remote wakes and worker commands. The executor currently
+  avoids a final failed receive because that operation reports channel
+  contention, so replacing the loop locally without a channel-level batch
+  primitive would change telemetry.
+- Per-task boxed remote factory transport remains necessary for heterogeneous
+  future types. Removing it requires pooled erased command storage or a shared
+  injection queue; simply returning a boxed future would add a second
+  allocation and lose inline pooled future storage.
+- A shared injection queue or explicit command batches may reduce per-task
+  channel sends, but they must preserve destination affinity, prompt submission
+  without timer-based batching delay, shutdown rejection, and panic-contained
+  destruction on the destination owner.
 - The no-op telemetry fast path must remain behaviorally paired with the
   configured-sink path. Existing telemetry tests compile and CI should execute
   them.
