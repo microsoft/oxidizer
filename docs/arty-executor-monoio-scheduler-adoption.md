@@ -78,13 +78,18 @@ pool/channel storage. This removes a `Weak::upgrade` from every spawn and keeps
 
 ### Per-thread registration
 
-Executor construction registers the exact `WakeShared` pointer in TLS.
+`executor_context.rs` owns TLS identity, the local FIFO, cycle-active state, and
+the cycle guard. Executor construction registers the exact `WakeShared` pointer
+directly in this context, and `Executor::drop` uses an unwind-safe guard to
+unregister it.
+
 Construction panics when another executor is live on the same thread. Drop
 clears the registration through an unwind-safe guard. A later executor may then
 register on the same thread.
 
 Local/remote classification compares the wake context against this TLS pointer.
-No `ThreadId` lookup is performed.
+No `ThreadId` lookup is performed. `WakeShared` delegates local queue operations
+to the executor context and contains no registration lifecycle logic.
 
 ### Pooled task ownership
 
@@ -394,6 +399,10 @@ intrusive inventory, clock, and last-cycle timestamp are direct fields, and
 cycle behavior is expressed as focused instance methods (`start_cycle`,
 `accept_new_tasks`, `activate_awakened_tasks`, `poll_active_tasks`,
 `cancel_if_shutting_down`, `cycle_outcome`, and `finish_cycle`).
+
+The TLS `CurrentExecutorState` and `WakeCycle` guard were also moved out of
+`wake.rs` into `executor_context.rs`, leaving `wake.rs` focused on inline task
+notification state, raw-waker ownership, and remote channel transport.
 
 ### Separate `Cell<bool>` shutdown flag
 
