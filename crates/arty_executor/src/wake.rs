@@ -9,8 +9,6 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
 use std::sync::atomic::{self, AtomicBool, AtomicU8};
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
@@ -39,23 +37,15 @@ struct CurrentExecutorState {
     executing: bool,
 }
 
-#[cfg(test)]
-pub(crate) type AwakenedQueue = Arc<Mutex<VecDeque<TaskRef>>>;
-
 #[derive(Debug)]
 pub(crate) struct WakeShared {
-    #[cfg(test)]
-    pub(crate) awakened: AwakenedQueue,
     parent_waker: Waker,
     remote_wake_tx: channel::Sender<RemoteWake>,
     remote_wake_rx: channel::Receiver<RemoteWake>,
     remote_wakes_pending: AtomicBool,
-    #[cfg(test)]
-    registered: AtomicBool,
 }
 
 impl WakeShared {
-    #[cfg(not(test))]
     pub(crate) fn new(parent_waker: Waker) -> Self {
         let (remote_wake_tx, remote_wake_rx) = channel::unbounded();
         Self {
@@ -63,19 +53,6 @@ impl WakeShared {
             remote_wake_tx,
             remote_wake_rx,
             remote_wakes_pending: AtomicBool::new(false),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new(awakened: AwakenedQueue, parent_waker: Waker) -> Self {
-        let (remote_wake_tx, remote_wake_rx) = channel::unbounded();
-        Self {
-            awakened,
-            parent_waker,
-            remote_wake_tx,
-            remote_wake_rx,
-            remote_wakes_pending: AtomicBool::new(false),
-            registered: AtomicBool::new(false),
         }
     }
 
@@ -87,11 +64,6 @@ impl WakeShared {
             current.awakened = VecDeque::with_capacity(crate::AWAKENED_CAPACITY);
             current.executing = false;
         });
-        #[cfg(test)]
-        assert!(
-            !self.registered.swap(true, atomic::Ordering::Release),
-            "an Executor wake context may only be registered once"
-        );
     }
 
     pub(crate) fn unregister_current(&self) {
@@ -103,8 +75,6 @@ impl WakeShared {
             current.awakened.clear();
             current.executing = false;
         });
-        #[cfg(test)]
-        self.registered.store(false, atomic::Ordering::Release);
     }
 
     fn is_current(&self) -> bool {
@@ -113,7 +83,7 @@ impl WakeShared {
         }
         #[cfg(test)]
         {
-            return !self.registered.load(atomic::Ordering::Acquire);
+            return CURRENT_EXECUTOR.with_borrow(|current| current.owner.is_null());
         }
         #[cfg(not(test))]
         false
@@ -139,74 +109,34 @@ impl WakeShared {
     }
 
     fn enqueue_local(&self, task_ref: TaskRef) -> Result<(), TaskRef> {
-        if self.tls_is_current() {
+        if self.is_current() {
             CURRENT_EXECUTOR.with_borrow_mut(|current| current.awakened.push_back(task_ref));
             return Ok(());
-        }
-        #[cfg(test)]
-        if !self.registered.load(atomic::Ordering::Acquire) {
-            return enqueue_test_wake(&self.awakened, task_ref);
         }
         Err(task_ref)
     }
 
-    pub(crate) fn take_local_wakes(&self, target: &mut VecDeque<TaskRef>) {
-        debug_assert!(target.is_empty());
-        if self.tls_is_current() {
-            CURRENT_EXECUTOR.with_borrow_mut(|current| {
-                std::mem::swap(&mut current.awakened, target);
-            });
-            return;
-        }
-        #[cfg(test)]
-        {
-            let mut awakened = self.awakened.lock().unwrap();
-            std::mem::swap(&mut *awakened, target);
+    pub(crate) fn append_local_wakes(&self, target: &mut VecDeque<TaskRef>) {
+        if self.is_current() {
+            CURRENT_EXECUTOR.with_borrow_mut(|current| target.append(&mut current.awakened));
         }
     }
 
     pub(crate) fn has_local_wakes(&self) -> bool {
-        let has_tls_wakes = CURRENT_EXECUTOR
-            .try_with(|current| {
-                let current = current.borrow();
-                current.owner == std::ptr::from_ref(self) && !current.awakened.is_empty()
-            })
-            .unwrap_or(false);
-        if has_tls_wakes {
-            return true;
-        }
-        #[cfg(test)]
-        {
-            return !self.awakened.lock().unwrap().is_empty();
-        }
-        #[cfg(not(test))]
-        false
+        self.is_current() && CURRENT_EXECUTOR.with_borrow(|current| !current.awakened.is_empty())
     }
 
     fn remove_local_notification(&self, task_ref: TaskPointer) {
-        if self.tls_is_current() {
+        if self.is_current() {
             CURRENT_EXECUTOR.with_borrow_mut(|current| {
                 current.awakened.retain(|queued| queued.pointer() != task_ref);
             });
-            return;
-        }
-        #[cfg(test)]
-        if !self.registered.load(atomic::Ordering::Acquire) {
-            self.awakened
-                .lock()
-                .expect("test wake queue is not held while invoking user code")
-                .retain(|queued| queued.pointer() != task_ref);
         }
     }
 
     pub(crate) fn clear_local_wakes(&self) {
-        if self.tls_is_current() {
+        if self.is_current() {
             CURRENT_EXECUTOR.with_borrow_mut(|current| current.awakened.clear());
-            return;
-        }
-        #[cfg(test)]
-        {
-            self.awakened.lock().unwrap().clear();
         }
     }
 
@@ -251,13 +181,8 @@ impl WakeSignal {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_parts(
-        awakened_queue: AwakenedQueue,
-        _probe_embedded_wake_signals: Arc<AtomicBool>,
-        parent_waker: Waker,
-        task_ref: TaskRef,
-    ) -> Self {
-        let shared = Arc::new(WakeShared::new(awakened_queue, parent_waker));
+    pub(crate) fn new_for_test(parent_waker: Waker, task_ref: TaskRef) -> Self {
+        let shared = Arc::new(WakeShared::new(parent_waker));
         let task_pointer = task_ref.pointer();
         let mut signal = Self::new(shared, task_pointer);
         signal._test_task_owner = Some(task_ref);
@@ -268,12 +193,7 @@ impl WakeSignal {
     pub(crate) fn fake() -> Self {
         // SAFETY: Tests use the allocation only as stable task identity.
         let fake_task_ref = unsafe { TaskRef::fake() };
-        Self::new_with_parts(
-            Arc::new(Mutex::new(VecDeque::new())),
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            fake_task_ref,
-        )
+        Self::new_for_test(Waker::noop().clone(), fake_task_ref)
     }
 
     pub(crate) fn retire(&self) {
@@ -308,6 +228,11 @@ impl WakeSignal {
     #[cfg(test)]
     pub(crate) fn has_queued_notification(&self) -> bool {
         self.schedule_state.load(atomic::Ordering::Acquire) & TASK_NOTIFIED != 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append_test_wakes(&self, target: &mut VecDeque<TaskRef>) {
+        self.shared.append_local_wakes(target);
     }
 
     fn wake(&self) {
@@ -534,18 +459,6 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 }
 
 #[cfg(test)]
-fn enqueue_test_wake(queue: &AwakenedQueue, task_ref: TaskRef) -> Result<(), TaskRef> {
-    let Ok(mut queue) = queue.try_lock() else {
-        return Err(task_ref);
-    };
-    if queue.len() >= queue.capacity() {
-        return Err(task_ref);
-    }
-    queue.push_back(task_ref);
-    Ok(())
-}
-
-#[cfg(test)]
 mod tests {
     use std::pin::pin;
     use std::sync::atomic::Ordering;
@@ -555,16 +468,10 @@ mod tests {
 
     #[test]
     fn borrowed_and_owned_wakes_share_inline_state() {
-        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(2)));
         let parent = Arc::new(TestWaker::new());
         // SAFETY: Tests use the allocation only as stable task identity.
         let task_ref = unsafe { TaskRef::fake() };
-        let signal = pin!(WakeSignal::new_with_parts(
-            Arc::clone(&queue),
-            Arc::new(AtomicBool::new(false)),
-            Arc::clone(&parent).into(),
-            task_ref,
-        ));
+        let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), task_ref));
 
         // SAFETY: The signal remains pinned for the borrow and clone.
         let borrowed = unsafe { signal.as_ref().waker_ref() };
@@ -572,30 +479,26 @@ mod tests {
         borrowed.wake_by_ref();
         owned.wake_by_ref();
 
-        assert_eq!(queue.lock().unwrap().len(), 1);
+        let mut queued = VecDeque::new();
+        signal.append_test_wakes(&mut queued);
+        assert_eq!(queued.len(), 1);
         assert!(parent.awakened.load(Ordering::Relaxed));
         drop(owned);
     }
 
     #[test]
     fn retirement_makes_retained_waker_inert() {
-        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
         // SAFETY: Tests use the allocation only as stable task identity.
         let task_ref = unsafe { TaskRef::fake() };
-        let signal = pin!(WakeSignal::new_with_parts(
-            Arc::clone(&queue),
-            Arc::new(AtomicBool::new(false)),
-            Waker::noop().clone(),
-            task_ref,
-        ));
+        let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), task_ref));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker() };
 
         waker.wake_by_ref();
-        assert_eq!(queue.lock().unwrap().len(), 1);
+        assert!(signal.shared.has_local_wakes());
         signal.retire();
-        assert!(queue.lock().unwrap().is_empty());
+        assert!(!signal.shared.has_local_wakes());
         waker.wake_by_ref();
-        assert!(queue.lock().unwrap().is_empty());
+        assert!(!signal.shared.has_local_wakes());
     }
 }
