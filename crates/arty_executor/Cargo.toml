@@ -41,7 +41,6 @@ derive_more = { workspace = true, features = ["debug"] }
 foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
-mockall = { workspace = true }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 scopeguard = { workspace = true }

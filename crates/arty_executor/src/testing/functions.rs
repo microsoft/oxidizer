@@ -8,6 +8,17 @@ use scopeguard::{Always, ScopeGuard};
 
 use crate::{CycleOutcome, Executor};
 
+pub(crate) fn new_test_task() -> impl crate::TypeErasedTask {
+    let events = events_once::LocalEventPool::<()>::new();
+    let (sender, _receiver) = events.rent();
+    crate::Task::new(std::future::pending(), sender)
+}
+
+pub(crate) fn new_test_task_ref() -> crate::TaskRef {
+    let pool = plurality::Pool::new();
+    crate::TaskRef::new(pool.alloc_arc_pin(new_test_task()))
+}
+
 /// Creates an executor with unit-test cleanup that drives explicit shutdown.
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // This is test scaffolding, mutation here is unhelpful.
