@@ -67,9 +67,13 @@ operation-level `&self` APIs rather than `Ref`/`RefMut`.
 Its fields are independently synchronized according to their actual needs:
 
 - only the newly registered task queue uses `RefCell` for reentrant mutation;
-- `MultiPool` and `JoinEventLake` use their existing shared-reference APIs;
+- `MultiPool` and `events_once::LocalEventLake` use their existing shared-reference APIs;
 - logical task count and shutdown state use their dedicated field operations;
 - wake context and telemetry sink are immutable shared values.
+
+The remote-wake receiver remains in this owner-only component, not in the
+cross-thread wake handle. This prevents queued task references from forming a
+cycle through the tasks' shared wake handles.
 
 `WakeShared` is itself a cheaply cloneable handle around one internal `Arc`
 allocation. Callers clone the handle directly instead of wrapping it in
@@ -97,14 +101,17 @@ register on the same thread.
 
 Local/remote classification compares the `ThreadId` carried by the cloned wake
 handle with the registered TLS value. This avoids both a raw identity pointer
-and repeated calls to `std::thread::current`. `WakeShared` delegates local queue
-operations to the executor context and contains no registration lifecycle
-logic.
+and repeated calls to `std::thread::current`. Local queue operations go directly
+through the executor context with that `ThreadId`; the context does not depend
+on the cross-thread `WakeShared` transport.
 
 ### Pooled task ownership
 
 Each concrete task is allocated and pinned through `MultiPool::alloc_arc_pin`.
-`TaskRef` holds a pinned `plurality::Arc<dyn TypeErasedTask>`.
+`TaskRef` owns one strong `plurality::Arc<dyn TypeErasedTask>` reference through
+the pointer returned by `Arc::into_raw`. It exposes only owner-thread pinned
+borrows. Retaining the original allocation pointer preserves provenance for
+the pool's adjacent reference count; deriving it from `&Task` does not.
 
 `plurality::Arc` gained raw strong-reference operations modeled on
 `std::sync::Arc`:
@@ -256,9 +263,10 @@ Operations that require a live allocation or raw ownership are unsafe:
 - reconstruction from an owned raw pointer;
 - retention from a non-owning pointer.
 
-The intrusive list is the only long-lived conceptual owner represented solely
-as a raw strong count. Its insert/remove operations transfer that ownership
-exactly once.
+`TaskRef` is the RAII strong owner used by runnable queues, remote notifications,
+and consuming raw-waker calls. The intrusive list is the only long-lived owner
+without such an RAII handle. Its insert/remove operations transfer raw strong
+ownership exactly once.
 
 ### Shutdown
 
@@ -417,7 +425,7 @@ The former `ReentrantState` aggregate and borrow accessors were removed.
 `ExecutorShared` now provides named operations such as accepting/draining new
 tasks, task-count retirement, shutdown requests, wake access, and completion
 queries. No `Ref` or `RefMut` escapes the shared component. `MultiPool` and
-`JoinEventLake` are direct fields, task count and shutdown use `Cell`, and only
+`events_once::LocalEventLake` are direct fields, task count and shutdown use `Cell`, and only
 the reentrant new-task queue uses `RefCell`.
 
 `ExecutorCore` no longer has an `ExclusiveState` wrapper. Its active queue,
@@ -557,13 +565,69 @@ Follow-up verification is partial, not a clean full-tier result:
 - All 135 Arty unit tests pass, including the new factory and parking tests.
 - Arty integration tests pass except three existing no-op-sink enrichment
   propagation failures, also reproduced on the unchanged branch in release.
-- Two executor failures remain: cross-thread wake completion and the warmed
-  debug allocation count. Both reproduce on pre-optimization code with only the
+- The warmed debug allocation-count failure remains. The cross-thread wake
+  failure was subsequently corrected by the executor cleanup described below;
+  both originally reproduced on pre-optimization code with only the
   shutdown-assertion guard applied.
 - Strict package-only Arty Clippy, formatting, README generation, spelling, and
-  no-default-features checks with and without `rt` pass. The generated workspace
-  Clippy check remains blocked by existing executor lints.
+  no-default-features checks with and without `rt` pass. The subsequent executor
+  cleanup also resolves the executor lints blocking workspace Clippy.
 - Miri, Loom, coverage and mutation testing were not run for this follow-up.
+
+### Executor cleanup follow-up
+
+The cleanup preserves the public API, pooled layouts, notification bits and
+intrusive inventory, while removing redundant layers:
+
+- Use `LocalEventLake` directly instead of the `JoinEventLake` wrapper, and
+  register typed tasks directly instead of routing result delivery through
+  generic creation/rejection callbacks. Admission is still checked both before
+  and after potentially reentrant `IntoFuture` conversion.
+- Remove local-TLS forwarding methods from `WakeShared`; the executor context
+  takes the existing `ThreadId` directly.
+- Use `TaskRef` ownership for remote notifications and consuming raw-waker calls
+  instead of a separate `RawWakerOwner` and manual remote-notification release.
+  Borrowed and owned wakers share their identical clone and borrowed-wake
+  callbacks.
+- Remove the unused `pin-project` dependency, redundant single-thread marker,
+  duplicate `must_use` annotation, and the unsafe signature on a safe mock
+  constructor.
+- Remove the test-only assumption that any unregistered thread is local.
+  Wake tests now register an executor just like production, and the existing
+  cross-thread clone/wake/drop regression passes.
+
+Focused Miri testing exposed and verified fixes for two ownership defects:
+task pointers derived from shared borrows could not legally reach the pool's
+reference count, and direct executor drop with an undrained remote notification
+retained a wake-state/task cycle. Raw allocation pointers and an owner-only
+remote receiver correct those paths without changing task placement.
+
+Before/after benchmarks used preserved binaries from `e1fe2805` and the cleaned
+working tree, with three interleaved runs per revision on Apple M5. Criterion
+contention cases used 100 samples, a one-second warm-up and five-second
+measurement windows:
+
+| Arty workload | Workers | Before cleanup | After cleanup | Time change |
+| --- | ---: | ---: | ---: | ---: |
+| Relocated cache | 1 | 11.06 us | 10.55 us | -4.6% |
+| Relocated cache | 8 | 35.43 us | 34.30 us | -3.2% |
+| Retained waker | 1 | 11.10 us | 10.85 us | -2.2% |
+| Retained waker | 8 | 31.18 us | 31.49 us | +1.0% |
+
+Elementary-operation median changes were between -2.2% and +2.3%.
+The initially noisy approximately two-nanosecond retired-waker case was
+remeasured with 200 samples and five-second windows; its median changed from
+2.10 ns to 2.15 ns (+2.3%). No repeatable regression exceeded the 5% investigation
+threshold. Allocation counts and allocated bytes were identical in all seven
+elementary allocation probes, and warmed release allocation tests remained
+at zero allocations. These are shared-workstation observations, not statistical
+equivalence guarantees.
+
+Validation passed: 277 scoped native tests, 23 focused Miri tests, generated
+workspace Anvil Clippy, formatting, README generation, and spelling. The
+pre-existing debug remote-allocation assertion and no-op-sink enrichment
+failures remain outside this cleanup; complete workspace coverage, mutation
+testing and exhaustive runtime analysis were not run.
 
 ## Validation
 

@@ -55,7 +55,7 @@ impl TaskList {
         }
         // SAFETY: Insertion transferred exactly one raw strong reference to the list, and this
         // successful unlink returns that ownership exactly once.
-        Some(unsafe { pointer.from_owned() })
+        Some(unsafe { pointer.into_task_ref() })
     }
 
     pub(crate) fn pop_front(&mut self) -> Option<TaskRef> {

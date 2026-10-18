@@ -51,7 +51,6 @@ impl ExecutorBuilder {
     ///
     /// The coordinate must identify the current OS thread. If omitted, the
     /// executor uses the current OS thread directly.
-    #[must_use]
     pub fn thread(mut self, thread: Thread) -> Self {
         self.thread = Some(thread);
         self

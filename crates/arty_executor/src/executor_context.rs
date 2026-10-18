@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::thread::ThreadId;
 
-use crate::{TaskPointer, TaskRef, WakeShared};
+use crate::{TaskPointer, TaskRef};
 
 thread_local! {
     static CURRENT: RefCell<State> = const {
@@ -31,52 +31,48 @@ pub(crate) const AWAKENED_CAPACITY: usize = 1024;
 #[cfg(miri)]
 pub(crate) const AWAKENED_CAPACITY: usize = 4;
 
-pub(crate) fn register(owner: &WakeShared) {
+pub(crate) fn register(owner: ThreadId) {
     CURRENT.with_borrow_mut(|current| {
         assert!(current.owner.is_none(), "only one live Executor may exist on a thread");
-        current.owner = Some(owner.thread_id());
+        current.owner = Some(owner);
         current.awakened = VecDeque::with_capacity(AWAKENED_CAPACITY);
         current.executing = false;
     });
 }
 
-pub(crate) fn unregister(owner: &WakeShared) {
+pub(crate) fn unregister(owner: ThreadId) {
     _ = CURRENT.try_with(|current| {
         let mut current = current.borrow_mut();
-        assert_eq!(
-            current.owner,
-            Some(owner.thread_id()),
-            "the current thread must unregister its own Executor"
-        );
+        assert_eq!(current.owner, Some(owner), "the current thread must unregister its own Executor");
         current.owner = None;
         current.awakened.clear();
         current.executing = false;
     });
 }
 
-pub(crate) fn is_current(owner: &WakeShared) -> bool {
+pub(crate) fn is_current(owner: ThreadId) -> bool {
     CURRENT
         .try_with(|current| {
             let current = current.borrow();
-            current.owner == Some(owner.thread_id()) || cfg!(test) && current.owner.is_none()
+            current.owner == Some(owner)
         })
         .unwrap_or(false)
 }
 
-pub(crate) fn enter_cycle(owner: &WakeShared) -> CycleGuard {
+pub(crate) fn enter_cycle(owner: ThreadId) -> CycleGuard {
     CURRENT.with_borrow_mut(|current| {
-        assert_eq!(current.owner, Some(owner.thread_id()));
+        assert_eq!(current.owner, Some(owner));
         assert!(!current.executing, "Executor::execute_cycle cannot be called reentrantly");
         current.executing = true;
     });
     CycleGuard
 }
 
-pub(crate) fn is_executing(owner: &WakeShared) -> bool {
-    CURRENT.with_borrow(|current| current.owner == Some(owner.thread_id()) && current.executing)
+pub(crate) fn is_executing(owner: ThreadId) -> bool {
+    CURRENT.with_borrow(|current| current.owner == Some(owner) && current.executing)
 }
 
-pub(crate) fn enqueue(owner: &WakeShared, task_ref: TaskRef) -> Result<(), TaskRef> {
+pub(crate) fn enqueue(owner: ThreadId, task_ref: TaskRef) -> Result<(), TaskRef> {
     if !is_current(owner) {
         return Err(task_ref);
     }
@@ -84,17 +80,17 @@ pub(crate) fn enqueue(owner: &WakeShared, task_ref: TaskRef) -> Result<(), TaskR
     Ok(())
 }
 
-pub(crate) fn append_wakes(owner: &WakeShared, target: &mut VecDeque<TaskRef>) {
+pub(crate) fn append_wakes(owner: ThreadId, target: &mut VecDeque<TaskRef>) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| target.append(&mut current.awakened));
     }
 }
 
-pub(crate) fn has_wakes(owner: &WakeShared) -> bool {
+pub(crate) fn has_wakes(owner: ThreadId) -> bool {
     is_current(owner) && CURRENT.with_borrow(|current| !current.awakened.is_empty())
 }
 
-pub(crate) fn remove_wake(owner: &WakeShared, task_ref: TaskPointer) {
+pub(crate) fn remove_wake(owner: ThreadId, task_ref: TaskPointer) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| {
             current.awakened.retain(|queued| queued.pointer() != task_ref);
@@ -102,7 +98,7 @@ pub(crate) fn remove_wake(owner: &WakeShared, task_ref: TaskPointer) {
     }
 }
 
-pub(crate) fn clear_wakes(owner: &WakeShared) {
+pub(crate) fn clear_wakes(owner: ThreadId) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| current.awakened.clear());
     }
