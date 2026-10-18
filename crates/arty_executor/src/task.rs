@@ -556,7 +556,7 @@ mod tests {
     use crate::testing::TestSubjectFuture;
 
     fn fake_wake_owner() -> TaskRef {
-        TaskRef::mock()
+        crate::testing::new_test_task_ref()
     }
 
     fn fake_wake_signal(owner: &TaskRef) -> WakeSignal {

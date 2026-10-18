@@ -304,7 +304,7 @@ mod tests {
     fn borrowed_and_owned_wakes_share_inline_state() {
         let _executor = crate::Executor::builder().build();
         let parent = Arc::new(TestWaker::new());
-        let task_ref = TaskRef::mock();
+        let task_ref = crate::testing::new_test_task_ref();
         let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), &task_ref));
 
         // SAFETY: The signal remains pinned for the borrow and clone.
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn retirement_makes_retained_waker_inert() {
         let _executor = crate::Executor::builder().build();
-        let task_ref = TaskRef::mock();
+        let task_ref = crate::testing::new_test_task_ref();
         let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_ref));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker_ref() }.clone();
