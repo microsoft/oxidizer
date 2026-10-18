@@ -5,8 +5,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
 use std::time::Instant;
 use std::{mem, task};
 
@@ -71,16 +69,13 @@ struct ReentrancySafeState {
 /// This portion of the executor state is exclusive to its internal use - even if something calls
 /// back into the executor during `execute_cycle()`, this state is never touched.
 ///
-/// This entire struct is `RefCell`-guarded and borrowed for the duration of `execute_cycle()`.
+/// This state is directly owned and mutably borrowed for the duration of `execute_cycle()`.
 #[derive(Debug)]
 struct ExclusiveState {
     /// All the tasks we want to poll.
     ///
     /// This is a `VecDeque` because we do not require set characteristics and a deque is faster.
     active: VecDeque<TaskRef>,
-
-    /// Scratch queue swapped with the TLS owner queue once per cycle.
-    awakened: VecDeque<TaskRef>,
 
     /// Stable owner-thread inventory of pending tasks.
     tasks: TaskList,
@@ -125,26 +120,13 @@ impl ExecutorCore {
                 join_events: JoinEventLake::new(),
                 shutting_down: false,
             }),
-            wake: {
-                #[cfg(test)]
-                {
-                    Arc::new(WakeShared::new(
-                        Arc::new(Mutex::new(VecDeque::with_capacity(AWAKENED_CAPACITY))),
-                        owner_waker,
-                    ))
-                }
-                #[cfg(not(test))]
-                {
-                    Arc::new(WakeShared::new(owner_waker))
-                }
-            },
+            wake: Arc::new(WakeShared::new(owner_waker)),
             sink,
         });
         Self {
             shared,
             exclusive: ExclusiveState {
                 active: VecDeque::new(),
-                awakened: VecDeque::with_capacity(AWAKENED_CAPACITY),
                 tasks: TaskList::default(),
                 completed: VecDeque::new(),
                 clock: SimpleClock::new_system().with_fast_instant(true),
@@ -352,12 +334,12 @@ impl ExecutorCore {
         // spurious wake signals may be sent when the task is already active (the signal
         // may come from a caller who has no idea if the task is already awake or not).
 
-        wake.take_local_wakes(&mut state_exclusive.awakened);
-        while let Some(task_ref) = state_exclusive.awakened.pop_front() {
+        let first_awakened = state_exclusive.active.len();
+        wake.append_local_wakes(&mut state_exclusive.active);
+        for task_ref in state_exclusive.active.range(first_awakened..) {
             // SAFETY: Retirement removes every queued notification before task storage is
             // released, so every queued reference still targets a live task.
             unsafe { task_ref.as_task() }.clear_queued_notification();
-            state_exclusive.active.push_back(task_ref);
             TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
         }
     }
@@ -506,7 +488,6 @@ impl ExecutorCore {
 
     fn prepare_task_abort(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) -> usize {
         wake.clear_local_wakes();
-        state_exclusive.awakened.clear();
 
         // Needed for split borrowing.
         let state_exclusive_real: &mut ExclusiveState = state_exclusive;

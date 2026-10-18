@@ -658,13 +658,7 @@ mod tests {
         let task = task.as_ref();
         // SAFETY: Tests use this only as an opaque identity.
         let fake_task_ref = unsafe { crate::TaskRef::fake() };
-        let queue = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(1)));
-        let signal = WakeSignal::new_with_parts(
-            Arc::clone(&queue),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            Waker::noop().clone(),
-            fake_task_ref,
-        );
+        let signal = WakeSignal::new_for_test(Waker::noop().clone(), fake_task_ref);
         task.initialize(signal);
         // SAFETY: Initialization populated the pinned wake-signal slot.
         let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
@@ -674,6 +668,8 @@ mod tests {
         let waker = unsafe { signal.waker_ref() };
         waker.wake_by_ref();
         assert!(signal.has_queued_notification());
+        let mut queued = std::collections::VecDeque::new();
+        signal.append_test_wakes(&mut queued);
 
         task.clear_queued_notification();
 
