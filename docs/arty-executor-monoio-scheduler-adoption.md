@@ -385,7 +385,15 @@ releasing immediately.
 The former `ReentrantState` aggregate and borrow accessors were removed.
 `ExecutorShared` now provides named operations such as accepting/draining new
 tasks, task-count retirement, shutdown requests, wake access, and completion
-queries. No `Ref` or `RefMut` escapes the shared component.
+queries. No `Ref` or `RefMut` escapes the shared component. `MultiPool` and
+`JoinEventLake` are direct fields, task count and shutdown use `Cell`, and only
+the reentrant new-task queue uses `RefCell`.
+
+`ExecutorCore` no longer has an `ExclusiveState` wrapper. Its active queue,
+intrusive inventory, clock, and last-cycle timestamp are direct fields, and
+cycle behavior is expressed as focused instance methods (`start_cycle`,
+`accept_new_tasks`, `activate_awakened_tasks`, `poll_active_tasks`,
+`cancel_if_shutting_down`, `cycle_outcome`, and `finish_cycle`).
 
 ### Separate `Cell<bool>` shutdown flag
 
