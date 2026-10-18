@@ -498,10 +498,72 @@ gap:
 | External spawn, one worker | 8.25 us | 6.50 us |
 | External spawn, four workers | 23.73 us | 10.13 us |
 
-Arty's local executor is competitive or faster. Multi-worker external
+At that stage, Arty's local executor was competitive or faster. Multi-worker external
 submission still pays for per-worker channel sends, explicit wakeups, boxed
 factory transport, result-channel setup, and payload relocation. Tokio uses a
 global injection queue plus stealing and more aggressive wake batching.
+
+### Arty integration follow-up
+
+The follow-up keeps worker affinity and inline pooled futures, and removes costs
+above the executor rather than introducing stealing or a global injection queue:
+
+- Remote factories use source-thread `plurality::MultiPool` storage instead of a
+  fresh standard `Box` per submission. A pooled erased callback consumes the
+  concrete `FnOnce` through `Cell<Option<_>>`, so captures need not be `Unpin`.
+  Detached pool handles allow registration or disposal after the submitting
+  thread exits. The existing queued-factory panic boundary remains intact.
+- Local child submissions rent cross-thread result channels from a worker-local
+  pool, rather than contending on the dispatcher's runtime-wide pool. The
+  returned join handles remain `Send` and may outlive the worker.
+- `Builtins` clones share one worker-local allocation. Relocation uses
+  copy-on-write so moving a clone does not rebind the source's services.
+  Deferred factories check shutdown through those retained services rather than
+  cloning the runtime-wide shutdown flag for every child.
+- `WorkerSignal` uses `Thread::park_timeout` and `Thread::unpark`, with an atomic
+  notification latch and lazily registered owner handle. Registration precedes
+  the latch check, retaining notifications before the first wait and across the
+  check-to-park window. Repeated notifications coalesce; spurious unparks consume
+  only the remaining timeout budget.
+
+Three complete Criterion runs on 2026-10-18 used 100 samples per case, a
+one-second warm-up and a five-second measurement window on Apple M5/macOS.
+The benchmark source, default features, compiler and bench profile match the
+earlier branch measurements. The table uses the median of the three slope
+estimates, with times per batch of 10 outer tasks and 100 inner operations:
+
+| Workload | Workers | Earlier branch | Follow-up | Same-run Tokio | Reduction vs earlier branch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Relocated cache | 1 | 16.93 us | 10.77 us | 17.10 us | 36.4% |
+| Relocated cache | 8 | 61.73 us | 36.33 us | 47.73 us | 41.2% |
+| Retained waker | 1 | 15.96 us | 10.68 us | 16.95 us | 33.1% |
+| Retained waker | 8 | 59.45 us | 34.68 us | 41.05 us | 41.7% |
+
+Both eight-worker workloads beat Tokio in each of the three follow-up runs.
+Median batch time is 23.9% lower for relocated cache and 15.5% lower for retained
+wakers. These measurements meet the eight-worker parity goal for these cases
+on this host, not a general runtime-performance claim. The machine is shared and
+has heterogeneous cores; exact percentages include host scheduling variability.
+
+Native validation added regressions for factory-slot reuse, source-thread exit,
+non-`Unpin` captures, worker-local result handles surviving shutdown, independent
+relocation of shared `Builtins`, retained notifications and spurious unparks.
+It also exposed shutdown-only executor assertions being evaluated during normal
+pending-task cycles; the shutdown-completion check now gates those assertions on
+shutdown actually having started.
+
+Follow-up verification is partial, not a clean full-tier result:
+
+- All 135 Arty unit tests pass, including the new factory and parking tests.
+- Arty integration tests pass except three existing no-op-sink enrichment
+  propagation failures, also reproduced on the unchanged branch in release.
+- Two executor failures remain: cross-thread wake completion and the warmed
+  debug allocation count. Both reproduce on pre-optimization code with only the
+  shutdown-assertion guard applied.
+- Strict package-only Arty Clippy, formatting, README generation, spelling, and
+  no-default-features checks with and without `rt` pass. The generated workspace
+  Clippy check remains blocked by existing executor lints.
+- Miri, Loom, coverage and mutation testing were not run for this follow-up.
 
 ## Validation
 
@@ -543,21 +605,18 @@ were formatted with package-scoped `cargo fmt`.
   ownership, raw waker vtables, and intrusive task links. The unsafe surface is
   documented and narrowed to 60 lexical unsafe blocks across `arty_executor`,
   but Miri and CI runtime-analysis results remain required.
-- Multi-worker remote injection is now the dominant measured performance gap.
-  The first follow-up to benchmark is edge-triggered worker notification:
-  `WorkerSignal` coalesces the parked state but currently acquires its mutex and
-  notifies for every submitted command. A pending-command transition could
-  amortize that work across a burst, but the check-to-park race must be proven
-  free of lost wakeups.
+- The integration follow-up removes the measured eight-worker contention gap on
+  this host without changing routing. Broader workloads and other hosts still
+  need measurement; parity in these coordination cases is not general parity.
+  Worker notification now uses an atomic latch and native thread parking rather
+  than taking a mutex for every command.
 - A batch drain API on `performables::channel` could amortize queue-state
   inspection for remote wakes and worker commands. The executor currently
   avoids a final failed receive because that operation reports channel
   contention, so replacing the loop locally without a channel-level batch
   primitive would change telemetry.
-- Per-task boxed remote factory transport remains necessary for heterogeneous
-  future types. Removing it requires pooled erased command storage or a shared
-  injection queue; simply returning a boxed future would add a second
-  allocation and lose inline pooled future storage.
+- Remote factory transport is now pooled erased command storage. It retains the
+  concrete future registration path instead of returning a boxed future.
 - A shared injection queue or explicit command batches may reduce per-task
   channel sends, but they must preserve destination affinity, prompt submission
   without timer-based batching delay, shutdown rejection, and panic-contained

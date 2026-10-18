@@ -47,7 +47,7 @@ impl RuntimeOperations {
 impl From<&Builtins> for RuntimeOperations {
     fn from(builtins: &Builtins) -> Self {
         Self {
-            dispatcher: builtins.scheduler.dispatcher.clone(),
+            dispatcher: builtins.dispatcher().clone(),
         }
     }
 }
