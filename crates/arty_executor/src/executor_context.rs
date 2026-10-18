@@ -3,13 +3,14 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::thread::ThreadId;
 
 use crate::{TaskPointer, TaskRef, WakeShared};
 
 thread_local! {
     static CURRENT: RefCell<State> = const {
         RefCell::new(State {
-            owner: std::ptr::null(),
+            owner: None,
             awakened: VecDeque::new(),
             executing: false,
         })
@@ -17,7 +18,7 @@ thread_local! {
 }
 
 struct State {
-    owner: *const WakeShared,
+    owner: Option<ThreadId>,
     awakened: VecDeque<TaskRef>,
     executing: bool,
 }
@@ -31,49 +32,48 @@ pub(crate) const AWAKENED_CAPACITY: usize = 1024;
 pub(crate) const AWAKENED_CAPACITY: usize = 4;
 
 pub(crate) fn register(owner: &WakeShared) {
-    let owner = std::ptr::from_ref(owner);
     CURRENT.with_borrow_mut(|current| {
-        assert!(current.owner.is_null(), "only one live Executor may exist on a thread");
-        current.owner = owner;
+        assert!(current.owner.is_none(), "only one live Executor may exist on a thread");
+        current.owner = Some(owner.thread_id());
         current.awakened = VecDeque::with_capacity(AWAKENED_CAPACITY);
         current.executing = false;
     });
 }
 
 pub(crate) fn unregister(owner: &WakeShared) {
-    let owner = std::ptr::from_ref(owner);
     _ = CURRENT.try_with(|current| {
         let mut current = current.borrow_mut();
-        assert_eq!(current.owner, owner, "the current thread must unregister its own Executor");
-        current.owner = std::ptr::null();
+        assert_eq!(
+            current.owner,
+            Some(owner.thread_id()),
+            "the current thread must unregister its own Executor"
+        );
+        current.owner = None;
         current.awakened.clear();
         current.executing = false;
     });
 }
 
 pub(crate) fn is_current(owner: &WakeShared) -> bool {
-    let owner = std::ptr::from_ref(owner);
     CURRENT
         .try_with(|current| {
             let current = current.borrow();
-            current.owner == owner || cfg!(test) && current.owner.is_null()
+            current.owner == Some(owner.thread_id()) || cfg!(test) && current.owner.is_none()
         })
         .unwrap_or(false)
 }
 
 pub(crate) fn enter_cycle(owner: &WakeShared) -> CycleGuard {
-    let owner = std::ptr::from_ref(owner);
     CURRENT.with_borrow_mut(|current| {
-        assert_eq!(current.owner, owner);
+        assert_eq!(current.owner, Some(owner.thread_id()));
         assert!(!current.executing, "Executor::execute_cycle cannot be called reentrantly");
         current.executing = true;
     });
-    CycleGuard(owner)
+    CycleGuard
 }
 
 pub(crate) fn is_executing(owner: &WakeShared) -> bool {
-    let owner = std::ptr::from_ref(owner);
-    CURRENT.with_borrow(|current| current.owner == owner && current.executing)
+    CURRENT.with_borrow(|current| current.owner == Some(owner.thread_id()) && current.executing)
 }
 
 pub(crate) fn enqueue(owner: &WakeShared, task_ref: TaskRef) -> Result<(), TaskRef> {
@@ -108,15 +108,13 @@ pub(crate) fn clear_wakes(owner: &WakeShared) {
     }
 }
 
-pub(crate) struct CycleGuard(*const WakeShared);
+pub(crate) struct CycleGuard;
 
 impl Drop for CycleGuard {
     fn drop(&mut self) {
         _ = CURRENT.try_with(|current| {
             let mut current = current.borrow_mut();
-            if current.owner == self.0 {
-                current.executing = false;
-            }
+            current.executing = false;
         });
     }
 }

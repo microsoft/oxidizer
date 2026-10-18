@@ -10,6 +10,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool, AtomicU8};
 use std::task::{RawWaker, RawWakerVTable, Waker};
+use std::thread::ThreadId;
 
 use performables::sync::channel;
 
@@ -20,8 +21,14 @@ const TASK_LOCAL_NOTIFIED: u8 = 1 << 1;
 const TASK_REMOTE_NOTIFIED: u8 = 1 << 2;
 const TASK_NOTIFIED: u8 = TASK_LOCAL_NOTIFIED | TASK_REMOTE_NOTIFIED;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WakeShared {
+    inner: Arc<WakeSharedInner>,
+}
+
+#[derive(Debug)]
+struct WakeSharedInner {
+    thread_id: ThreadId,
     parent_waker: Waker,
     remote_wake_tx: channel::Sender<RemoteWake>,
     remote_wake_rx: channel::Receiver<RemoteWake>,
@@ -29,14 +36,21 @@ pub(crate) struct WakeShared {
 }
 
 impl WakeShared {
-    pub(crate) fn new(parent_waker: Waker) -> Self {
+    pub(crate) fn new(parent_waker: Waker, thread_id: ThreadId) -> Self {
         let (remote_wake_tx, remote_wake_rx) = channel::unbounded();
         Self {
-            parent_waker,
-            remote_wake_tx,
-            remote_wake_rx,
-            remote_wakes_pending: AtomicBool::new(false),
+            inner: Arc::new(WakeSharedInner {
+                thread_id,
+                parent_waker,
+                remote_wake_tx,
+                remote_wake_rx,
+                remote_wakes_pending: AtomicBool::new(false),
+            }),
         }
+    }
+
+    pub(crate) fn thread_id(&self) -> ThreadId {
+        self.inner.thread_id
     }
 
     fn is_current(&self) -> bool {
@@ -72,11 +86,11 @@ impl WakeShared {
     }
 
     pub(crate) fn drain_remote_wakes(&self) {
-        if !self.remote_wakes_pending.swap(false, atomic::Ordering::Acquire) {
+        if !self.inner.remote_wakes_pending.swap(false, atomic::Ordering::Acquire) {
             return;
         }
-        while !self.remote_wake_rx.is_empty() {
-            match self.remote_wake_rx.try_recv() {
+        while !self.inner.remote_wake_rx.is_empty() {
+            match self.inner.remote_wake_rx.try_recv() {
                 Ok(notification) => notification.schedule_local(),
                 Err(error) if error.is_empty() || error.is_closed() => return,
                 Err(error) => unreachable!("remote wake channel reports only empty or closed: {error}"),
@@ -85,46 +99,31 @@ impl WakeShared {
     }
 
     pub(crate) fn has_remote_wakes(&self) -> bool {
-        self.remote_wakes_pending.load(atomic::Ordering::Relaxed)
+        self.inner.remote_wakes_pending.load(atomic::Ordering::Relaxed)
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct WakeSignal {
     task_ref: TaskPointer,
-    shared: Arc<WakeShared>,
+    shared: WakeShared,
     schedule_state: AtomicU8,
     _requires_pin: PhantomPinned,
-    #[cfg(test)]
-    _test_task_owner: Option<TaskRef>,
 }
 
 impl WakeSignal {
-    pub(crate) fn new(shared: Arc<WakeShared>, task_ref: TaskPointer) -> Self {
+    pub(crate) fn new(shared: WakeShared, task_ref: TaskPointer) -> Self {
         Self {
             task_ref,
             shared,
             schedule_state: AtomicU8::new(TASK_ACTIVE),
             _requires_pin: PhantomPinned,
-            #[cfg(test)]
-            _test_task_owner: None,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn new_for_test(parent_waker: Waker, task_ref: TaskRef) -> Self {
-        let shared = Arc::new(WakeShared::new(parent_waker));
-        let task_pointer = task_ref.pointer();
-        let mut signal = Self::new(shared, task_pointer);
-        signal._test_task_owner = Some(task_ref);
-        signal
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fake() -> Self {
-        // SAFETY: Tests use the allocation only as stable task identity.
-        let fake_task_ref = unsafe { TaskRef::fake() };
-        Self::new_for_test(Waker::noop().clone(), fake_task_ref)
+    pub(crate) fn new_for_test(parent_waker: Waker, task_ref: &TaskRef) -> Self {
+        Self::new(WakeShared::new(parent_waker, std::thread::current().id()), task_ref.pointer())
     }
 
     pub(crate) fn retire(&self) {
@@ -180,13 +179,13 @@ impl WakeSignal {
 
     fn schedule_remote(&self) {
         let notification = RemoteWake::new(self);
-        if let Err(error) = self.shared.remote_wake_tx.try_send(notification) {
+        if let Err(error) = self.shared.inner.remote_wake_tx.try_send(notification) {
             self.clear_notification();
             drop(error.into_inner());
             return;
         }
-        self.shared.remote_wakes_pending.store(true, atomic::Ordering::Release);
-        self.shared.parent_waker.wake_by_ref();
+        self.shared.inner.remote_wakes_pending.store(true, atomic::Ordering::Release);
+        self.shared.inner.parent_waker.wake_by_ref();
     }
 
     fn schedule_local(&self, wake_owner: bool) {
@@ -194,14 +193,14 @@ impl WakeSignal {
         let task_ref = unsafe { self.task_ref.retain() };
         if self.shared.enqueue_local(task_ref).is_ok() {
             if wake_owner && !self.shared.is_executing() {
-                self.shared.parent_waker.wake_by_ref();
+                self.shared.inner.parent_waker.wake_by_ref();
             }
 
             return;
         }
         self.clear_notification();
         if wake_owner {
-            self.shared.parent_waker.wake_by_ref();
+            self.shared.inner.parent_waker.wake_by_ref();
         }
     }
 
@@ -389,7 +388,7 @@ mod tests {
         let parent = Arc::new(TestWaker::new());
         // SAFETY: Tests use the allocation only as stable task identity.
         let task_ref = unsafe { TaskRef::fake() };
-        let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), task_ref));
+        let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), &task_ref));
 
         // SAFETY: The signal remains pinned for the borrow and clone.
         let borrowed = unsafe { signal.as_ref().waker_ref() };
@@ -408,7 +407,7 @@ mod tests {
     fn retirement_makes_retained_waker_inert() {
         // SAFETY: Tests use the allocation only as stable task identity.
         let task_ref = unsafe { TaskRef::fake() };
-        let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), task_ref));
+        let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_ref));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker() };
 

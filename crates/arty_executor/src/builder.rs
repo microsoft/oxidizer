@@ -4,6 +4,7 @@
 use std::task::Waker;
 
 use observed::Sink;
+use thread_aware_core::Thread;
 
 use crate::{Executor, ExecutorCore};
 
@@ -13,6 +14,7 @@ use crate::{Executor, ExecutorCore};
 pub struct ExecutorBuilder {
     owner_waker: Waker,
     sink: Sink,
+    thread: Option<Thread>,
 }
 
 impl ExecutorBuilder {
@@ -21,6 +23,7 @@ impl ExecutorBuilder {
         Self {
             owner_waker: Waker::noop().clone(),
             sink: Sink::noop(),
+            thread: None,
         }
     }
 
@@ -44,14 +47,34 @@ impl ExecutorBuilder {
         self
     }
 
+    /// Configures the thread coordinate owned by the executor.
+    ///
+    /// The coordinate must identify the current OS thread. If omitted, the
+    /// executor uses the current OS thread directly.
+    #[must_use]
+    pub fn thread(mut self, thread: Thread) -> Self {
+        self.thread = Some(thread);
+        self
+    }
+
     /// Builds the executor with the configured settings.
     ///
     /// # Panics
     ///
-    /// Panics if another executor is already alive on the current thread.
+    /// Panics if another executor is already alive on the current thread or if
+    /// the configured thread coordinate identifies a different OS thread.
     #[must_use]
     pub fn build(self) -> Executor {
-        Executor::new(ExecutorCore::new(self.owner_waker, self.sink))
+        let current_thread_id = std::thread::current().id();
+        let thread_id = self.thread.map_or(current_thread_id, |thread| {
+            assert_eq!(
+                thread.id(),
+                current_thread_id,
+                "Executor thread coordinate must identify the current OS thread"
+            );
+            thread.id()
+        });
+        Executor::new(ExecutorCore::new(self.owner_waker, self.sink, thread_id))
     }
 }
 
