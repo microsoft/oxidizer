@@ -80,9 +80,6 @@ struct ExclusiveState {
     /// Stable owner-thread inventory of pending tasks.
     tasks: TaskList,
 
-    /// Tasks that completed during this cycle after their inline wake state and payload retired.
-    completed: VecDeque<TaskRef>,
-
     /// Used to measure the time spent during/between executor cycle processing and during shutdown.
     /// This is a very fast clock designed to be cheap to poll many times each millisecond (if we
     /// need to).
@@ -128,7 +125,6 @@ impl ExecutorCore {
             exclusive: ExclusiveState {
                 active: VecDeque::new(),
                 tasks: TaskList::default(),
-                completed: VecDeque::new(),
                 clock: SimpleClock::new_system().with_fast_instant(true),
                 last_cycle_ended: None,
             },
@@ -256,10 +252,9 @@ impl ExecutorCore {
 
         {
             let mut state_reentrant = shared.reentrancy_safe.borrow_mut();
-
             Self::accept_new_tasks(state_exclusive, &mut state_reentrant);
-            Self::activate_awakened_tasks(&shared.wake, state_exclusive);
         }
+        Self::activate_awakened_tasks(&shared.wake, state_exclusive);
 
         Self::poll_active_tasks(shared, state_exclusive);
 
@@ -268,13 +263,11 @@ impl ExecutorCore {
                 let mut state_reentrant = shared.reentrancy_safe.borrow_mut();
                 Self::prepare_task_abort(&shared.wake, state_exclusive, &mut state_reentrant)
             };
-            Self::abort_prepared_tasks(state_exclusive, aborted_count);
+            Self::abort_prepared_tasks(state_exclusive, aborted_count, true);
         }
 
         {
             let state_reentrant = shared.reentrancy_safe.borrow();
-
-            Self::drop_completed_tasks(state_exclusive, true);
 
             let outcome = if Self::evaluate_shutdown_completion(state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
@@ -345,7 +338,7 @@ impl ExecutorCore {
     }
 
     fn poll_active_tasks(shared: &ExecutorShared, state_exclusive: &mut ExclusiveState) {
-        let completed_before = state_exclusive.completed.len();
+        let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
         while let Some(task_ref) = state_exclusive.active.pop_front() {
@@ -363,19 +356,17 @@ impl ExecutorCore {
                 task.abort();
                 Self::decrement_task_count(shared, 1);
                 drop(state_exclusive.tasks.remove(pointer));
-                state_exclusive.completed.push_back(task_ref);
+                completed_count = completed_count.saturating_add(1);
                 continue;
             }
 
             match task.poll() {
                 task::Poll::Ready(()) => {
-                    // The task has completed and retired its inline wake state, so it can move to
-                    // the completed list for release at the end of this cycle.
                     if linked {
                         drop(state_exclusive.tasks.remove(pointer));
                     }
                     Self::decrement_task_count(shared, 1);
-                    state_exclusive.completed.push_back(task_ref);
+                    completed_count = completed_count.saturating_add(1);
                 }
                 task::Poll::Pending => {
                     pending_count = pending_count.saturating_add(1);
@@ -386,12 +377,7 @@ impl ExecutorCore {
             }
         }
 
-        let completed_diff = state_exclusive
-            .completed
-            .len()
-            .checked_sub(completed_before)
-            .expect("completed tasks set cannot decrease when completing more tasks");
-        Self::record_poll_metrics(pending_count, completed_diff);
+        Self::record_poll_metrics(pending_count, completed_count);
     }
 
     fn decrement_task_count(shared: &ExecutorShared, count: usize) {
@@ -403,26 +389,14 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
-    fn record_poll_metrics(pending_count: usize, completed_diff: usize) {
+    fn record_poll_metrics(pending_count: usize, completed_count: usize) {
         if pending_count != 0 {
             TASKS_INACTIVATED.with(|x| x.observe(pending_count));
         }
 
-        if completed_diff != 0 {
-            TASKS_COMPLETED.with(|x| x.observe(completed_diff));
-        }
-    }
-
-    #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_completed_tasks(state_exclusive: &mut ExclusiveState, record_cycle_metric: bool) {
-        let completed_before = state_exclusive.completed.len();
-
-        // Draining releases the executor's strong references after completion/cancellation has
-        // retired inline wake state and emptied the task payload on the owner thread.
-        state_exclusive.completed.clear();
-
-        if record_cycle_metric && completed_before > 0 {
-            TASKS_DROPPED.with(|x| x.observe(completed_before));
+        if completed_count != 0 {
+            TASKS_COMPLETED.with(|x| x.observe(completed_count));
+            TASKS_DROPPED.with(|x| x.observe(completed_count));
         }
     }
 
@@ -460,7 +434,7 @@ impl ExecutorCore {
 
         let aborted_count = Self::prepare_task_abort(&self.shared.wake, state_exclusive, &mut state_reentrant);
         drop(state_reentrant);
-        Self::abort_prepared_tasks(state_exclusive, aborted_count);
+        Self::abort_prepared_tasks(state_exclusive, aborted_count, true);
     }
 
     pub(crate) fn owner_dropped(&mut self) {
@@ -479,8 +453,7 @@ impl ExecutorCore {
         let mut state_reentrant = self.shared.reentrancy_safe.borrow_mut();
         let aborted_count = Self::prepare_task_abort(&self.shared.wake, state_exclusive, &mut state_reentrant);
         drop(state_reentrant);
-        Self::abort_prepared_tasks(state_exclusive, aborted_count);
-        Self::drop_completed_tasks(state_exclusive, false);
+        Self::abort_prepared_tasks(state_exclusive, aborted_count, false);
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
             // Executor cleanup must remain safe after metrics TLS has been destroyed.
         }
@@ -489,27 +462,18 @@ impl ExecutorCore {
     fn prepare_task_abort(wake: &WakeShared, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) -> usize {
         wake.clear_local_wakes();
 
-        // Needed for split borrowing.
-        let state_exclusive_real: &mut ExclusiveState = state_exclusive;
-
         let new = &mut state_reentrant.new_tasks;
-        let active = &mut state_exclusive_real.active;
-        let tasks = &mut state_exclusive_real.tasks;
-        let completed = &mut state_exclusive_real.completed;
+        let active = &mut state_exclusive.active;
+        let tasks = &mut state_exclusive.tasks;
 
-        let completed_before = completed.len();
-        for task_ref in active.drain(..) {
+        for task_ref in active.iter() {
             drop(tasks.remove(task_ref.pointer()));
-            completed.push_back(task_ref);
         }
-        completed.extend(new.drain(..));
+        active.extend(new.drain(..));
         while let Some(task_ref) = tasks.pop_front() {
-            completed.push_back(task_ref);
+            active.push_back(task_ref);
         }
-        let aborted_count = completed
-            .len()
-            .checked_sub(completed_before)
-            .expect("prepared task count cannot decrease");
+        let aborted_count = active.len();
         state_reentrant.task_count = state_reentrant
             .task_count
             .checked_sub(aborted_count)
@@ -524,13 +488,8 @@ impl ExecutorCore {
         aborted_count
     }
 
-    fn abort_prepared_tasks(state_exclusive: &ExclusiveState, aborted_count: usize) {
-        let abort_start = state_exclusive
-            .completed
-            .len()
-            .checked_sub(aborted_count)
-            .expect("prepared task count cannot exceed completed task count");
-        for task_ref in state_exclusive.completed.range(abort_start..) {
+    fn abort_prepared_tasks(state_exclusive: &mut ExclusiveState, aborted_count: usize, record_drop_metric: bool) {
+        while let Some(task_ref) = state_exclusive.active.pop_front() {
             // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -540,6 +499,9 @@ impl ExecutorCore {
             let task = unsafe { task_ref.as_task() };
 
             task.abort();
+        }
+        if record_drop_metric && aborted_count != 0 {
+            TASKS_DROPPED.with(|x| x.observe(aborted_count));
         }
     }
 
@@ -552,12 +514,12 @@ impl ExecutorCore {
             return false;
         }
 
-        // During shutdown, tasks can only exist in the "completed" state.
+        // During shutdown, no live task ownership remains in executor queues.
         debug_assert!(state_exclusive.active.is_empty());
         debug_assert!(state_reentrant.new_tasks.is_empty());
         debug_assert!(state_exclusive.tasks.is_empty());
 
-        state_exclusive.completed.is_empty() && state_reentrant.task_count == 0
+        state_reentrant.task_count == 0
     }
 }
 
@@ -569,9 +531,7 @@ impl Drop for ExecutorCore {
 
         state_reentrant.shutting_down = true;
         let aborted_count = Self::prepare_task_abort(&self.shared.wake, state_exclusive, &mut state_reentrant);
-        Self::abort_prepared_tasks(state_exclusive, aborted_count);
-
-        Self::drop_completed_tasks(state_exclusive, false);
+        Self::abort_prepared_tasks(state_exclusive, aborted_count, false);
         match EXECUTOR_PUSHER.try_with(MetricsPusher::push) {
             Ok(()) => {}
             Err(_access_error) => {
