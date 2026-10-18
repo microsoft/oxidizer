@@ -36,6 +36,10 @@ impl TypeErasedTask for MockTypeErasedTask {
 
     fn clear_queued_notification(&self) {}
 
+    fn promote_remote_notification(&self) -> bool {
+        false
+    }
+
     fn abort(self: Pin<&Self>) {
         self.abort();
     }

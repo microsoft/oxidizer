@@ -7,7 +7,6 @@ use std::marker::{PhantomData, PhantomPinned};
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool, AtomicU8};
 use std::task::{RawWaker, RawWakerVTable, Waker};
@@ -59,7 +58,7 @@ impl WakeShared {
         }
         while !remote_wakes.is_empty() {
             match remote_wakes.try_recv() {
-                Ok(notification) => notification.schedule_local(),
+                Ok(notification) => notification.schedule_local(self.inner.thread_id),
                 Err(error) if error.is_empty() || error.is_closed() => return,
                 Err(error) => unreachable!("remote wake channel reports only empty or closed: {error}"),
             }
@@ -119,12 +118,6 @@ impl WakeSignal {
     }
 
     #[cfg(test)]
-    pub(crate) unsafe fn waker(self: Pin<&Self>) -> Waker {
-        // SAFETY: The signal remains pinned until the owned clone has acquired task ownership.
-        unsafe { self.waker_ref() }.clone()
-    }
-
-    #[cfg(test)]
     pub(crate) fn has_queued_notification(&self) -> bool {
         self.schedule_state.load(atomic::Ordering::Acquire) & TASK_NOTIFIED != 0
     }
@@ -142,7 +135,7 @@ impl WakeSignal {
         if remote {
             self.schedule_remote();
         } else {
-            self.schedule_local(true);
+            self.schedule_local();
         }
     }
 
@@ -157,20 +150,18 @@ impl WakeSignal {
         self.shared.inner.parent_waker.wake_by_ref();
     }
 
-    fn schedule_local(&self, wake_owner: bool) {
+    fn schedule_local(&self) {
         // SAFETY: The signal is embedded in the live task that owns this call.
         let task_ref = unsafe { self.task_ref.retain() };
         if executor_context::enqueue(self.shared.thread_id(), task_ref).is_ok() {
-            if wake_owner && !executor_context::is_executing(self.shared.thread_id()) {
+            if !executor_context::is_executing(self.shared.thread_id()) {
                 self.shared.inner.parent_waker.wake_by_ref();
             }
 
             return;
         }
         self.clear_notification();
-        if wake_owner {
-            self.shared.inner.parent_waker.wake_by_ref();
-        }
+        self.shared.inner.parent_waker.wake_by_ref();
     }
 
     fn begin_notification(&self, remote: bool) -> bool {
@@ -192,7 +183,7 @@ impl WakeSignal {
         }
     }
 
-    fn promote_remote_notification(&self) -> bool {
+    pub(crate) fn promote_remote_notification(&self) -> bool {
         let mut state = self.schedule_state.load(atomic::Ordering::Acquire);
         loop {
             if state & TASK_ACTIVE == 0 || state & TASK_REMOTE_NOTIFIED == 0 {
@@ -226,29 +217,18 @@ impl Drop for WakeSignal {
     }
 }
 
-pub(crate) struct RemoteWake {
-    signal: NonNull<WakeSignal>,
-    _task: TaskRef,
-}
-
-// SAFETY: The task strong reference keeps the signal pinned and alive. Scheduling state is atomic.
-unsafe impl Send for RemoteWake {}
+pub(crate) struct RemoteWake(TaskRef);
 
 impl RemoteWake {
     fn new(signal: &WakeSignal) -> Self {
         // SAFETY: The live signal's enclosing task owns the allocation during notification setup.
-        let task = unsafe { signal.task_ref.retain() };
-        Self {
-            signal: NonNull::from(signal),
-            _task: task,
-        }
+        Self(unsafe { signal.task_ref.retain() })
     }
 
-    fn schedule_local(self) {
-        // SAFETY: This notification owns a strong task reference containing the pinned signal.
-        let signal = unsafe { self.signal.as_ref() };
-        if signal.promote_remote_notification() {
-            signal.schedule_local(false);
+    fn schedule_local(self, owner: ThreadId) {
+        // SAFETY: The receiving executor owns this thread, and the notification retains the task.
+        if unsafe { self.0.as_task() }.promote_remote_notification() {
+            executor_context::enqueue(owner, self.0).expect("remote wakes are drained by their registered executor owner");
         }
     }
 }
@@ -346,7 +326,7 @@ mod tests {
         let task_ref = TaskRef::mock();
         let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_ref));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
-        let waker = unsafe { signal.as_ref().waker() };
+        let waker = unsafe { signal.as_ref().waker_ref() }.clone();
 
         waker.wake_by_ref();
         assert!(executor_context::has_wakes(signal.shared.thread_id()));

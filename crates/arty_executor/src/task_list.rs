@@ -81,50 +81,17 @@ impl Drop for TaskList {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::Pin;
-    use std::task::Poll;
+    use std::future::pending;
 
+    use events_once::LocalEventPool;
     use plurality::MultiPool;
 
     use super::*;
-    use crate::{TaskCreatedReporter, TaskLinks, TypeErasedTask, WakeSignal};
-
-    struct ListTask {
-        links: TaskLinks,
-    }
-
-    // SAFETY: Tests access list links on one thread only and never poll task payload.
-    unsafe impl Send for ListTask {}
-    // SAFETY: Same invariant as `Send`.
-    unsafe impl Sync for ListTask {}
-
-    impl TypeErasedTask for ListTask {
-        fn poll(self: Pin<&Self>) -> Poll<()> {
-            Poll::Pending
-        }
-
-        fn created_reporter(&self) -> Option<TaskCreatedReporter> {
-            None
-        }
-
-        fn links(&self) -> &TaskLinks {
-            &self.links
-        }
-
-        fn clear_queued_notification(&self) {}
-
-        fn abort(self: Pin<&Self>) {}
-
-        fn initialize(self: Pin<&Self>, _wake_signal: WakeSignal) {}
-
-        #[cfg(all(debug_assertions, test))]
-        fn inspect_waker_backtraces(&self, _f: &mut dyn FnMut(&std::backtrace::Backtrace)) {}
-    }
+    use crate::Task;
 
     fn task(pool: &MultiPool) -> TaskRef {
-        TaskRef::new(pool.alloc_arc_pin(ListTask {
-            links: TaskLinks::default(),
-        }))
+        let (sender, _receiver) = LocalEventPool::<()>::new().rent();
+        TaskRef::new(pool.alloc_arc_pin(Task::new(pending(), sender)))
     }
 
     #[test]

@@ -6,11 +6,63 @@
 use std::cell::{Cell, RefCell};
 use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::task::{Poll, Wake, Waker};
+use std::task::{Context, Poll, Wake, Waker};
 
 use arty_executor::{CycleOutcome, Executor, TaskOptions};
+
+#[test]
+fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
+    let mut executor = Executor::builder().build();
+    let ready = Rc::new(Cell::new(false));
+    let polls = Rc::new(RefCell::new(Vec::new()));
+    let retained = Rc::new(RefCell::new(Vec::new()));
+    let mut handles = std::array::from_fn::<_, 3, _>(|index| {
+        executor.tasks().add(
+            poll_fn({
+                let ready = Rc::clone(&ready);
+                let polls = Rc::clone(&polls);
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    polls.borrow_mut().push(index);
+                    if ready.get() {
+                        Poll::Ready(index)
+                    } else {
+                        retained.borrow_mut().push(cx.waker().clone());
+                        Poll::Pending
+                    }
+                }
+            }),
+            TaskOptions::default(),
+        )
+    });
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    polls.borrow_mut().clear();
+    ready.set(true);
+    let wakers = retained.take();
+
+    std::thread::spawn(move || {
+        let [first, second, third]: [Waker; 3] = wakers.try_into().unwrap();
+        third.wake_by_ref();
+        first.wake();
+        third.wake();
+        second.wake();
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert_eq!(*polls.borrow(), [2, 0, 1]);
+    for (index, handle) in handles.iter_mut().enumerate() {
+        assert_eq!(
+            Pin::new(handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Ok(index))
+        );
+    }
+    assert!(!executor.has_tasks());
+}
 
 #[test]
 fn remote_consuming_wake_keeps_payload_on_owner_when_notification_panics() {

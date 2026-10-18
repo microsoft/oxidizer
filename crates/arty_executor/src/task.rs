@@ -3,10 +3,9 @@
 
 #[cfg(all(debug_assertions, test))]
 use std::backtrace::Backtrace;
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::fmt::Debug;
 use std::marker::PhantomPinned;
-use std::mem::ManuallyDrop;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 #[cfg(all(debug_assertions, test))]
@@ -15,6 +14,7 @@ use std::task;
 
 use events_once::PooledLocalSender;
 use observed::Sink;
+use pin_project::{pin_project, pinned_drop};
 
 use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
@@ -50,14 +50,8 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     payload: UnsafeCell<Option<Payload<F, R, T>>>,
 
-    /// `None` if the task has not been initialized yet.
-    ///
-    /// We use `UnsafeCell` to allow the `Task` to be accessed from multiple viewpoints, with the
-    /// executor using both the payload and the wake signal, and the wakers emitted by the
-    /// wake signal using the wake signal. All access is via shared references to ensure no
-    /// aliasing violations, with `UnsafeCell` used when mutation of the contents is needed.
-    /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
-    wake_signal: UnsafeCell<Option<WakeSignal>>,
+    /// Initialized once on the owner, before any waker is exposed. The signal is never replaced.
+    wake_signal: OnceCell<WakeSignal>,
 
     options: TaskOptions,
 
@@ -145,7 +139,7 @@ where
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
             })),
-            wake_signal: UnsafeCell::new(None),
+            wake_signal: OnceCell::new(),
             options,
             sink,
             poll_count: Cell::new(0),
@@ -177,24 +171,22 @@ where
     }
 
     fn clear_queued_notification(&self) {
-        // SAFETY: The executor calls this only for a live initialized task while draining its
-        // wake queue.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before clearing a wake notification")
-                .clear_queued_notification();
-        }
+        self.wake_signal
+            .get()
+            .expect("task must be initialized before clearing a wake notification")
+            .clear_queued_notification();
+    }
+
+    fn promote_remote_notification(&self) -> bool {
+        self.wake_signal
+            .get()
+            .expect("remote notifications retain initialized tasks")
+            .promote_remote_notification()
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>) {
-        // SAFETY: Initialized wake metadata is retired only by the task's owner.
-        let wake_signal = unsafe { &*self.wake_signal.get() };
-        if let Some(wake_signal) = wake_signal {
+        if let Some(wake_signal) = self.wake_signal.get() {
             wake_signal.retire();
         }
 
@@ -208,17 +200,7 @@ where
     }
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
-        // SAFETY: The `Task` is single-threaded and before initialization, we do not create any
-        // escaping references to the wake signal, so we have exclusive access here. We rely on
-        // the caller's safety guarantees that this is not called more than once.
-        let maybe_wake_signal = unsafe { self.wake_signal.get().as_mut().expect("UnsafeCell pointer cannot be null") };
-
-        assert!(maybe_wake_signal.is_none(), "task must be initialized exactly once");
-
-        // SAFETY: initialization is called once, so the slot contains None and
-        // owns no previous signal. Writing avoids generating drop glue for an
-        // impossible old Some value on every task registration.
-        unsafe { std::ptr::write(maybe_wake_signal, Some(wake_signal)) };
+        self.wake_signal.set(wake_signal).expect("task must be initialized exactly once");
     }
 
     #[cfg(all(debug_assertions, test))]
@@ -233,6 +215,12 @@ where
     R: 'static,
     T: TaskResultTarget<R>,
 {
+    fn pinned_wake_signal(self: Pin<&Self>) -> Pin<&WakeSignal> {
+        let signal = self.get_ref().wake_signal.get().expect("task must be initialized before poll()");
+        // SAFETY: OnceCell never removes or replaces the signal, which stays pinned with Task.
+        unsafe { Pin::new_unchecked(signal) }
+    }
+
     fn poll_in_context(self: Pin<&Self>) -> task::Poll<()> {
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
@@ -247,21 +235,7 @@ where
         // `Pin` annotation just gets lost in the type layering. We add it back here.
         let future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
 
-        // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
-        // shared references to the wake signal, so creating a shared reference here is valid.
-        // Before initialization, we do not create any escaping references to the wake signal.
-        let wake_signal = unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before poll()")
-        };
-
-        // SAFETY: It is pinned together with the `Task` that contains it, the `Pin` wrapper just
-        // goes lost in the whole `UnsafeCell` and `Option` layering.
-        let wake_signal = unsafe { Pin::new_unchecked(wake_signal) };
+        let wake_signal = self.pinned_wake_signal();
 
         let poll_result = {
             // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
@@ -334,9 +308,8 @@ where
             // SAFETY: The future is pinned with Task and destroyed in place.
             unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err()
         };
-        // SAFETY: The future and result target were retired above, so clearing the payload cannot
-        // run user code.
-        unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
+        // Assignment drops the retired storage in place without moving its pinned future.
+        *maybe_payload = None;
 
         match outcome {
             TerminalOutcome::Succeeded(result) => {
@@ -464,49 +437,39 @@ impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
     }
 }
 
+#[pin_project(PinnedDrop)]
 struct FutureStorage<F> {
-    inner: ManuallyDrop<F>,
-    live: bool,
-    _pinned: PhantomPinned,
+    #[pin]
+    inner: Option<F>,
 }
 
 impl<F> FutureStorage<F> {
     fn new(inner: F) -> Self {
-        Self {
-            inner: ManuallyDrop::new(inner),
-            live: true,
-            _pinned: PhantomPinned,
-        }
+        Self { inner: Some(inner) }
     }
 
     fn destroy_pinned(self: Pin<&mut Self>) -> Result<(), TaskPanicPayload> {
-        // SAFETY: destruction leaves the retired value in place and never moves it.
-        let this = unsafe { self.get_unchecked_mut() };
-        Self::destroy(&mut this.inner, &mut this.live)
-    }
-
-    fn destroy(inner: &mut ManuallyDrop<F>, live: &mut bool) -> Result<(), TaskPanicPayload> {
-        if !std::mem::replace(live, false) {
+        let mut inner = self.project().inner;
+        if inner.is_none() {
             return Ok(());
         }
-        catch_unwind(AssertUnwindSafe(|| {
-            // SAFETY: the live value stays in place and is retired before its destructor runs.
-            unsafe { ManuallyDrop::drop(inner) };
-        }))
+        catch_unwind(AssertUnwindSafe(|| inner.set(None)))
     }
 }
 
 impl<F: Future> Future for FutureStorage<F> {
     type Output = F::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        // SAFETY: no operation moves inner after pinning.
-        let this = unsafe { self.get_unchecked_mut() };
-        assert!(this.live, "task future polled after completion");
-        // SAFETY: inner occupies the same pinned storage throughout its lifetime.
-        let outcome = unsafe { Pin::new_unchecked(&mut *this.inner) }.poll(cx);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+        let outcome = self
+            .as_mut()
+            .project()
+            .inner
+            .as_pin_mut()
+            .expect("task future must not be polled after completion")
+            .poll(cx);
         if outcome.is_ready()
-            && let Err(panic) = Self::destroy(&mut this.inner, &mut this.live)
+            && let Err(panic) = self.destroy_pinned()
         {
             std::panic::resume_unwind(panic);
         }
@@ -514,10 +477,11 @@ impl<F: Future> Future for FutureStorage<F> {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
-impl<F> Drop for FutureStorage<F> {
-    fn drop(&mut self) {
-        if let Err(panic) = Self::destroy(&mut self.inner, &mut self.live) {
+#[pinned_drop]
+impl<F> PinnedDrop for FutureStorage<F> {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
+    fn drop(self: Pin<&mut Self>) {
+        if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
         }
     }
@@ -547,6 +511,9 @@ pub(crate) trait TypeErasedTask: Send + Sync {
 
     /// Records that the executor drained this task's queued wake notification.
     fn clear_queued_notification(&self);
+
+    /// Promotes an active remote notification to local scheduling.
+    fn promote_remote_notification(&self) -> bool;
 
     /// Clears the inner state of the task, entering a form where no further polling is possible
     /// and any future-specific state is dropped.
@@ -660,6 +627,21 @@ mod tests {
     }
 
     #[test]
+    fn wake_signal_is_initialized_exactly_once() {
+        let wake_owner = fake_wake_owner();
+        let event_pool = LocalEventPool::<u64>::new();
+        let (tx, _rx) = event_pool.rent();
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        task.initialize(fake_wake_signal(&wake_owner));
+
+        assert_panic!(task.initialize(fake_wake_signal(&wake_owner)));
+
+        assert!(task.wake_signal.get().is_some());
+        task.abort();
+    }
+
+    #[test]
     fn clear_queued_notification_forwards_to_the_wake_signal() {
         let _executor = crate::Executor::builder().build();
         let fake_task_ref = fake_wake_owner();
@@ -669,10 +651,7 @@ mod tests {
         let task = task.as_ref();
         let signal = WakeSignal::new_for_test(Waker::noop().clone(), &fake_task_ref);
         task.initialize(signal);
-        // SAFETY: Initialization populated the pinned wake-signal slot.
-        let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
-        // SAFETY: The signal remains pinned with the task.
-        let signal = unsafe { Pin::new_unchecked(signal) };
+        let signal = task.pinned_wake_signal();
         // SAFETY: The pinned signal remains alive for this borrow.
         let waker = unsafe { signal.waker_ref() };
         waker.wake_by_ref();
@@ -732,6 +711,41 @@ mod tests {
         drop(FutureStorage::new(DropCountingFuture(std::sync::Arc::clone(&drops))));
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn future_storage_retires_a_panicking_destructor_exactly_once() {
+        struct PanickingDropFuture(std::sync::Arc<AtomicUsize>);
+
+        impl Future for PanickingDropFuture {
+            type Output = ();
+
+            fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+                task::Poll::Ready(())
+            }
+        }
+
+        impl Drop for PanickingDropFuture {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("future destructor panic");
+            }
+        }
+
+        for completes in [false, true] {
+            let drops = std::sync::Arc::new(AtomicUsize::new(0));
+            {
+                let mut storage = pin!(FutureStorage::new(PanickingDropFuture(std::sync::Arc::clone(&drops))));
+                if completes {
+                    assert_panic!(storage.as_mut().poll(&mut task::Context::from_waker(Waker::noop())));
+                } else {
+                    storage.as_mut().destroy_pinned().unwrap_err();
+                }
+                assert_eq!(drops.load(Ordering::Relaxed), 1);
+                storage.as_mut().destroy_pinned().unwrap();
+            }
+            assert_eq!(drops.load(Ordering::Relaxed), 1);
+        }
     }
 
     struct PanicOnDropFuture(Ready<u64>);
