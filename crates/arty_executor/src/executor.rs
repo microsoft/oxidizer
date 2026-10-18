@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::rc::Rc;
-
 use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 
 /// The async task executor for a single thread.
@@ -17,11 +15,13 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// capabilities into a single package of features offered to each thread in an Arty-based
 /// application.
 ///
+/// At most one executor may be alive on a thread. Dropping it releases that thread registration,
+/// after which a replacement executor may be created.
+///
 /// # Reentrancy and mutability
 ///
-/// The executor calls out into external code (futures of the tasks it executes), which may call
-/// back into specific methods on the executor (e.g. to enqueue more tasks). Therefore, it operates
-/// using internal mutability.
+/// Owner operations take exclusive access to the executor. Futures may still submit tasks through
+/// a [`TaskSet`], whose narrowly scoped internal mutability is released around external callbacks.
 ///
 /// Not every method can be called in a reentrant manner - see API documentation of individual
 /// methods for details.
@@ -59,7 +59,7 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// register a remote result target that receives captured panics without unwinding the worker.
 #[derive(Debug)]
 pub struct Executor {
-    core: Rc<ExecutorCore>,
+    core: ExecutorCore,
 }
 
 impl Executor {
@@ -71,14 +71,15 @@ impl Executor {
 
     #[must_use]
     pub(crate) fn new(core: ExecutorCore) -> Self {
-        Self { core: Rc::new(core) }
+        core.register_current();
+        Self { core }
     }
 
     /// Creates a new handle to the set of tasks registered with the executor. You can use
     /// this to register additional tasks.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
-        TaskSet::new(&self.core)
+        TaskSet::new(self.core.shared())
     }
 
     /// Returns whether the executor still owns any registered tasks.
@@ -104,7 +105,7 @@ impl Executor {
     /// Panics if called in a reentrant manner (e.g. from external code called
     /// from within `execute_cycle()`).
     #[must_use]
-    pub fn execute_cycle(&self) -> CycleOutcome {
+    pub fn execute_cycle(&mut self) -> CycleOutcome {
         self.core.execute_cycle()
     }
 
@@ -123,7 +124,7 @@ impl Executor {
     ///
     /// [1]: Self::execute_cycle
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
-    pub fn begin_shutdown(&self) {
+    pub fn begin_shutdown(&mut self) {
         self.core.begin_shutdown();
     }
 }
@@ -140,6 +141,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::{Ready, poll_fn, ready};
     use std::pin::Pin;
+    use std::rc::Rc;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
 
@@ -176,10 +178,6 @@ mod tests {
 
     struct DropSignalFuture(Rc<Cell<bool>>);
 
-    struct DropOwnerOnPoll {
-        owner: Rc<RefCell<Option<Executor>>>,
-    }
-
     impl Future for DropSignalFuture {
         type Output = ();
 
@@ -191,15 +189,6 @@ mod tests {
     impl Drop for DropSignalFuture {
         fn drop(&mut self) {
             self.0.set(true);
-        }
-    }
-
-    impl Future for DropOwnerOnPoll {
-        type Output = ();
-
-        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-            drop(self.owner.borrow_mut().take());
-            Poll::Pending
         }
     }
 
@@ -244,28 +233,10 @@ mod tests {
     }
 
     #[test]
-    fn owner_drop_during_active_cycle_defers_cancellation_to_the_cycle() {
-        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
-        let executor_core = Rc::clone(&owner.borrow().as_ref().unwrap().core);
-        let mut task = owner
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .tasks()
-            .add_test(DropOwnerOnPoll { owner: Rc::clone(&owner) });
-
-        assert_eq!(executor_core.execute_cycle(), CycleOutcome::Shutdown);
-
-        assert!(owner.borrow().is_none());
-        let mut cx = Context::from_waker(Waker::noop());
-        assert!(matches!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
-    }
-
-    #[test]
     fn smoke_test() {
         // Create the executor, run a task to completion, and shut the executor down - basic stuff.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let task_completed = Rc::new(Cell::new(false));
@@ -307,7 +278,7 @@ mod tests {
         // Creates an executor with no tasks, executes it for a cycle,
         // then observes the universe still exists and goes home.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     }
@@ -316,7 +287,7 @@ mod tests {
     fn two_tasks_complete_together() {
         // Create the executor, run a task to completion, and shut the executor down - basic stuff.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future1 = async move { 42 };
@@ -350,7 +321,7 @@ mod tests {
         // A task is polled and immediately awakens itself, causing the executor to request a new
         // execution cycle from the caller immediately after the current cycle completes.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -376,7 +347,7 @@ mod tests {
         // Two tasks are polled, both suspending immediately and the second one awakens the first
         // one. We expect this to result in a `Continue` outcome.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future1 = TestSubjectFuture::new();
@@ -408,7 +379,7 @@ mod tests {
 
     #[test]
     fn task_completes_after_external_awaken() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -440,7 +411,7 @@ mod tests {
         // inactive task remains suspended when the executor probes all embedded wake signals.
         const AWAKENED_TASK_COUNT: usize = AWAKENED_CAPACITY + 1;
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let mut join_handles = Vec::with_capacity(AWAKENED_TASK_COUNT);
@@ -484,7 +455,7 @@ mod tests {
 
     #[test]
     fn task_not_polled_when_inactive() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -538,7 +509,7 @@ mod tests {
 
         let drop_signal = Rc::new(Cell::new(false));
 
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
@@ -556,7 +527,7 @@ mod tests {
 
     #[test]
     fn shutdown_without_tasks_is_immediate() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
 
         executor.begin_shutdown();
 
@@ -565,7 +536,7 @@ mod tests {
 
     #[test]
     fn shutdown_with_unreferenced_tasks_is_immediate() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         // We add the task but do not keep any references to its join handle.
@@ -579,7 +550,7 @@ mod tests {
 
     #[test]
     fn join_handle_reports_shutdown_without_delaying_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let mut join_handle = tasks.add_test(TestSubjectFuture::new());
@@ -595,7 +566,7 @@ mod tests {
 
     #[test]
     fn enqueue_after_shutdown_reports_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         executor.begin_shutdown();
@@ -623,7 +594,7 @@ mod tests {
         // owner's waker to be triggered.
         let owner_waker = Arc::new(TestWaker::new());
 
-        let executor = new_guarded_executor(Arc::clone(&owner_waker).into());
+        let mut executor = new_guarded_executor(Arc::clone(&owner_waker).into());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -647,7 +618,7 @@ mod tests {
     fn task_awaits_yield_future() {
         // A task awaits a future that yields (Pending on first poll, then immediately completes).
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = async {
@@ -668,7 +639,7 @@ mod tests {
     fn reentrant_task_addition() {
         // We add a new task while already executing another task.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let inner_task_completed = Rc::new(Cell::new(false));
@@ -700,7 +671,7 @@ mod tests {
 
     #[test]
     fn reentrant_tasks_wait_for_next_cycle_in_registration_order() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
         let polls = Rc::new(RefCell::new(Vec::new()));
         let mut cycles = Vec::new();
@@ -735,7 +706,7 @@ mod tests {
 
     #[test]
     fn new_tasks_precede_awakened_tasks() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
         let polls = Rc::new(RefCell::new(Vec::new()));
 
@@ -767,7 +738,7 @@ mod tests {
 
     #[test]
     fn completed_task_waker_is_noop_after_executor_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
         executor.tasks().add_test(poll_fn({
@@ -791,7 +762,7 @@ mod tests {
 
     #[test]
     fn duplicate_wakes_keep_first_notification_order() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let polls = Rc::new(RefCell::new(Vec::new()));
         let mut wakers = Vec::new();
         for index in 0..3 {
@@ -820,7 +791,7 @@ mod tests {
 
     #[test]
     fn cross_thread_waker_clone_wake_and_drop() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
         let completes = future.completes_on_next_poll();
@@ -844,7 +815,7 @@ mod tests {
 
     #[test]
     fn retained_waiter_does_not_delay_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let retained_waiter = Rc::new(RefCell::new(None));
@@ -872,5 +843,16 @@ mod tests {
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(Executor: Send, Sync);
+    }
+
+    #[test]
+    fn only_one_live_executor_is_allowed_per_thread() {
+        let executor = Executor::builder().build();
+
+        let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Executor::builder().build()));
+        assert!(duplicate.is_err());
+
+        drop(executor);
+        drop(Executor::builder().build());
     }
 }

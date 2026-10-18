@@ -19,7 +19,14 @@ use observed::Sink;
 use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
+use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, TaskPointer, WakeSignal, discard_task_panic_payload};
+
+#[derive(Debug, Default)]
+pub(crate) struct TaskLinks {
+    pub(crate) previous: Cell<Option<TaskPointer>>,
+    pub(crate) next: Cell<Option<TaskPointer>>,
+    pub(crate) linked: Cell<bool>,
+}
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -57,6 +64,7 @@ where
     sink: Sink,
 
     poll_count: Cell<u64>,
+    links: TaskLinks,
 
     /// Unit tests store backtraces of waker clones here to exercise leak diagnostics.
     #[cfg(all(debug_assertions, test))]
@@ -67,6 +75,27 @@ where
     _single_threaded: PhantomData<*const ()>,
 
     _requires_pin: PhantomPinned,
+}
+
+// SAFETY: Task cells may be retained and reference-counted from remote threads, but task access is
+// private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
+// metadata. Completion and cancellation empty the non-Send payload before the owner releases its
+// final scheduling reference, so remote final reclamation cannot drop user state.
+unsafe impl<F, R, T> Send for Task<F, R, T>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskResultTarget<R>,
+{
+}
+
+// SAFETY: Same invariant as `Send`; shared remote access never reaches task payload fields.
+unsafe impl<F, R, T> Sync for Task<F, R, T>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskResultTarget<R>,
+{
 }
 
 impl<F, R> Task<F, R>
@@ -120,6 +149,7 @@ where
             options,
             sink,
             poll_count: Cell::new(0),
+            links: TaskLinks::default(),
             #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
             _single_threaded: PhantomData,
@@ -139,37 +169,12 @@ where
         self.options.with_context(|| self.poll_in_context())
     }
 
-    fn created_reporter(&self) -> TaskCreatedReporter {
+    fn created_reporter(&self) -> Option<TaskCreatedReporter> {
         self.options.created_reporter(self.sink.clone())
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn consume_awakened(&self) -> bool {
-        // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
-        // shared references to the wake signal, so creating a shared reference here is valid.
-        // Before initialization, we do not create any escaping references to the wake signal.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before consume_awakened()")
-                .consume_awakened()
-        }
-    }
-
-    fn is_awakened(&self) -> bool {
-        // SAFETY: The task owner reads initialized wake metadata only on its owning thread.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before checking its wake state")
-                .is_awakened()
-        }
+    fn links(&self) -> &TaskLinks {
+        &self.links
     }
 
     fn clear_queued_notification(&self) {
@@ -261,7 +266,8 @@ where
 
         let poll_result = {
             // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
-            // independently pooled state and may outlive both the poll and the task.
+            // pinned pooled task allocation; owner retirement empties its payload before a remote
+            // clone can release the final reference.
             let waker = unsafe { wake_signal.waker_ref() };
 
             // Unit tests wrap the waker to exercise clone backtrace diagnostics.
@@ -518,7 +524,7 @@ impl<F> Drop for FutureStorage<F> {
     }
 }
 
-pub(crate) trait TypeErasedTask {
+pub(crate) trait TypeErasedTask: Send + Sync {
     /// Polls the task's future, enabling it to make progress.
     ///
     /// There is no result type here - the expectation is that the task itself will deliver any
@@ -535,17 +541,10 @@ pub(crate) trait TypeErasedTask {
     fn poll(self: Pin<&Self>) -> task::Poll<()>;
 
     /// Captures independently owned data for task-created telemetry.
-    fn created_reporter(&self) -> TaskCreatedReporter;
+    fn created_reporter(&self) -> Option<TaskCreatedReporter>;
 
-    /// Swaps the task's "is awakened" flag to false and returns its previous value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the task has not been initialized.
-    fn consume_awakened(&self) -> bool;
-
-    /// Returns whether a wake arrived without consuming it.
-    fn is_awakened(&self) -> bool;
+    /// Returns owner-thread intrusive-list links for this task.
+    fn links(&self) -> &TaskLinks;
 
     /// Records that the executor drained this task's queued wake notification.
     fn clear_queued_notification(&self);
@@ -553,7 +552,7 @@ pub(crate) trait TypeErasedTask {
     /// Clears the inner state of the task, entering a form where no further polling is possible
     /// and any future-specific state is dropped.
     ///
-    /// Independently pooled wakers remain valid but become inert.
+    /// Retained wakers keep the empty task allocation alive but become inert.
     fn abort(self: Pin<&Self>);
 
     /// Initializes the task, providing it the wake signal that it needs to enable polling
@@ -582,7 +581,7 @@ mod tests {
 
     use events_once::{Disconnected, LocalEventPool};
     use observed_testing::{TEST_ID, test_emitter};
-    use static_assertions::assert_not_impl_any;
+    use static_assertions::assert_impl_all;
     use testing_aids::assert_panic;
 
     use super::*;
@@ -814,7 +813,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -845,7 +844,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -877,7 +876,7 @@ mod tests {
         ));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.created_reporter().unwrap().report();
 
         task.abort();
         task.abort();
@@ -908,7 +907,7 @@ mod tests {
         let task = pin!(Task::new_remote(pending::<u64>(), TaskOptions::default(), sink, result_tx));
         let task = task.as_ref();
         task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.created_reporter().unwrap().report();
 
         task.abort();
 
@@ -1148,6 +1147,6 @@ mod tests {
 
     #[test]
     fn thread_safety() {
-        assert_not_impl_any!(Task<TestSubjectFuture, ()>: Send, Sync);
+        assert_impl_all!(Task<TestSubjectFuture, ()>: Send, Sync);
     }
 }

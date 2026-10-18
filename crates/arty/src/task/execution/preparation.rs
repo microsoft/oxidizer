@@ -64,17 +64,17 @@ where
 }
 
 struct TaskFactory<F> {
-    pending: Option<(F, Transfer)>,
+    pending: Option<(F, Option<Transfer>)>,
 }
 
 impl<F> TaskFactory<F> {
-    fn new(inner: F, enrichment: Transfer) -> Self {
+    fn new(inner: F, enrichment: Option<Transfer>) -> Self {
         Self {
             pending: Some((inner, enrichment)),
         }
     }
 
-    fn into_parts(mut self) -> (F, Transfer) {
+    fn into_parts(mut self) -> (F, Option<Transfer>) {
         self.pending.take().expect("a queued factory is consumed exactly once")
     }
 }
@@ -84,8 +84,12 @@ impl<F> Drop for TaskFactory<F> {
         let Some((factory, enrichment)) = self.pending.take() else {
             return;
         };
-        let _guard = enrichment.apply_current_thread();
-        discard_panicking_drop(factory);
+        if let Some(enrichment) = enrichment {
+            let _guard = enrichment.apply_current_thread();
+            discard_panicking_drop(factory);
+        } else {
+            discard_panicking_drop(factory);
+        }
     }
 }
 
@@ -111,7 +115,7 @@ pub(crate) type BoxedRemoteFutureFactory = Box<dyn FnOnce(Builtins, &TaskSet) + 
 pub(crate) fn prepare_remote<FF, F, R>(
     result_pool: &RemotePool,
     future_factory: FF,
-    parent_task_enrichment: Transfer,
+    parent_task_enrichment: Option<Transfer>,
     placement: TaskPlacement,
     shutdown_signal: Arc<AtomicBool>,
 ) -> (BoxedRemoteFutureFactory, JoinHandle<R>)
@@ -129,7 +133,8 @@ where
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options = TaskOptions::observed(parent_task_enrichment, placement);
+        let options =
+            parent_task_enrichment.map_or_else(|| TaskOptions::new(placement), |context| TaskOptions::observed(context, placement));
         tasks.add_with_remote_result(inner, options, result_tx);
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -218,16 +223,16 @@ mod tests {
                     *value
                 }
             },
-            sink.transfer_context(),
+            Some(sink.transfer_context()),
             TaskPlacement::Any,
             performables::arc::Arc::new(AtomicBool::new(false)),
         );
 
-        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
+        let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
         factory(builtins, &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
-        run_to_completion(&executor);
+        run_to_completion(&mut executor);
         let result = block_on(handle).unwrap();
 
         assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
@@ -256,7 +261,7 @@ mod tests {
     }
 
     /// Drives the executor until it reports that no further progress can be made.
-    fn run_to_completion(executor: &Executor) {
+    fn run_to_completion(executor: &mut Executor) {
         while executor.execute_cycle() == CycleOutcome::Continue {}
     }
 
@@ -296,14 +301,14 @@ mod tests {
         let (factory, handle) = prepare_remote(
             &result_pool,
             |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
-            sink.transfer_context(),
+            Some(sink.transfer_context()),
             TaskPlacement::Any,
             performables::arc::Arc::new(AtomicBool::new(false)),
         );
-        let executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
+        let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
         factory(builtins, &executor.tasks());
-        run_to_completion(&executor);
+        run_to_completion(&mut executor);
         assert!(block_on(handle).unwrap_err().is_panic());
     }
 
@@ -368,7 +373,7 @@ mod tests {
             }
 
             let sink = Sink::noop();
-            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context()));
+            drop(TaskFactory::new(PanicOnDrop(&dropped), Some(sink.transfer_context())));
         }));
         result.unwrap();
         assert!(dropped.load(Ordering::Acquire));

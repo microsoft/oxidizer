@@ -152,6 +152,58 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     pub fn ptr_eq(a: &Self, b: &Self) -> bool {
         addr_eq(a.slot.as_ptr(), b.slot.as_ptr())
     }
+
+    /// Transfers ownership of one strong reference into a raw pointer.
+    ///
+    /// The pointer remains valid until its strong reference is recovered with
+    /// [`from_raw`](Self::from_raw) or released with
+    /// [`decrement_strong_count`](Self::decrement_strong_count).
+    #[must_use]
+    pub fn into_raw(this: Self) -> NonNull<T> {
+        let value = this.slot;
+        forget(this);
+        value
+    }
+
+    /// Reconstructs ownership of one strong reference previously transferred
+    /// by [`into_raw`](Self::into_raw).
+    ///
+    /// # Safety
+    ///
+    /// `value` must have been returned by `Arc::into_raw` for the same `T` and
+    /// allocator type. Its transferred strong reference must not already have
+    /// been recovered or released.
+    #[must_use]
+    pub unsafe fn from_raw(value: NonNull<T>) -> Self {
+        Self::from_value(value)
+    }
+
+    /// Adds one strong reference for a pointer returned by
+    /// [`into_raw`](Self::into_raw).
+    ///
+    /// # Safety
+    ///
+    /// `value` must identify a live `Arc` allocation for the same `T` and
+    /// allocator type. At least one strong reference must remain alive for the
+    /// duration of this call.
+    pub unsafe fn increment_strong_count(value: NonNull<T>) {
+        // SAFETY: the caller guarantees that the slot remains occupied.
+        let old = unsafe { (*refcount_ptr(value)).fetch_add(1, Relaxed) };
+        check_refcount_overflow(old);
+    }
+
+    /// Releases one strong reference for a pointer returned by
+    /// [`into_raw`](Self::into_raw).
+    ///
+    /// # Safety
+    ///
+    /// `value` must identify a live `Arc` allocation for the same `T` and
+    /// allocator type, and the caller must own one strong reference to release.
+    pub unsafe fn decrement_strong_count(value: NonNull<T>) {
+        // SAFETY: the caller transfers one valid strong reference into the
+        // temporary owner, whose destructor performs the normal release path.
+        drop(unsafe { Self::from_raw(value) });
+    }
 }
 
 impl<T, A: Allocator> Arc<MaybeUninit<T>, A> {

@@ -45,6 +45,10 @@ impl ExecutorBuilder {
     }
 
     /// Builds the executor with the configured settings.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another executor is already alive on the current thread.
     #[must_use]
     pub fn build(self) -> Executor {
         Executor::new(ExecutorCore::new(self.owner_waker, self.sink))

@@ -12,7 +12,7 @@ use crate::{CycleOutcome, Executor};
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // This is test scaffolding, mutation here is unhelpful.
 pub(crate) fn new_guarded_executor(owner_waker: Waker) -> ScopeGuard<Executor, fn(Executor), Always> {
-    scopeguard::guard(Executor::builder().owner_waker(owner_waker).build(), |executor: Executor| {
+    scopeguard::guard(Executor::builder().owner_waker(owner_waker).build(), |mut executor: Executor| {
         executor.begin_shutdown();
 
         while executor.execute_cycle() != CycleOutcome::Shutdown {

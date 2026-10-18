@@ -152,7 +152,7 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
 
-        let Some(executor) = self.executor.as_ref() else {
+        let Some(executor) = self.executor.as_mut() else {
             // Executor drop cancels tasks before final timer callbacks can observe their state.
             _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
@@ -726,7 +726,7 @@ mod tests {
         let timer_observer = Arc::clone(&timer_done);
         let shutdown = command_tx.clone();
 
-        let worker = test_worker(
+        let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
             BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
@@ -743,7 +743,7 @@ mod tests {
             timer_observer.store(true, Ordering::Relaxed);
             shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
         }));
-        _ = worker.executor.as_ref().unwrap().execute_cycle();
+        _ = worker.executor.as_mut().unwrap().execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
 
@@ -1069,7 +1069,7 @@ mod tests {
         );
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
-        worker.executor.as_ref().unwrap().begin_shutdown();
+        worker.executor.as_mut().unwrap().begin_shutdown();
 
         let outcome = worker.execute_step();
 
