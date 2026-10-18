@@ -130,8 +130,9 @@ payload.
 Local wakes push a temporary strong `TaskRef` into the registered executor's
 TLS `VecDeque`.
 
-The executor swaps that queue into owner scratch storage once per cycle. It
-clears notification state and moves each task into the active queue.
+The executor appends that queue directly to the active queue once per cycle,
+records the appended range, and releases the TLS borrow before clearing each
+task's notification state. No second owner scratch queue is required.
 
 TLS also tracks whether the owner is currently executing a cycle. A self-wake
 while already polling queues work but does not redundantly wake `WorkerSignal`.
@@ -353,6 +354,13 @@ vector storage and benchmarks regressed:
 
 Implemented and reverted. Removing `RefCell` borrow checks did not produce a
 reliable improvement and regressed measured single-worker cases.
+
+### Test-only mutex wake queue
+
+Removed as unnecessary test-only architecture. Standalone wake tests now use
+the same TLS FIFO as production, with a small test constructor retaining the
+fake task allocation. This removes the alternate `AwakenedQueue` type, mutex,
+constructor shape, and fallback branches from production-adjacent code.
 
 ### Separate `Cell<bool>` shutdown flag
 
