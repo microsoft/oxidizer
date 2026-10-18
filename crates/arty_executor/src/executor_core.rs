@@ -11,7 +11,7 @@ use observed::Sink;
 use tick::SimpleClock;
 
 use crate::wake::WakeShared;
-use crate::{CycleOutcome, ExecutorShared, TaskList, TaskRef};
+use crate::{CycleOutcome, ExecutorShared, TaskList, TaskRef, executor_context};
 
 /// Owner-only executor state.
 #[derive(Debug)]
@@ -53,7 +53,7 @@ impl ExecutorCore {
 
     #[must_use]
     pub(crate) fn execute_cycle(&mut self) -> CycleOutcome {
-        let _cycle = self.shared.wake().enter_cycle();
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         let cycle_started = self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
@@ -64,7 +64,7 @@ impl ExecutorCore {
         outcome
     }
 
-    fn start_cycle(&mut self) -> Instant {
+    fn start_cycle(&self) -> Instant {
         let started = self.clock.instant();
         if let Some(last_ended) = self.last_cycle_ended {
             CYCLE_GAP_MILLIS.with(|event| {
@@ -110,10 +110,10 @@ impl ExecutorCore {
     }
 
     fn activate_awakened_tasks(&mut self) {
-        self.shared.wake().drain_remote_wakes();
+        self.shared.drain_remote_wakes();
 
         let first_awakened = self.active.len();
-        self.shared.wake().append_local_wakes(&mut self.active);
+        executor_context::append_wakes(self.shared.wake().thread_id(), &mut self.active);
         for task_ref in self.active.range(first_awakened..) {
             // SAFETY: Retirement removes every queued notification before task storage is
             // released, so every queued reference still targets a live task.
@@ -162,19 +162,7 @@ impl ExecutorCore {
             }
         }
 
-        self.record_poll_metrics(pending_count, completed_count);
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
-    fn record_poll_metrics(&self, pending_count: usize, completed_count: usize) {
-        if pending_count != 0 {
-            TASKS_INACTIVATED.with(|x| x.observe(pending_count));
-        }
-
-        if completed_count != 0 {
-            TASKS_COMPLETED.with(|x| x.observe(completed_count));
-            TASKS_DROPPED.with(|x| x.observe(completed_count));
-        }
+        record_poll_metrics(pending_count, completed_count);
     }
 
     /// Whether an immediately performed `execute_cycle()` would do any useful work.
@@ -190,7 +178,7 @@ impl ExecutorCore {
         // future after some refactoring (as we would then need to react to it).
         debug_assert!(self.active.is_empty(), "Active tasks should not be present at this point");
 
-        self.shared.has_new_tasks() || self.shared.wake().has_local_wakes() || self.shared.wake().has_remote_wakes()
+        self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
@@ -211,7 +199,7 @@ impl ExecutorCore {
     }
 
     fn prepare_task_abort(&mut self) -> usize {
-        self.shared.wake().clear_local_wakes();
+        executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_ref in &self.active {
             drop(self.tasks.remove(task_ref.pointer()));
         }
@@ -260,6 +248,17 @@ impl ExecutorCore {
         debug_assert!(self.tasks.is_empty());
 
         self.shared.shutdown_complete()
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
+fn record_poll_metrics(pending_count: usize, completed_count: usize) {
+    if pending_count != 0 {
+        TASKS_INACTIVATED.with(|x| x.observe(pending_count));
+    }
+    if completed_count != 0 {
+        TASKS_COMPLETED.with(|x| x.observe(completed_count));
+        TASKS_DROPPED.with(|x| x.observe(completed_count));
     }
 }
 

@@ -5,7 +5,7 @@
 use std::backtrace::Backtrace;
 use std::cell::{Cell, UnsafeCell};
 use std::fmt::Debug;
-use std::marker::{PhantomData, PhantomPinned};
+use std::marker::PhantomPinned;
 use std::mem::ManuallyDrop;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -70,13 +70,13 @@ where
     #[cfg(all(debug_assertions, test))]
     diagnostic_waker_registry: Arc<DiagnosticWakerRegistry>,
 
-    // Technically, the wakers also touch the wake signal from other threads but that is
-    // private business of the wake signal and nothing that is visible to this type.
-    _single_threaded: PhantomData<*const ()>,
-
     _requires_pin: PhantomPinned,
 }
 
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "remote owners retain only the allocation; the executor retires non-Send payloads on their owner thread"
+)]
 // SAFETY: Task cells may be retained and reference-counted from remote threads, but task access is
 // private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
@@ -152,7 +152,6 @@ where
             links: TaskLinks::default(),
             #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
-            _single_threaded: PhantomData,
             _requires_pin: PhantomPinned,
         }
     }
@@ -590,8 +589,7 @@ mod tests {
     use crate::testing::TestSubjectFuture;
 
     fn fake_wake_owner() -> TaskRef {
-        // SAFETY: Tests use the allocation only as stable task identity.
-        unsafe { TaskRef::fake() }
+        TaskRef::mock()
     }
 
     fn fake_wake_signal(owner: &TaskRef) -> WakeSignal {
@@ -663,6 +661,7 @@ mod tests {
 
     #[test]
     fn clear_queued_notification_forwards_to_the_wake_signal() {
+        let _executor = crate::Executor::builder().build();
         let fake_task_ref = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();

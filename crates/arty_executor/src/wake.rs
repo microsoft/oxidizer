@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(test)]
 use std::collections::VecDeque;
 use std::marker::{PhantomData, PhantomPinned};
-use std::mem::ManuallyDrop;
+use std::mem::ManuallyDrop;f
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
@@ -31,66 +32,33 @@ struct WakeSharedInner {
     thread_id: ThreadId,
     parent_waker: Waker,
     remote_wake_tx: channel::Sender<RemoteWake>,
-    remote_wake_rx: channel::Receiver<RemoteWake>,
     remote_wakes_pending: AtomicBool,
 }
 
 impl WakeShared {
-    pub(crate) fn new(parent_waker: Waker, thread_id: ThreadId) -> Self {
+    pub(crate) fn new(parent_waker: Waker, thread_id: ThreadId) -> (Self, channel::Receiver<RemoteWake>) {
         let (remote_wake_tx, remote_wake_rx) = channel::unbounded();
-        Self {
+        let shared = Self {
             inner: Arc::new(WakeSharedInner {
                 thread_id,
                 parent_waker,
                 remote_wake_tx,
-                remote_wake_rx,
                 remote_wakes_pending: AtomicBool::new(false),
             }),
-        }
+        };
+        (shared, remote_wake_rx)
     }
 
     pub(crate) fn thread_id(&self) -> ThreadId {
         self.inner.thread_id
     }
 
-    fn is_current(&self) -> bool {
-        executor_context::is_current(self)
-    }
-
-    pub(crate) fn enter_cycle(&self) -> executor_context::CycleGuard {
-        executor_context::enter_cycle(self)
-    }
-
-    fn is_executing(&self) -> bool {
-        executor_context::is_executing(self)
-    }
-
-    fn enqueue_local(&self, task_ref: TaskRef) -> Result<(), TaskRef> {
-        executor_context::enqueue(self, task_ref)
-    }
-
-    pub(crate) fn append_local_wakes(&self, target: &mut VecDeque<TaskRef>) {
-        executor_context::append_wakes(self, target);
-    }
-
-    pub(crate) fn has_local_wakes(&self) -> bool {
-        executor_context::has_wakes(self)
-    }
-
-    fn remove_local_notification(&self, task_ref: TaskPointer) {
-        executor_context::remove_wake(self, task_ref);
-    }
-
-    pub(crate) fn clear_local_wakes(&self) {
-        executor_context::clear_wakes(self);
-    }
-
-    pub(crate) fn drain_remote_wakes(&self) {
+    pub(crate) fn drain_remote_wakes(&self, remote_wakes: &channel::Receiver<RemoteWake>) {
         if !self.inner.remote_wakes_pending.swap(false, atomic::Ordering::Acquire) {
             return;
         }
-        while !self.inner.remote_wake_rx.is_empty() {
-            match self.inner.remote_wake_rx.try_recv() {
+        while !remote_wakes.is_empty() {
+            match remote_wakes.try_recv() {
                 Ok(notification) => notification.schedule_local(),
                 Err(error) if error.is_empty() || error.is_closed() => return,
                 Err(error) => unreachable!("remote wake channel reports only empty or closed: {error}"),
@@ -123,13 +91,14 @@ impl WakeSignal {
 
     #[cfg(test)]
     pub(crate) fn new_for_test(parent_waker: Waker, task_ref: &TaskRef) -> Self {
-        Self::new(WakeShared::new(parent_waker, std::thread::current().id()), task_ref.pointer())
+        let (shared, _remote_wakes) = WakeShared::new(parent_waker, std::thread::current().id());
+        Self::new(shared, task_ref.pointer())
     }
 
     pub(crate) fn retire(&self) {
         let previous = self.schedule_state.swap(0, atomic::Ordering::AcqRel);
         if previous & TASK_LOCAL_NOTIFIED != 0 {
-            self.shared.remove_local_notification(self.task_ref);
+            executor_context::remove_wake(self.shared.thread_id(), self.task_ref);
         }
     }
 
@@ -162,11 +131,11 @@ impl WakeSignal {
 
     #[cfg(test)]
     pub(crate) fn append_test_wakes(&self, target: &mut VecDeque<TaskRef>) {
-        self.shared.append_local_wakes(target);
+        executor_context::append_wakes(self.shared.thread_id(), target);
     }
 
     fn wake(&self) {
-        let remote = !self.shared.is_current();
+        let remote = !executor_context::is_current(self.shared.thread_id());
         if !self.begin_notification(remote) {
             return;
         }
@@ -191,8 +160,8 @@ impl WakeSignal {
     fn schedule_local(&self, wake_owner: bool) {
         // SAFETY: The signal is embedded in the live task that owns this call.
         let task_ref = unsafe { self.task_ref.retain() };
-        if self.shared.enqueue_local(task_ref).is_ok() {
-            if wake_owner && !self.shared.is_executing() {
+        if executor_context::enqueue(self.shared.thread_id(), task_ref).is_ok() {
+            if wake_owner && !executor_context::is_executing(self.shared.thread_id()) {
                 self.shared.inner.parent_waker.wake_by_ref();
             }
 
@@ -257,9 +226,9 @@ impl Drop for WakeSignal {
     }
 }
 
-struct RemoteWake {
+pub(crate) struct RemoteWake {
     signal: NonNull<WakeSignal>,
-    task_ref: TaskPointer,
+    _task: TaskRef,
 }
 
 // SAFETY: The task strong reference keeps the signal pinned and alive. Scheduling state is atomic.
@@ -268,10 +237,10 @@ unsafe impl Send for RemoteWake {}
 impl RemoteWake {
     fn new(signal: &WakeSignal) -> Self {
         // SAFETY: The live signal's enclosing task owns the allocation during notification setup.
-        unsafe { signal.task_ref.increment_strong() };
+        let task = unsafe { signal.task_ref.retain() };
         Self {
             signal: NonNull::from(signal),
-            task_ref: signal.task_ref,
+            _task: task,
         }
     }
 
@@ -281,13 +250,6 @@ impl RemoteWake {
         if signal.promote_remote_notification() {
             signal.schedule_local(false);
         }
-    }
-}
-
-impl Drop for RemoteWake {
-    fn drop(&mut self) {
-        // SAFETY: `RemoteWake::new` created exactly one raw strong reference for this owner.
-        unsafe { self.task_ref.release_strong() };
     }
 }
 
@@ -310,33 +272,8 @@ impl Deref for BorrowedWakerRef<'_> {
     }
 }
 
-struct RawWakerOwner(TaskPointer);
-
-impl RawWakerOwner {
-    unsafe fn from_raw(ptr: *const ()) -> Self {
-        Self(signal_from_raw(ptr).task_ref)
-    }
-}
-
-impl Drop for RawWakerOwner {
-    fn drop(&mut self) {
-        // SAFETY: The raw waker transferred exactly one task strong reference into this guard.
-        unsafe { self.0.release_strong() };
-    }
-}
-
-static BORROWED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(borrowed_clone, borrowed_consume, borrowed_wake_by_ref, borrowed_drop);
+static BORROWED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone, borrowed_consume, waker_wake_by_ref, borrowed_drop);
 static OWNED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone, waker_wake, waker_wake_by_ref, waker_drop);
-
-fn borrowed_clone(ptr: *const ()) -> RawWaker {
-    let signal = signal_from_raw(ptr);
-    signal.add_owned_waker();
-    RawWaker::new(ptr, &OWNED_WAKER_VTABLE)
-}
-
-fn borrowed_wake_by_ref(ptr: *const ()) {
-    signal_from_raw(ptr).wake();
-}
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn borrowed_consume(_: *const ()) {
@@ -356,7 +293,7 @@ fn waker_clone(ptr: *const ()) -> RawWaker {
 
 fn waker_wake(ptr: *const ()) {
     // SAFETY: Consuming wake transfers this raw waker's ownership into the guard.
-    let _owner = unsafe { RawWakerOwner::from_raw(ptr) };
+    let _owner = unsafe { signal_from_raw(ptr).task_ref.into_task_ref() };
     signal_from_raw(ptr).wake();
 }
 
@@ -366,7 +303,7 @@ fn waker_wake_by_ref(ptr: *const ()) {
 
 fn waker_drop(ptr: *const ()) {
     // SAFETY: Dropping transfers this raw waker's ownership into the guard.
-    drop(unsafe { RawWakerOwner::from_raw(ptr) });
+    drop(unsafe { signal_from_raw(ptr).task_ref.into_task_ref() });
 }
 
 fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
@@ -385,9 +322,9 @@ mod tests {
 
     #[test]
     fn borrowed_and_owned_wakes_share_inline_state() {
+        let _executor = crate::Executor::builder().build();
         let parent = Arc::new(TestWaker::new());
-        // SAFETY: Tests use the allocation only as stable task identity.
-        let task_ref = unsafe { TaskRef::fake() };
+        let task_ref = TaskRef::mock();
         let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), &task_ref));
 
         // SAFETY: The signal remains pinned for the borrow and clone.
@@ -405,17 +342,17 @@ mod tests {
 
     #[test]
     fn retirement_makes_retained_waker_inert() {
-        // SAFETY: Tests use the allocation only as stable task identity.
-        let task_ref = unsafe { TaskRef::fake() };
+        let _executor = crate::Executor::builder().build();
+        let task_ref = TaskRef::mock();
         let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_ref));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker() };
 
         waker.wake_by_ref();
-        assert!(signal.shared.has_local_wakes());
+        assert!(executor_context::has_wakes(signal.shared.thread_id()));
         signal.retire();
-        assert!(!signal.shared.has_local_wakes());
+        assert!(!executor_context::has_wakes(signal.shared.thread_id()));
         waker.wake_by_ref();
-        assert!(!signal.shared.has_local_wakes());
+        assert!(!executor_context::has_wakes(signal.shared.thread_id()));
     }
 }

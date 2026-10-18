@@ -8,11 +8,14 @@ use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
 
+use events_once::LocalEventLake;
 use observed::Sink;
+use performables::sync::channel;
 use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
-use crate::{JoinEventLake, JoinHandle, Task, TaskOptions, TaskRef, TypeErasedTask, WakeShared, WakeSignal};
+use crate::wake::RemoteWake;
+use crate::{JoinHandle, Task, TaskOptions, TaskRef, TypeErasedTask, WakeShared, WakeSignal};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -25,22 +28,26 @@ struct ExecutorSharedInner {
     new_tasks: RefCell<VecDeque<TaskRef>>,
     task_storage: MultiPool,
     task_count: Cell<usize>,
-    join_events: JoinEventLake,
+    join_events: LocalEventLake,
     shutting_down: Cell<bool>,
     wake: WakeShared,
+    // Owner-only reception breaks the wake queue -> task -> shared wake state ownership cycle.
+    remote_wakes: channel::Receiver<RemoteWake>,
     sink: Sink,
 }
 
 impl ExecutorShared {
     pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId) -> Self {
+        let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);
         Self {
             inner: Rc::new(ExecutorSharedInner {
                 new_tasks: RefCell::new(VecDeque::new()),
                 task_storage: MultiPool::new(),
                 task_count: Cell::new(0),
-                join_events: JoinEventLake::new(),
+                join_events: LocalEventLake::new(),
                 shutting_down: Cell::new(false),
-                wake: WakeShared::new(owner_waker, thread_id),
+                wake,
+                remote_wakes,
                 sink,
             }),
         }
@@ -48,6 +55,10 @@ impl ExecutorShared {
 
     pub(crate) fn wake(&self) -> &WakeShared {
         &self.inner.wake
+    }
+
+    pub(crate) fn drain_remote_wakes(&self) {
+        self.inner.wake.drain_remote_wakes(&self.inner.remote_wakes);
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -108,13 +119,12 @@ impl ExecutorShared {
             return join_handle;
         }
         let future = future.into_future();
-        self.register_task(
-            move |join_events, sink| {
-                let (result_tx, join_handle) = join_events.rent();
-                (Task::new_with_options(future, result_tx, options, sink), join_handle)
-            },
-            JoinEventLake::disconnected,
-        )
+        if let Some(join_handle) = self.rejected_submission() {
+            return join_handle;
+        }
+        let (result_tx, result_rx) = self.inner.join_events.rent();
+        self.register_task(Task::new_with_options(future, result_tx, options, self.inner.sink.clone()));
+        JoinHandle::new(result_rx)
     }
 
     pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>)
@@ -126,24 +136,20 @@ impl ExecutorShared {
             return;
         }
         let future = future.into_future();
-        self.register_task(
-            move |_join_events, sink| (Task::new_remote(future, options, sink, remote_result_tx), ()),
-            |_join_events| (),
-        );
+        if self.is_shutting_down() {
+            return;
+        }
+        self.register_task(Task::new_remote(future, options, self.inner.sink.clone(), remote_result_tx));
     }
 
     fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
-        self.inner.shutting_down.get().then(|| self.inner.join_events.disconnected())
+        self.is_shutting_down().then(|| JoinHandle::disconnected(&self.inner.join_events))
     }
 
-    fn register_task<O, T>(&self, create: impl FnOnce(&JoinEventLake, Sink) -> (T, O), reject: impl FnOnce(&JoinEventLake) -> O) -> O
+    fn register_task<T>(&self, task: T)
     where
         T: TypeErasedTask + 'static,
     {
-        if self.inner.shutting_down.get() {
-            return reject(&self.inner.join_events);
-        }
-        let (task, output) = create(&self.inner.join_events, self.inner.sink.clone());
         let task_ref = TaskRef::new(self.inner.task_storage.alloc_arc_pin(task));
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_ref.pointer());
 
@@ -159,7 +165,6 @@ impl ExecutorShared {
         if let Some(reporter) = reporter {
             reporter.report();
         }
-        output
     }
 
     pub(crate) fn has_tasks(&self) -> bool {
