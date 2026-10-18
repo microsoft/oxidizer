@@ -13,26 +13,27 @@ use crate::TypeErasedTask;
 ///
 /// Clones retain the pinned pooled task allocation. Task methods remain owner-thread-only even
 /// when a waker or remote notification carries a strong reference across threads.
-#[derive(Clone)]
+/// Each handle owns a raw Arc strong reference, preserving the allocation pointer's provenance
+/// for access to the pool's adjacent reference count.
 pub(crate) struct TaskRef {
-    inner: Pin<PoolArc<dyn TypeErasedTask>>,
+    pointer: TaskPointer,
 }
 
 impl TaskRef {
     pub(crate) fn new<T: TypeErasedTask + 'static>(inner: Pin<PoolArc<T>>) -> Self {
+        let inner = PoolArc::unsize_pin(inner, coerce!(dyn TypeErasedTask));
+        // SAFETY: Only owner-thread pinned borrows are exposed by TaskRef. Moving the Arc
+        // handle into raw ownership cannot move its pinned task.
+        let inner = unsafe { Pin::into_inner_unchecked(inner) };
         Self {
-            inner: PoolArc::unsize_pin(inner, coerce!(dyn TypeErasedTask)),
+            pointer: TaskPointer {
+                inner: PoolArc::into_raw(inner),
+            },
         }
     }
 
-    /// For test purposes, we can create a fake instance.
-    ///
-    /// # Safety
-    ///
-    /// The "value" of the fake task reference is undefined. It is only for use as a
-    /// placeholder and actually dereferencing it or accessing its contents is invalid.
     #[cfg(test)]
-    pub(crate) unsafe fn fake() -> Self {
+    pub(crate) fn mock() -> Self {
         use crate::MockTypeErasedTask;
 
         let pool = plurality::Pool::new();
@@ -40,19 +41,13 @@ impl TaskRef {
     }
 
     pub(crate) fn pointer(&self) -> TaskPointer {
-        TaskPointer {
-            inner: NonNull::from(&*self.inner),
-        }
+        self.pointer
     }
 
     pub(crate) fn into_owned_pointer(self) -> TaskPointer {
-        let Self { inner } = self;
-        // SAFETY: Extracting the Arc handle does not move or expose mutable access to its pinned
-        // pointee. Ownership immediately transfers into the raw strong pointer.
-        let inner = unsafe { Pin::into_inner_unchecked(inner) };
-        TaskPointer {
-            inner: PoolArc::into_raw(inner),
-        }
+        let pointer = self.pointer;
+        std::mem::forget(self);
+        pointer
     }
 
     /// # Safety
@@ -66,7 +61,23 @@ impl TaskRef {
     /// The caller must guarantee that the referenced task is still alive.
     #[must_use]
     pub(crate) unsafe fn as_task(&self) -> Pin<&dyn TypeErasedTask> {
-        self.inner.as_ref()
+        // SAFETY: Forwarding the caller's owner-thread guarantee; this owner keeps the task live.
+        unsafe { self.pointer.as_task() }
+    }
+}
+
+impl Clone for TaskRef {
+    fn clone(&self) -> Self {
+        // SAFETY: This owner keeps the allocation alive while acquiring another strong reference.
+        unsafe { self.pointer.retain() }
+    }
+}
+
+impl Drop for TaskRef {
+    fn drop(&mut self) {
+        // SAFETY: Every TaskRef owns one raw Arc strong reference. All pointers originate from
+        // into_raw, retaining the slot's provenance; reconstructed handles are only dropped.
+        drop(unsafe { PoolArc::<dyn TypeErasedTask>::from_raw(self.pointer.inner) });
     }
 }
 
@@ -81,17 +92,11 @@ impl TaskPointer {
         unsafe { PoolArc::<dyn TypeErasedTask>::increment_strong_count(self.inner) };
     }
 
-    pub(crate) unsafe fn release_strong(self) {
-        // SAFETY: Forwarding the caller's ownership of exactly one raw strong reference.
-        unsafe { PoolArc::<dyn TypeErasedTask>::decrement_strong_count(self.inner) };
-    }
-
-    pub(crate) unsafe fn from_owned(self) -> TaskRef {
-        // SAFETY: Forwarding the caller's ownership of exactly one raw strong reference.
-        let inner = unsafe { PoolArc::<dyn TypeErasedTask>::from_raw(self.inner) };
-        // SAFETY: The task was pinned before its pointer was published and remains immovable.
-        let inner = unsafe { Pin::new_unchecked(inner) };
-        TaskRef { inner }
+    /// # Safety
+    ///
+    /// The caller must transfer exactly one owned strong reference to a live, pinned task.
+    pub(crate) unsafe fn into_task_ref(self) -> TaskRef {
+        TaskRef { pointer: self }
     }
 
     #[must_use]
@@ -106,7 +111,7 @@ impl TaskPointer {
         // SAFETY: Forwarding the caller's live-allocation guarantee.
         unsafe { self.increment_strong() };
         // SAFETY: The increment above created exactly one raw strong reference.
-        unsafe { self.from_owned() }
+        unsafe { self.into_task_ref() }
     }
 }
 
@@ -145,7 +150,7 @@ mod tests {
         let owned = task_ref.into_owned_pointer();
         assert_eq!(owned, pointer);
         // SAFETY: `into_owned_pointer` transferred exactly one strong reference.
-        drop(unsafe { owned.from_owned() });
+        drop(unsafe { owned.into_task_ref() });
         assert!(pool.is_empty());
     }
 

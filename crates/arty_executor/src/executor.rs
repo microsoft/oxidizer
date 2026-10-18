@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet, WakeShared, executor_context};
+use std::thread::ThreadId;
+
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -71,7 +73,7 @@ impl Executor {
 
     #[must_use]
     pub(crate) fn new(core: ExecutorCore) -> Self {
-        executor_context::register(core.wake());
+        executor_context::register(core.wake().thread_id());
         Self { core }
     }
 
@@ -131,15 +133,15 @@ impl Executor {
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        struct ClearRegistration(WakeShared);
+        struct ClearRegistration(ThreadId);
 
         impl Drop for ClearRegistration {
             fn drop(&mut self) {
-                executor_context::unregister(&self.0);
+                executor_context::unregister(self.0);
             }
         }
 
-        let _clear_registration = ClearRegistration(self.core.wake().clone());
+        let _clear_registration = ClearRegistration(self.core.wake().thread_id());
         self.core.owner_dropped();
     }
 }
@@ -860,7 +862,7 @@ mod tests {
         let executor = Executor::builder().build();
 
         let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Executor::builder().build()));
-        assert!(duplicate.is_err());
+        duplicate.unwrap_err();
 
         drop(executor);
         drop(Executor::builder().build());
