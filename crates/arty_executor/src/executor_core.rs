@@ -23,19 +23,6 @@ pub(crate) struct ExecutorCore {
     last_cycle_ended: Option<Instant>,
 }
 
-// Owner-thread wake notifications use the executor's TLS queue without synchronization. Remote
-// cloned wakers first travel through the executor's unbounded performables channel and are
-// converted to owner-thread notifications while draining that channel.
-//
-// It is just a VecDeque so the size does not significantly impact wake-up processing time.
-// This is the initial TLS queue capacity; VecDeque may grow if a cycle receives more notifications.
-#[cfg(not(miri))]
-pub(crate) const AWAKENED_CAPACITY: usize = 1024;
-
-// Miri performance scales with memory access count, so large numbers are our enemy.
-#[cfg(miri)]
-pub(crate) const AWAKENED_CAPACITY: usize = 4;
-
 impl ExecutorCore {
     /// Creates a new async task executor.
     ///
@@ -52,8 +39,12 @@ impl ExecutorCore {
         }
     }
 
-    pub(crate) fn register_current(&self) {
-        self.shared.register_current();
+    pub(crate) fn wake(&self) -> &WakeShared {
+        self.shared.wake()
+    }
+
+    pub(crate) fn wake_handle(&self) -> Arc<WakeShared> {
+        self.shared.wake_handle()
     }
 
     pub(crate) fn shared(&self) -> &ExecutorShared {
@@ -223,15 +214,6 @@ impl ExecutorCore {
     }
 
     pub(crate) fn owner_dropped(&mut self) {
-        struct ClearRegistration(Arc<WakeShared>);
-
-        impl Drop for ClearRegistration {
-            fn drop(&mut self) {
-                self.0.unregister_current();
-            }
-        }
-
-        let _clear_registration = ClearRegistration(self.shared.wake_handle());
         self.shared.request_shutdown();
 
         let aborted_count = self.prepare_task_abort();
