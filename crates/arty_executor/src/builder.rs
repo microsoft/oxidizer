@@ -6,7 +6,7 @@ use std::task::Waker;
 use observed::Sink;
 use thread_aware_core::Thread;
 
-use crate::{Executor, ExecutorCore};
+use crate::Executor;
 
 /// Builds an instance of [`Executor`].
 #[derive(Debug)]
@@ -73,7 +73,7 @@ impl ExecutorBuilder {
             );
             thread.id()
         });
-        Executor::new(ExecutorCore::new(self.owner_waker, self.sink, thread_id))
+        Executor::new(self.owner_waker, self.sink, thread_id)
     }
 }
 

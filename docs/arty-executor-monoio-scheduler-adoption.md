@@ -48,9 +48,8 @@ hashing, and context manipulation on elementary task and wake paths.
 
 ### Executor ownership
 
-`Executor` directly owns `ExecutorCore`.
-
-`ExecutorCore` directly owns its owner-only fields:
+`Executor` directly owns its owner-only fields; there is no separate
+`ExecutorCore` wrapper:
 
 - the active task queue;
 - the intrusive pending-task inventory;
@@ -60,7 +59,7 @@ There is no `ExclusiveState` wrapper. `execute_cycle`, `begin_shutdown`, and
 owner-drop cleanup use mutable core access directly.
 
 `ExecutorShared` lives in its own module as a cloneable handle around internal
-`Rc` state. `ExecutorCore` owns the primary handle and `TaskSet` holds a strong
+`Rc` state. `Executor` owns the primary handle and `TaskSet` holds a strong
 clone; the intrusive `TaskList` does not own `ExecutorShared`. Tasks retain only
 the narrower `WakeShared` needed by wakers. `ExecutorShared` exposes
 operation-level `&self` APIs rather than `Ref`/`RefMut`.
@@ -428,7 +427,7 @@ queries. No `Ref` or `RefMut` escapes the shared component. `MultiPool` and
 `events_once::LocalEventLake` are direct fields, task count and shutdown use `Cell`, and only
 the reentrant new-task queue uses `RefCell`.
 
-`ExecutorCore` no longer has an `ExclusiveState` wrapper. Its active queue,
+`Executor` has no `ExecutorCore` or `ExclusiveState` wrapper. Its active queue,
 intrusive inventory, clock, and last-cycle timestamp are direct fields, and
 cycle behavior is expressed as focused instance methods (`start_cycle`,
 `accept_new_tasks`, `activate_awakened_tasks`, `poll_active_tasks`,
@@ -629,7 +628,23 @@ pre-existing debug remote-allocation assertion and no-op-sink enrichment
 failures remain outside this cleanup; complete workspace coverage, mutation
 testing and exhaustive runtime analysis were not run.
 
-## Validation
+### Executor owner consolidation
+
+The owner state, cycle implementation, metrics and shutdown logic now live
+directly in `Executor`; the `ExecutorCore` type and module have been removed.
+The builder constructs `Executor` directly, without forwarding owner operations
+through another object.
+
+Thread registration happens before constructing the owner value. A failed
+attempt to create a second executor therefore cannot run owner cleanup against
+the existing executor's queued notifications. A focused regression reproduced
+that loss of a queued wake before the consolidation and now passes.
+
+One drop guard keeps owner-thread cancellation and TLS unregistration
+unwind-safe, without retaining a second state-owning executor type.
+The public task, cycle and shutdown APIs are unchanged.
+
+## Initial executor validation
 
 Executed locally:
 

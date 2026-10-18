@@ -1,9 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::collections::VecDeque;
+use std::task;
 use std::thread::ThreadId;
+use std::time::Instant;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet, executor_context};
+use nm::{Event, Magnitude, MetricsPusher, Push};
+use observed::Sink;
+use tick::SimpleClock;
+
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskList, TaskRef, TaskSet, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -61,7 +68,11 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet, executor_conte
 /// register a remote result target that receives captured panics without unwinding the worker.
 #[derive(Debug)]
 pub struct Executor {
-    core: ExecutorCore,
+    shared: ExecutorShared,
+    active: VecDeque<TaskRef>,
+    pending: TaskList,
+    clock: SimpleClock,
+    last_cycle_ended: Option<Instant>,
 }
 
 impl Executor {
@@ -72,16 +83,25 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(core: ExecutorCore) -> Self {
-        executor_context::register(core.wake().thread_id());
-        Self { core }
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId) -> Self {
+        let shared = ExecutorShared::new(owner_waker, sink, thread_id);
+        let clock = SimpleClock::new_system().with_fast_instant(true);
+        // Register before creating an executor whose Drop would unregister this thread.
+        executor_context::register(thread_id);
+        Self {
+            shared,
+            active: VecDeque::new(),
+            pending: TaskList::default(),
+            clock,
+            last_cycle_ended: None,
+        }
     }
 
     /// Creates a new handle to the set of tasks registered with the executor. You can use
     /// this to register additional tasks.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
-        TaskSet::new(self.core.shared())
+        TaskSet::new(&self.shared)
     }
 
     /// Returns whether the executor still owns any registered tasks.
@@ -90,7 +110,7 @@ impl Executor {
     /// and retained wakers do not count as tasks and may remain alive after this returns `false`.
     #[must_use]
     pub fn has_tasks(&self) -> bool {
-        self.core.has_tasks()
+        self.shared.has_tasks()
     }
 
     /// Executes one processing cycle to progress registered tasks.
@@ -108,7 +128,15 @@ impl Executor {
     /// from within `execute_cycle()`).
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
-        self.core.execute_cycle()
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
+        let cycle_started = self.start_cycle();
+        self.accept_new_tasks();
+        self.activate_awakened_tasks();
+        self.poll_active_tasks();
+        self.cancel_if_shutting_down();
+        let outcome = self.cycle_outcome();
+        self.finish_cycle(cycle_started);
+        outcome
     }
 
     /// Starts the executor shutdown process.
@@ -127,23 +155,258 @@ impl Executor {
     /// [1]: Self::execute_cycle
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     pub fn begin_shutdown(&mut self) {
-        self.core.begin_shutdown();
+        self.shared.begin_shutdown();
+        let aborted_count = self.prepare_task_abort();
+        self.abort_prepared_tasks(aborted_count, true);
+    }
+
+    fn start_cycle(&self) -> Instant {
+        let started = self.clock.instant();
+        if let Some(last_ended) = self.last_cycle_ended {
+            CYCLE_GAP_MILLIS.with(|event| {
+                event.observe_millis(started.saturating_duration_since(last_ended));
+            });
+        }
+        started
+    }
+
+    fn finish_cycle(&mut self, started: Instant) {
+        let ended = self.clock.instant();
+        self.last_cycle_ended = Some(ended);
+        CYCLE_DURATION_MILLIS.with(|event| {
+            event.observe_millis(ended.saturating_duration_since(started));
+        });
+        EXECUTOR_PUSHER.with(MetricsPusher::push);
+    }
+
+    fn accept_new_tasks(&mut self) {
+        let accepted = self.shared.accept_new_tasks(&mut self.active);
+        if accepted != 0 {
+            TASKS_ACCEPTED.with(|event| event.observe(accepted));
+        }
+    }
+
+    fn cancel_if_shutting_down(&mut self) {
+        if self.shared.is_shutting_down() {
+            let aborted_count = self.prepare_task_abort();
+            self.abort_prepared_tasks(aborted_count, true);
+        }
+    }
+
+    fn cycle_outcome(&self) -> CycleOutcome {
+        if self.evaluate_shutdown_completion() {
+            CycleOutcome::Shutdown
+        } else if self.has_work_to_do() {
+            CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
+            CycleOutcome::Continue
+        } else {
+            CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
+            CycleOutcome::Suspend
+        }
+    }
+
+    fn activate_awakened_tasks(&mut self) {
+        self.shared.drain_remote_wakes();
+
+        let first_awakened = self.active.len();
+        executor_context::append_wakes(self.shared.wake().thread_id(), &mut self.active);
+        for task_ref in self.active.range(first_awakened..) {
+            // SAFETY: Retirement removes queued notifications before releasing their live tasks.
+            unsafe { task_ref.as_task() }.clear_queued_notification();
+            TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
+        }
+    }
+
+    fn poll_active_tasks(&mut self) {
+        let mut completed_count: usize = 0;
+        let mut pending_count: usize = 0;
+
+        while let Some(task_ref) = self.active.pop_front() {
+            // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
+            // and retires its payload on the task's owner thread.
+            let task = unsafe { task_ref.as_task() };
+            let pointer = task_ref.pointer();
+            let linked = task.links().linked.get();
+
+            if self.shared.is_shutting_down() {
+                task.abort();
+                self.shared.decrement_task_count(1);
+                drop(self.pending.remove(pointer));
+                completed_count = completed_count.saturating_add(1);
+                continue;
+            }
+
+            match task.poll() {
+                task::Poll::Ready(()) => {
+                    if linked {
+                        drop(self.pending.remove(pointer));
+                    }
+                    self.shared.decrement_task_count(1);
+                    completed_count = completed_count.saturating_add(1);
+                }
+                task::Poll::Pending => {
+                    pending_count = pending_count.saturating_add(1);
+                    if !linked {
+                        self.pending.insert(task_ref);
+                    }
+                }
+            }
+        }
+
+        record_poll_metrics(pending_count, completed_count);
+    }
+
+    /// Whether an immediately performed cycle would do useful work.
+    #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
+    fn has_work_to_do(&self) -> bool {
+        debug_assert!(self.active.is_empty(), "active tasks are drained before deciding the next cycle");
+        self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
+    }
+
+    fn prepare_task_abort(&mut self) -> usize {
+        executor_context::clear_wakes(self.shared.wake().thread_id());
+        for task_ref in &self.active {
+            drop(self.pending.remove(task_ref.pointer()));
+        }
+        self.shared.drain_new_tasks(&mut self.active);
+        while let Some(task_ref) = self.pending.pop_front() {
+            self.active.push_back(task_ref);
+        }
+        let aborted_count = self.active.len();
+        self.shared.decrement_task_count(aborted_count);
+        match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
+            Ok(Ok(())) => {}
+            Ok(Err(_access_error)) | Err(_access_error) => {
+                // Metrics TLS may already be destroyed when an executor itself lives in TLS.
+            }
+        }
+
+        aborted_count
+    }
+
+    fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool) {
+        while let Some(task_ref) = self.active.pop_front() {
+            // SAFETY: The cancellation batch owns each pinned task on its owner thread.
+            unsafe { task_ref.as_task() }.abort();
+        }
+        if record_drop_metric && aborted_count != 0 {
+            TASKS_DROPPED.with(|event| event.observe(aborted_count));
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
+    #[must_use]
+    fn evaluate_shutdown_completion(&self) -> bool {
+        if !self.shared.is_shutting_down() {
+            return false;
+        }
+        debug_assert!(self.active.is_empty());
+        debug_assert!(self.pending.is_empty());
+
+        self.shared.shutdown_complete()
     }
 }
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        struct ClearRegistration(ThreadId);
+        struct FinishDrop<'a>(&'a mut Executor);
 
-        impl Drop for ClearRegistration {
+        impl Drop for FinishDrop<'_> {
             fn drop(&mut self) {
-                executor_context::unregister(self.0);
+                if std::thread::panicking() {
+                    // Retire remaining payloads on their owner if cancellation unwinds.
+                    let aborted_count = self.0.prepare_task_abort();
+                    self.0.abort_prepared_tasks(aborted_count, false);
+                }
+                executor_context::unregister(self.0.shared.wake().thread_id());
             }
         }
 
-        let _clear_registration = ClearRegistration(self.core.wake().thread_id());
-        self.core.owner_dropped();
+        self.shared.request_shutdown();
+        let guard = FinishDrop(self);
+        let aborted_count = guard.0.prepare_task_abort();
+        guard.0.abort_prepared_tasks(aborted_count, false);
+        if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
+            // Executor cleanup must remain safe after metrics TLS has been destroyed.
+        }
+        debug_assert!(guard.0.shared.shutdown_complete());
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
+fn record_poll_metrics(pending_count: usize, completed_count: usize) {
+    if pending_count != 0 {
+        TASKS_INACTIVATED.with(|event| event.observe(pending_count));
+    }
+    if completed_count != 0 {
+        TASKS_COMPLETED.with(|event| event.observe(completed_count));
+        TASKS_DROPPED.with(|event| event.observe(completed_count));
+    }
+}
+
+const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];
+const TASKS_TOUCHED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+const TASKS_MANAGED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+
+thread_local! {
+    static EXECUTOR_PUSHER: MetricsPusher = MetricsPusher::new();
+
+    static TASKS_ABORTED_ON_SHUTDOWN: Event<Push> = Event::builder()
+        .name("ae_tasks_aborted_on_shutdown")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_ACCEPTED: Event<Push> = Event::builder()
+        .name("ae_tasks_accepted_per_cycle")
+        .histogram(TASKS_MANAGED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_COMPLETED: Event<Push> = Event::builder()
+        .name("ae_tasks_completed_per_cycle")
+        .histogram(TASKS_TOUCHED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_INACTIVATED: Event<Push> = Event::builder()
+        .name("ae_tasks_inactivated_per_cycle")
+        .histogram(TASKS_TOUCHED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_DROPPED: Event<Push> = Event::builder()
+        .name("ae_tasks_dropped_per_cycle")
+        .histogram(TASKS_MANAGED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_ACTIVATED_VIA_AWAKENED_SET: Event<Push> = Event::builder()
+        .name("ae_tasks_activated_via_awakened_set")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_DURATION_MILLIS: Event<Push> = Event::builder()
+        .name("ae_cycle_duration_millis")
+        .histogram(MILLIS_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_GAP_MILLIS: Event<Push> = Event::builder()
+        .name("ae_cycle_gap_millis")
+        .histogram(MILLIS_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_OUTCOME_CONTINUE: Event<Push> = Event::builder()
+        .name("ae_cycle_outcome_continue")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_OUTCOME_SUSPEND: Event<Push> = Event::builder()
+        .name("ae_cycle_outcome_suspend")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
 }
 
 #[cfg(test)]

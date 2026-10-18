@@ -4,7 +4,7 @@
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::marker::{PhantomData, PhantomPinned};
-use std::mem::ManuallyDrop;f
+use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
