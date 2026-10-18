@@ -95,13 +95,13 @@ impl WakeShared {
             .unwrap_or(false)
     }
 
-    pub(crate) fn enter_cycle(&self) -> WakeCycle<'_> {
+    pub(crate) fn enter_cycle(&self) -> WakeCycle {
         CURRENT_EXECUTOR.with_borrow_mut(|current| {
             assert_eq!(current.owner, std::ptr::from_ref(self));
             assert!(!current.executing, "Executor::execute_cycle cannot be called reentrantly");
             current.executing = true;
         });
-        WakeCycle(self)
+        WakeCycle(std::ptr::from_ref(self))
     }
 
     fn is_executing(&self) -> bool {
@@ -321,13 +321,13 @@ impl WakeSignal {
     }
 }
 
-pub(crate) struct WakeCycle<'a>(&'a WakeShared);
+pub(crate) struct WakeCycle(*const WakeShared);
 
-impl Drop for WakeCycle<'_> {
+impl Drop for WakeCycle {
     fn drop(&mut self) {
         _ = CURRENT_EXECUTOR.try_with(|current| {
             let mut current = current.borrow_mut();
-            if current.owner == std::ptr::from_ref(self.0) {
+            if current.owner == self.0 {
                 current.executing = false;
             }
         });
