@@ -6,6 +6,7 @@
 //! Run with:
 //! `cargo bench -p observed --features test-util --bench observed_benchmarks`.
 
+use std::any::Any;
 use std::hint::black_box;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -169,21 +170,15 @@ struct EmitState {
 }
 
 struct EnrichedEmitState {
+    // Drop the guard before the state that owns the sink and provider.
+    _guard: Box<dyn Any>,
     state: EmitState,
-    _scopes: EnrichmentScopes,
 }
 
 struct EnrichedSinkState {
+    // Drop the guard before the sink whose slot it restores.
+    _guard: Box<dyn Any>,
     sink: Sink,
-    _scopes: EnrichmentScopes,
-}
-
-struct EnrichmentScopes(Vec<observed::__private::EnrichmentGuard>);
-
-impl Drop for EnrichmentScopes {
-    fn drop(&mut self) {
-        while self.0.pop().is_some() {}
-    }
 }
 
 fn replacing_engine() -> data_privacy::RedactionEngine {
@@ -214,34 +209,32 @@ fn processor_free_sink() -> Sink {
 
 fn enriched_emit_state(depth: usize) -> EnrichedEmitState {
     let state = emit_state();
-    let scopes = enrichment_scopes(&state.sink, depth);
-    EnrichedEmitState { state, _scopes: scopes }
+    let guard = applied_enrichment(&state.sink, depth);
+    EnrichedEmitState { _guard: guard, state }
 }
 
 fn enriched_sink_state(depth: usize) -> EnrichedSinkState {
     let sink = processor_free_sink();
-    let scopes = enrichment_scopes(&sink, depth);
-    EnrichedSinkState { sink, _scopes: scopes }
+    let guard = applied_enrichment(&sink, depth);
+    EnrichedSinkState { _guard: guard, sink }
 }
 
-fn enrichment_scopes(sink: &Sink, depth: usize) -> EnrichmentScopes {
+fn applied_enrichment(sink: &Sink, depth: usize) -> Box<dyn Any> {
+    let mut transfer = sink.transfer_context();
     if depth == 3 {
-        return EnrichmentScopes(vec![sink.push_test_enrichment(BenchEnrich3 {
+        transfer = transfer.with_enrichment(BenchEnrich3 {
             service: 1,
             region: 2,
             env: 3,
-        })]);
+        });
+    } else {
+        for value in 0..depth {
+            transfer = transfer.with_enrichment(BenchEnrich1 {
+                val: i64::try_from(value).expect("benchmark enrichment depth fits in i64"),
+            });
+        }
     }
-
-    EnrichmentScopes(
-        (0..depth)
-            .map(|value| {
-                sink.push_test_enrichment(BenchEnrich1 {
-                    val: i64::try_from(value).expect("benchmark enrichment depth fits in i64"),
-                })
-            })
-            .collect(),
-    )
+    Box::new(transfer.apply_current_thread())
 }
 
 fn transfer_with_entries(slot_count: usize) -> Transfer {

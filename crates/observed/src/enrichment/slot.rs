@@ -370,7 +370,6 @@ mod coverage_tests {
     }
 
     static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
-    static_assertions::assert_not_impl_any!(crate::__private::EnrichmentGuard: Send, Sync);
 
     #[test]
     fn relocation_preserves_thread_local_storage_identity() {

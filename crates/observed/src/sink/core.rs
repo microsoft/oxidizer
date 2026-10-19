@@ -11,8 +11,6 @@ use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
-#[cfg(any(test, feature = "test-util"))]
-use crate::enrichment::Enrichment;
 use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
@@ -234,14 +232,6 @@ impl Sink {
 
     pub(crate) fn supports_enrichment(&self) -> bool {
         !matches!(&*self.inner, SinkInner::Noop)
-    }
-
-    /// Opens an enrichment scope for test and benchmark setup.
-    #[cfg(any(test, feature = "test-util"))]
-    #[doc(hidden)]
-    pub fn push_test_enrichment(&self, enrichment: impl Enrichment) -> crate::__private::EnrichmentGuard {
-        let entries = enrichment.into_entries().into();
-        crate::__private::EnrichmentGuard::new(self.push_enrichment(entries))
     }
 
     /// Returns whether any processor currently wants the described event.
@@ -530,6 +520,7 @@ mod tests {
     use ohno::assert_error_message;
 
     use super::*;
+    use crate::enrichment::Enrichment;
     use crate::typestates::Set;
 
     // These atomics are observation counters only. Assertions read them after the
@@ -552,26 +543,6 @@ mod tests {
         assert!(sink.is_noop());
         assert!(sink.current_enrichments().is_empty());
         drop(transfer.apply_current_thread());
-    }
-
-    #[test]
-    fn test_enrichment_guard_holds_scope_open() {
-        struct TestEnrichment;
-
-        impl Enrichment for TestEnrichment {
-            fn into_entries(self) -> Vec<EnrichmentEntry> {
-                vec![EnrichmentEntry::unclassified("test", 1_i64)]
-            }
-        }
-
-        let sink = Sink::builder("test").clock(SimpleClock::new_frozen()).build();
-        let guard = sink.push_test_enrichment(TestEnrichment);
-
-        assert_eq!(sink.current_enrichments().len(), 1);
-        assert!(format!("{guard:?}").contains("EnrichmentGuard"));
-
-        drop(guard);
-        assert!(sink.current_enrichments().is_empty());
     }
 
     struct DummyDyn;
