@@ -408,11 +408,12 @@ mod tests {
         let worker_thread = thread::spawn(move || {
             let (command_tx, command_rx) = channel::unbounded();
             let signal = Arc::new(WorkerSignal::default());
+            let control = ClockControl::new();
             let mut worker = test_worker(
                 command_tx,
                 command_rx,
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
-                InactiveClock::default(),
+                control.clone().into(),
                 Arc::clone(&signal),
             );
             let (scheduler, clock) = {
@@ -424,12 +425,13 @@ mod tests {
                 scheduler,
                 task_ran: Arc::clone(&task_ran),
             }));
-            let mut delay = Box::pin(clock.delay(Duration::from_millis(1)));
+            let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
             assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(&timer_waker)).is_pending());
             worker_ready.send(WorkerSignal::waker(&signal)).unwrap();
 
+            WorkerSignal::waker(&signal).wake_by_ref();
             assert!(worker.execute_step().is_continue());
-            thread::sleep(Duration::from_millis(2));
+            let _control = control.auto_advance_timers(true);
             assert!(worker.execute_step().is_continue());
             assert!(
                 !timed_out_by_worker.load(Ordering::Relaxed),
