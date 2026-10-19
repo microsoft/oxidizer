@@ -256,7 +256,7 @@ mod tests {
         let (events, mut observed_events) = ::tokio::sync::mpsc::unbounded_channel();
         let driver_task = ::tokio::spawn(run_driver(
             driver,
-            notify,
+            Arc::clone(&notify),
             move || base_std + ::tokio::time::Instant::now().duration_since(base_tokio),
             move |observed_deadline, outcome| {
                 events.send((observed_deadline, outcome)).unwrap();
@@ -278,9 +278,17 @@ mod tests {
         );
 
         ::tokio::time::advance(Duration::from_millis(36)).await;
-        ::tokio::task::yield_now().await;
         let before_deadline = base_tokio + Duration::from_millis(36);
         assert_eq!(::tokio::time::Instant::now(), before_deadline);
+        notify.notify_one();
+        assert_eq!(
+            next_driver_event_without_time_advance(&mut observed_events, before_deadline).await,
+            (Some(deadline), Some(WaitOutcome::Notified))
+        );
+        assert_eq!(
+            next_driver_event_without_time_advance(&mut observed_events, before_deadline).await,
+            (Some(deadline), None)
+        );
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 0);
         assert_eq!(observed_events.try_recv(), Err(::tokio::sync::mpsc::error::TryRecvError::Empty));
 
