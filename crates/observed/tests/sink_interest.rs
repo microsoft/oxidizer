@@ -77,20 +77,19 @@ impl EventSampler for DropSampler {
 
 #[mutants::skip]
 fn leaf(processor: &Arc<ProbeProcessor>) -> Sink {
-    Sink::new(
-        "interest",
-        vec![Arc::clone(processor) as Arc<dyn EventProcessor>],
-        SimpleClock::new_frozen(),
-    )
+    Sink::builder("interest")
+        .processors(vec![Arc::clone(processor) as Arc<dyn EventProcessor>])
+        .clock(SimpleClock::new_frozen())
+        .build()
 }
 
 #[test]
 fn noop_and_empty_sinks_are_uninterested() {
     let sinks = [
         Sink::noop(),
-        Sink::new("empty", vec![], SimpleClock::new_frozen()),
+        Sink::builder("empty").clock(SimpleClock::new_frozen()).build(),
         Sink::composite([]),
-        Sink::composite([Sink::noop(), Sink::new("empty-child", vec![], SimpleClock::new_frozen())]),
+        Sink::composite([Sink::noop(), Sink::builder("empty-child").clock(SimpleClock::new_frozen()).build()]),
     ];
 
     for sink in sinks {
@@ -103,14 +102,13 @@ fn leaf_interest_accepts_any_processor_and_preserves_metadata() {
     for (first, second, expected) in [(false, false, false), (false, true, true), (true, false, true), (true, true, true)] {
         let first = Arc::new(ProbeProcessor::new(first));
         let second = Arc::new(ProbeProcessor::new(second));
-        let sink = Sink::new(
-            "mixed",
-            vec![
+        let sink = Sink::builder("mixed")
+            .processors(vec![
                 Arc::clone(&first) as Arc<dyn EventProcessor>,
                 Arc::clone(&second) as Arc<dyn EventProcessor>,
-            ],
-            SimpleClock::new_frozen(),
-        );
+            ])
+            .clock(SimpleClock::new_frozen())
+            .build();
 
         assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), expected);
         assert!(!sink.is_interested(&EventDescription::new("interest.rejected", None, None, None, false, false)));
@@ -151,6 +149,9 @@ fn initialization_updates_interest_in_both_directions() {
         assert_eq!(composite.is_interested(&AcceptedEvent::DESCRIPTION), after);
         processor.assert_untouched();
         uninterested.assert_untouched();
+
+        emit!(&sink, AcceptedEvent);
+        assert_eq!(processor.processed.load(Ordering::Relaxed), usize::from(after));
     }
 }
 
@@ -160,16 +161,14 @@ fn interest_queries_do_not_read_leaf_clocks() {
         // Nonzero increments make any clock read observable without using real time.
         let first_control = ClockControl::new().auto_advance(Duration::from_secs(1));
         let second_control = ClockControl::new().auto_advance(Duration::from_secs(1));
-        let first = Sink::new(
-            "first",
-            vec![Arc::new(ProbeProcessor::new(first_interest))],
-            first_control.to_simple_clock(),
-        );
-        let second = Sink::new(
-            "second",
-            vec![Arc::new(ProbeProcessor::new(second_interest))],
-            second_control.to_simple_clock(),
-        );
+        let first = Sink::builder("first")
+            .processors(vec![Arc::new(ProbeProcessor::new(first_interest))])
+            .clock(first_control.to_simple_clock())
+            .build();
+        let second = Sink::builder("second")
+            .processors(vec![Arc::new(ProbeProcessor::new(second_interest))])
+            .clock(second_control.to_simple_clock())
+            .build();
         let composite = Sink::composite([first.clone(), second.clone()]);
 
         assert_eq!(first.is_interested(&AcceptedEvent::DESCRIPTION), first_interest);
@@ -185,22 +184,19 @@ fn interest_queries_do_not_read_leaf_clocks() {
 }
 
 #[test]
-fn uninterested_emissions_do_not_construct_or_sample() {
+fn uninterested_queries_do_not_construct_or_sample() {
     let processor = Arc::new(ProbeProcessor::new(false));
     let sampler = DropSampler::default();
-    let sink = leaf(&processor).with_event_sampler(sampler.clone());
+    let sink = Sink::builder("interest")
+        .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+        .clock(SimpleClock::new_frozen())
+        .event_sampler(sampler.clone())
+        .build();
     let composite = Sink::composite([Sink::noop(), sink.clone()]);
-    let constructed = Cell::new(0);
-
     for sink in [sink, composite] {
         assert!(!sink.is_interested(&AcceptedEvent::DESCRIPTION));
-        emit!(&sink, {
-            constructed.set(constructed.get() + 1);
-            AcceptedEvent
-        });
     }
 
-    assert_eq!(constructed.get(), 0);
     assert_eq!(sampler.sampled.load(Ordering::Relaxed), 0);
     processor.assert_untouched();
 }
@@ -209,7 +205,11 @@ fn uninterested_emissions_do_not_construct_or_sample() {
 fn queries_do_not_sample_and_interest_does_not_guarantee_delivery() {
     let processor = Arc::new(ProbeProcessor::new(true));
     let sampler = DropSampler::default();
-    let sink = leaf(&processor).with_event_sampler(sampler.clone());
+    let sink = Sink::builder("interest")
+        .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+        .clock(SimpleClock::new_frozen())
+        .event_sampler(sampler.clone())
+        .build();
     let composite = Sink::composite([Sink::noop(), sink.clone()]);
 
     assert!(sink.is_interested(&AcceptedEvent::DESCRIPTION));
@@ -223,7 +223,7 @@ fn queries_do_not_sample_and_interest_does_not_guarantee_delivery() {
         AcceptedEvent
     });
 
-    assert_eq!(constructed.get(), 1);
+    assert_eq!(constructed.get(), 0);
     assert_eq!(sampler.sampled.load(Ordering::Relaxed), 1);
     processor.assert_untouched();
     assert!(sink.is_interested(&AcceptedEvent::DESCRIPTION));

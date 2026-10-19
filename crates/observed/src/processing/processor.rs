@@ -28,29 +28,27 @@ use crate::metadata::EventDescription;
 /// metrics-only) select them through
 /// [`is_interested()`](EventProcessor::is_interested).
 pub trait EventProcessor: Send + Sync {
-    /// Returns whether this processor is interested in the described event.
+    /// Decides whether this processor wants the event.
     ///
-    /// Uses the event description rather than inspecting event fields.
+    /// Called at most once per emission for each Sink the processor belongs
+    /// to, and not at all when that Sink's
+    /// [`EventSampler`](crate::EventSampler) drops the event without asking.
+    /// Keep it cheap.
     ///
-    /// Called while routing events and, for lazy typed events, **before**
-    /// construction. It may run more than once per emission, including through
-    /// composite sinks. Keep it cheap, and let the answer depend only on
-    /// `description` and on state that changes at most once, such as a
-    /// `OnceLock` filled during initialization. A sampler, rate limiter, or any
-    /// filter whose answer varies per call belongs in
-    /// [`process()`](Self::process), which runs exactly once per delivery.
+    /// [`Sink::is_interested`](crate::Sink::is_interested) can also call this
+    /// independently of emission. Those probes do not reserve recipients or
+    /// replace the checks performed for a later emission.
     ///
-    /// Also called by [`Sink::is_interested`](crate::Sink::is_interested),
-    /// which aggregates processor interest independently of emission.
+    /// It is both the lazy-construction gate and the per-processor routing
+    /// decision: the event closure runs only when at least one processor
+    /// returns `true`, and a processor that returns `false` never receives the
+    /// event even when a peer is interested.
     ///
-    /// Interest is advisory for the current check, not the processor's lifetime.
-    /// Initialization may change selection for subsequent emissions. Checks do
-    /// not form an atomic snapshot across processors, and earlier decisions
-    /// need not be revisited during the same emission.
+    /// # Nested telemetry is not supported
     ///
-    /// Interest gates lazy construction and selects recipients. If every
-    /// processor declines admission, the event closure is never invoked.
-    /// Routing can check interest independently of admission.
+    /// Do not emit from inside `is_interested()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn is_interested(&self, description: &EventDescription) -> bool;
 
     /// Processes an event by pulling fields and enrichments from the view.
@@ -60,10 +58,9 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// # Nested telemetry is not supported
     ///
-    /// Emitting from inside `process()` is silently dropped, including to a
-    /// different [`Sink`](crate::Sink): a thread-wide reentrancy guard skips
-    /// any nested `emit!` for the duration of the outer emission. Report
-    /// processor-internal failures through a non-`observed` channel instead.
+    /// Do not emit from inside `process()`, including to a different
+    /// [`Sink`](crate::Sink). Report processor-internal failures through a
+    /// non-`observed` channel instead.
     fn process(&self, event: &EventView<'_>);
 
     /// Forces any buffered telemetry produced by this processor out to its

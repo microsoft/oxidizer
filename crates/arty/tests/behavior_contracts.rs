@@ -318,7 +318,10 @@ fn configured_emitter_is_available_from_builtins() {
         }
     }
 
-    let sink = Sink::new("test", vec![Arc::new(TestProcessor)], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(TestProcessor)])
+        .build();
     let runtime = Runtime::builder().sink(sink).build().unwrap();
 
     runtime

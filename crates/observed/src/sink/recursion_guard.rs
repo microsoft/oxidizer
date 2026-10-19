@@ -1,23 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Thread-local reentrancy guard that stops telemetry emitted *while
-//! processors are running* from re-entering the pipeline on the current
+//! Thread-local reentrancy guard that stops telemetry emitted *while an event
+//! sampler or processor runs* from re-entering the pipeline on the current
 //! thread.
 //!
-//! The guard covers processor dispatch only. Building an event value is
-//! ordinary user code - a field initializer may call a helper that emits
-//! telemetry of its own - so the guard is taken after the event has been
-//! constructed and only for the dispatch itself.
-//! Dispatch includes recipient interest checks and event sampling. Initial
-//! admission checks remain outside the guard for both typed and dynamic events.
+//! Building an event value is ordinary user code - a field initializer may
+//! call a helper that emits telemetry of its own - so the guard is released
+//! while the event is built.
 //!
 //! # Scope: thread-wide, not per-sink
 //!
 //! The guard is a single un-keyed thread-local flag shared by **every**
 //! [`Sink`](crate::Sink) on the thread, not one slot per sink identity. While
-//! an event is being dispatched to processors, *any* nested `emit!` on that
-//! thread is skipped - including one targeting a completely unrelated sink.
+//! the guard is held, *any* nested `emit!` on that thread is skipped -
+//! including one targeting a completely unrelated sink.
 //!
 //! This is deliberate: nested telemetry is not a supported scenario. A
 //! processor that emits while handling an event (e.g. reporting its own
@@ -27,8 +24,8 @@
 //!
 //! The consequence is that such nested events are dropped silently - there is
 //! no warning, log, or error return, because reporting the drop would itself
-//! require an emission. Processors must therefore not rely on emitting
-//! telemetry from inside `process()`.
+//! require an emission. Samplers and processors must therefore not rely on
+//! emitting telemetry.
 
 /// RAII guard that releases the current thread's reentrancy slot on drop.
 struct ReentrancyGuard;

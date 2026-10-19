@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `EventSamplingContext::processors_interested`.
+
+### Changed
+
+- A Sink calls its event sampler before `EventProcessor::is_interested`.
+- `EventProcessor::is_interested` runs at most once per event per Sink.
+- A Sink holds at most 64 processors, counting every leaf of a composite
+  together. `Sink::new`, `Sink::new_isolated`, and `Sink::composite` panic past
+  that.
+- `EventSamplingContext` is no longer `Sync` or `RefUnwindSafe`.
+
+### Removed
+
+- `EventSamplingContext::sink_id`.
+- `EventSamplingContext::timestamp`.
+- The public `EventSamplingContext::new`.
+
 ## [0.27.0] - 2026-10-05
 
 ### Changed

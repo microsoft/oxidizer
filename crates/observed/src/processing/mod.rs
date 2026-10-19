@@ -8,13 +8,13 @@
 //! [`EventProcessor::process`]; concrete processors live in separate
 //! destination crates.
 
-mod evaluated_event;
+mod event_state;
 mod event_view;
 mod processor;
 
 use std::ops::ControlFlow;
 
-pub(crate) use evaluated_event::EvaluatedEvent;
+pub(crate) use event_state::IntermediateEvent;
 pub use event_view::EventView;
 pub use processor::EventProcessor;
 
