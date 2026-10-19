@@ -73,17 +73,17 @@ where
 }
 
 struct TaskFactory<F> {
-    pending: Option<(F, Option<Transfer>)>,
+    pending: Option<(F, Transfer)>,
 }
 
 impl<F> TaskFactory<F> {
-    fn new(inner: F, enrichment: Option<Transfer>) -> Self {
+    fn new(inner: F, enrichment: Transfer) -> Self {
         Self {
             pending: Some((inner, enrichment)),
         }
     }
 
-    fn into_parts(mut self) -> (F, Option<Transfer>) {
+    fn into_parts(mut self) -> (F, Transfer) {
         self.pending.take().expect("a queued factory is consumed exactly once")
     }
 }
@@ -93,12 +93,8 @@ impl<F> Drop for TaskFactory<F> {
         let Some((factory, enrichment)) = self.pending.take() else {
             return;
         };
-        if let Some(enrichment) = enrichment {
-            let _guard = enrichment.apply_current_thread();
-            discard_panicking_drop(factory);
-        } else {
-            discard_panicking_drop(factory);
-        }
+        let _guard = enrichment.apply_current_thread();
+        discard_panicking_drop(factory);
     }
 }
 
@@ -146,7 +142,7 @@ impl RemoteFutureFactory {
 pub(crate) fn prepare_remote<FF, F, R>(
     result_pool: &RemotePool,
     future_factory: FF,
-    parent_task_enrichment: Option<Transfer>,
+    parent_task_enrichment: Transfer,
     placement: TaskPlacement,
 ) -> (RemoteFutureFactory, JoinHandle<R>)
 where
@@ -163,8 +159,7 @@ where
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options =
-            parent_task_enrichment.map_or_else(|| TaskOptions::new(placement), |context| TaskOptions::observed(context, placement));
+        let options = TaskOptions::observed(parent_task_enrichment, placement);
         tasks.add_with_remote_result(inner, options, result_tx);
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -268,7 +263,7 @@ mod tests {
                     *value
                 }
             },
-            Some(sink.transfer_context()),
+            sink.transfer_context(),
             TaskPlacement::Any,
         );
 
@@ -344,7 +339,7 @@ mod tests {
         let (factory, handle) = prepare_remote(
             &result_pool,
             |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
-            Some(sink.transfer_context()),
+            sink.transfer_context(),
             TaskPlacement::Any,
         );
         let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -415,26 +410,7 @@ mod tests {
             }
 
             let sink = Sink::noop();
-            drop(TaskFactory::new(PanicOnDrop(&dropped), Some(sink.transfer_context())));
-        }));
-        result.unwrap();
-        assert!(dropped.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn queued_factory_without_enrichment_disposes_a_panicking_factory_without_unwinding() {
-        let dropped = AtomicBool::new(false);
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            struct PanicOnDrop<'a>(&'a AtomicBool);
-
-            impl Drop for PanicOnDrop<'_> {
-                fn drop(&mut self) {
-                    self.0.store(true, Ordering::Release);
-                    panic!("factory drop");
-                }
-            }
-
-            drop(TaskFactory::new(PanicOnDrop(&dropped), None));
+            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context()));
         }));
         result.unwrap();
         assert!(dropped.load(Ordering::Acquire));
