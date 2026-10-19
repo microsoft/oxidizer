@@ -192,4 +192,20 @@ mod tests {
         result.unwrap();
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
+
+    #[test]
+    fn queued_io_access_disposal_contains_captured_destructor_panic() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let capture = PanicOnDrop(Arc::clone(&drops));
+        let access: IoAccess = Box::new(move |_| {
+            let _ = &capture;
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(QueuedIoAccess::new(access));
+        }));
+
+        result.unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
 }

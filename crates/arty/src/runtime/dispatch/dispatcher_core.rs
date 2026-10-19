@@ -456,6 +456,25 @@ mod tests {
     }
 
     #[test]
+    fn io_access_after_shutdown_is_rejected() {
+        let (tx, rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &threads[0])),
+            observed::Sink::noop(),
+        );
+        dispatcher.stop();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let access_invoked = Arc::clone(&invoked);
+
+        assert!(!dispatcher.access_io(WorkerIndex(0), Box::new(move |_| access_invoked.store(true, Ordering::Release)),));
+
+        assert!(!invoked.load(Ordering::Acquire));
+        assert!(matches!(drain_rx(&rx).as_slice(), [AsyncWorkerCommand::Shutdown]));
+    }
+
+    #[test]
     fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
