@@ -202,9 +202,9 @@ nix = { version = "0.31.3", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 nonempty = { version = "0.12.0", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
-observed = { path = "crates/observed", default-features = false, version = "0.27.1" }
-observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.27.1" }
-observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.27.1" }
+observed = { path = "crates/observed", default-features = false, version = "0.28.0" }
+observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.28.0" }
+observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.28.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.4.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.5.2" }
