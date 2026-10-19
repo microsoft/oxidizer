@@ -162,6 +162,24 @@ fn cross_thread_enrichment_transfer() {
 }
 
 #[test]
+fn applied_guard_can_outlive_the_transfer() {
+    let sink = processor_free_sink();
+    let transfer = (|| sink.transfer_context()).enrich(
+        &sink,
+        ServiceCtx {
+            service: Sensitive::new("api", TEST_DC),
+        },
+    )();
+
+    let guard = transfer.apply_current_thread();
+    drop(transfer);
+    assert_eq!(sink.current_enrichments().len(), 1);
+
+    drop(guard);
+    assert!(sink.current_enrichments().is_empty());
+}
+
+#[test]
 fn enrich_for_targets_specific_emitter() {
     static FETCH: SinkId = SinkId::new("fetch");
 

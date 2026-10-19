@@ -103,21 +103,6 @@ pub(crate) struct Guard {
     slots: SmallVec<[(Slot, OptEnrichmentNode); INLINE_SLOT_CAPACITY]>,
 }
 
-/// Holds an enrichment scope open for test and benchmark setup.
-#[cfg(any(test, feature = "test-util"))]
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct EnrichmentGuard {
-    _guard: Guard,
-}
-
-#[cfg(any(test, feature = "test-util"))]
-impl EnrichmentGuard {
-    pub(crate) fn new(guard: Guard) -> Self {
-        Self { _guard: guard }
-    }
-}
-
 impl Guard {
     pub(crate) fn empty() -> Self {
         Self { slots: SmallVec::new() }
@@ -211,6 +196,16 @@ impl EnrichmentTransfer {
             slots.push((slot, prev));
         }
         AppliedGuard { slots }
+    }
+
+    /// Restores captured heads with an owned guard that can outlive this transfer.
+    pub(crate) fn apply_owned(&self) -> Guard {
+        let mut slots = SmallVec::with_capacity(self.slots.len());
+        for (slot, head) in &self.slots {
+            let prev = slot.replace(head.clone());
+            slots.push((slot.clone(), prev));
+        }
+        Guard { slots }
     }
 
     /// Pushes an additional enrichment node onto every captured chain.
@@ -375,6 +370,7 @@ mod coverage_tests {
     }
 
     static_assertions::assert_impl_all!(Slot: thread_aware::ThreadAware);
+    static_assertions::assert_not_impl_any!(crate::__private::EnrichmentGuard: Send, Sync);
 
     #[test]
     fn relocation_preserves_thread_local_storage_identity() {
@@ -401,6 +397,54 @@ mod coverage_tests {
 
         drop(guard);
         assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn applied_guard_restores_spilled_slot_storage() {
+        const SLOT_COUNT: usize = INLINE_SLOT_CAPACITY + 1;
+
+        let slots: [_; SLOT_COUNT] = std::array::from_fn(|_| Slot::new());
+        let captured_guards: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                slot.push(Arc::from(vec![EnrichmentEntry::unclassified(
+                    "captured",
+                    i64::try_from(index).unwrap(),
+                )]))
+            })
+            .collect();
+        let mut transfer = EnrichmentTransfer::default();
+        for slot in &slots {
+            transfer.add_slot(slot);
+        }
+        drop(captured_guards);
+
+        let previous_guards: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                slot.push(Arc::from(vec![EnrichmentEntry::unclassified(
+                    "previous",
+                    i64::try_from(index).unwrap(),
+                )]))
+            })
+            .collect();
+
+        {
+            let _guard = transfer.apply();
+            for slot in &slots {
+                assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "captured");
+            }
+        }
+
+        for slot in &slots {
+            assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "previous");
+        }
+        drop(previous_guards);
+        for slot in &slots {
+            assert!(slot.current().is_none());
+        }
     }
 
     #[test]

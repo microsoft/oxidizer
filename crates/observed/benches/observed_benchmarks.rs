@@ -11,10 +11,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{self, Poll};
 
-use criterion::{BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, Sensitive};
 use observed::__private::EnrichmentEntry;
-use observed::context::Transfer;
+use observed::context::{Transfer, Transferred};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Key, Sink, Value, event};
 use opentelemetry::logs::LoggerProvider;
@@ -145,6 +145,7 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
     }
 }
 
+/// Discards exported records so pipeline benchmarks do not retain unbounded output.
 #[derive(Debug)]
 struct NoOpLogExporter;
 
@@ -161,6 +162,7 @@ impl opentelemetry_sdk::logs::LogExporter for NoOpLogExporter {
     }
 }
 
+/// Keeps the provider alive for as long as its sink is used by a benchmark.
 struct EmitState {
     sink: Sink,
     _provider: SdkLoggerProvider,
@@ -252,6 +254,16 @@ fn transfer_with_entries(slot_count: usize) -> Transfer {
     (|| sink.transfer_context()).enrich(&sink, BenchEnrich1 { val: 42 })()
 }
 
+struct AttachedPollState {
+    future: Pin<Box<Transferred<AlwaysPending>>>,
+}
+
+fn attached_poll_state(slot_count: usize) -> AttachedPollState {
+    AttachedPollState {
+        future: Box::pin(AlwaysPending.attach(transfer_with_entries(slot_count))),
+    }
+}
+
 #[metabench::benchmark(EMIT_SIMPLE_LOG, EMIT_PIPELINE, "simple_log_2_fields")]
 #[bench::run(&emit_state())]
 fn emit_simple_log(state: &EmitState) {
@@ -284,7 +296,11 @@ fn emit_with_body(state: &EmitState) {
 
 #[metabench::benchmark(EMIT_METRIC_EVENT, EMIT_PIPELINE, "log_of_metric_event")]
 #[bench::run(&emit_state())]
-fn emit_metric_event(state: &EmitState) {
+/// Measures log mapping for an event that also declares metric metadata.
+///
+/// The fixture installs only a log processor, so this excludes instrument
+/// creation and metric recording.
+fn emit_log_of_metric_event(state: &EmitState) {
     observed::emit!(
         &state.sink,
         MetricEvent {
@@ -409,6 +425,10 @@ fn composite_sink() -> Sink {
 #[metabench::benchmark(PENDING_ENRICHED_FUTURE, ALLOCATION, "pending_enriched_future_8_polls")]
 #[bench::single(&processor_free_sink())]
 #[bench::composite_3(&composite_sink())]
+/// Compares per-poll enrichment work without executor scheduling overhead.
+///
+/// The future stays pending and is driven directly with a no-op waker; the
+/// cases isolate one sink from representative composite fan-out.
 fn pending_enriched_future(sink: &Sink) {
     poll_pending(AlwaysPending.enrich(sink, BenchEnrich1 { val: 42 }));
 }
@@ -427,6 +447,7 @@ fn key_value_creation(integer: bool) -> (Key, Value) {
 #[metabench::benchmark(REDACTED_VALUE_CREATION, ALLOCATION, "redacted_value_creation")]
 #[bench::via_string(&replacing_engine(), false)]
 #[bench::direct(&replacing_engine(), true)]
+/// Compares intermediate `String` construction with direct rendering into `Value`.
 fn redacted_value_creation(engine: &data_privacy::RedactionEngine, direct: bool) -> Value {
     let classified = Sensitive::new(black_box("Mozilla/5.0 (Windows NT 10.0)"), BENCH_DC);
     if direct {
@@ -442,15 +463,25 @@ fn redacted_value_creation(engine: &data_privacy::RedactionEngine, direct: bool)
 #[metabench::benchmark(EMIT_ENRICHMENT_DEPTH, ALLOCATION, "emit_enrichment_depth")]
 #[bench::depth_0(&enriched_emit_state(0))]
 #[bench::depth_5(&enriched_emit_state(5))]
+/// Uses representative low and higher depths to compare aggregate emit cost.
+///
+/// These endpoints are not intended to report a per-layer marginal cost.
 fn emit_enrichment_depth(state: &EnrichedEmitState) {
     emit_simple_log(&state.state);
 }
 
-#[metabench::benchmark(APPLY_TRANSFER, ENRICHMENT_TRANSFER, "apply_current_thread")]
-#[bench::single_slot(&transfer_with_entries(1))]
-#[bench::three_slots(&transfer_with_entries(3))]
-fn apply_transfer(transfer: &Transfer) {
-    black_box(transfer.apply_current_thread());
+#[metabench::benchmark(POLL_ATTACHED, ENRICHMENT_TRANSFER, "poll_attached")]
+#[bench::single_slot(attached_poll_state(1))]
+#[bench::three_slots(attached_poll_state(3))]
+/// Measures the attached-future hot path that applies borrowed transfer state.
+///
+/// The single leaf is the lower bound; the small composite represents common
+/// fan-out without treating the result as a per-slot scaling model.
+fn poll_attached(mut state: AttachedPollState) -> AttachedPollState {
+    let waker = task::Waker::noop();
+    let mut cx = task::Context::from_waker(waker);
+    let _ = black_box(state.future.as_mut().poll(&mut cx));
+    state
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -466,7 +497,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         bencher.iter(|| emit_with_body(black_box(&emit)));
     });
     emit_pipeline.bench_function(BenchmarkId::new(EMIT_METRIC_EVENT.benchmark_name(), "run"), |bencher| {
-        bencher.iter(|| emit_metric_event(black_box(&emit)));
+        bencher.iter(|| emit_log_of_metric_event(black_box(&emit)));
     });
     let redacted = redacted_emit_state();
     emit_pipeline.bench_function(BenchmarkId::new(EMIT_REDACTED_STRINGS.benchmark_name(), "run"), |bencher| {
@@ -537,11 +568,13 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     allocation.finish();
 
     let mut transfer = criterion.benchmark_group(ENRICHMENT_TRANSFER);
-    let single = transfer_with_entries(1);
-    let three = transfer_with_entries(3);
-    for (case, context) in [("single_slot", &single), ("three_slots", &three)] {
-        transfer.bench_function(BenchmarkId::new(APPLY_TRANSFER.benchmark_name(), case), |bencher| {
-            bencher.iter(|| apply_transfer(black_box(context)));
+    for (case, slot_count) in [("single_slot", 1), ("three_slots", 3)] {
+        transfer.bench_function(BenchmarkId::new(POLL_ATTACHED.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(
+                || attached_poll_state(slot_count),
+                |state| black_box(poll_attached(state)),
+                BatchSize::SmallInput,
+            );
         });
     }
     transfer.finish();
@@ -566,6 +599,6 @@ metabench::main!(
         KEY_VALUE_CREATION,
         REDACTED_VALUE_CREATION,
         EMIT_ENRICHMENT_DEPTH,
-        APPLY_TRANSFER,
+        POLL_ATTACHED,
     ],
 );

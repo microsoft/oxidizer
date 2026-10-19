@@ -24,7 +24,7 @@ pub struct Enriched<T> {
     #[pin]
     inner: T,
     sink: Sink,
-    entries: Arc<[EnrichmentEntry]>,
+    entries: Option<Arc<[EnrichmentEntry]>>,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Enriched<T> {
@@ -40,29 +40,23 @@ impl<F: Future> Future for Enriched<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.sink.push_enrichment(Arc::clone(this.entries));
+        let _guard = this.entries.as_ref().map(|entries| this.sink.push_enrichment(Arc::clone(entries)));
         this.inner.poll(cx)
     }
 }
 
-fn entries(sink: &Sink, enrichment: impl Enrichment) -> Arc<[EnrichmentEntry]> {
-    if sink.supports_enrichment() {
-        enrichment.into_entries().into()
-    } else {
-        Arc::from([])
-    }
+fn entries(sink: &Sink, enrichment: impl Enrichment) -> Option<Arc<[EnrichmentEntry]>> {
+    sink.supports_enrichment().then(|| enrichment.into_entries().into())
 }
 
-fn targeted_entries(sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Arc<[EnrichmentEntry]> {
-    if sink.supports_enrichment() {
+fn targeted_entries(sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Option<Arc<[EnrichmentEntry]>> {
+    sink.supports_enrichment().then(|| {
         enrichment
             .into_entries()
             .into_iter()
             .map(move |entry| entry.with_target(target))
             .collect()
-    } else {
-        Arc::from([])
-    }
+    })
 }
 
 /// Extension trait that adds methods for enriching an async block of code.
@@ -124,7 +118,7 @@ pub trait EnrichFnExt<R>: FnOnce() -> R + Sized {
         move || {
             // For composite emitters, this broadcasts the push to every
             // child's slot; the returned compound guard pops them all on Drop.
-            let _guard = sink.push_enrichment(entries);
+            let _guard = entries.map(|entries| sink.push_enrichment(entries));
             self()
         }
     }
@@ -135,7 +129,7 @@ pub trait EnrichFnExt<R>: FnOnce() -> R + Sized {
         let entries = targeted_entries(sink, target, enrichment);
         let sink = sink.clone();
         move || {
-            let _guard = sink.push_enrichment(entries);
+            let _guard = entries.map(|entries| sink.push_enrichment(entries));
             self()
         }
     }

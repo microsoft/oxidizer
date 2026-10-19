@@ -19,7 +19,8 @@ use crate::runtime::handle::Runtime;
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
+/// a shared blocking pool, a real-time clock, and a processor-free telemetry
+/// sink that preserves task enrichment while discarding events.
 ///
 /// # Examples
 ///
@@ -147,9 +148,10 @@ impl RuntimeBuilder {
 
     /// Sets the telemetry sink for runtime events and task enrichment.
     ///
-    /// The default is [`Sink::noop`]. Async tasks inherit enrichment
-    /// active on the configured sink at submission, including their completion
-    /// events. Retrieve the sink inside a task with
+    /// The default sink has no processors, so it discards events while retaining
+    /// enrichment context. Async tasks inherit enrichment active on the
+    /// configured sink at submission, including their completion events.
+    /// Retrieve the sink inside a task with
     /// [`Builtins::sink`](crate::task::Builtins::sink).
     ///
     /// Configured event processors must not panic. Runtime events are emitted
@@ -207,7 +209,7 @@ impl RuntimeBuilder {
         Self {
             clock: InactiveClock::default(),
             processor_config: RuntimeConfig::default(),
-            sink: Sink::noop(),
+            sink: Sink::builder("arty").build(),
         }
     }
 }

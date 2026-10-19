@@ -3,9 +3,10 @@
 
 //! Runtime telemetry through [`observed`].
 //!
-//! Arty emits runtime events through an [`observed::Sink`]. The default sink is
-//! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
-//! before starting the runtime. Tasks can access it through
+//! Arty emits runtime events through an [`observed::Sink`]. The default sink has
+//! no processors, so it discards events while retaining task enrichment; supply
+//! a configured sink with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
+//! to receive events. Tasks can access it through
 //! [`Builtins::sink`](crate::task::Builtins::sink).
 //! Configure processors that do not panic: event delivery is synchronous and
 //! Arty does not recover from telemetry-processor panics.

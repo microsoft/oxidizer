@@ -460,10 +460,31 @@ pub use value::Value;
 /// This is **not public API** - it exists solely for macro-generated code.
 #[doc(hidden)]
 pub mod __private {
+    #[cfg(any(test, feature = "test-util"))]
+    use std::marker::PhantomData;
+    #[cfg(any(test, feature = "test-util"))]
+    use std::rc::Rc;
+
     // data_privacy re-exports (no public path in this crate).
     pub use ::data_privacy::{RedactedDisplay, RedactedToString, Sensitive};
 
     pub use crate::enrichment::EnrichmentEntry;
+
+    /// Holds an enrichment scope open for test and benchmark setup.
     #[cfg(any(test, feature = "test-util"))]
-    pub use crate::enrichment::EnrichmentGuard;
+    #[derive(Debug)]
+    pub struct EnrichmentGuard {
+        _guard: crate::enrichment::Guard,
+        _not_send: PhantomData<Rc<()>>,
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    impl EnrichmentGuard {
+        pub(crate) fn new(guard: crate::enrichment::Guard) -> Self {
+            Self {
+                _guard: guard,
+                _not_send: PhantomData,
+            }
+        }
+    }
 }
