@@ -87,6 +87,8 @@ mod tests {
     use std::task::{Context, Poll};
     use std::time::Duration;
 
+    use testing_aids::TEST_TIMEOUT;
+
     use super::*;
 
     #[derive(Debug)]
@@ -183,6 +185,49 @@ mod tests {
         drop(clock);
     }
 
+    #[::tokio::test(start_paused = true)]
+    async fn deadline_wait_fires_at_the_exact_requested_instant() {
+        let notify = Arc::new(Notify::new());
+        let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
+        let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
+        let base_std = Instant::now();
+        let base_tokio = ::tokio::time::Instant::now();
+        let deadline = base_std + Duration::from_millis(37);
+        let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
+        let (events, mut observed_events) = ::tokio::sync::mpsc::unbounded_channel();
+        let driver_task = ::tokio::spawn(run_driver(
+            driver,
+            notify,
+            move || base_std + ::tokio::time::Instant::now().duration_since(base_tokio),
+            move |observed_deadline, outcome| {
+                events.send((observed_deadline, outcome)).unwrap();
+            },
+        ));
+
+        assert_eq!(next_driver_event(&mut observed_events).await, (None, None));
+        let timer = clock.register_timer(deadline, Waker::from(Arc::clone(&wake_count)));
+        assert_eq!(next_driver_event(&mut observed_events).await, (None, Some(WaitOutcome::Notified)));
+        assert_eq!(next_driver_event(&mut observed_events).await, (Some(deadline), None));
+
+        ::tokio::time::advance(Duration::from_millis(36)).await;
+        ::tokio::task::yield_now().await;
+        assert_eq!(wake_count.0.load(Ordering::Relaxed), 0);
+        assert_eq!(observed_events.try_recv(), Err(::tokio::sync::mpsc::error::TryRecvError::Empty));
+
+        ::tokio::time::advance(Duration::from_millis(1)).await;
+        ::tokio::task::yield_now().await;
+        assert_eq!(
+            next_driver_event(&mut observed_events).await,
+            (Some(deadline), Some(WaitOutcome::Deadline))
+        );
+        assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
+
+        driver_task.abort();
+        assert!(driver_task.await.unwrap_err().is_cancelled());
+        clock.unregister_timer(timer);
+        drop(clock);
+    }
+
     #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
     #[::tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn hidden_driver_task_finishes_when_clock_is_dropped() {
@@ -190,12 +235,12 @@ mod tests {
         // join handle; public timing and relocation behavior is covered by integration tests.
         let (clock, handle) = Clock::new_tokio_core();
 
-        ::tokio::time::timeout(Duration::from_secs(1), clock.delay(Duration::from_millis(15)))
+        ::tokio::time::timeout(TEST_TIMEOUT, clock.delay(Duration::from_millis(15)))
             .await
             .unwrap();
         drop(clock);
 
-        ::tokio::time::timeout(Duration::from_secs(1), handle)
+        ::tokio::time::timeout(TEST_TIMEOUT, handle)
             .await
             .expect("the hidden driver task must terminate after its final clock owner is dropped")
             .unwrap();

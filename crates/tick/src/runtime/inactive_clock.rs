@@ -153,12 +153,17 @@ impl<S> InactiveClock<S> {
     /// runtime to interrupt its current wait.
     ///
     /// Controlled clocks advance externally and do not register the driver waker. Their owner is
-    /// responsible for advancing controlled time and waking any timers that become ready.
+    /// responsible for advancing controlled time, waking any timers that become ready, and
+    /// independently waking the driver during shutdown or owner-lifecycle changes.
     ///
-    /// The retained waker must not transitively own a [`Clock`] associated with this driver.
-    /// Runtime loops commonly wait for [`ClockGone`](crate::runtime::ClockGone) before dropping the
-    /// driver; a `Waker -> runtime state -> Clock` ownership cycle would keep the final clock owner
-    /// alive and prevent that shutdown condition.
+    /// Driver notifications may occur between [`ClockDriver::advance_timers`] returning and the
+    /// runtime parking. Integrations must retain pending wakes, or otherwise make that transition
+    /// race-free, so a timer registration cannot be lost in the gap.
+    ///
+    /// The retained waker must not transitively own a [`Clock`] or [`ClockDriver`] associated with
+    /// this driver. Runtime loops commonly wait for [`ClockGone`](crate::runtime::ClockGone) before
+    /// dropping the driver; either ownership cycle would prevent the corresponding final owner or
+    /// driver drop. Use a separate signal or a weak runtime handle instead.
     #[must_use]
     pub fn activate(self, driver_waker: Waker) -> (Clock, ClockDriver) {
         let driver_id = self.state.register_driver(driver_waker);

@@ -9,6 +9,7 @@ use std::task::{Context, RawWaker, RawWakerVTable, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::{ThreadAware, ThreadBuilder};
 use tick::Clock;
 use tick::runtime::InactiveClock;
@@ -219,7 +220,7 @@ fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock
         completed.send(()).unwrap();
     });
 
-    completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    completion.recv_timeout(TEST_TIMEOUT).unwrap();
     dropping.join().unwrap();
     drop(first_driver);
 }
@@ -250,7 +251,7 @@ fn notifying_drivers_does_not_clone_custom_wakers_under_the_registry_lock() {
         drop(first_clock);
     });
 
-    completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    completion.recv_timeout(TEST_TIMEOUT).unwrap();
     registering.join().unwrap();
     assert!(first_driver.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some());
 }

@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Builtins;
+use testing_aids::TEST_TIMEOUT;
 use tick::FutureExt;
 
 const TIMER_COUNT: usize = 8;
@@ -35,11 +36,11 @@ fn first_cross_thread_timer_interrupts_idle_worker_wait() {
         .build()
         .unwrap();
     idle_wait
-        .recv_timeout(Duration::from_millis(900))
+        .recv_timeout(TEST_TIMEOUT)
         .expect("the worker must establish its initial no-deadline notification wait");
     let clock = runtime.scheduler().block_on(async |builtins| builtins.clock().clone()).unwrap();
     idle_wait
-        .recv_timeout(Duration::from_millis(900))
+        .recv_timeout(TEST_TIMEOUT)
         .expect("the worker must consume the submission wake and reestablish its idle wait");
     let (completed, completion) = mpsc::channel();
     let waker = Waker::from(Arc::new(CompletionWake(completed)));
@@ -48,7 +49,7 @@ fn first_cross_thread_timer_interrupts_idle_worker_wait() {
 
     assert!(delay.as_mut().poll(&mut context).is_pending());
     completion
-        .recv_timeout(Duration::from_millis(900))
+        .recv_timeout(TEST_TIMEOUT)
         .expect("the first cross-thread timer must interrupt the idle worker before the former one-second fallback");
 
     runtime.stop().unwrap();

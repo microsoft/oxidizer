@@ -6015,6 +6015,7 @@ dependencies = [
  "serde_core",
  "serde_json",
  "static_assertions",
+ "testing_aids",
  "thread_aware",
  "time",
  "tokio",

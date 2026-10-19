@@ -176,12 +176,13 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Notifies tests immediately before a worker enters an idle notification wait.
+    /// Notifies a test immediately before each worker enters an idle notification wait.
     ///
-    /// This test-only hook establishes that earlier notifications have been consumed and the
-    /// worker is about to block. The runtime may send more than one notification per worker.
+    /// Enable the `test-util` feature to deterministically coordinate tests with worker parking.
+    /// A notification means the worker holds its wait-state lock, has consumed any earlier wake,
+    /// and is about to block. The runtime may send this notification repeatedly and from every
+    /// worker, so tests must not assume a one-to-one relationship with submitted tasks.
     #[cfg(feature = "test-util")]
-    #[doc(hidden)]
     #[must_use]
     pub fn notify_on_idle_wait(mut self, notifier: mpsc::Sender<()>) -> Self {
         self.worker_signal_test_hooks = WorkerSignalTestHooks::with_idle_wait_notifier(notifier);
