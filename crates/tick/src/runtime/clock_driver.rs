@@ -17,6 +17,11 @@ use crate::state::{ClockState, DriverId};
 /// worker owns its own `ClockDriver` that advances only the timers registered
 /// on that thread's [`Clock`][crate::Clock]. See the [`runtime`][crate::runtime]
 /// module for the setup pattern.
+///
+/// Controlled clocks ignore the waker supplied to
+/// [`InactiveClock::activate`](crate::runtime::InactiveClock::activate). Their external owner must
+/// advance controlled time and explicitly wake, exit, and drop every driver loop during lifecycle
+/// shutdown; controlled drivers must not wait solely for [`ClockGone`].
 #[derive(Debug)]
 pub struct ClockDriver {
     pub(crate) state: ClockState,

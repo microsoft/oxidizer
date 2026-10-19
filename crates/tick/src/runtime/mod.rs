@@ -106,7 +106,9 @@
 //! ```
 //!
 //! Controlled clocks advance externally. Their owner is responsible for advancing controlled time
-//! and waking timers; the runtime driver has no system parking deadline for them.
+//! and waking timers; the supplied activation waker is ignored and the runtime driver has no
+//! system parking deadline. External lifecycle state must wake, exit, and drop every controlled
+//! driver loop during shutdown rather than waiting solely for [`ClockGone`].
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate

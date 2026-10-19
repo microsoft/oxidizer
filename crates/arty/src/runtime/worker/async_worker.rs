@@ -331,6 +331,8 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn first_cross_thread_timer_interrupts_established_idle_wait() {
+        // Establishing that the worker is already parked is intentionally private: exposing that
+        // synchronization through RuntimeBuilder would turn implementation timing into public API.
         struct CompletionWake(mpsc::Sender<()>);
 
         impl Wake for CompletionWake {
@@ -340,12 +342,13 @@ mod tests {
         }
 
         let (idle_wait_started, idle_wait) = mpsc::channel();
+        let (wait_released, released_wait) = mpsc::channel();
         let (command_tx, command_rx) = channel::unbounded();
         let worker_command_tx = command_tx.clone();
         let (worker_ready, worker_setup) = mpsc::channel();
         let worker_thread = thread::spawn(move || {
             let signal = Arc::new(WorkerSignal::new(
-                crate::runtime::worker::signal::WorkerSignalTestHooks::with_idle_wait_notifier(idle_wait_started),
+                crate::runtime::worker::signal::WorkerSignalTestHooks::with_wait_observers(idle_wait_started, wait_released),
             ));
             let worker = test_worker(
                 worker_command_tx,
@@ -368,6 +371,9 @@ mod tests {
         let mut delay = Box::pin(clock.delay(Duration::from_millis(20)));
 
         assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(&waker)).is_pending());
+        released_wait
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("timer registration must release the established notification wait");
         completion
             .recv_timeout(TEST_TIMEOUT)
             .expect("the first cross-thread timer must interrupt the established idle wait");

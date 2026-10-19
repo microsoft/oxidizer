@@ -24,19 +24,27 @@ pub(crate) struct WorkerSignal {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct WorkerSignalTestHooks {
     idle_wait_notifier: Option<mpsc::Sender<()>>,
+    notification_wait_released: Option<mpsc::Sender<()>>,
 }
 
 #[cfg(test)]
 impl WorkerSignalTestHooks {
-    pub(crate) fn with_idle_wait_notifier(idle_wait_notifier: mpsc::Sender<()>) -> Self {
+    pub(crate) fn with_wait_observers(idle_wait_notifier: mpsc::Sender<()>, notification_wait_released: mpsc::Sender<()>) -> Self {
         Self {
             idle_wait_notifier: Some(idle_wait_notifier),
+            notification_wait_released: Some(notification_wait_released),
         }
     }
 
     #[cfg(test)]
     fn notify_idle_wait(&self) {
         if let Some(notifier) = &self.idle_wait_notifier {
+            _ = notifier.send(());
+        }
+    }
+
+    fn notify_notification_release(&self) {
+        if let Some(notifier) = &self.notification_wait_released {
             _ = notifier.send(());
         }
     }
@@ -80,6 +88,8 @@ impl WorkerSignal {
         loop {
             if *notified {
                 *notified = false;
+                #[cfg(test)]
+                self.test_hooks.notify_notification_release();
                 return;
             }
             #[cfg(test)]

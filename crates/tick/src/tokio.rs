@@ -103,6 +103,28 @@ mod tests {
             .unwrap()
     }
 
+    async fn next_driver_event_without_time_advance(
+        observed_events: &mut ::tokio::sync::mpsc::UnboundedReceiver<(Option<Instant>, Option<WaitOutcome>)>,
+        expected_now: ::tokio::time::Instant,
+    ) -> (Option<Instant>, Option<WaitOutcome>) {
+        for _ in 0..100 {
+            match observed_events.try_recv() {
+                Ok(event) => {
+                    assert_eq!(::tokio::time::Instant::now(), expected_now);
+                    return event;
+                }
+                Err(::tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    assert_eq!(::tokio::time::Instant::now(), expected_now);
+                    ::tokio::task::yield_now().await;
+                }
+                Err(::tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    panic!("driver event channel disconnected before the expected event");
+                }
+            }
+        }
+        panic!("driver did not publish the expected event without advancing paused time");
+    }
+
     impl Wake for CountingWake {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -190,8 +212,8 @@ mod tests {
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
         let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
-        let base_std = Instant::now();
         let base_tokio = ::tokio::time::Instant::now();
+        let base_std = base_tokio.into_std();
         let deadline = base_std + Duration::from_millis(37);
         let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
         let (events, mut observed_events) = ::tokio::sync::mpsc::unbounded_channel();
@@ -204,20 +226,31 @@ mod tests {
             },
         ));
 
-        assert_eq!(next_driver_event(&mut observed_events).await, (None, None));
+        assert_eq!(
+            next_driver_event_without_time_advance(&mut observed_events, base_tokio).await,
+            (None, None)
+        );
         let timer = clock.register_timer(deadline, Waker::from(Arc::clone(&wake_count)));
-        assert_eq!(next_driver_event(&mut observed_events).await, (None, Some(WaitOutcome::Notified)));
-        assert_eq!(next_driver_event(&mut observed_events).await, (Some(deadline), None));
+        assert_eq!(
+            next_driver_event_without_time_advance(&mut observed_events, base_tokio).await,
+            (None, Some(WaitOutcome::Notified))
+        );
+        assert_eq!(
+            next_driver_event_without_time_advance(&mut observed_events, base_tokio).await,
+            (Some(deadline), None)
+        );
 
         ::tokio::time::advance(Duration::from_millis(36)).await;
         ::tokio::task::yield_now().await;
+        let before_deadline = base_tokio + Duration::from_millis(36);
+        assert_eq!(::tokio::time::Instant::now(), before_deadline);
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 0);
         assert_eq!(observed_events.try_recv(), Err(::tokio::sync::mpsc::error::TryRecvError::Empty));
 
         ::tokio::time::advance(Duration::from_millis(1)).await;
-        ::tokio::task::yield_now().await;
+        let at_deadline = base_tokio + Duration::from_millis(37);
         assert_eq!(
-            next_driver_event(&mut observed_events).await,
+            next_driver_event_without_time_advance(&mut observed_events, at_deadline).await,
             (Some(deadline), Some(WaitOutcome::Deadline))
         );
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);

@@ -154,7 +154,9 @@ impl<S> InactiveClock<S> {
     ///
     /// Controlled clocks advance externally and do not register the driver waker. Their owner is
     /// responsible for advancing controlled time, waking any timers that become ready, and
-    /// independently waking the driver during shutdown or owner-lifecycle changes.
+    /// independently waking each driver loop during shutdown or owner-lifecycle changes. A
+    /// controlled driver must exit and be dropped from that external lifecycle state rather than
+    /// waiting solely for [`ClockGone`](crate::runtime::ClockGone).
     ///
     /// Driver notifications may occur between [`ClockDriver::advance_timers`] returning and the
     /// runtime parking. Integrations must retain pending wakes, or otherwise make that transition
