@@ -24,8 +24,10 @@ use crate::native::{control_callback, status};
 /// resources to the caller. Resources must support use and teardown from another
 /// thread. Registered addresses may be accessed only while retained by the caller;
 /// successful `stop` must end all access, including pending native reads/callbacks.
-/// Implementations must not unwind across native callbacks. These obligations do
-/// not establish synchronization between publication writes and consumer reads.
+/// Counter references are aligned eight-byte atomic storage. Native accesses
+/// must be read-only, atomic, and exactly eight bytes wide: no partial reads or
+/// ordinary non-atomic Rust accesses may overlap emission. No memory-ordering
+/// relationship with other data is required. Callbacks must not unwind.
 pub(super) unsafe trait Api: Send + Sync {
     fn start(&self, provider: &GUID) -> Result<HANDLE, Error>;
     unsafe fn set_info(&self, handle: HANDLE, template: &mut [u64], bytes: u32) -> u32;
@@ -39,8 +41,14 @@ pub(super) unsafe trait Api: Send + Sync {
 pub(super) struct SystemApi;
 
 // SAFETY: successful Perflib creation returns caller-owned, non-thread-affine
-// resources. Stop unregisters the provider; caller retains all reference storage
-// until it succeeds. No borrowed input is retained except registered addresses.
+// resources. PerfSetCounterRefValue specifies dereferencing a four- or eight-byte
+// unsigned integer; our templates only request eight bytes. Windows documents
+// aligned eight-byte variable reads as atomic on 64-bit Windows:
+// https://learn.microsoft.com/windows/win32/sync/interlocked-variable-access
+// https://learn.microsoft.com/windows/win32/api/perflib/nf-perflib-perfsetcounterrefvalue
+// Caller supplies aligned AtomicU64 storage and retains it until stop succeeds.
+// This platform contract is essential; ordinary Rust raw-pointer reads would
+// not satisfy Api's atomic-access contract. No other borrowed input is retained.
 unsafe impl Api for SystemApi {
     fn start(&self, provider: &GUID) -> Result<HANDLE, Error> {
         let mut handle = null_mut();

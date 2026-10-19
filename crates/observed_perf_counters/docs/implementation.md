@@ -22,35 +22,39 @@ or application-derived identity calculation.
 
 The processor owns its bindings, atomic totals, first retained error, and native
 provider. [`native.rs`](../src/native.rs) owns the provider handle and instance.
-Reference cells remain at stable addresses through native cleanup. The
-image-local registry holds a strong reference while Perflib might retain their
-addresses; unsuccessful shutdown retains that storage rather than freeing a
-potentially live reference.
+The references registered with Perflib point directly at the processor's atomic
+totals, not at a second publication buffer. The image-local registry holds a
+strong reference while Perflib might retain their addresses; unsuccessful
+shutdown retains that storage rather than freeing a potentially live reference.
+Each registration has its own registry identity, even if totals are shared.
 
-Perflib callbacks have no provider-specific context. The registry and collection
-state therefore belong to one loaded Rust image, not to a process-wide Rust ABI.
-Do not unload an image with a live provider. The injected native API documents
-resource ownership and cross-thread obligations independently of the
-publication synchronization requirement.
+Do not unload an image with a live provider. The registry belongs to one loaded
+Rust image, not to a process-wide Rust ABI. The injected native API documents
+resource ownership, full-width atomic reads, and cross-thread obligations.
 
-## Collection coordination
+## Continuous publication
 
-Emission only updates atomic totals. The first admitted START marks publication
-in progress and attempts to refresh reference cells without waiting for the
-registry lock. Overlapping admitted collectors use the existing snapshot.
-END releases admission without acquiring the registry lock. Invalid state
-retains a fault, freezes further snapshots, and surfaces through flush.
+Emission updates the registered atomic totals directly. Registration and
+teardown use the registry lock; collection does not acquire it. The custom
+callback returns success without accessing state or native input buffers.
+No copy, reader count, callback ordering, deadline, or quiescence assumption
+participates in publication.
 
-The image-wide cell cap is a conservative resource policy, not a hard real-time
-guarantee. In particular, the writer marker is internal bookkeeping: Windows
-does not consult it when a callback times out. The
-[unresolved publication boundary](design.md#publication-safety-boundary) must not
-be inferred from the ordinary START/END or Miri results.
+The [native access contract](design.md#publication-safety-boundary) restricts
+this design to aligned, full-width eight-byte counter reads on 64-bit Windows.
+Individual readings are atomic; several readings need not represent one event
+or one point in time. The image-wide counter cap is a resource policy, not a
+real-time or synchronization guarantee.
 
 ## Validation boundaries
 
 Injected lifecycle and processor tests exercise failure retention, checked
-arithmetic, teardown ownership, and cooperation between admitted collectors.
+arithmetic, teardown ownership, registered-pointer identity and alignment, and
+concurrent full-width atomic reads. A deterministic delayed-START test lets a
+consumer read updated totals and issue END before the START callback resumes.
+There are no sleeps and no deliberately conflicting non-atomic accesses.
+Miri validates Rust ownership, provenance and synchronization in that model;
+it does not run Perflib or establish its native access contract.
 Native tests exercise operating-system registration and error propagation.
 The installed-schema consumer scenario is opt-in: it additionally needs
 the supplied definitions and resources installed on a Windows host. Compiling

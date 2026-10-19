@@ -37,13 +37,11 @@ impl Error {
 
     /// The native status to include in operating-system failure diagnostics.
     ///
-    /// Startup failures and frozen collection both retain their original status;
-    /// this value does not imply that restarting or retrying is safe.
+    /// Native startup failures retain their original status; this value does
+    /// not imply that restarting or retrying is safe.
     #[must_use]
     pub fn windows_code(&self) -> Option<u32> {
-        self.find_source::<NativeFailure>()
-            .map(|cause| cause.code)
-            .or_else(|| self.find_source::<CollectionFailure>().map(|cause| cause.code))
+        self.find_source::<NativeFailure>().map(|cause| cause.code)
     }
 }
 
@@ -66,7 +64,6 @@ cause_conversions!(
     NativeFailure,
     Overflow,
     Underflow,
-    CollectionFailure,
     Poisoned,
     ManifestRead
 );
@@ -217,12 +214,6 @@ pub(crate) struct Underflow {
 }
 
 #[ohno::error]
-#[display("performance-counter collection failed with Windows status {code}; snapshots are frozen")]
-pub(crate) struct CollectionFailure {
-    pub(crate) code: u32,
-}
-
-#[ohno::error]
 #[display("performance-counter state lock was poisoned")]
 pub(crate) struct Poisoned;
 
@@ -253,7 +244,6 @@ mod tests {
             ),
             (UnsupportedPlatform::new().into(), (false, true, None)),
             (NativeFailure::new("start", 42_u32).into(), (false, false, Some(42))),
-            (CollectionFailure::new(87_u32).into(), (false, false, Some(87))),
             (Overflow::new(7_u32).into(), (false, false, None)),
         ];
         for (error, expected) in cases {

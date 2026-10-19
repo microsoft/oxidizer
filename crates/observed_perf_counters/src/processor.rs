@@ -230,9 +230,11 @@ pub struct PerfCounterProcessor {
 
 impl Debug for PerfCounterProcessor {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_struct(type_name::<Self>().rsplit("::").next().unwrap_or_else(type_name::<Self>))
-            .field("schema", &self.schema)
-            .finish_non_exhaustive()
+        let mut debug = f.debug_struct(type_name::<Self>().rsplit("::").next().unwrap_or_else(type_name::<Self>));
+        debug.field("schema", &self.schema);
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        debug.field("native", &self.native);
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -327,10 +329,6 @@ impl EventProcessor for PerfCounterProcessor {
         {
             return Err(FlushError::new("observed_perf_counters", error.clone()));
         }
-        #[cfg(all(windows, target_pointer_width = "64"))]
-        self.native
-            .check()
-            .map_err(|error| FlushError::new("observed_perf_counters", error))?;
         Ok(())
     }
 }
@@ -444,7 +442,7 @@ mod tests {
 
     fn named_values(processor: &PerfCounterProcessor) -> Vec<(String, u64)> {
         #[cfg(all(windows, target_pointer_width = "64"))]
-        let values = crate::native::test_snapshot(&processor.native, &processor.schema);
+        let values = crate::native::test_readings(&processor.native, &processor.schema);
         #[cfg(not(all(windows, target_pointer_width = "64")))]
         let values = processor
             .schema
@@ -988,7 +986,7 @@ mod tests {
                 });
             }
             for _ in 0..20 {
-                let snapshot = crate::native::test_snapshot(&processor.native, &processor.schema);
+                let snapshot = crate::native::test_readings(&processor.native, &processor.schema);
                 assert!(snapshot.into_iter().all(|value| value <= 4 * iterations * 37));
             }
         });
@@ -1002,7 +1000,7 @@ mod tests {
                 _ => 4 * iterations * 37,
             })
             .collect::<Vec<_>>();
-        assert_eq!(crate::native::test_snapshot(&processor.native, &processor.schema), expected);
+        assert_eq!(crate::native::test_readings(&processor.native, &processor.schema), expected);
         sink.flush().unwrap();
         emit!(sink, HugeIncrement { value: u64::MAX });
         emit!(sink, HugeIncrement { value: 1 });
@@ -1016,7 +1014,7 @@ mod tests {
                 _ => 4 * iterations * 37,
             })
             .collect::<Vec<_>>();
-        assert_eq!(crate::native::test_snapshot(&processor.native, &processor.schema), expected);
+        assert_eq!(crate::native::test_readings(&processor.native, &processor.schema), expected);
         assert!(sink.flush().unwrap_err().to_string().contains("overflowed"));
         assert!(sink.flush().unwrap_err().to_string().contains("overflowed"));
     }

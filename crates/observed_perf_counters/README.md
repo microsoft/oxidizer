@@ -21,14 +21,6 @@ into Windows’ catalog; the application reads the same file at startup and
 binds Rust metric names to its declared counters. Multiple processes can
 publish the same definitions through separate named instances.
 
-## Native publication limitation
-
-The reference-cell protocol does not yet establish safe concurrent access
-when Windows proceeds after a collection-start callback times out. Native
-publication is not ready for deployment until that access contract is
-established or the storage design is replaced. See the
-[publication safety boundary][__link0].
-
 ## Usage
 
 ```rust
@@ -86,7 +78,7 @@ returns it from an explicit `Sink::flush()`. Other valid updates continue.
 **Use the deployment-owned definition.** Windows cannot infer counter
 definitions from Rust events. Supply the `.man` maintained by your deployment,
 with instrument names matching its counters. The
-[example definition][__link1]
+[example definition][__link0]
 shows the supported format. This crate reads it; it does not export XML.
 
 Compile that same supplied manifest’s names and descriptions into the resource
@@ -132,27 +124,30 @@ This crate exposes local counters; it does not send readings to a server.
 Emission uses the lazy event-field visitor and prepared numeric indices to
 update atomic `u64` storage without string lookup, allocation, redaction, or
 Windows API calls. Only bound numeric getters run; other fields are enumerated
-without evaluating their values. Windows collection snapshots these values
-into registered reference cells. Events emitted through a sink follow that
+without evaluating their values. Windows reads the same aligned atomic
+totals through references registered once at startup. There is no separate
+publication buffer, collection-time copy, or per-update native call.
+Events emitted through a sink follow that
 sink’s timestamp, context, enrichment, and sampling rules; the backend does
 not extract enrichment.
 
-Values reset when the processor restarts. Snapshots are per-metric, not
-transactional across an event. Brief collection contention keeps the previous
-snapshot or returns a retryable busy response. Invalid callback state freezes
-snapshots until restart and surfaces through `flush`; emission still records.
+Values reset when the processor restarts. Readings are per-metric, not
+transactional across an event: collection can observe different updates
+across counters. The custom callback is a no-op; readings do not depend on
+receiving START/END notifications or completing a callback before its deadline.
+Storage is retained until native shutdown, including after shutdown failure.
 
 The conversion to a standard `Arc` above matches the sink builder’s processor boundary.
 Native state is local to one executable or library image; never unload an
 image with a live provider.
 
-See the Microsoft [provider guide][__link2]
-and [resource installation reference][__link3].
+See the Microsoft [provider guide][__link1]
+and [resource installation reference][__link2].
 
 ## Maintainer guides
 
-See the [backend design and publication limits][__link4]
-and [implementation guide][__link5].
+See the [backend design and native access contract][__link3]
+and [implementation guide][__link4].
 
 
 <hr/>
@@ -160,9 +155,8 @@ and [implementation guide][__link5].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_perf_counters">source code</a>.
 </sub>
 
- [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md#publication-safety-boundary
- [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/examples/MyServiceCounters.man
- [__link2]: https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0
- [__link3]: https://learn.microsoft.com/windows/win32/perfctrs/ctrpp
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md
- [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/implementation.md
+ [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/examples/MyServiceCounters.man
+ [__link1]: https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0
+ [__link2]: https://learn.microsoft.com/windows/win32/perfctrs/ctrpp
+ [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/implementation.md

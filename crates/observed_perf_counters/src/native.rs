@@ -1,47 +1,44 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The only module that lends pointers to Perflib.
+//! Stable atomic counter storage registered with Perflib.
 //!
-//! Perflib dereferences reference-counter pointers; its documentation does not
-//! establish Rust atomic-load semantics for those accesses.
-//! Emission only modifies separate atomic totals. On `PERF_COLLECT_START` we
-//! copy totals to native cells before collection and freeze those cells until
-//! all matching `PERF_COLLECT_END` notifications. Overlapping collections share
-//! the snapshot when callbacks complete on time.
+//! `PerfSetCounterRefValue` specifies a pointer to a four- or eight-byte integer
+//! which Perflib dereferences when collecting. This backend registers only
+//! eight-byte counters on 64-bit Windows. Windows guarantees that aligned
+//! eight-byte variable accesses are atomic on those targets:
+//! <https://learn.microsoft.com/windows/win32/sync/interlocked-variable-access>.
 //!
-//! Publication safety is unresolved for a timed-out START: Windows may continue
-//! collection before that callback returns. The internal writer marker cannot
-//! exclude such native reads. A bounded work count is not a scheduling guarantee.
-//! See `docs/design.md`, "Publication safety boundary", and the native contract:
-//! <https://learn.microsoft.com/windows/win32/api/perflib/nc-perflib-perflibrequest>
+//! Each reference points directly at an aligned `AtomicU64`. Rust updates use
+//! only full-width atomic operations; native reads follow the Windows scalar
+//! access contract, not ordinary non-atomic Rust pointer reads. No byte-sized
+//! accesses, shared `u64` references, or payload publication use this storage.
+//! This is the reference-counter pattern also used by .NET `CounterData` with
+//! Interlocked operations. It is not a portable mixed-access assumption.
 //!
-//! PERFLIBREQUEST has no user context or provider identity. Consequently one
-//! image-local registry gates all providers using this callback. Callbacks do
-//! not wait for locks, allocate snapshots, emit `observed` events, or call user code.
-//! Registry contention keeps the previous snapshot; an overlapping snapshot writer
-//! returns a retryable `ERROR_BUSY`. Invalid collection state permanently freezes
-//! snapshots; flush reports it rather than risking a write during an active read.
+//! A no-op callback satisfies manifests declaring callback="custom". It does
+//! not copy or freeze values, so collection can proceed before, during, or
+//! after a delayed callback. Individual readings are atomic, not transactional
+//! across counters. The registry retains addresses until native shutdown.
 
-use std::cell::UnsafeCell;
 use std::ffi::c_void;
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::iter::once;
-use std::panic::{UnwindSafe, catch_unwind};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
-use windows_sys::Win32::Foundation::{ERROR_BUSY, ERROR_INVALID_DATA, ERROR_SUCCESS, ERROR_UNHANDLED_EXCEPTION, HANDLE};
+use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
 use windows_sys::Win32::System::Performance::{
-    PERF_ATTRIB_BY_REFERENCE, PERF_COLLECT_END, PERF_COLLECT_START, PERF_COUNTER_INFO, PERF_COUNTERSET_INFO, PERF_COUNTERSET_INSTANCE,
-    PERF_COUNTERSET_MULTI_INSTANCES, PERF_DETAIL_NOVICE,
+    PERF_ATTRIB_BY_REFERENCE, PERF_COUNTER_INFO, PERF_COUNTERSET_INFO, PERF_COUNTERSET_INSTANCE, PERF_COUNTERSET_MULTI_INSTANCES,
+    PERF_DETAIL_NOVICE,
 };
 use windows_sys::core::GUID;
 
 use crate::Error;
 use crate::error::configuration::{NativeCounterCount, NativeTemplateSize, PublishedCapacity};
-use crate::error::{CollectionFailure, NativeFailure, Poisoned};
+use crate::error::{NativeFailure, Poisoned};
 use crate::schema::CounterSchema;
 
 mod api;
@@ -52,131 +49,38 @@ use api::{Api, SystemApi};
 pub(crate) mod testing;
 
 // Conservative resource policy: at most sixteen full categories per image.
-// This bounds copy work, not wall-clock time or time spent descheduled.
 const MAX_PUBLISHED_COUNTERS: usize = 4096;
-// The high bit excludes readers while the first collector refreshes the cells.
-const SNAPSHOT_IN_PROGRESS: u32 = 1 << 31;
 // winperf.h's PERF_COUNTER_LARGE_RAWCOUNT is PERF_SIZE_LARGE | PERF_TYPE_NUMBER |
 // PERF_NUMBER_DECIMAL | PERF_DISPLAY_NO_SUFFIX; the last two omitted flags are 0.
 const COUNTER_TYPE: u32 = 0x0001_0100;
 
-// Atomic emission totals and stable reference cells retained through native shutdown.
+const _: () = assert!(size_of::<AtomicU64>() == 8 && align_of::<AtomicU64>() == 8);
+
+// Each registration has its own identity even when it shares emission totals.
 struct CounterStorage {
     totals: Arc<[AtomicU64]>,
-    published: Box<[UnsafeCell<u64>]>,
 }
 
-// SAFETY: the reader gate excludes cooperating callbacks and emission never
-// touches published cells. REGISTRY retains their storage through shutdown.
-// TODO: this does not justify native reads after a START timeout. The missing
-// publication/access contract described above must be resolved before release.
-unsafe impl Sync for CounterStorage {}
-
 #[derive(Default)]
-// Image-local strong ownership for every reference registered with the context-free callback.
+// Retain every registered address until native shutdown succeeds.
 struct Registry {
     providers: Vec<Arc<CounterStorage>>,
 }
 
-// These globals cannot be replaced with per-provider state: the Windows
-// callback ABI does not carry a context. Nothing here is shared across DLLs.
+// Retain storage after failed native shutdown without a process-wide Rust ABI.
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry { providers: Vec::new() });
-static COLLECTION_FAULT: AtomicU32 = AtomicU32::new(ERROR_SUCCESS);
-static COLLECTION_READERS: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(test)]
 pub(crate) static TEST_NATIVE: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
-pub(crate) fn test_snapshot(provider: &Provider, schema: &CounterSchema) -> Vec<u64> {
-    let _collection = tests::Collection::begin();
+pub(crate) fn test_readings(provider: &Provider, schema: &CounterSchema) -> Vec<u64> {
     tests::registered_values(provider, schema)
 }
 
-fn fault(state: &AtomicU32, code: u32) -> u32 {
-    // Retain the first failure without allocating or locking in an FFI callback.
-    let _previous = state.compare_exchange(ERROR_SUCCESS, code, Ordering::AcqRel, Ordering::Acquire);
-    code
-}
-
-fn collect(request: u32) -> u32 {
-    collect_with(&REGISTRY, &COLLECTION_FAULT, &COLLECTION_READERS, request)
-}
-
-// Coordinate cooperating START/END callbacks; see the module's publication contract.
-fn collect_with(registry: &Mutex<Registry>, state: &AtomicU32, readers: &AtomicU32, request: u32) -> u32 {
-    if request != PERF_COLLECT_START && request != PERF_COLLECT_END {
-        return ERROR_SUCCESS;
-    }
-    let existing = state.load(Ordering::Acquire);
-    if existing != ERROR_SUCCESS {
-        return existing;
-    }
-    if request == PERF_COLLECT_END {
-        return match readers.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-            (count > 0 && count < SNAPSHOT_IN_PROGRESS).then(|| count - 1)
-        }) {
-            Ok(_) => ERROR_SUCCESS,
-            Err(_) => fault(state, ERROR_INVALID_DATA),
-        };
-    }
-    let count = match readers.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-        if count == SNAPSHOT_IN_PROGRESS || count == SNAPSHOT_IN_PROGRESS - 1 {
-            None
-        } else {
-            Some(if count == 0 { SNAPSHOT_IN_PROGRESS } else { count + 1 })
-        }
-    }) {
-        Ok(count) => count,
-        Err(SNAPSHOT_IN_PROGRESS) => {
-            // Perflib reports a failed START to the consumer. No reader was
-            // admitted, so this request must not decrement another one's END.
-            return ERROR_BUSY;
-        }
-        Err(_) => return fault(state, ERROR_INVALID_DATA),
-    };
-    if count != 0 {
-        return ERROR_SUCCESS;
-    }
-    // The writer bit prevents a new collector from reading partially copied
-    // cells. END never needs the registry lock, including during teardown.
-    let result = snapshot(registry, state);
-    readers.store(1, Ordering::Release);
-    result
-}
-
-// Refresh registered values without waiting for registry ownership.
-fn snapshot(registry: &Mutex<Registry>, state: &AtomicU32) -> u32 {
-    let registry = match registry.try_lock_result() {
-        Ok(Some(registry)) => registry,
-        // A previous snapshot remains safe to read. Still admit this reader
-        // so an overlapping collector cannot refresh until its matching END.
-        Ok(None) => return ERROR_SUCCESS,
-        Err(_) => return fault(state, ERROR_INVALID_DATA),
-    };
-    let existing = state.load(Ordering::Acquire);
-    if existing != ERROR_SUCCESS {
-        return existing;
-    }
-    for provider in &registry.providers {
-        for (total, published) in provider.totals.iter().zip(&provider.published) {
-            let value = total.load(Ordering::Relaxed);
-            // SAFETY: the writer bit excludes admitted readers and REGISTRY
-            // retains each cell. This does not exclude a native reader that
-            // proceeds after a callback timeout; see the publication blocker above.
-            unsafe { published.get().write(value) };
-        }
-    }
+unsafe extern "system" fn control_callback(_request: u32, _buffer: *mut c_void, _buffer_size: u32) -> u32 {
+    // Publication is continuous. Never dereference buffers or run fallible code.
     ERROR_SUCCESS
-}
-
-unsafe extern "system" fn control_callback(request: u32, _buffer: *mut c_void, _buffer_size: u32) -> u32 {
-    // Never dereference the unneeded native buffer and never unwind into Windows.
-    callback_with(|| collect(request))
-}
-
-fn callback_with(collect: impl FnOnce() -> u32 + UnwindSafe) -> u32 {
-    catch_unwind(collect).unwrap_or_else(|_| fault(&COLLECTION_FAULT, ERROR_UNHANDLED_EXCEPTION))
 }
 
 // Owns provider registration, instance lifetime, and ordered cleanup.
@@ -187,12 +91,20 @@ pub(crate) struct Provider {
     api: Arc<dyn Api>,
 }
 
+impl Debug for Provider {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct("Provider")
+            .field("registered_counters", &self.storage.totals.len())
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: handles/pointers are owned, not thread-affine, and are only used by
-// startup or exclusive Drop. Shared access only reads COLLECTION_FAULT. Storage
-// synchronization and lifetime are established above independently of handles.
+// startup or exclusive Drop. Registered data uses only full-width atomic
+// accesses under the Windows contract above and is retained through shutdown.
 unsafe impl Send for Provider {}
 // SAFETY: sharing Provider cannot access instance memory or mutate the handles.
-// Counter emission updates separate AtomicU64 values, not native instance data.
+// Counter emission updates AtomicU64 values, not native instance data.
 unsafe impl Sync for Provider {}
 
 impl Provider {
@@ -202,17 +114,13 @@ impl Provider {
 
     fn start_with(schema: &CounterSchema, name: &str, totals: Arc<[AtomicU64]>, api: Arc<dyn Api>) -> Result<Self, Error> {
         let mut template = template(schema)?;
-        let storage = Arc::new(CounterStorage {
-            published: (0..totals.len()).map(|_| UnsafeCell::new(0)).collect(),
-            totals,
-        });
+        let storage = Arc::new(CounterStorage { totals });
         {
             let mut registry = REGISTRY.lock_result().map_err(|_poisoned| Error::from(Poisoned::new()))?;
-            check_collection()?;
-            let count = registry.providers.iter().map(|provider| provider.published.len()).sum::<usize>();
-            if count + storage.published.len() > MAX_PUBLISHED_COUNTERS {
+            let count = registry.providers.iter().map(|provider| provider.totals.len()).sum::<usize>();
+            if count + storage.totals.len() > MAX_PUBLISHED_COUNTERS {
                 return Err(Error::configuration(PublishedCapacity::new(
-                    count + storage.published.len(),
+                    count + storage.totals.len(),
                     MAX_PUBLISHED_COUNTERS,
                 )));
             }
@@ -241,22 +149,15 @@ impl Provider {
         let instance = unsafe { provider.api.create(provider.handle, &counter_set_guid, &name) }?;
         provider.instance = Some(instance);
         for counter in &schema.counters {
-            let address = provider.storage.published[counter.source_index].get().cast::<c_void>();
+            let address = provider.storage.totals[counter.source_index].as_ptr().cast::<c_void>();
             // SAFETY: instance belongs to this provider, counter.id is in its
-            // template, and address is stable eight-byte u64 storage. Registration
-            // occurs once; the registry retains storage through cleanup.
+            // eight-byte template, and address is a stable, aligned AtomicU64.
+            // The native API's full-width atomic-read contract is documented
+            // in api.rs; the registry retains storage through native cleanup.
             let code = unsafe { provider.api.set_reference(provider.handle, instance, counter.id.get(), address) };
             status("PerfSetCounterRefValue", code)?;
         }
         Ok(provider)
-    }
-
-    #[expect(
-        clippy::unused_self,
-        reason = "collection status applies to every live provider sharing the callback ABI"
-    )]
-    pub(crate) fn check(&self) -> Result<(), Error> {
-        check_collection()
     }
 }
 
@@ -281,15 +182,6 @@ impl Drop for Provider {
             // never turn a potentially registered native reference into a UAF.
             tracing::error!(code, "observed_perf_counters.provider.stop_failed_storage_retained");
         }
-    }
-}
-
-pub(crate) fn check_collection() -> Result<(), Error> {
-    let code = COLLECTION_FAULT.load(Ordering::Acquire);
-    if code == ERROR_SUCCESS {
-        Ok(())
-    } else {
-        Err(CollectionFailure::new(code).into())
     }
 }
 
@@ -364,22 +256,11 @@ fn template(schema: &CounterSchema) -> Result<Vec<u64>, Error> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
 
-    pub(super) struct Collection;
-
-    impl Collection {
-        pub(super) fn begin() -> Self {
-            assert_eq!(collect(PERF_COLLECT_START), ERROR_SUCCESS);
-            Self
-        }
-    }
-
-    impl Drop for Collection {
-        fn drop(&mut self) {
-            assert_eq!(collect(PERF_COLLECT_END), ERROR_SUCCESS);
-        }
-    }
+    static_assertions::assert_impl_all!(CounterStorage: Send, Sync);
 
     pub(super) fn registered_values(provider: &Provider, schema: &CounterSchema) -> Vec<u64> {
         let instance = provider.instance.unwrap().as_ptr();
@@ -396,21 +277,22 @@ mod tests {
                 let slot = unsafe { base.add(counter.offset as usize) };
                 // SAFETY: the slot contains the reference registered during startup.
                 let pointer = unsafe { slot.cast::<*const u64>().read_unaligned() };
-                assert_eq!(pointer, provider.storage.published[counter.source_index].get().cast_const());
-                // SAFETY: the address was checked against our owned u64 cell, and
-                // an active Collection keeps it frozen against snapshot writers.
-                unsafe { pointer.read() }
+                assert_eq!(pointer, provider.storage.totals[counter.source_index].as_ptr().cast_const());
+                assert_eq!(pointer.align_offset(align_of::<AtomicU64>()), 0);
+                // SAFETY: the pointer identifies our retained, aligned atomic.
+                // Model the full-width native atomic read with a Rust atomic
+                // load, not a conflicting non-atomic raw-pointer read.
+                unsafe { AtomicU64::from_ptr(pointer.cast_mut()) }.load(Ordering::Relaxed)
             })
             .collect()
     }
 
     #[test]
-    fn registered_native_references_are_frozen_through_overlapping_collections() {
+    fn registered_native_references_point_at_live_atomic_totals() {
         let _native_tests = TEST_NATIVE.lock();
         let schema = crate::testing::counter_schema("Native snapshots", &["Bytes", "Requests"]);
         let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(4096), AtomicU64::new(7)].into();
         let provider = testing::start_mock(&schema, Arc::clone(&totals));
-        let first = Collection::begin();
         let expected = schema
             .counters
             .iter()
@@ -419,19 +301,12 @@ mod tests {
         assert_eq!(registered_values(&provider, &schema), expected);
         totals[0].store(8192, Ordering::Relaxed);
         totals[1].store(9, Ordering::Relaxed);
-        let second = Collection::begin();
-        assert_eq!(registered_values(&provider, &schema), expected);
-        drop(first);
-        assert_eq!(registered_values(&provider, &schema), expected);
-        drop(second);
-        let next = Collection::begin();
         let updated = schema
             .counters
             .iter()
             .map(|counter| totals[counter.source_index].load(Ordering::Relaxed))
             .collect::<Vec<_>>();
         assert_eq!(registered_values(&provider, &schema), updated);
-        drop(next);
         drop(provider);
         let restarted = testing::start_mock(&schema, totals);
         drop(restarted);

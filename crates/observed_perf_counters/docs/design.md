@@ -39,19 +39,43 @@ PerfSpy, remains separate from local publication.
 
 ## Publication safety boundary
 
-Emission totals are atomic and separate from the cells registered with Perflib.
-The collection protocol refreshes those cells on START and freezes them while
-admitted collections are active.
+Each registered reference points directly at an `AtomicU64` emission total.
+No ordinary `u64` publication cells or collection-time copies exist.
+The backing allocation stays at a stable address until native shutdown succeeds.
 
-**That admission protocol does not establish safety for a timed-out START.**
-The [Perflib callback contract][callback] allows collection to proceed before a
-late callback returns. A thread can remain descheduled during publication, so a
-bound on copying work is not a synchronization guarantee.
+The FFI access contract combines these guarantees:
 
-Native publication needs an access or lifetime contract that also covers this
-case before the registered mutable-cell design is suitable for release.
-Replacing writes with a convenience setter alone does not establish such a
-contract. See the [implementation guide](implementation.md) for the ownership
-and coordination involved.
+- [`PerfSetCounterRefValue`][reference] specifies a pointer to a four- or
+  eight-byte unsigned integer which Perflib dereferences during collection.
+  This backend accepts only eight-byte `perf_counter_large_rawcount` references.
+- [64-bit Windows guarantees atomic reads of aligned 64-bit variables][windows].
+  This backend does not publish counters on 32-bit Windows.
+- [`AtomicU64`][atomic] has `u64`'s size and bit validity, with eight-byte
+  alignment. Rust writes use only full-width atomic operations, and native
+  collection reads the full-width integer. No other payload depends on these
+  reads, so relaxed memory ordering is sufficient.
+
+These are Windows scalar-access guarantees, not permission to mix Rust atomic
+writes with ordinary Rust pointer reads. The injected native API requires
+read-only, full-width atomic access; mock consumers therefore use atomic loads.
+Partial-width access, concurrent native writes, and publishing other storage
+types are outside this contract.
+
+This follows [.NET's V2 `CounterData` reference-publication pattern][dotnet],
+which registers stable unmanaged integers and updates them with `Interlocked`
+operations rather than freezing collection. The .NET implementation is
+supporting precedent; it does not replace the platform access contract above.
+
+The [Perflib callback deadline][callback] is not a synchronization primitive.
+The callback is a no-op, so a delayed, overlapping, or unmatched START/END
+notification cannot write stale snapshots or release a nonexistent reader gate.
+Collection may observe an older or newer value of each counter, but does not
+obtain a transactional snapshot across counters.
+
+See the [implementation guide](implementation.md) for ownership and validation.
 
 [callback]: https://learn.microsoft.com/windows/win32/api/perflib/nc-perflib-perflibrequest
+[reference]: https://learn.microsoft.com/windows/win32/api/perflib/nf-perflib-perfsetcounterrefvalue
+[windows]: https://learn.microsoft.com/windows/win32/sync/interlocked-variable-access
+[atomic]: https://doc.rust-lang.org/1.95.0/std/sync/atomic/struct.AtomicU64.html
+[dotnet]: https://github.com/dotnet/runtime/blob/81cabf2857a01351e5ab578947c7403a5b128ad1/src/libraries/System.Diagnostics.PerformanceCounter/src/System/Diagnostics/PerformanceData/CounterSetInstanceCounterDataSet.cs

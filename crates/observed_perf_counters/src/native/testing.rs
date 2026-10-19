@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::panic::AssertUnwindSafe;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process::id;
 use std::ptr::null_mut;
+use std::sync::Barrier;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 
 use ohno::ErrorExt as _;
+use windows_sys::Win32::Foundation::{ERROR_BUSY, ERROR_INVALID_DATA};
+use windows_sys::Win32::System::Performance::{PERF_COLLECT_END, PERF_COLLECT_START};
 
 use super::*;
 
@@ -40,7 +44,8 @@ impl MockApi {
 
 // SAFETY: the mock owns fixed aligned storage through provider teardown. Calls
 // serialize access through its mutex, returned resources are not thread-affine,
-// and it never accesses registered cells after successful stop.
+// native reference reads use full-width atomic loads, and it never accesses
+// registered storage after successful stop.
 unsafe impl Api for MockApi {
     fn start(&self, _: &GUID) -> Result<HANDLE, Error> {
         status("PerfStartProvider", self.code("start"))?;
@@ -84,6 +89,7 @@ unsafe impl Api for MockApi {
     }
 
     unsafe fn set_reference(&self, _: HANDLE, _: NonNull<PERF_COUNTERSET_INSTANCE>, id: u32, address: *mut c_void) -> u32 {
+        assert_eq!(address.align_offset(align_of::<AtomicU64>()), 0);
         let mut state = self.state.lock();
         let index = state.ids.iter().position(|known| *known == id).unwrap();
         let offset = size_of::<PERF_COUNTERSET_INSTANCE>() + index * 8;
@@ -197,11 +203,10 @@ fn native_counter_limit_accepts_exactly_the_bound_and_rejects_one_more() {
         .lock()
         .providers
         .iter()
-        .map(|provider| provider.published.len())
+        .map(|provider| provider.totals.len())
         .sum::<usize>();
     let filler = Arc::new(CounterStorage {
-        totals: Vec::<AtomicU64>::new().into(),
-        published: (0..MAX_PUBLISHED_COUNTERS - count - 1).map(|_| UnsafeCell::new(0)).collect(),
+        totals: (0..MAX_PUBLISHED_COUNTERS - count - 1).map(|_| AtomicU64::new(0)).collect(),
     });
     REGISTRY.lock().providers.push(filler.clone());
     let last = start_mock(&schema, vec![AtomicU64::new(0)].into());
@@ -220,178 +225,85 @@ fn native_counter_limit_accepts_exactly_the_bound_and_rejects_one_more() {
 }
 
 #[test]
-fn callback_faults_are_sticky_and_prevent_further_snapshot_writes() {
-    let registry = Mutex::new(Registry::default());
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(0);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, 999), ERROR_SUCCESS);
-    assert_eq!(
-        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END),
-        ERROR_INVALID_DATA
-    );
-    assert_eq!(
-        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START),
-        ERROR_INVALID_DATA
-    );
-    assert_eq!(fault(&fault_state, ERROR_INVALID_DATA), ERROR_INVALID_DATA);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
-    assert_eq!(readers.load(Ordering::Acquire), 0);
-
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS - 1);
-    assert_eq!(
-        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START),
-        ERROR_INVALID_DATA
-    );
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
-    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS - 1);
-    let fault_state = AtomicU32::new(ERROR_BUSY);
-    assert_eq!(snapshot(&registry, &fault_state), ERROR_BUSY);
-}
-
-#[test]
-fn registry_contention_preserves_readers_and_the_next_collection_refreshes() {
-    let storage = Arc::new(CounterStorage {
-        totals: vec![AtomicU64::new(37)].into(),
-        published: vec![UnsafeCell::new(0)].into(),
-    });
-    let registry = Mutex::new(Registry {
-        providers: vec![Arc::clone(&storage)],
-    });
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(0);
-    let guard = registry.lock();
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 1);
+fn callbacks_do_not_lock_storage_or_freeze_emission() {
+    let _serial = TEST_NATIVE.lock();
+    let schema = schema();
+    let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(0)].into();
+    let provider = start_mock(&schema, Arc::clone(&totals));
+    let guard = REGISTRY.lock();
+    for (request, value) in [(PERF_COLLECT_END, 7), (PERF_COLLECT_START, 37), (PERF_COLLECT_START, 73), (999, 99)] {
+        // SAFETY: the no-op callback never dereferences its buffer.
+        assert_eq!(unsafe { control_callback(request, null_mut(), 0) }, ERROR_SUCCESS);
+        totals[0].store(value, Ordering::Relaxed);
+        assert_eq!(tests::registered_values(&provider, &schema), [value]);
+    }
     drop(guard);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 2);
-    // SAFETY: both admitted collectors freeze the reference cells.
-    assert_eq!(unsafe { storage.published[0].get().read() }, 0);
-    let guard = registry.lock();
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 1);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 0);
-    drop(guard);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
-    // SAFETY: the admitted collector freezes the refreshed reference cells.
-    assert_eq!(unsafe { storage.published[0].get().read() }, 37);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 0);
 }
 
 #[test]
-fn overlapping_snapshot_writer_returns_busy_without_poisoning_future_collections() {
-    let registry = Mutex::new(Registry::default());
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_BUSY);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS);
-    // Finish the first writer's admission, then its collection.
-    readers.store(1, Ordering::Release);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
-    assert_eq!(readers.load(Ordering::Acquire), 0);
-}
-
-#[test]
-fn unmatched_collection_end_cannot_release_an_active_snapshot_writer() {
-    let registry = Mutex::new(Registry::default());
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(SNAPSHOT_IN_PROGRESS);
-    assert_eq!(
-        collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END),
-        ERROR_INVALID_DATA,
-    );
-    assert_eq!(readers.load(Ordering::Acquire), SNAPSHOT_IN_PROGRESS);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_INVALID_DATA);
-}
-
-#[test]
-fn concurrent_collectors_balance_admission_and_keep_reference_reads_race_free() {
-    let storage = Arc::new(CounterStorage {
-        totals: vec![AtomicU64::new(0)].into(),
-        published: vec![UnsafeCell::new(0)].into(),
-    });
-    let registry = Mutex::new(Registry {
-        providers: vec![Arc::clone(&storage)],
-    });
-    let fault_state = AtomicU32::new(ERROR_SUCCESS);
-    let readers = AtomicU32::new(0);
-    let iterations = if cfg!(miri) { 8 } else { 1000 };
+fn collection_before_a_delayed_start_callback_reads_the_live_atomic_counter() {
+    let _serial = TEST_NATIVE.lock();
+    let schema = schema();
+    let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(0)].into();
+    let provider = start_mock(&schema, Arc::clone(&totals));
+    let entered = Barrier::new(2);
+    let resume = Barrier::new(2);
     thread::scope(|scope| {
-        for _ in 0..4 {
-            let registry = &registry;
-            let fault_state = &fault_state;
-            let readers = &readers;
-            let storage = &storage;
+        let callback = scope.spawn(|| {
+            entered.wait();
+            resume.wait();
+            // SAFETY: model a START callback descheduled before executing its
+            // body. The buffer is unused, and no Windows provider is involved.
+            unsafe { control_callback(PERF_COLLECT_START, null_mut(), 0) }
+        });
+        entered.wait();
+        // Model the documented timeout without sleeping or racing a raw read.
+        // The consumer proceeds before START and may finish before START returns.
+        totals[0].store(u64::MAX, Ordering::Relaxed);
+        assert_eq!(tests::registered_values(&provider, &schema), [u64::MAX]);
+        // SAFETY: END has no required buffer in our no-op implementation.
+        assert_eq!(unsafe { control_callback(PERF_COLLECT_END, null_mut(), 0) }, ERROR_SUCCESS);
+        resume.wait();
+        assert_eq!(callback.join().unwrap(), ERROR_SUCCESS);
+    });
+    assert_eq!(tests::registered_values(&provider, &schema), [u64::MAX]);
+}
+
+#[test]
+fn concurrent_reference_reads_use_the_same_full_width_atomic_as_emission() {
+    let _serial = TEST_NATIVE.lock();
+    let schema = schema();
+    let patterns = [0x5555_AAAA_5555_AAAA_u64, 0xAAAA_5555_AAAA_5555];
+    let totals: Arc<[AtomicU64]> = vec![AtomicU64::new(patterns[0])].into();
+    let provider = start_mock(&schema, Arc::clone(&totals));
+    let iterations = if cfg!(miri) { 8 } else { 1000 };
+    let start = Barrier::new(4);
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            start.wait();
+            for index in 0..iterations {
+                totals[0].store(patterns[index % patterns.len()], Ordering::Relaxed);
+            }
+        });
+        for _ in 0..3 {
+            let start = &start;
+            let provider = &provider;
+            let schema = &schema;
             scope.spawn(move || {
+                start.wait();
                 for _ in 0..iterations {
-                    storage.totals[0].fetch_add(1, Ordering::Relaxed);
-                    match collect_with(registry, fault_state, readers, PERF_COLLECT_START) {
-                        ERROR_SUCCESS => {
-                            // SAFETY: this successful START owns one reader
-                            // until END; no snapshot writer can enter meanwhile.
-                            let value = unsafe { storage.published[0].get().read() };
-                            assert!(value <= 4 * iterations);
-                            assert_eq!(collect_with(registry, fault_state, readers, PERF_COLLECT_END), ERROR_SUCCESS);
-                        }
-                        ERROR_BUSY => {}
-                        other => panic!("collection failed with {other}"),
-                    }
+                    let reading = tests::registered_values(provider, schema);
+                    assert!(patterns.contains(&reading[0]));
                 }
             });
         }
     });
-    assert_eq!(readers.load(Ordering::Acquire), 0);
-    assert_eq!(fault_state.load(Ordering::Acquire), ERROR_SUCCESS);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_START), ERROR_SUCCESS);
-    // SAFETY: the final collector freezes the refreshed reference value.
-    assert_eq!(unsafe { storage.published[0].get().read() }, 4 * iterations);
-    assert_eq!(collect_with(&registry, &fault_state, &readers, PERF_COLLECT_END), ERROR_SUCCESS);
-}
-
-#[test]
-fn poisoned_registry_is_reported_without_entering_a_collection() {
-    let registry = Mutex::new(Registry::default());
-    let _panic = catch_unwind(AssertUnwindSafe(|| {
-        let _guard = registry.lock();
-        panic!("inject poison");
-    }));
-    let state = AtomicU32::new(ERROR_SUCCESS);
-    assert_eq!(
-        collect_with(&registry, &state, &AtomicU32::new(0), PERF_COLLECT_START),
-        ERROR_INVALID_DATA
-    );
-    assert_eq!(state.load(Ordering::Acquire), ERROR_INVALID_DATA);
-}
-
-#[test]
-fn callback_catches_panics_and_provider_flush_reports_the_collection_failure() {
-    let _serial = TEST_NATIVE.lock();
-    let provider = start_mock(&schema(), vec![AtomicU64::new(0)].into());
-    // SAFETY: the callback ignores its buffer and this request has no payload.
-    assert_eq!(unsafe { control_callback(999, null_mut(), 0) }, ERROR_SUCCESS);
-    assert_eq!(callback_with(|| ERROR_SUCCESS), ERROR_SUCCESS);
-    let old = COLLECTION_FAULT.load(Ordering::Acquire);
-    let result = callback_with(|| panic!("injected callback failure"));
-    let error = provider.check().unwrap_err();
-    COLLECTION_FAULT.store(old, Ordering::Release);
-    assert_eq!(result, ERROR_UNHANDLED_EXCEPTION);
-    assert_eq!(error.windows_code(), Some(ERROR_UNHANDLED_EXCEPTION));
-    provider.check().unwrap();
 }
 
 #[test]
 fn teardown_can_remove_its_cells_from_a_poisoned_registry() {
     let storage = Arc::new(CounterStorage {
         totals: Vec::<AtomicU64>::new().into(),
-        published: Vec::new().into(),
     });
     let registry = Mutex::new(Registry {
         providers: vec![storage.clone()],
@@ -409,7 +321,6 @@ fn poisoned_registry_diagnostic_runs_after_unlocking_and_removing_cells() {
     let _serial = TEST_NATIVE.lock();
     let storage = Arc::new(CounterStorage {
         totals: Vec::<AtomicU64>::new().into(),
-        published: Vec::new().into(),
     });
     let registry = Arc::new(Mutex::new(Registry {
         providers: vec![Arc::clone(&storage)],
