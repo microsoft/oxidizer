@@ -34,10 +34,9 @@ Later retrievals return a clone of the existing context. The runtime does not
 register the same concrete context type twice. Libraries that need two
 independent registrations use two distinct context types.
 
-Cloning a registered context may retrieve a different context type, but it must
-not retrieve its own concrete type. The runtime may serialize clones for one
-registration, so same-type re-entry would recursively wait for the clone already
-in progress.
+Cloning a registered context must not retrieve an I/O context. The runtime may
+serialize context clones, so retrieving another context while cloning can create
+a lock-order cycle between registrations on different workers.
 
 `IoContext::driver` completes driver setup before the context is published. A
 driver must not wait for another async worker to run during creation. If driver

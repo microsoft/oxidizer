@@ -6,7 +6,6 @@
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
@@ -32,7 +31,6 @@ struct State {
     driver_waker: Mutex<Option<Waker>>,
     context_calls: AtomicUsize,
     format_calls: AtomicUsize,
-    clone_reentry: AtomicBool,
     shutdowns: AtomicUsize,
     panic_context: AtomicBool,
     fail_initialization: AtomicBool,
@@ -83,51 +81,6 @@ impl IoContext for ReentrantContext {
             state: Arc::clone(&self.state),
         })
     }
-}
-
-struct CloneReentrantContext {
-    state: Arc<State>,
-}
-
-impl Clone for CloneReentrantContext {
-    fn clone(&self) -> Self {
-        if self.state.clone_reentry.load(Ordering::SeqCst) {
-            CLONE_HOST.with_borrow(|host| {
-                let host = host.as_ref().and_then(Weak::upgrade).expect("the clone test retains its host");
-                let _ = host.context::<Context<true>>(&self.state).unwrap();
-            });
-        }
-        Self {
-            state: Arc::clone(&self.state),
-        }
-    }
-}
-
-impl ThreadAware for CloneReentrantContext {
-    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
-        assert!(source.is_none());
-    }
-}
-
-impl IoContext for CloneReentrantContext {
-    type ContextOptions = Arc<State>;
-    type Driver = TestDriver;
-
-    fn context(options: Self::ContextOptions) -> Self {
-        Self { state: options }
-    }
-
-    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
-        self.state.roles.lock().unwrap().push((Kind::Second, options.role()));
-        Ok(TestDriver {
-            kind: Kind::Second,
-            state: Arc::clone(&self.state),
-        })
-    }
-}
-
-thread_local! {
-    static CLONE_HOST: RefCell<Option<Weak<DriverHost>>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone)]
@@ -422,24 +375,6 @@ fn worker_local_drivers_are_created_lazily() {
     let _ = second.context::<Context<false>>(&state).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 2);
     assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn cached_context_clone_can_register_another_secondary() {
-    let host = Rc::new(host(&test_runtime()));
-    let state = Arc::new(State::default());
-    CLONE_HOST.with_borrow_mut(|installed| *installed = Some(Rc::downgrade(&host)));
-    let _ = host.context::<Context<false>>(&state).unwrap();
-    let _ = host.context::<CloneReentrantContext>(&state).unwrap();
-
-    state.clone_reentry.store(true, Ordering::SeqCst);
-    let _ = host.context::<CloneReentrantContext>(&state).unwrap();
-    CLONE_HOST.with_borrow_mut(Option::take);
-
-    assert_eq!(
-        state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
-        [DriverRole::Primary, DriverRole::Secondary, DriverRole::Secondary]
-    );
 }
 
 #[test]

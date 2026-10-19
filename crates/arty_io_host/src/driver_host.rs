@@ -201,13 +201,15 @@ impl DriverHost {
         C::ContextOptions: Clone,
     {
         self.runtime.check_failed()?;
-        if let Some(context) = self
-            .primary
-            .borrow()
-            .as_ref()
-            .and_then(LocalContext::context_handle::<C>)
-            .or_else(|| self.secondaries.borrow().iter().find_map(LocalContext::context_handle::<C>))
-        {
+        let context = {
+            let primary = self.primary.borrow();
+            primary.as_ref().and_then(LocalContext::context_handle::<C>)
+        }
+        .or_else(|| {
+            let secondaries = self.secondaries.borrow();
+            secondaries.iter().find_map(LocalContext::context_handle::<C>)
+        });
+        if let Some(context) = context {
             let context = context
                 .downcast_ref::<C>()
                 .expect("worker-local I/O contexts are stored under their own TypeId")
