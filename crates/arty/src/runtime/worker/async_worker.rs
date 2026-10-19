@@ -256,6 +256,7 @@ mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
     #[cfg(not(miri))]
     use std::task::Wake;
     use std::task::Waker;
@@ -266,7 +267,7 @@ mod tests {
     use events_once::BoxedSender;
     use events_once::{Event, IntoValueError};
     use nonempty::NonEmpty;
-    use testing_aids::async_test;
+    use testing_aids::{TEST_TIMEOUT, async_test};
     use thread_aware::ThreadBuilder;
     use tick::ClockControl;
 
@@ -325,6 +326,124 @@ mod tests {
         drop(clock);
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
         worker.run();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn first_cross_thread_timer_interrupts_established_idle_wait() {
+        struct CompletionWake(mpsc::Sender<()>);
+
+        impl Wake for CompletionWake {
+            fn wake(self: std::sync::Arc<Self>) {
+                _ = self.0.send(());
+            }
+        }
+
+        let (idle_wait_started, idle_wait) = mpsc::channel();
+        let (command_tx, command_rx) = channel::unbounded();
+        let worker_command_tx = command_tx.clone();
+        let (worker_ready, worker_setup) = mpsc::channel();
+        let worker_thread = thread::spawn(move || {
+            let signal = Arc::new(WorkerSignal::new(
+                crate::runtime::worker::signal::WorkerSignalTestHooks::with_idle_wait_notifier(idle_wait_started),
+            ));
+            let worker = test_worker(
+                worker_command_tx,
+                command_rx,
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::clone(&signal),
+            );
+            worker_ready
+                .send((worker.builtins.as_ref().unwrap().clock().clone(), WorkerSignal::waker(&signal)))
+                .unwrap();
+            worker.run();
+        });
+        let (clock, worker_waker) = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+        idle_wait
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("the worker must establish its no-deadline notification wait");
+        let (completed, completion) = mpsc::channel();
+        let waker = Waker::from(std::sync::Arc::new(CompletionWake(completed)));
+        let mut delay = Box::pin(clock.delay(Duration::from_millis(20)));
+
+        assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(&waker)).is_pending());
+        completion
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("the first cross-thread timer must interrupt the established idle wait");
+
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker_waker.wake_by_ref();
+        worker_thread.join().unwrap();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn timer_callback_direct_submission_notifies_the_worker() {
+        struct SpawnOnWake {
+            scheduler: Scheduler,
+            task_ran: Arc<AtomicBool>,
+        }
+
+        impl Wake for SpawnOnWake {
+            fn wake(self: std::sync::Arc<Self>) {
+                let task_ran = Arc::clone(&self.task_ran);
+                drop(self.scheduler.spawn(move |builtins| async move {
+                    task_ran.store(true, Ordering::Relaxed);
+                    builtins.scheduler().dispatcher.stop();
+                }));
+            }
+        }
+
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let timed_out_by_worker = Arc::clone(&timed_out);
+        let (worker_ready, worker_setup) = mpsc::channel();
+        let (worker_done, worker_completion) = mpsc::channel();
+        let worker_thread = thread::spawn(move || {
+            let (command_tx, command_rx) = channel::unbounded();
+            let signal = Arc::new(WorkerSignal::default());
+            let mut worker = test_worker(
+                command_tx,
+                command_rx,
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::clone(&signal),
+            );
+            let (scheduler, clock) = {
+                let builtins = worker.builtins.as_ref().unwrap();
+                (builtins.scheduler().clone(), builtins.clock().clone())
+            };
+            let task_ran = Arc::new(AtomicBool::new(false));
+            let timer_waker = Waker::from(std::sync::Arc::new(SpawnOnWake {
+                scheduler,
+                task_ran: Arc::clone(&task_ran),
+            }));
+            let mut delay = Box::pin(clock.delay(Duration::from_millis(1)));
+            assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(&timer_waker)).is_pending());
+            worker_ready.send(WorkerSignal::waker(&signal)).unwrap();
+
+            assert!(worker.execute_step().is_continue());
+            thread::sleep(Duration::from_millis(2));
+            assert!(worker.execute_step().is_continue());
+            assert!(
+                !timed_out_by_worker.load(Ordering::Relaxed),
+                "the timer callback's direct submission must release the worker wait"
+            );
+            assert!(!task_ran.load(Ordering::Relaxed));
+
+            assert!(worker.execute_step().is_continue());
+            assert!(task_ran.load(Ordering::Relaxed));
+            assert!(worker.execute_step().is_break());
+            worker_done.send(()).unwrap();
+        });
+        let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        if worker_completion.recv_timeout(TEST_TIMEOUT).is_err() {
+            timed_out.store(true, Ordering::Relaxed);
+            worker_waker.wake_by_ref();
+        }
+        worker_thread.join().unwrap();
+        assert!(!timed_out.load(Ordering::Relaxed));
     }
 
     trait TestTaskSetExt {

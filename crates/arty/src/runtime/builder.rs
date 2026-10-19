@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 
 use std::num::NonZeroUsize;
-#[cfg(feature = "test-util")]
-use std::sync::mpsc;
 
 use observed::Sink;
 use thread_aware::ThreadBuilder;
@@ -13,7 +11,6 @@ use crate::runtime::bootstrap;
 use crate::runtime::config::{BlockingPoolPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
-use crate::runtime::worker::signal::WorkerSignalTestHooks;
 
 /// Configures workers, clocks, and telemetry before starting a runtime.
 ///
@@ -41,7 +38,6 @@ pub struct RuntimeBuilder {
     processor_config: RuntimeConfig,
     clock: InactiveClock,
     sink: Sink,
-    worker_signal_test_hooks: WorkerSignalTestHooks,
 }
 
 impl RuntimeBuilder {
@@ -176,19 +172,6 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Notifies a test immediately before each worker enters an idle notification wait.
-    ///
-    /// Enable the `test-util` feature to deterministically coordinate tests with worker parking.
-    /// A notification means the worker holds its wait-state lock, has consumed any earlier wake,
-    /// and is about to block. The runtime may send this notification repeatedly and from every
-    /// worker, so tests must not assume a one-to-one relationship with submitted tasks.
-    #[cfg(feature = "test-util")]
-    #[must_use]
-    pub fn notify_on_idle_wait(mut self, notifier: mpsc::Sender<()>) -> Self {
-        self.worker_signal_test_hooks = WorkerSignalTestHooks::with_idle_wait_notifier(notifier);
-        self
-    }
-
     /// Starts the configured workers and returns their runtime owner.
     ///
     /// Blocks the calling thread until workers are ready to receive tasks.
@@ -214,13 +197,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(
-            self.processor_config,
-            &self.clock,
-            self.sink,
-            &ThreadBuilder::default(),
-            &self.worker_signal_test_hooks,
-        )
+        bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
     }
 }
 
@@ -231,7 +208,6 @@ impl RuntimeBuilder {
             clock: InactiveClock::default(),
             processor_config: RuntimeConfig::default(),
             sink: Sink::noop(),
-            worker_signal_test_hooks: WorkerSignalTestHooks::default(),
         }
     }
 }

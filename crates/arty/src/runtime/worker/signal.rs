@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::sync::Arc as StdArc;
-#[cfg(any(test, feature = "test-util"))]
+#[cfg(test)]
 use std::sync::mpsc;
 use std::task::{Wake, Waker};
 use std::time::Duration;
@@ -16,25 +16,26 @@ use performables::sync::mutex::Mutex;
 pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
+    #[cfg(test)]
     test_hooks: WorkerSignalTestHooks,
 }
 
+#[cfg(test)]
 #[derive(Debug, Default, Clone)]
 pub(crate) struct WorkerSignalTestHooks {
-    #[cfg(feature = "test-util")]
     idle_wait_notifier: Option<mpsc::Sender<()>>,
 }
 
+#[cfg(test)]
 impl WorkerSignalTestHooks {
-    #[cfg(feature = "test-util")]
     pub(crate) fn with_idle_wait_notifier(idle_wait_notifier: mpsc::Sender<()>) -> Self {
         Self {
             idle_wait_notifier: Some(idle_wait_notifier),
         }
     }
 
+    #[cfg(test)]
     fn notify_idle_wait(&self) {
-        #[cfg(feature = "test-util")]
         if let Some(notifier) = &self.idle_wait_notifier {
             _ = notifier.send(());
         }
@@ -65,6 +66,7 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
+    #[cfg(test)]
     pub(crate) fn new(test_hooks: WorkerSignalTestHooks) -> Self {
         Self {
             notified: Mutex::new(false),
@@ -80,6 +82,7 @@ impl WorkerSignal {
                 *notified = false;
                 return;
             }
+            #[cfg(test)]
             self.test_hooks.notify_idle_wait();
             notified = self.ready.wait(notified);
         }

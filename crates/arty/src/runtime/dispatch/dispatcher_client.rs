@@ -33,6 +33,10 @@ impl DispatcherClient {
         self.core.blocking_worker(worker_index)
     }
 
+    pub(crate) fn wake_worker(&self, worker_index: WorkerIndex) {
+        self.core.wake_worker(worker_index);
+    }
+
     pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
         self.core.next_blocking_worker()
     }

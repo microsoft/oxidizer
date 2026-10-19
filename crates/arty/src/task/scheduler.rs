@@ -219,6 +219,7 @@ impl Scheduler {
             let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
+            self.dispatcher.wake_worker(self.binding.worker_index);
             Ok(JoinHandle::new(result_rx))
         })
     }
