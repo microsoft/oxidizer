@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn remote_wake_has_non_exhaustive_diagnostics() {
         let task_handle = crate::testing::new_test_task_handle();
-        let remote = RemoteWake(task_handle.clone());
+        let remote = RemoteWake(task_handle);
 
         assert_eq!(format!("{remote:?}"), "RemoteWake { .. }");
     }
