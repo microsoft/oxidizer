@@ -138,7 +138,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGTvrvo-fV-8bX71dk0Y2kEQby4ruQUuQ1Kgb3ChN6fCifzRhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGTvrvo-fV-8bX71dk0Y2kEQby4ruQUuQ1Kgb3ChN6fCifzRhZIOCZGFydHllMC40LjCCa2FydHlfbWFjcm9zZTAuNC4wgmhvYnNlcnZlZGYwLjI3LjE
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
@@ -155,7 +155,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link20]: https://docs.rs/arty/0.4.0/arty/?search=documentation::thread_awareness
  [__link21]: https://docs.rs/arty/0.4.0/arty/?search=documentation::time
  [__link22]: https://docs.rs/arty/0.4.0/arty/?search=documentation::telemetry
- [__link23]: https://crates.io/crates/observed/0.27.0
+ [__link23]: https://crates.io/crates/observed/0.27.1
  [__link24]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=main
  [__link25]: https://docs.rs/arty_macros/0.4.0/arty_macros/?search=test
  [__link26]: https://docs.rs/arty/0.4.0/arty/?search=time::ClockControl
