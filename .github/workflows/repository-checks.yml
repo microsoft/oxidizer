@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  release-script-tests:
-    name: "Release script tests (${{ matrix.os }})"
+  script-tests:
+    name: "Repository script tests (${{ matrix.os }})"
     strategy:
       fail-fast: false
       matrix:
@@ -25,8 +25,6 @@ jobs:
       - uses: ./.github/actions/anvil-setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Install Pester
         shell: pwsh
         run: |
@@ -161,12 +159,12 @@ jobs:
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, rallocator-macos, metabench-native-contracts]
+    needs: [script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, rallocator-macos, metabench-native-contracts]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
         env:
-          RELEASE_SCRIPT_TESTS: ${{ needs.release-script-tests.result }}
+          SCRIPT_TESTS: ${{ needs.script-tests.result }}
           SIMD_NO_STD_ARM: ${{ needs.simd-no-std-arm.result }}
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
           INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
@@ -174,8 +172,8 @@ jobs:
           RALLOCATOR_MACOS: ${{ needs.rallocator-macos.result }}
           METABENCH_NATIVE_CONTRACTS: ${{ needs.metabench-native-contracts.result }}
         run: |
-          if [[ "$RELEASE_SCRIPT_TESTS" != "success" ]]; then
-            echo "::error::release-script-tests concluded $RELEASE_SCRIPT_TESTS"
+          if [[ "$SCRIPT_TESTS" != "success" ]]; then
+            echo "::error::script-tests concluded $SCRIPT_TESTS"
             exit 1
           fi
           if [[ "$SIMD_NO_STD_ARM" != "success" ]]; then
