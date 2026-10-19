@@ -14,7 +14,7 @@ use std::thread::ThreadId;
 
 use performables::sync::channel;
 
-use crate::{TaskPointer, TaskRef, executor_context};
+use crate::{TaskHandle, TaskPtr, executor_context};
 
 const TASK_ACTIVE: u8 = 1 << 0;
 const TASK_LOCAL_NOTIFIED: u8 = 1 << 1;
@@ -72,16 +72,16 @@ impl WakeShared {
 
 #[derive(Debug)]
 pub(crate) struct WakeSignal {
-    task_ref: TaskPointer,
+    task_ptr: TaskPtr,
     shared: WakeShared,
     schedule_state: AtomicU8,
     _requires_pin: PhantomPinned,
 }
 
 impl WakeSignal {
-    pub(crate) fn new(shared: WakeShared, task_ref: TaskPointer) -> Self {
+    pub(crate) fn new(shared: WakeShared, task_ptr: TaskPtr) -> Self {
         Self {
-            task_ref,
+            task_ptr,
             shared,
             schedule_state: AtomicU8::new(TASK_ACTIVE),
             _requires_pin: PhantomPinned,
@@ -89,15 +89,15 @@ impl WakeSignal {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_for_test(parent_waker: Waker, task_ref: &TaskRef) -> Self {
+    pub(crate) fn new_for_test(parent_waker: Waker, task_handle: &TaskHandle) -> Self {
         let (shared, _remote_wakes) = WakeShared::new(parent_waker, std::thread::current().id());
-        Self::new(shared, task_ref.pointer())
+        Self::new(shared, task_handle.as_ptr())
     }
 
     pub(crate) fn retire(&self) {
         let previous = self.schedule_state.swap(0, atomic::Ordering::AcqRel);
         if previous & TASK_LOCAL_NOTIFIED != 0 {
-            executor_context::remove_wake(self.shared.thread_id(), self.task_ref);
+            executor_context::remove_wake(self.shared.thread_id(), self.task_ptr);
         }
     }
 
@@ -123,7 +123,7 @@ impl WakeSignal {
     }
 
     #[cfg(test)]
-    pub(crate) fn append_test_wakes(&self, target: &mut VecDeque<TaskRef>) {
+    pub(crate) fn append_test_wakes(&self, target: &mut VecDeque<TaskHandle>) {
         executor_context::append_wakes(self.shared.thread_id(), target);
     }
 
@@ -152,8 +152,8 @@ impl WakeSignal {
 
     fn schedule_local(&self) {
         // SAFETY: The signal is embedded in the live task that owns this call.
-        let task_ref = unsafe { self.task_ref.retain() };
-        if executor_context::enqueue(self.shared.thread_id(), task_ref).is_ok() {
+        let task_handle = unsafe { self.task_ptr.retain() };
+        if executor_context::enqueue(self.shared.thread_id(), task_handle).is_ok() {
             if !executor_context::is_executing(self.shared.thread_id()) {
                 self.shared.inner.parent_waker.wake_by_ref();
             }
@@ -207,7 +207,7 @@ impl WakeSignal {
     fn add_owned_waker(&self) {
         // SAFETY: The borrowed signal is embedded in a live task; the increment transfers
         // independent ownership to the cloned waker.
-        unsafe { self.task_ref.increment_strong() };
+        unsafe { self.task_ptr.increment_strong() };
     }
 }
 
@@ -217,12 +217,12 @@ impl Drop for WakeSignal {
     }
 }
 
-pub(crate) struct RemoteWake(TaskRef);
+pub(crate) struct RemoteWake(TaskHandle);
 
 impl RemoteWake {
     fn new(signal: &WakeSignal) -> Self {
         // SAFETY: The live signal's enclosing task owns the allocation during notification setup.
-        Self(unsafe { signal.task_ref.retain() })
+        Self(unsafe { signal.task_ptr.retain() })
     }
 
     fn schedule_local(self, owner: ThreadId) {
@@ -273,7 +273,7 @@ fn waker_clone(ptr: *const ()) -> RawWaker {
 
 fn waker_wake(ptr: *const ()) {
     // SAFETY: Consuming wake transfers this raw waker's ownership into the guard.
-    let _owner = unsafe { signal_from_raw(ptr).task_ref.into_task_ref() };
+    let _owner = unsafe { signal_from_raw(ptr).task_ptr.into_handle() };
     signal_from_raw(ptr).wake();
 }
 
@@ -283,7 +283,7 @@ fn waker_wake_by_ref(ptr: *const ()) {
 
 fn waker_drop(ptr: *const ()) {
     // SAFETY: Dropping transfers this raw waker's ownership into the guard.
-    drop(unsafe { signal_from_raw(ptr).task_ref.into_task_ref() });
+    drop(unsafe { signal_from_raw(ptr).task_ptr.into_handle() });
 }
 
 fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
@@ -304,8 +304,8 @@ mod tests {
     fn borrowed_and_owned_wakes_share_inline_state() {
         let _executor = crate::Executor::builder().build();
         let parent = Arc::new(TestWaker::new());
-        let task_ref = crate::testing::new_test_task_ref();
-        let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), &task_ref));
+        let task_handle = crate::testing::new_test_task_handle();
+        let signal = pin!(WakeSignal::new_for_test(Arc::clone(&parent).into(), &task_handle));
 
         // SAFETY: The signal remains pinned for the borrow and clone.
         let borrowed = unsafe { signal.as_ref().waker_ref() };
@@ -323,8 +323,8 @@ mod tests {
     #[test]
     fn retirement_makes_retained_waker_inert() {
         let _executor = crate::Executor::builder().build();
-        let task_ref = crate::testing::new_test_task_ref();
-        let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_ref));
+        let task_handle = crate::testing::new_test_task_handle();
+        let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_handle));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker_ref() }.clone();
 

@@ -33,10 +33,10 @@ design reference.
 The previous executor used:
 
 - `Rc<ExecutorCore>` with both reentrant and owner-only state in `RefCell`;
-- a mutex-protected `VecDeque<TaskRef>` for wake notifications;
+- a mutex-protected `VecDeque<TaskHandle>` for wake notifications;
 - detached pooled `WakerState` allocations for cloned wakers;
 - separate embedded wake flags plus an O(n) inactive-task probe fallback;
-- `HashSet<TaskRef>` as both pending-task ownership and scheduling state;
+- `HashSet<TaskHandle>` as both pending-task ownership and scheduling state;
 - `ThreadId` checks to classify local and remote wakes;
 - pool occupancy as the definition of live tasks;
 - telemetry context capture/application even for `Sink::noop()`.
@@ -107,22 +107,31 @@ on the cross-thread `WakeShared` transport.
 ### Pooled task ownership
 
 Each concrete task is allocated and pinned through `MultiPool::alloc_arc_pin`.
-`TaskRef` owns one strong `plurality::Arc<dyn TypeErasedTask>` reference through
-the pointer returned by `Arc::into_raw`. It exposes only owner-thread pinned
-borrows. Retaining the original allocation pointer preserves provenance for
-the pool's adjacent reference count; deriving it from `&Task` does not.
+`TaskHandle` directly stores a `Pin<plurality::Arc<dyn TypeErasedTask>>`, using its
+ordinary clone and drop implementations. It exposes only owner-thread pinned
+task borrows, never a mutable reference to the shared task.
 
-`plurality::Arc` gained raw strong-reference operations modeled on
-`std::sync::Arc`:
+Each task also embeds a `TaskHandleSlot`, an alias for
+`OnceLock<ManuallyDrop<TaskHandle>>`. It stores an immutable, uncounted copy of
+the original handle, not a separate owner abstraction. `TaskPtr` addresses that
+template. Retaining a pointer clones the stored handle normally. Cloning a raw
+waker forgets that clone, transferring the new strong reference to the waker.
+Reconstructing a `TaskHandle` from an owned raw pointer copies the handle
+directly, without forming a borrow into the allocation, consuming exactly one
+previously counted reference. The template itself is never dropped and carries
+no extra reference, so it creates no ownership cycle.
 
-- `into_raw`;
-- `from_raw`;
-- `increment_strong_count`;
-- `decrement_strong_count`.
+Keeping the original owner handle preserves its allocation provenance.
+Allocator layout, slot arithmetic, reference-count ordering, and overflow
+handling remain entirely inside plurality's existing clone/drop operations.
+No new plurality API, detached allocation, or pointer derived from `&Task` is
+used to recover a pooled owner.
 
-These operations keep allocator/slot arithmetic inside `plurality`, where the
-layout is defined. `arty_executor` handles only typed/non-owning task pointers
-and explicit raw strong ownership transitions.
+Every template read is protected by an existing counted reference and ends
+before that reference is released. Plurality's release decrement and final
+acquire fence order other owners' template reads before final reclamation.
+Releasing a reference never mutates or manually drops the embedded template;
+its `ManuallyDrop` suppresses the otherwise self-referential destructor.
 
 ### Inline raw wakers
 
@@ -153,7 +162,7 @@ payload.
 
 ### Local wakes
 
-Local wakes push a temporary strong `TaskRef` into the registered executor's
+Local wakes push a temporary strong `TaskHandle` into the registered executor's
 TLS `VecDeque`.
 
 The executor appends that queue directly to the active queue once per cycle,
@@ -252,7 +261,7 @@ non-`Send` future or result.
 
 ### Raw ownership
 
-`TaskPointer` is non-owning unless a caller explicitly documents possession of
+`TaskPtr` is non-owning unless a caller explicitly documents possession of
 one raw strong reference.
 
 Operations that require a live allocation or raw ownership are unsafe:
@@ -262,7 +271,7 @@ Operations that require a live allocation or raw ownership are unsafe:
 - reconstruction from an owned raw pointer;
 - retention from a non-owning pointer.
 
-`TaskRef` is the RAII strong owner used by runnable queues, remote notifications,
+`TaskHandle` is the RAII strong owner used by runnable queues, remote notifications,
 and consuming raw-waker calls. The intrusive list is the only long-lived owner
 without such an RAII handle. Its insert/remove operations transfer raw strong
 ownership exactly once.
@@ -357,13 +366,13 @@ Removed after measurement. It added a first-wake allocation/pool lock and
 duplicated lifetime state. Inline task wakers reduced self-wake and clone costs
 materially.
 
-### Stable `HashSet<TaskRef>` registry
+### Stable `HashSet<TaskHandle>` registry
 
 Implemented and reverted. It avoided remove/reinsert on wake but added an Arc
 clone and hashed immediately-ready tasks. `arty_contention` regressed,
 especially under multi-worker load.
 
-### Existing inactive `HashSet<TaskRef>`
+### Existing inactive `HashSet<TaskHandle>`
 
 Removed. It combined ownership and scheduling state and performed hash-table
 insert/remove on every pending/wake transition.
@@ -373,7 +382,7 @@ insert/remove on every pending/wake transition.
 Rejected because stable Rust cannot remove an arbitrary completed node in O(1)
 from a task pointer.
 
-### `Vec<TaskRef>` plus task index
+### `Vec<TaskHandle>` plus task index
 
 Implemented and reverted. It was simpler, but short-lived executors allocated
 vector storage and benchmarks regressed:
@@ -393,7 +402,7 @@ task became runnable. Representative elementary benchmarks regressed:
 - clone during poll: 73.83 ns to 82.88 ns;
 - one additional measured allocation in affected cases.
 
-The final model therefore retains `TaskRef` in runnable queues, keeps the
+The final model therefore retains `TaskHandle` in runnable queues, keeps the
 intrusive list as pending-task ownership, and tracks logical task count
 separately from pool occupancy. This is required because retained inert wakers
 can keep empty pooled allocations alive after the logical task has completed.
@@ -584,7 +593,7 @@ intrusive inventory, while removing redundant layers:
   and after potentially reentrant `IntoFuture` conversion.
 - Remove local-TLS forwarding methods from `WakeShared`; the executor context
   takes the existing `ThreadId` directly.
-- Use `TaskRef` ownership for remote notifications and consuming raw-waker calls
+- Use `TaskHandle` ownership for remote notifications and consuming raw-waker calls
   instead of a separate `RawWakerOwner` and manual remote-notification release.
   Borrowed and owned wakers share their identical clone and borrowed-wake
   callbacks.
@@ -659,7 +668,7 @@ counts include test code and exclude macro-generated and dependency code.
   The previously unused dependency is reintroduced for this concrete purpose.
   Tests verify pinned addresses and exact-once destruction even when a future
   destructor panics.
-- Remote notifications carry only their existing owning `TaskRef`. The owner
+- Remote notifications carry only their existing owning `TaskHandle`. The owner
   promotes the notification and transfers that reference into the local queue,
   avoiding a separate raw signal pointer, a manual `Send` implementation, and
   an extra retain/release pair. Tests cover mixed consuming/borrowed wakes,

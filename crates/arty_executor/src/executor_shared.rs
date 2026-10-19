@@ -15,7 +15,7 @@ use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
 use crate::wake::RemoteWake;
-use crate::{JoinHandle, Task, TaskOptions, TaskRef, TypeErasedTask, WakeShared, WakeSignal};
+use crate::{JoinHandle, Task, TaskHandle, TaskOptions, TypeErasedTask, WakeShared, WakeSignal};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -25,7 +25,7 @@ pub(crate) struct ExecutorShared {
 
 #[derive(Debug)]
 struct ExecutorSharedInner {
-    new_tasks: RefCell<VecDeque<TaskRef>>,
+    new_tasks: RefCell<VecDeque<TaskHandle>>,
     task_storage: MultiPool,
     task_count: Cell<usize>,
     join_events: LocalEventLake,
@@ -65,7 +65,7 @@ impl ExecutorShared {
         self.inner.shutting_down.get()
     }
 
-    pub(crate) fn accept_new_tasks(&self, active: &mut VecDeque<TaskRef>) -> usize {
+    pub(crate) fn accept_new_tasks(&self, active: &mut VecDeque<TaskHandle>) -> usize {
         let mut new_tasks = self.inner.new_tasks.borrow_mut();
         let accepted = new_tasks.len();
         if accepted == 0 {
@@ -80,7 +80,7 @@ impl ExecutorShared {
         !self.inner.new_tasks.borrow().is_empty()
     }
 
-    pub(crate) fn drain_new_tasks(&self, target: &mut VecDeque<TaskRef>) {
+    pub(crate) fn drain_new_tasks(&self, target: &mut VecDeque<TaskHandle>) {
         target.extend(self.inner.new_tasks.borrow_mut().drain(..));
     }
 
@@ -150,14 +150,14 @@ impl ExecutorShared {
     where
         T: TypeErasedTask + 'static,
     {
-        let task_ref = TaskRef::new(self.inner.task_storage.alloc_arc_pin(task));
-        let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_ref.pointer());
+        let task_handle = TaskHandle::new(self.inner.task_storage.alloc_arc_pin(task));
+        let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.
-        let task = unsafe { task_ref.as_task() };
+        let task = unsafe { task_handle.as_task() };
         task.initialize(wake_signal);
         let reporter = task.created_reporter();
-        self.inner.new_tasks.borrow_mut().push_back(task_ref);
+        self.inner.new_tasks.borrow_mut().push_back(task_handle);
         self.inner
             .task_count
             .set(self.inner.task_count.get().checked_add(1).expect("live task count cannot overflow"));
