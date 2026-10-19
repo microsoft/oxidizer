@@ -50,7 +50,6 @@ rt = [
     "dep:performables",
     "dep:pin-project",
     "dep:thread_aware",
-    "dep:threadpool",
 ]
 time = ["dep:tick"]
 test-util = ["tick?/test-util", "many_cpus?/test-util"]
@@ -71,7 +70,6 @@ performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
-threadpool = { workspace = true, optional = true }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -100,7 +98,6 @@ scopeguard = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-utils"] }
-threadpool = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
 
