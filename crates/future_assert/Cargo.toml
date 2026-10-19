@@ -1,0 +1,23 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "future_assert"
+version = "0.1.0"
+description = "Manual polling assertions for futures in tests, without an async runtime."
+readme = "README.md"
+keywords = ["async", "future", "testing", "assert", "poll"]
+categories = ["development-tools::testing", "asynchronous"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/future_assert"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

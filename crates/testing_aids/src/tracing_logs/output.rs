@@ -6,13 +6,13 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
-use tracing::subscriber::Interest;
-use tracing::{Level, Metadata, Subscriber};
-use tracing_subscriber::Layer;
+use tracing::Level;
 use tracing_subscriber::fmt::MakeWriter;
-use tracing_subscriber::layer::{Context, Filter, SubscriberExt};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use super::format::formatting_layer;
 use crate::is_mutation_testing;
 
 /// Enables logging of test output to the standard output stream.
@@ -27,7 +27,8 @@ use crate::is_mutation_testing;
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
-/// Logging is disabled under mutation testing - this becomes a no-op.
+/// Output is disabled under mutation testing - this becomes a no-op. The initialized
+/// subscriber still evaluates fields and formats events and spans synchronously.
 ///
 /// # Panics
 ///
@@ -35,13 +36,14 @@ use crate::is_mutation_testing;
 /// invoked, which means the test binary is missing its `#[ctor::ctor]`
 /// process-initialization function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
-    if is_mutation_testing() {
-        // Under mutation testing, we do not log anything, to speed up the tests.
+    let mutation_testing = is_mutation_testing();
+    if mutation_testing {
+        // Suppress diagnostic output, but leave the initialized formatter enabled.
         return;
     }
 
     assert_initialized();
-    STDOUT_ENABLED.store(true, Ordering::Relaxed);
+    enable_stdout(&STDOUT_ENABLED, mutation_testing);
 }
 
 /// Enables logging of test output to the standard output stream and to a specific log file.
@@ -58,7 +60,8 @@ pub fn write_to_stdout() {
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
-/// Logging is disabled under mutation testing - this becomes a no-op.
+/// Output is disabled under mutation testing - this becomes a no-op. The initialized
+/// subscriber still evaluates fields and formats events and spans synchronously.
 ///
 /// # Panics
 ///
@@ -68,13 +71,14 @@ pub fn write_to_stdout() {
 /// is missing its `#[ctor::ctor]` process-initialization function. See
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
-    if is_mutation_testing() {
-        // Under mutation testing, we do not log anything, to speed up the tests.
+    let mutation_testing = is_mutation_testing();
+    if mutation_testing {
+        // Suppress diagnostic output, but leave the initialized formatter enabled.
         return FileGuard::fake();
     }
 
     assert_initialized();
-    STDOUT_ENABLED.store(true, Ordering::Relaxed);
+    enable_stdout(&STDOUT_ENABLED, mutation_testing);
 
     start_log_file_scope(file_name)
 }
@@ -120,11 +124,11 @@ pub fn log_file(file_name: &str) -> String {
 /// with all output sinks silent.
 ///
 /// The installed subscriber is permanently interested in every callsite at every
-/// level (via an always-interested no-op interest-keeper layer), so once it is
-/// present `tracing-core` can never cache a callsite as disabled and event field
-/// expressions are always evaluated. It produces no output on its own: the stdout,
-/// file, and buffer sinks are separate formatting layers, each off (and skipping
-/// formatting) until a `write_to_*` helper turns it on.
+/// level, so once it is present `tracing-core` can never cache a callsite as disabled.
+/// Field expressions and `Debug`, `Display`, and message formatting are exercised
+/// synchronously, including initial and recorded span fields and during mutation
+/// testing. Output is discarded after formatting until a `write_to_*` helper enables
+/// a sink. Events are formatted once, regardless of the number of active sinks.
 ///
 /// Installing this from a `#[cfg(test)] #[ctor::ctor]` process-initialization
 /// function guarantees the subscriber is present before any unit test runs, which
@@ -145,109 +149,23 @@ pub fn initialize() {
 
 fn ensure_initialized() {
     INITIALIZER.call_once(|| {
-        // Each output sink is a formatting layer gated by a `SinkFilter` that is
-        // active only while that sink is turned on. The filter runs before the
-        // layer formats an event, so when a sink is off its (relatively expensive)
-        // event formatting is skipped entirely rather than being rendered and then
-        // discarded by the writer.
-        // All layers omit the timestamp. Wall-clock timestamps would make captured
-        // output non-deterministic (breaking buffer assertions) and reading the clock
-        // via `SystemTime::now` is an unsupported operation under Miri's isolation.
-        let terminal_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(StdoutWriterFactory)
-            .with_filter(SinkFilter {
-                active: stdout_active,
-                max_level: Some(Level::INFO),
-            });
+        // Filter writers, not the layer: interest and formatting must remain enabled
+        // even when no sink wants output. Tee the rendered bytes to avoid invoking
+        // user formatters again for each sink.
+        let writer = stdout_writer(std::io::stdout, || STDOUT_ENABLED.load(Ordering::Relaxed))
+            .and(LogFileWriter.with_filter(|_| file_active()))
+            .and(BufferWriterFactory.with_filter(|_| buffer_active()));
 
-        let file_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(LogFileWriter)
-            // No coloring codes or such fancy stuff in the file, please.
-            .with_ansi(false)
-            .with_filter(SinkFilter {
-                active: file_active,
-                max_level: None,
-            });
-
-        let buffer_layer = tracing_subscriber::fmt::layer()
-            .without_time()
-            .with_writer(BufferWriterFactory)
-            .with_ansi(false)
-            .with_filter(SinkFilter {
-                active: buffer_active,
-                max_level: None,
-            });
-
-        // The interest keeper carries no filter and does no formatting, so it is
-        // permanently interested in every callsite at every level. This is
-        // deliberate and load-bearing on two counts. First, because this
-        // always-interested layer is part of the process-global subscriber from the
-        // very first initialization, `tracing-core` can never cache a callsite's
-        // interest as "disabled", which makes both buffer capture and per-test
-        // thread-local capture deterministic regardless of test execution order.
-        // Second, keeping every callsite enabled forces `tracing` to evaluate event
-        // field expressions (e.g. `duration.as_nanos()`) on every emission even when
-        // no sink is capturing, so coverage of those expressions is deterministic.
-        // See `docs/tracing-tests.md`.
         tracing_subscriber::registry()
-            .with(InterestKeeper)
-            .with(terminal_layer)
-            .with(file_layer)
-            .with(buffer_layer)
+            .with(formatting_layer(writer))
             .try_init()
             .expect("this can only happen if something else besides testing_aids has configured logging");
     });
 }
 
-/// No-op layer that is permanently interested in every callsite at every level.
-///
-/// It performs no formatting and produces no output; its sole job is to keep every
-/// `tracing` callsite enabled from process start. This prevents `tracing-core` from
-/// caching a callsite's interest as "disabled" and forces event field expressions to
-/// be evaluated on every emission, which keeps capture and coverage deterministic
-/// independent of which output sinks are active. See `docs/tracing-tests.md`.
-#[derive(Debug)]
-struct InterestKeeper;
-
-impl<S: Subscriber> Layer<S> for InterestKeeper {
-    fn register_callsite(&self, _metadata: &'static Metadata<'static>) -> Interest {
-        Interest::always()
-    }
-}
-
-/// Per-layer filter that enables its formatting layer only while the associated sink
-/// is active, so event formatting is skipped when nothing is capturing.
-///
-/// Returns [`Interest::sometimes`] so the decision is re-evaluated on every event
-/// rather than cached: the sink activation flags change at runtime, and the always
-/// interested [`InterestKeeper`] guarantees no callsite is ever cached as disabled.
-struct SinkFilter {
-    /// Whether this sink is currently active.
-    active: fn() -> bool,
-    /// The most verbose level this sink accepts, or `None` for every level.
-    max_level: Option<Level>,
-}
-
-impl<S> Filter<S> for SinkFilter {
-    fn enabled(&self, meta: &Metadata<'_>, _cx: &Context<'_, S>) -> bool {
-        (self.active)() && self.max_level.is_none_or(|level| *meta.level() <= level)
-    }
-
-    fn callsite_enabled(&self, _metadata: &'static Metadata<'static>) -> Interest {
-        Interest::sometimes()
-    }
-}
-
-/// Whether the stdout sink is currently active.
-fn stdout_active() -> bool {
-    STDOUT_ENABLED.load(Ordering::Relaxed)
-}
-
 /// Whether the file sink is currently active.
 ///
-/// Reads a lock-free flag rather than locking [`LOG_FILE`] so the per-event filter
+/// Reads a lock-free flag rather than locking [`LOG_FILE`] so the writer filter
 /// stays off the global mutex on the hot path. The flag is kept in sync with
 /// `LOG_FILE` by setting it under that lock whenever the file sink is attached or
 /// detached.
@@ -257,7 +175,7 @@ fn file_active() -> bool {
 
 /// Whether the buffer sink is currently active.
 ///
-/// Reads a lock-free flag rather than locking [`LOG_BUFFER`] so the per-event filter
+/// Reads a lock-free flag rather than locking [`LOG_BUFFER`] so the writer filter
 /// stays off the global mutex on the hot path. The flag is kept in sync with
 /// `LOG_BUFFER` by setting it under that lock whenever the buffer sink is attached or
 /// detached.
@@ -296,40 +214,18 @@ pub(crate) fn assert_initialized() {
 /// helpers.
 static STDOUT_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Produces writers to stdout when stdout logging is enabled, discarding otherwise.
-#[derive(Debug)]
-struct StdoutWriterFactory;
-
-impl<'a> MakeWriter<'a> for StdoutWriterFactory {
-    type Writer = StdoutWriter;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        StdoutWriter {
-            enabled: STDOUT_ENABLED.load(Ordering::Relaxed),
-        }
+fn enable_stdout(enabled: &AtomicBool, mutation_testing: bool) {
+    if !mutation_testing {
+        enabled.store(true, Ordering::Relaxed);
     }
 }
 
-/// Writes to stdout when enabled, or discards output otherwise.
-#[derive(Debug)]
-struct StdoutWriter {
-    enabled: bool,
-}
-
-impl Write for StdoutWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.enabled {
-            std::io::stdout().write_all(buf)?;
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if self.enabled {
-            std::io::stdout().flush()?;
-        }
-        Ok(())
-    }
+fn stdout_writer<W, E>(writer: W, enabled: E) -> impl for<'a> MakeWriter<'a>
+where
+    W: for<'a> MakeWriter<'a>,
+    E: Fn() -> bool,
+{
+    writer.with_max_level(Level::INFO).with_filter(move |_| enabled())
 }
 
 /// Enables logging of test output to the standard output stream and captures every
@@ -372,9 +268,7 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
     // test, so a disabled buffer would break those tests rather than merely omit
     // diagnostic output. The stdout tee, however, is purely diagnostic, so we silence
     // it under mutation testing to avoid the output overhead.
-    if !is_mutation_testing() {
-        STDOUT_ENABLED.store(true, Ordering::Relaxed);
-    }
+    enable_stdout(&STDOUT_ENABLED, is_mutation_testing());
 
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
@@ -453,7 +347,7 @@ impl BufferGuard {
     /// Detaches the capture buffer and returns everything logged during the guard's
     /// lifetime, one entry per emitted log line.
     ///
-    /// `tracing`'s formatting layers write synchronously on each event, so there is
+    /// `tracing`'s formatting layer writes synchronously on each event, so there is
     /// no asynchronous buffering to flush; the returned lines are complete as of the
     /// last emission on this thread before the call.
     #[must_use]
@@ -710,6 +604,56 @@ impl Write for LogWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdout_route_filters_levels_after_activation() {
+        assert_stdout_route(
+            false,
+            &[
+                "ERROR stdout-routing-test: after-ERROR",
+                " WARN stdout-routing-test: after-WARN",
+                " INFO stdout-routing-test: after-INFO",
+            ],
+        );
+    }
+
+    #[test]
+    fn stdout_route_stays_silent_during_mutation_testing() {
+        assert_stdout_route(true, &[]);
+    }
+
+    fn assert_stdout_route(mutation_testing: bool, expected: &[&str]) {
+        let enabled = Arc::new(AtomicBool::new(false));
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let writer = stdout_writer(
+            {
+                let buffer = Arc::clone(&buffer);
+                move || BufferWriter {
+                    buffer: Some(Arc::clone(&buffer)),
+                    pending: Vec::new(),
+                }
+            },
+            {
+                let enabled = Arc::clone(&enabled);
+                move || enabled.load(Ordering::Relaxed)
+            },
+        );
+        let _guard = tracing_subscriber::registry().with(formatting_layer(writer)).set_default();
+
+        emit_levels("before");
+        assert_eq!(*buffer.lock().unwrap(), Vec::<String>::new());
+        enable_stdout(&enabled, mutation_testing);
+        emit_levels("after");
+        assert_eq!(*buffer.lock().unwrap(), expected);
+    }
+
+    fn emit_levels(phase: &str) {
+        tracing::error!(target: "stdout-routing-test", "{phase}-ERROR");
+        tracing::warn!(target: "stdout-routing-test", "{phase}-WARN");
+        tracing::info!(target: "stdout-routing-test", "{phase}-INFO");
+        tracing::debug!(target: "stdout-routing-test", "{phase}-DEBUG");
+        tracing::trace!(target: "stdout-routing-test", "{phase}-TRACE");
+    }
 
     fn new_writer() -> (BufferWriter, Arc<Mutex<Vec<String>>>) {
         let buffer = Arc::new(Mutex::new(Vec::new()));

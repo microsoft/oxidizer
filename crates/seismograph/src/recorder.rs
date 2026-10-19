@@ -40,7 +40,10 @@ const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
+#[cfg(not(miri))]
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(miri)]
+const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const RETIRED_RING_BUDGET_BYTES: usize = 268_435_456;
 #[cfg(test)]
@@ -1681,7 +1684,7 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
         count
     }
 
-    #[cfg(all(target_os = "linux", not(miri)))]
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
     {
         const SKIPPED_FRAMES: usize = 4;
         const CAPACITY: usize = 28;
@@ -1697,7 +1700,7 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
         retained
     }
 
-    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux"))))]
+    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux", target_os = "macos"))))]
     {
         let _ = frames;
         0
@@ -2663,7 +2666,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_configuration()
         });
         drop(LateTelemetryUser);
 
@@ -3500,7 +3503,7 @@ mod tests {
         configure(Configuration::default());
     }
 
-    #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+    #[cfg(all(any(target_os = "windows", target_os = "linux", target_os = "macos"), not(miri)))]
     #[test]
     fn stack_capture_returns_real_frames_within_the_fixed_capacity() {
         let (frames, count) = capture_stack();
@@ -3781,7 +3784,7 @@ mod tests {
 
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
-            ..Default::default()
+            ..test_configuration()
         });
         assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));
@@ -3896,7 +3899,7 @@ mod tests {
         });
         assert_eq!(capture_backtrace(BacktraceCapture::Never), Vec::new());
         let captured = capture_backtrace(BacktraceCapture::Always);
-        #[cfg(all(any(target_os = "windows", target_os = "linux"), not(miri)))]
+        #[cfg(all(any(target_os = "windows", target_os = "linux", target_os = "macos"), not(miri)))]
         assert!(!captured.is_empty());
         assert!(captured.len() <= MAX_STACK_FRAMES);
 

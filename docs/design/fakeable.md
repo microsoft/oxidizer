@@ -43,6 +43,13 @@ projected or nested `Self` return types are rejected because their values cannot
 be translated across the wrapper boundary. Bare `Self` in method generic bounds
 or where predicates is rejected for the same reason.
 
+Generated real impls allow `clippy::unused_self` because a stateless operation
+may still need an instance receiver for fake dispatch. The allowance covers the
+whole real impl, including private helpers that are not delegated. The generated allowance
+precedes the original impl attributes, so explicit lint settings and expectations
+on that impl or its methods still take precedence. With `cfg_attr(test, ...)`,
+this suppression does not apply to the implementation in normal builds.
+
 Trait delegation uses fully qualified calls on the hidden real type so an
 inherent method with the same name cannot intercept a trait method call.
 Unsafe impl blocks are rejected because the macro cannot prove the unsafe
@@ -86,6 +93,14 @@ feature belongs to the consuming crate and must be declared there. Production
 builds therefore do not include the fake variant unless they explicitly enable
 the configured feature.
 
+Set `fakes_feature = false` on both the struct and every annotated impl to enable
+fakes only under `cfg(test)`. This mode emits no feature condition, so the
+consumer does not need to declare a feature or customize cfg checking. Other
+consumer features, including `test-util`, do not enable these fakes.
+Use `cfg_attr(test, fakeable::fakeable(...))` as well when the macro itself is a
+dev-dependency. Unit-test-only fakes are not available to integration tests or
+downstream crates.
+
 To prevent accidental wrapper bloat, non-generic wrappers reject fake types
 that are both larger than 256 bytes and at least twice the size of the real
 type. Large fakes should be placed behind a pointer such as `Arc`.
@@ -94,9 +109,14 @@ type. Large fakes should be placed behind a pointer such as `Arc`.
 
 The optional `mockall` feature enables
 `generate_mockall_fake = true` on implementation blocks. The macro emits a
-Mockall type in the configured module, excluding constructors, private methods,
-and rejecting mutable-receiver or restricted-visibility methods that would make
-the generated fake incompatible with the wrapper. Generic impl blocks are also
+Mockall type in the configured module, excluding constructors and private methods.
+Public and `pub(crate)` methods retain their visibility in the generated mock,
+so internal adapters can use argument matching, ordered calls, call counts, and
+scripted results without a handwritten fake. Other restricted visibility scopes
+and mutable-receiver methods are rejected. The configured fake-availability gate
+also applies to the generated mock and deferred diagnostics for cfg-gated methods.
+Unsupported methods without cfg attributes produce immediate errors, even when
+fakes are disabled. Generic impl blocks are also
 rejected because the generated Mockall type cannot preserve their generic
 parameters and bounds. Trait impl blocks are rejected because their inherited
 method visibility would otherwise produce an incomplete mock API. Async methods
@@ -112,6 +132,22 @@ Method-level `cfg` and `cfg_attr` attributes are preserved on generated Mockall
 declarations. When a cfg-gated method has an unsupported signature, its
 diagnostic is emitted with the same gating attributes so a disabled API does
 not fail the build.
+
+Generated containers remain public by default. Set
+`mockall_fake_visibility = "pub(crate)"` on the generating impl to keep an
+internal adapter's mock container crate-private. The option accepts a Rust
+visibility string, including `""` for private, and requires
+`generate_mockall_fake = true`. For a named mock module, it controls that
+module's visibility and the mock type is public inside the module. With
+`mockall_fake_module = "."`, it controls the mock type directly. Relative
+visibility is resolved in the module containing the impl block, not inside the generated
+module. Method visibility is preserved independently.
+
+This is explicit rather than inferred from methods so adding, removing, or
+cfg-gating a method cannot silently change the container's API. Choose a
+visibility compatible with the wrapper's fake constructor: a public wrapper
+with a public fake constructor needs an accessible fake type. Internal
+wrappers can use internal mocks without exposing either as a public API.
 
 Method forwarding rejects receiver/parameter/generic attributes, by-reference
 bindings, subpatterns, unsafe methods, `impl Trait` returns, and concrete

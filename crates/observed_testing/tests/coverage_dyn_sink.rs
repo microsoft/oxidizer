@@ -134,16 +134,38 @@ impl Enrichment for EmptyEnrichment {
 }
 
 #[test]
+fn standard_arc_processor_delegates_interest_filter() {
+    let processor: Arc<dyn EventProcessor> = Arc::new(MockProcessor::with_filter(EventDescription::is_log));
+    let no_signals = EventDescription::new("no.signals", None, None, None, false, false);
+
+    assert!(EventProcessor::is_interested(&processor, &DynProbe.description()));
+    assert!(!EventProcessor::is_interested(&processor, &no_signals));
+}
+
+#[test]
+fn standard_arc_processor_delivers_synthetic_events() {
+    let mock = MockProcessor::new();
+    let processor: Arc<dyn EventProcessor> = Arc::new(mock.clone());
+    let view = EventView::new_synthetic(&DynProbe, SystemTime::UNIX_EPOCH);
+
+    EventProcessor::process(&processor, &view);
+
+    assert_eq!(
+        mock.single_event(),
+        ExpectedEvent::new("dyn.probe", Severity::Info).body("probe body"),
+    );
+}
+
+#[test]
 fn dyn_event_dispatch_reads_every_accessor() {
     let saw = Arc::new(AtomicBool::new(false));
     let mock = MockProcessor::new();
     let read_all = ReadAllProcessor { saw: Arc::clone(&saw) };
 
-    let sink = Sink::new(
-        "dyn",
-        vec![Arc::new(mock.clone()), Arc::new(read_all)],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("dyn")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(mock.clone()), Arc::new(read_all)])
+        .build();
 
     emit_dyn_event(&sink, &DynProbe);
 
@@ -158,7 +180,10 @@ fn dyn_event_dispatch_reads_every_accessor() {
 #[test]
 fn dyn_event_with_log_signal_reaches_logs_only_processor() {
     let logs_only = MockProcessor::with_filter(EventDescription::is_log);
-    let sink = Sink::new("dyn_logs_only", vec![Arc::new(logs_only.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("dyn_logs_only")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(logs_only.clone())])
+        .build();
 
     emit_dyn_event(&sink, &DynProbe);
 
@@ -215,7 +240,10 @@ fn a_dyn_event_without_a_log_signal_has_no_severity_and_never_reaches_logs() {
     assert_eq!(view.severity(), None);
 
     let logs_only = MockProcessor::with_filter(EventDescription::is_log);
-    let sink = Sink::new("dyn_undeclared", vec![Arc::new(logs_only.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("dyn_undeclared")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(logs_only.clone())])
+        .build();
 
     emit_dyn_event(&sink, &UndeclaredProbe);
 
@@ -286,7 +314,10 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
             .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Erase))
             .build(),
     );
-    let sink = Sink::new("dyn_redaction", vec![Arc::new(erasing.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("dyn_redaction")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(erasing.clone())])
+        .build();
 
     emit_dyn_event(&sink, &FieldProbe);
 
@@ -307,13 +338,12 @@ fn typed_event_source_crate_is_read() {
     // mutated `source_crate` implementation is caught.
     let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-    let sink = Sink::new(
-        "typed",
-        vec![Arc::new(CaptureCrate {
+    let sink = Sink::builder("typed")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(CaptureCrate {
             captured: Arc::clone(&captured),
-        })],
-        tick::SimpleClock::new_frozen(),
-    );
+        })])
+        .build();
 
     emit!(sink, ProbeEvent::new(1));
 
@@ -335,7 +365,10 @@ fn synthetic_event_view_exposes_accessors() {
 
 #[test]
 fn sink_variants_debug_id_flush_and_noop() {
-    let single = Sink::new("single", vec![Arc::new(MockProcessor::new())], tick::SimpleClock::new_frozen());
+    let single = Sink::builder("single")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(MockProcessor::new())])
+        .build();
     let noop = Sink::noop();
     let composite = Sink::composite([single.clone(), noop.clone()]);
 
@@ -362,14 +395,23 @@ fn sink_variants_debug_id_flush_and_noop() {
 
 #[test]
 fn flush_reports_every_processor_error() {
-    let single = Sink::new("failing", vec![Arc::new(FailingProcessor)], tick::SimpleClock::new_frozen());
+    let single = Sink::builder("failing")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(FailingProcessor)])
+        .build();
     let err = single.flush().expect_err("the only processor fails to flush");
     assert_eq!(err.failures().len(), 1);
 
     // A composite keeps flushing after a leaf fails, so both are reported.
     let composite = Sink::composite([
-        Sink::new("f1", vec![Arc::new(FailingProcessor)], tick::SimpleClock::new_frozen()),
-        Sink::new("f2", vec![Arc::new(FailingProcessor)], tick::SimpleClock::new_frozen()),
+        Sink::builder("f1")
+            .clock(tick::SimpleClock::new_frozen())
+            .processors(vec![Arc::new(FailingProcessor)])
+            .build(),
+        Sink::builder("f2")
+            .clock(tick::SimpleClock::new_frozen())
+            .processors(vec![Arc::new(FailingProcessor)])
+            .build(),
     ]);
     let err = composite.flush().expect_err("both leaves fail to flush");
     assert_eq!(err.failures().len(), 2);
@@ -408,7 +450,10 @@ fn metadata_accessors() {
 
 #[test]
 fn context_and_future_wrappers_debug() {
-    let sink = Sink::new("ctx", vec![Arc::new(MockProcessor::new())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("ctx")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(MockProcessor::new())])
+        .build();
 
     let transfer = sink.transfer_context();
     assert!(format!("{transfer:?}").contains("Transfer"));
