@@ -33,8 +33,8 @@ skill does not generate changelogs; do not update them unless explicitly instruc
 Use the [increment-versions skill](.github/skills/increment-versions/SKILL.md)
 in **standalone mode** when explicitly asked to prepare package versions.
 Version preparation is on demand, not required for every code PR.
-See [docs/releasing.md](docs/releasing.md) for prerequisites, invocation
-inputs, upstream provenance, and the publication boundary.
+The skill owns prerequisites, planning inputs, and loading the latest upstream skill.
+See [docs/releasing.md](docs/releasing.md) for the maintainer's release workflow.
 
 Require an explicitly selected local release-history ref and, for stacked PRs,
 the actual parent target ref. Do not infer these from the publication setup.
