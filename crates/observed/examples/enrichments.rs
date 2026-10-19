@@ -152,14 +152,12 @@ fn main() {
     let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
     // Build and register a sink with a processor.
-    let sink = Sink::new(
-        "enrichments",
-        vec![Arc::new(SimpleLogProcessor {
+    let sink = Sink::builder("enrichments")
+        .processors(vec![Arc::new(SimpleLogProcessor {
             logger: provider.logger("enrichments"),
             redaction_engine: redaction::passthrough_redaction_engine(),
-        })],
-        tick::SimpleClock::new_system(),
-    );
+        })])
+        .build();
 
     // Top-level enrichment visible throughout the program.
     (|| {

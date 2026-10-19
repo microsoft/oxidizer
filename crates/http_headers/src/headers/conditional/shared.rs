@@ -1735,6 +1735,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain every obsolete-date byte substitution; representative date formats still enter the parser under Miri"
+    )]
     fn obsolete_dates_match_the_reference_for_every_byte_substitution() {
         for wire in [b"Sun Nov  6 08:49:37 1994".as_slice(), b"Sunday, 06-Nov-94 08:49:37 GMT"] {
             for offset in 0..wire.len() {

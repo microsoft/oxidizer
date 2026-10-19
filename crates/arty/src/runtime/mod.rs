@@ -39,7 +39,6 @@ pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
-pub(crate) mod context;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
@@ -61,15 +60,21 @@ pub use operations::RuntimeOperations;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]
-#[doc(hidden)]
 pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
 
     /// Preserves an entry point's return type while reporting root-task failure.
+    ///
+    /// # Panics
+    ///
+    /// Resumes a captured root-task panic or starts an unwind carrying the runtime failure.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
-            Ok(error) => error.resume(),
+            Ok(error) if error.is_panic() => {
+                std::panic::resume_unwind(error.into_panic().expect("the join error was checked as a panic"));
+            }
+            Ok(_) => std::panic::resume_unwind(Box::new("runtime is shutting down")),
             Err(error) => std::panic::resume_unwind(Box::new(error.to_string())),
         }
     }

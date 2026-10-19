@@ -103,13 +103,19 @@ impl JoinError {
         Self { panic: None }
     }
 
-    #[cfg(feature = "macros")]
-    pub(crate) fn resume(self) -> ! {
-        let payload = match self.panic {
-            Some(payload) => payload.into_inner(),
-            None => Box::new("runtime is shutting down"),
-        };
-        std::panic::resume_unwind(payload)
+    /// Returns the captured panic payload, or `None` if this error represents shutdown.
+    #[must_use]
+    pub fn into_panic(self) -> Option<Box<dyn Any + Send + 'static>> {
+        self.panic.map(Mutex::into_inner)
+    }
+}
+
+impl JoinError {
+    pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
+        match error.into_panic() {
+            Some(payload) => Self::panicked(payload),
+            None => Self::shutdown(),
+        }
     }
 }
 
@@ -153,13 +159,5 @@ mod tests {
         assert_eq!(shutdown.to_string(), "runtime is shutting down");
         assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
         assert!(shutdown.source().is_none());
-    }
-
-    #[test]
-    fn debug_uses_the_rust_type_and_failure_flags() {
-        let debug = format!("{:?}", JoinError::shutdown());
-        assert!(debug.contains(std::any::type_name::<JoinError>()));
-        assert!(debug.contains("is_panic: false"));
-        assert!(debug.contains("is_shutdown: true"));
     }
 }

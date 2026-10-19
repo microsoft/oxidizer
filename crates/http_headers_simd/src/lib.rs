@@ -34,6 +34,9 @@ mod dispatch;
 mod list;
 mod range;
 mod scalar;
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod test_support;
 mod uri;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]

@@ -886,6 +886,7 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
+    use crate::test_support::lane_bytes;
 
     #[test]
     #[cfg_attr(miri, ignore = "Bolero corpus replay requires filesystem access unavailable under Miri isolation")]
@@ -997,7 +998,7 @@ mod tests {
             });
     }
 
-    /// Puts every byte value in every lane of a token-list block.
+    /// Puts every byte value in every lane natively; Miri separates the axes.
     ///
     /// Each kernel classifies a lane into one of four roles, so a single
     /// misplaced range or compare shows up as one byte in one lane disagreeing
@@ -1009,9 +1010,9 @@ mod tests {
             return;
         }
         let sse42 = arch::is_x86_feature_detected!("sse4.2");
+        let mut block = [b'a'; 2 * WIDTH];
         for lane in 0..2 * WIDTH {
-            for byte in u8::MIN..=u8::MAX {
-                let mut block = [b'a'; 2 * WIDTH];
+            for byte in lane_bytes(block.len(), lane) {
                 block[lane] = byte;
                 for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {
                     let expected = crate::list::scan_token_list(&block, empty);
@@ -1028,6 +1029,7 @@ mod tests {
                     );
                 }
             }
+            block[lane] = b'a';
         }
     }
 
@@ -1037,14 +1039,15 @@ mod tests {
         if !arch::is_x86_feature_detected!("sse2") {
             return;
         }
+        let mut window = [b'0'; WINDOW];
         for lane in 0..WINDOW {
-            for byte in u8::MIN..=u8::MAX {
-                let mut window = [b'0'; WINDOW];
+            for byte in lane_bytes(window.len(), lane) {
                 window[lane] = byte;
                 // SAFETY: runtime detection above establishes SSE2 support.
                 let masks = unsafe { range_masks(&window) };
                 assert_eq!(masks, RangeMasks::scalar(&window), "byte {byte:#04x} lane {lane}");
             }
+            window[lane] = b'0';
         }
     }
 
@@ -1056,9 +1059,10 @@ mod tests {
         }
         let sse42 = arch::is_x86_feature_detected!("sse4.2");
         let ssse3 = arch::is_x86_feature_detected!("ssse3");
+        let mut base64_block = [b'A'; 2 * WIDTH];
+        let mut uri_block = [b'a'; 2 * WIDTH];
         for lane in 0..2 * WIDTH {
-            for byte in u8::MIN..=u8::MAX {
-                let mut base64_block = [b'A'; 2 * WIDTH];
+            for byte in lane_bytes(base64_block.len(), lane) {
                 base64_block[lane] = byte;
                 let expected_base64 = crate::base64::all_base64_alphabet(&base64_block);
                 assert_eq!(
@@ -1076,7 +1080,6 @@ mod tests {
                     "SSE4.2 base64 byte {byte:#04x} lane {lane}"
                 );
 
-                let mut uri_block = [b'a'; 2 * WIDTH];
                 uri_block[lane] = byte;
                 let expected_uri = crate::uri::simple_uri_tail(&uri_block, 0);
                 assert_eq!(
@@ -1102,6 +1105,8 @@ mod tests {
                     "SSE4.2 URI byte {byte:#04x} lane {lane}"
                 );
             }
+            base64_block[lane] = b'A';
+            uri_block[lane] = b'a';
         }
     }
 
