@@ -427,7 +427,7 @@ mod tests {
         // The wide alphabet covers every class, and the narrow one reaches the
         // lengths that hold two specifications and a separator between them.
         let wide_max = if cfg!(miri) { 3 } else { 5 };
-        let narrow_max = if cfg!(miri) { 7 } else { 8 };
+        let narrow_max = if cfg!(miri) { 6 } else { 8 };
         sweep(ALPHABET, 0..=wide_max);
         // Miri keeps the two-specification topology. The wide sweep and direct
         // grammar tests cover whitespace and digit classes; native runs retain

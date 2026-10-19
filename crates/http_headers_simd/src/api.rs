@@ -843,7 +843,8 @@ mod tests {
         let alphabet = b"0-, 1\t9";
         let mut line = Vec::new();
         for prefix in [&b"bytes="[..], b"b=", b"aaaaaaaaaaaaaaaabytes="] {
-            for length in 0..=4_usize {
+            let maximum_length = if cfg!(miri) { 3 } else { 4 };
+            for length in 0..=maximum_length {
                 for index in 0..alphabet.len().pow(u32::try_from(length).unwrap_or(0)) {
                     line.clear();
                     line.extend_from_slice(prefix);
@@ -870,6 +871,23 @@ mod tests {
     /// exercise those transitions at every nearby offset.
     #[test]
     fn token_list_scan_matches_scalar_across_block_boundaries() {
+        if cfg!(miri) {
+            for pattern in [
+                b"a".as_slice(),
+                b",".as_slice(),
+                b" ".as_slice(),
+                b"\t".as_slice(),
+                b"%".as_slice(),
+                b"a,".as_slice(),
+                b",a".as_slice(),
+                b"a\t,".as_slice(),
+                b" ,a".as_slice(),
+                b"%,a".as_slice(),
+            ] {
+                check_pattern_at_boundaries(pattern);
+            }
+            return;
+        }
         let alphabet = b"a,\t %";
         let mut pattern = Vec::new();
         slide_patterns(alphabet, 3, &mut pattern);
@@ -884,6 +902,9 @@ mod tests {
     #[test]
     fn token_list_tails_match_scalar_for_every_length_and_byte() {
         for length in 16..=33_usize {
+            if cfg!(miri) && !matches!(length, 17 | 31 | 33) {
+                continue;
+            }
             let mut input = vec![b'a'; length];
             for lane in 0..length {
                 for byte in lane_bytes(length, lane) {
@@ -912,7 +933,22 @@ mod tests {
         let alphabet = b"a,\t x";
         for prefix in [&b"abc, def, ghij"[..], &b"a,b,c,d,e,f,g,h,i,j,k,l"[..], &b"  a  ,  b  ,  c  "[..]] {
             let mut ending = Vec::new();
-            walk_endings(alphabet, 4, prefix, &mut ending);
+            walk_endings(alphabet, if cfg!(miri) { 3 } else { 4 }, prefix, &mut ending);
+        }
+    }
+
+    fn check_pattern_at_boundaries(pattern: &[u8]) {
+        for &fill in b"a, \t" {
+            for lead in [0, 15, 16, 17] {
+                let mut input = vec![fill; lead];
+                input.extend_from_slice(pattern);
+                input.resize(input.len() + 19, fill);
+                for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {
+                    let expected = list::oracle(&input, empty);
+                    assert_eq!(scan_token_list(&input, empty), expected, "{input:?}");
+                    assert_eq!(list::scan_token_list(&input, empty), expected, "{input:?}");
+                }
+            }
         }
     }
 
