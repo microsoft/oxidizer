@@ -48,7 +48,6 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 ctor = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 static_assertions = { workspace = true }
-tempfile = { workspace = true }
 testing_aids = { path = "../testing_aids", default-features = false }
 tick = { path = "../tick", default-features = false, features = ["test-util"] }
 uuid = { workspace = true, features = ["std", "v5"] }

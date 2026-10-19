@@ -81,10 +81,13 @@ impl PerfCounterProcessorBuilder {
     /// # Errors
     ///
     /// Returns a path-bearing I/O error or an explicit invalid-manifest error.
-    pub fn manifest_file(mut self, path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref();
+    pub fn manifest_file(self, path: impl AsRef<Path>) -> Result<Self, Error> {
+        self.manifest_file_with(path.as_ref(), |path| File::open(path))
+    }
+
+    fn manifest_file_with<R: Read>(mut self, path: &Path, open: impl FnOnce(&Path) -> std::io::Result<R>) -> Result<Self, Error> {
         let mut xml = String::new();
-        File::open(path)
+        open(path)
             .and_then(|file| file.take(MAX_MANIFEST_BYTES + 1).read_to_string(&mut xml))
             .map_err(|source| Error::from(ManifestRead::caused_by(path.to_path_buf(), source)))?;
         if xml.len() as u64 > MAX_MANIFEST_BYTES {
@@ -345,6 +348,8 @@ struct MetricTarget {
 mod tests {
     use std::any::TypeId;
     use std::borrow::Cow;
+    use std::cell::Cell;
+    use std::io::{Cursor, ErrorKind};
     use std::ops::ControlFlow;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe, catch_unwind};
     use std::time::SystemTime;
@@ -352,9 +357,141 @@ mod tests {
     use observed::interop::DynEvent;
     use observed::processing::{FieldVisitorFn, MetricReadError};
     use observed::{Sink, emit, event};
+    use ohno::ErrorExt as _;
     use tick::SimpleClock;
 
     use super::*;
+
+    const FILE_MANIFEST: &str = include_str!("../tests/test_data/ConsumerCounters.man");
+    const FILE_CATEGORY: &str = "Observed Windows consumer test <&\"'> 中文🦀";
+
+    struct CountedReader<'a> {
+        contents: Cursor<&'a [u8]>,
+        reads: &'a Cell<usize>,
+        bytes: &'a Cell<usize>,
+    }
+
+    impl Read for CountedReader<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.reads.set(self.reads.get() + 1);
+            let count = self.contents.read(buf)?;
+            self.bytes.set(self.bytes.get() + count);
+            Ok(count)
+        }
+    }
+
+    fn load_bytes(contents: &[u8]) -> Result<PerfCounterProcessorBuilder, Error> {
+        PerfCounterProcessor::builder().manifest_file_with(Path::new("supplied.man"), |_| Ok(Cursor::new(contents)))
+    }
+
+    #[test]
+    fn manifest_open_and_read_errors_preserve_the_path_and_original_cause() {
+        struct ReadFailure;
+        impl Read for ReadFailure {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(ErrorKind::PermissionDenied, "scripted read failure"))
+            }
+        }
+
+        let path = Path::new("supplied.man");
+        let open = PerfCounterProcessor::builder()
+            .manifest_file_with(path, |_| {
+                Err::<Cursor<&[u8]>, _>(std::io::Error::new(ErrorKind::NotFound, "scripted open failure"))
+            })
+            .unwrap_err();
+        let read = PerfCounterProcessor::builder()
+            .manifest_file_with(path, |_| Ok(ReadFailure))
+            .unwrap_err();
+        for (error, kind, message) in [
+            (open, ErrorKind::NotFound, "scripted open failure"),
+            (read, ErrorKind::PermissionDenied, "scripted read failure"),
+        ] {
+            assert_eq!(error.find_source::<std::io::Error>().unwrap().kind(), kind);
+            assert_eq!(
+                error.find_source::<ManifestRead>().unwrap().message(),
+                format!("cannot read counter manifest \"supplied.man\"\ncaused by: {message}")
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_is_opened_and_read_once_before_schema_preparation() {
+        let opens = Cell::new(0);
+        let reads = Cell::new(0);
+        let bytes = Cell::new(0);
+        let loaded = PerfCounterProcessor::builder()
+            .manifest_file_with(Path::new("supplied.man"), |path| {
+                assert_eq!(path, Path::new("supplied.man"));
+                opens.set(opens.get() + 1);
+                Ok(CountedReader {
+                    contents: Cursor::new(FILE_MANIFEST.as_bytes()),
+                    reads: &reads,
+                    bytes: &bytes,
+                })
+            })
+            .unwrap();
+        let initial_reads = reads.get();
+        assert!(initial_reads > 0);
+        let loaded = loaded
+            .category(FILE_CATEGORY)
+            .instance("loaded-once")
+            .bind_event::<RequestCompleted>();
+        let first = loaded.schema().unwrap();
+        assert_eq!(loaded.schema().unwrap(), first);
+        assert_eq!((opens.get(), reads.get(), bytes.get()), (1, initial_reads, FILE_MANIFEST.len()));
+    }
+
+    #[test]
+    fn malformed_xml_and_invalid_utf8_retain_their_specific_causes() {
+        let xml = load_bytes(b"<broken>").unwrap_err();
+        assert!(xml.find_source::<crate::error::configuration::ManifestSyntax>().is_some());
+        let utf8 = load_bytes(&[0xff]).unwrap_err();
+        assert_eq!(utf8.find_source::<std::io::Error>().unwrap().kind(), ErrorKind::InvalidData);
+        assert!(utf8.find_source::<ManifestRead>().is_some());
+    }
+
+    #[test]
+    fn valid_manifest_at_the_byte_limit_is_accepted_and_one_extra_byte_is_rejected() {
+        const LIMIT: usize = 1024 * 1024;
+        for size in [LIMIT - 1, LIMIT] {
+            let mut contents = FILE_MANIFEST.as_bytes().to_vec();
+            contents.resize(size, b' ');
+            let loaded = load_bytes(&contents)
+                .unwrap()
+                .category(FILE_CATEGORY)
+                .instance("boundary")
+                .bind_event::<RequestCompleted>();
+            assert_eq!(loaded.schema().unwrap().category, FILE_CATEGORY);
+        }
+        let mut contents = FILE_MANIFEST.as_bytes().to_vec();
+        contents.resize(LIMIT + 1, b' ');
+        let error = load_bytes(&contents).unwrap_err();
+        assert_eq!(
+            error.find_source::<ManifestDefinition>().unwrap().detail,
+            "manifest exceeds one MiB"
+        );
+    }
+
+    #[test]
+    fn oversized_manifest_read_stops_after_the_first_excess_byte() {
+        let contents = vec![b' '; 2 * 1024 * 1024];
+        let reads = Cell::new(0);
+        let bytes = Cell::new(0);
+        let error = PerfCounterProcessor::builder()
+            .manifest_file_with(Path::new("supplied.man"), |_| {
+                Ok(CountedReader {
+                    contents: Cursor::new(contents.as_slice()),
+                    reads: &reads,
+                    bytes: &bytes,
+                })
+            })
+            .unwrap_err();
+        assert_eq!(bytes.get(), 1024 * 1024 + 1);
+        assert_eq!(
+            error.find_source::<ManifestDefinition>().unwrap().detail,
+            "manifest exceeds one MiB"
+        );
+    }
 
     // Both types may retain arbitrary ohno sources; catching a panic requires
     // the caller to decide whether the surrounding operation can be recovered.

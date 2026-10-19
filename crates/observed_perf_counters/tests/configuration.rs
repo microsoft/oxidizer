@@ -3,12 +3,11 @@
 
 //! External Windows definitions and typed event binding validation.
 
-// Every scenario uses real file-system startup. Parsing and native-shaped
-// slot/lifetime checks remain covered by the library's isolated Miri suite.
+// Public startup reads a checked-in fixture. Injected reader, parsing, and
+// native-shaped lifetime checks run in the library's isolated Miri suite.
 #![cfg(not(miri))]
 
 use std::error::Error as _;
-use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 
@@ -17,10 +16,8 @@ use observed::processing::{FieldVisitorFn, MetricBindingError};
 use observed::{Event, event};
 use observed_perf_counters::{Error, PerfCounterProcessor, PerfCounterProcessorBuilder};
 use ohno::ErrorExt as _;
-use tempfile::NamedTempFile;
 
 const CATEGORY: &str = "Observed Windows consumer test <&\"'> 中文🦀";
-const MANIFEST: &str = include_str!("test_data/ConsumerCounters.man");
 
 testing_aids::init_tracing!();
 
@@ -217,64 +214,6 @@ fn two_events_cannot_accidentally_write_to_the_same_declared_counter() {
 }
 
 #[test]
-fn file_io_errors_preserve_the_path_and_original_cause() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("missing.man");
-    let error = PerfCounterProcessor::builder().manifest_file(&path).unwrap_err();
-    assert!(error.to_string().contains("missing.man"));
-    assert_eq!(error.find_source::<std::io::Error>().unwrap().kind(), std::io::ErrorKind::NotFound);
-}
-
-#[test]
-#[cfg_attr(
-    miri,
-    ignore = "native startup is covered natively; parser and mock provider lifetimes run under Miri"
-)]
-fn file_is_loaded_once_and_not_needed_after_initialization() {
-    let mut file = NamedTempFile::new().unwrap();
-    file.write_all(MANIFEST.as_bytes()).unwrap();
-    let loaded = PerfCounterProcessor::builder().manifest_file(file.path()).unwrap();
-    file.write_all(b"this does not modify the already parsed definitions").unwrap();
-    drop(file);
-    let result = loaded
-        .category(CATEGORY)
-        .instance("loaded-once")
-        .bind_event::<RequestCompleted>()
-        .build();
-    #[cfg(all(windows, target_pointer_width = "64"))]
-    result.unwrap();
-    #[cfg(not(all(windows, target_pointer_width = "64")))]
-    assert!(result.unwrap_err().is_unsupported_platform());
-}
-
-#[test]
-fn malformed_xml_invalid_utf8_and_oversized_files_are_not_accepted() {
-    for contents in [b"<broken>".as_slice(), &[0xff], &vec![b' '; 1024 * 1024 + 1]] {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(contents).unwrap();
-        PerfCounterProcessor::builder().manifest_file(file.path()).unwrap_err();
-    }
-}
-
-#[test]
-fn valid_xml_at_the_file_size_limit_is_accepted_but_one_extra_byte_is_rejected() {
-    const LIMIT: usize = 1024 * 1024;
-    for size in [LIMIT - 1, LIMIT, LIMIT + 1] {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(MANIFEST.as_bytes()).unwrap();
-        file.write_all(&vec![b' '; size - MANIFEST.len()]).unwrap();
-        let result = PerfCounterProcessor::builder().manifest_file(file.path());
-        if size <= LIMIT {
-            result.unwrap();
-        } else {
-            let error = result.unwrap_err();
-            assert!(error.is_invalid_configuration());
-            assert!(error.to_string().contains("manifest exceeds one MiB"));
-        }
-    }
-}
-
-#[test]
 fn public_types_are_send_and_sync() {
     fn assert_traits<T: Send + Sync>() {}
     assert_traits::<PerfCounterProcessor>();
@@ -326,8 +265,18 @@ fn unsupported_numeric_types_are_startup_errors() {
         #[unredacted]
         value: i64,
     }
-    for builder in [builder().bind_event::<FloatGauge>(), builder().bind_event::<SignedGauge>()] {
-        assert!(builder.build().unwrap_err().is_invalid_configuration());
+    for (builder, expected) in [
+        (
+            builder().bind_event::<FloatGauge>(),
+            "invalid performance-counter configuration: metric `Float` requires an unsigned counter or gauge, or a signed up/down counter (received Gauge/F64)",
+        ),
+        (
+            builder().bind_event::<SignedGauge>(),
+            "invalid performance-counter configuration: metric `Signed` requires an unsigned counter or gauge, or a signed up/down counter (received Gauge/I64)",
+        ),
+    ] {
+        let error = builder.build().unwrap_err();
+        assert_eq!(error.message().lines().next().unwrap(), expected);
     }
 }
 
