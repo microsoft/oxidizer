@@ -38,39 +38,25 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// the [`CycleOutcome`] returned from each call.
 ///
 /// The owner may, at any point (regardless of what any registered tasks are doing), initiate the
-/// shutdown process and drop the executor after the shutdown process has completed. Any active
-/// tasks are aborted and their futures dropped when shutdown starts. Any remaining [`TaskSet`]s
-/// become disconnected and will panic if an attempt is made to use them after shutdown starts.
+/// shutdown process. Any active tasks are aborted and their futures dropped when shutdown starts.
+/// Submissions through remaining [`TaskSet`]s resolve to [`JoinError`](crate::JoinError).
 ///
 /// # Shutdown process
 ///
-/// The executor must be gracefully shut down by the caller before it can be dropped:
+/// Graceful shutdown lets the owner observe when cancellation is complete:
 ///
 /// 1. Call [`begin_shutdown()`][Self::begin_shutdown] to start the shutdown process.
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
-/// 3. Drop the executor.
+/// 3. Drop the executor when convenient.
 ///
-/// The executor will only return [`CycleOutcome::Shutdown`] when none of its resources are
-/// referenced any more (e.g. all join handles have been dropped).
+/// Dropping the executor without this sequence is also safe and synchronously cancels remaining
+/// tasks. Retained join handles and task wakers own independent pooled metadata, so they may
+/// outlive the executor and report shutdown or become inert respectively.
 ///
-/// ## Troubleshooting shutdown failure
+/// # Process termination
 ///
-/// The executor will terminate the process if the shutdown process times out. This is typically
-/// a sign of a resource leak that prevented resource manager finalization.
-///
-/// Potential causes include:
-///
-/// * Some future awaited by a task failed to cancel an ongoing `await` operation when the future
-///   was dropped. This suggests a resource management defect in the future.
-/// * A [`JoinHandle`][1] remains alive somewhere with an independent lifetime (e.g. in
-///   a `thread_local!` variable). This suggests a resource management defect in whatever logic
-///   placed the [`JoinHandle`][1] there.
-///
-/// If the app is a debug build (`debug_assertions` is set) and `RUST_BACKTRACE=1` is defined,
-/// additional diagnostic information will be emitted to standard error stream when the
-/// timeout occurs, to help pinpoint what executor resources have not been cleaned up.
-///
-/// [1]: crate::JoinHandle
+/// Plain executor tasks terminate the process if their futures panic. Runtime integrations can
+/// register a remote result target that receives captured panics without unwinding the worker.
 #[derive(Debug)]
 pub struct Executor {
     core: Rc<ExecutorCore>,
@@ -95,6 +81,15 @@ impl Executor {
         TaskSet::new(&self.core)
     }
 
+    /// Returns whether the executor still owns any registered tasks.
+    ///
+    /// Completed tasks stop counting during the cycle that observes their completion. Join handles
+    /// and retained wakers do not count as tasks and may remain alive after this returns `false`.
+    #[must_use]
+    pub fn has_tasks(&self) -> bool {
+        self.core.has_tasks()
+    }
+
     /// Executes one processing cycle to progress registered tasks.
     ///
     /// More work may remain after a cycle completes. The return value will indicate whether the
@@ -115,23 +110,8 @@ impl Executor {
 
     /// Starts the executor shutdown process.
     ///
-    /// An executor shutdown may complete instantaneously or occur over many seconds, as it depends
-    /// on the release of shared resources that are not under the control of the executor. For
-    /// speedy shutdown, ensure that nothing is awaiting on the join handles of tasks registered
-    /// with the executor.
-    ///
-    /// The caller must keep regularly commanding executor cycle execution via
-    /// [`execute_cycle()`][1] until they receive [`CycleOutcome::Shutdown`], at which point
-    /// the executor is ready to be dropped. Dropping the executor before that point
-    /// is a programming error. This is a safety requirement enforced by
-    /// [`ExecutorBuilder::build()`][2].
-    ///
-    /// If the shutdown process takes too long, the executor will declare a timeout and terminate
-    /// the process on a call to [`execute_cycle()`][1]. This is a sign of a resource leak.
-    ///
-    /// If this happens in a debug build and `RUST_BACKTRACE=1` is defined in environment variables,
-    /// additional debug information is emitted to the standard error stream to help
-    /// you track down the leak.
+    /// The next [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`] after releasing cancelled
+    /// task storage. Retained join handles resolve independently and do not delay shutdown.
     ///
     /// This function is not safe to call in a reentrant manner - only the owner may
     /// call it in an exclusive context.
@@ -142,29 +122,144 @@ impl Executor {
     /// from within [`execute_cycle()`][1]).
     ///
     /// [1]: Self::execute_cycle
-    /// [2]: ExecutorBuilder::build
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     pub fn begin_shutdown(&self) {
         self.core.begin_shutdown();
     }
 }
 
+impl Drop for Executor {
+    fn drop(&mut self) {
+        self.core.owner_dropped();
+    }
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::future::poll_fn;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::future::{Ready, poll_fn, ready};
     use std::pin::Pin;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
-    use std::time::Duration;
 
     use static_assertions::assert_not_impl_any;
-    use testing_aids::{YieldFuture, assert_panic};
+    use testing_aids::YieldFuture;
 
     use super::*;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
-    use crate::{AWAKENED_CAPACITY, ShutdownTimeoutBehavior};
+    use crate::{AWAKENED_CAPACITY, JoinHandle, TaskOptions};
+
+    trait TestTaskSetExt {
+        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
+        where
+            F: IntoFuture<Output = R> + 'static,
+            R: 'static;
+    }
+
+    impl TestTaskSetExt for TaskSet {
+        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
+        where
+            F: IntoFuture<Output = R> + 'static,
+            R: 'static,
+        {
+            self.add(future, TaskOptions::default())
+        }
+    }
+
+    struct DropOwnerDuringConversion {
+        owner: Rc<RefCell<Option<Executor>>>,
+        tasks: TaskSet,
+        existing_dropped: Rc<Cell<bool>>,
+        nested_rejected: Rc<Cell<bool>>,
+    }
+
+    struct DropSignalFuture(Rc<Cell<bool>>);
+
+    struct DropOwnerOnPoll {
+        owner: Rc<RefCell<Option<Executor>>>,
+    }
+
+    impl Future for DropSignalFuture {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for DropSignalFuture {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    impl Future for DropOwnerOnPoll {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            drop(self.owner.borrow_mut().take());
+            Poll::Pending
+        }
+    }
+
+    impl IntoFuture for DropOwnerDuringConversion {
+        type Output = usize;
+        type IntoFuture = Ready<usize>;
+
+        fn into_future(self) -> Self::IntoFuture {
+            drop(self.owner.borrow_mut().take());
+            assert!(self.existing_dropped.get(), "owner drop must synchronously cancel existing tasks");
+            let mut nested = self.tasks.add_test(async { 42 });
+            let mut cx = Context::from_waker(Waker::noop());
+            self.nested_rejected.set(matches!(
+                Pin::new(&mut nested).poll(&mut cx),
+                Poll::Ready(Err(error)) if error.is_shutdown()
+            ));
+            ready(7)
+        }
+    }
+
+    #[test]
+    fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
+        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
+        let tasks = owner.borrow().as_ref().unwrap().tasks();
+        let existing_dropped = Rc::new(Cell::new(false));
+        let mut existing = tasks.add_test(DropSignalFuture(Rc::clone(&existing_dropped)));
+        let nested_rejected = Rc::new(Cell::new(false));
+
+        let mut outer = tasks.add_test(DropOwnerDuringConversion {
+            owner: Rc::clone(&owner),
+            tasks: tasks.clone(),
+            existing_dropped: Rc::clone(&existing_dropped),
+            nested_rejected: Rc::clone(&nested_rejected),
+        });
+
+        assert!(owner.borrow().is_none());
+        assert!(existing_dropped.get());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(Pin::new(&mut existing).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(Pin::new(&mut outer).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(nested_rejected.get());
+    }
+
+    #[test]
+    fn owner_drop_during_active_cycle_defers_cancellation_to_the_cycle() {
+        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
+        let executor_core = Rc::clone(&owner.borrow().as_ref().unwrap().core);
+        let mut task = owner
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .tasks()
+            .add_test(DropOwnerOnPoll { owner: Rc::clone(&owner) });
+
+        assert_eq!(executor_core.execute_cycle(), CycleOutcome::Shutdown);
+
+        assert!(owner.borrow().is_none());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+    }
 
     #[test]
     fn smoke_test() {
@@ -184,7 +279,7 @@ mod tests {
             }
         };
 
-        let mut join_handle = tasks.add(future);
+        let mut join_handle = tasks.add_test(future);
 
         // This task completes immediately, so we only need one executor cycle to complete it.
         //
@@ -204,7 +299,7 @@ mod tests {
         let mut cx = Context::from_waker(Waker::noop());
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
-        assert!(matches!(result, Poll::Ready(42)));
+        assert!(matches!(result, Poll::Ready(Ok(42))));
     }
 
     #[test]
@@ -227,8 +322,8 @@ mod tests {
         let future1 = async move { 42 };
         let future2 = async move { 43 };
 
-        let mut join_handle1 = tasks.add(future1);
-        let mut join_handle2 = tasks.add(future2);
+        let mut join_handle1 = tasks.add_test(future1);
+        let mut join_handle2 = tasks.add_test(future2);
 
         // Both tasks complete immediately, so we only need one executor cycle to complete them.
         //
@@ -246,8 +341,8 @@ mod tests {
         let result1 = Pin::new(&mut join_handle1).poll(&mut cx);
         let result2 = Pin::new(&mut join_handle2).poll(&mut cx);
 
-        assert!(matches!(result1, Poll::Ready(42)));
-        assert!(matches!(result2, Poll::Ready(43)));
+        assert!(matches!(result1, Poll::Ready(Ok(42))));
+        assert!(matches!(result2, Poll::Ready(Ok(43))));
     }
 
     #[test]
@@ -261,7 +356,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let wakes_self = future.wakes_self_on_next_poll();
 
-        let _join_handle = tasks.add(future);
+        let _join_handle = tasks.add_test(future);
 
         // Enable self-awakening.
         wakes_self.set(true);
@@ -304,8 +399,8 @@ mod tests {
         future1.on_poll(on_poll.clone());
         future2.on_poll(on_poll);
 
-        _ = tasks.add(future1);
-        _ = tasks.add(future2);
+        _ = tasks.add_test(future1);
+        _ = tasks.add_test(future2);
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -320,7 +415,7 @@ mod tests {
         let future_waker = future.waker();
         let future_complete = future.completes_on_next_poll();
 
-        let mut join_handle = tasks.add(future);
+        let mut join_handle = tasks.add_test(future);
 
         // The future should inactivate, leading to a Suspend outcome.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -335,7 +430,7 @@ mod tests {
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
         // The task must be completed.
-        assert!(matches!(result, Poll::Ready(())));
+        assert!(matches!(result, Poll::Ready(Ok(()))));
     }
 
     #[test]
@@ -356,11 +451,11 @@ mod tests {
             let future = TestSubjectFuture::new();
             future_wakers.push(future.waker());
             future_completes.push(future.completes_on_next_poll());
-            join_handles.push(tasks.add(future));
+            join_handles.push(tasks.add_test(future));
         }
 
         let inactive_future = TestSubjectFuture::new();
-        let mut inactive_join_handle = tasks.add(inactive_future);
+        let mut inactive_join_handle = tasks.add_test(inactive_future);
 
         // The futures should all inactivate, leading to a Suspend outcome.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -381,7 +476,7 @@ mod tests {
         // Every task should now have completed.
         for mut join_handle in join_handles {
             let result = Pin::new(&mut join_handle).poll(&mut cx);
-            assert!(matches!(result, Poll::Ready(())));
+            assert!(matches!(result, Poll::Ready(Ok(()))));
         }
 
         assert!(matches!(Pin::new(&mut inactive_join_handle).poll(&mut cx), Poll::Pending));
@@ -403,7 +498,7 @@ mod tests {
             }
         });
 
-        _ = tasks.add(future);
+        _ = tasks.add_test(future);
 
         // Task gets polled and then inactivates.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -443,14 +538,12 @@ mod tests {
 
         let drop_signal = Rc::new(Cell::new(false));
 
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
 
-        tasks.add(signal_setter);
+        tasks.add_test(signal_setter);
 
         assert!(!drop_signal.get());
 
@@ -463,34 +556,21 @@ mod tests {
 
     #[test]
     fn shutdown_without_tasks_is_immediate() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
 
         executor.begin_shutdown();
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    #[should_panic(expected = "shutdown timeout must be representable")]
-    fn unrepresentable_shutdown_timeout_panics_when_shutdown_begins() {
-        // SAFETY: The configured timeout intentionally prevents shutdown from beginning.
-        let executor = unsafe { Executor::builder().shutdown_timeout(Duration::MAX).build() };
-
-        executor.begin_shutdown();
     }
 
     #[test]
     fn shutdown_with_unreferenced_tasks_is_immediate() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         // We add the task but do not keep any references to its join handle.
         // This task has nothing holding on to its resources, so it can be cleaned up at any time.
-        tasks.add(TestSubjectFuture::new());
+        tasks.add_test(TestSubjectFuture::new());
 
         executor.begin_shutdown();
 
@@ -498,68 +578,43 @@ mod tests {
     }
 
     #[test]
-    fn join_handle_delays_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+    fn join_handle_reports_shutdown_without_delaying_shutdown() {
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
-        // We add the task and keep a reference to its join handle. This will keep the executor
-        // alive until we drop the join handle.
-        let join_handle = tasks.add(TestSubjectFuture::new());
+        let mut join_handle = tasks.add_test(TestSubjectFuture::new());
 
         executor.begin_shutdown();
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        drop(join_handle);
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    fn join_handle_poll_panics_during_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
-        let tasks = executor.tasks();
-
-        // We add the task and keep a reference to its join handle. This will keep the executor
-        // alive until we drop the join handle. The join handle itself will now start to panic,
-        // however, as it is impossible for the task to progress to completion.
-        let mut join_handle = tasks.add(TestSubjectFuture::new());
-
-        executor.begin_shutdown();
-
         let mut cx = Context::from_waker(Waker::noop());
+        let result = Pin::new(&mut join_handle).poll(&mut cx);
 
-        assert_panic!(Pin::new(&mut join_handle).poll(&mut cx));
-
-        // This returns Shutdown because a poll that panics still consumes the join handle and
-        // releases resources (it is just a different form of completion, think of this panic as
-        // just being a poll().unwrap()).
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
-    fn panic_if_enqueue_after_shutdown() {
-        // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
-        // as required by the Executor.
-        let executor = unsafe { Executor::builder().build() };
+    fn enqueue_after_shutdown_reports_shutdown() {
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         executor.begin_shutdown();
 
-        let future = async { 42 };
-        assert_panic!(tasks.add(future));
+        let mut handle = tasks.add_test(async { 42 });
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
-    fn panic_if_dirty_drop() {
-        // SAFETY: We intentionally fail to uphold the safety promises and skip graceful shutdown.
-        let executor = unsafe { Executor::builder().build() };
+    fn direct_drop_cancels_tasks_safely() {
+        let executor = Executor::builder().build();
+        let mut handle = executor.tasks().add_test(std::future::pending::<()>());
 
-        assert_panic!(drop(executor));
+        drop(executor);
+
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 
     #[test]
@@ -574,7 +629,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
 
-        tasks.add(future);
+        tasks.add_test(future);
 
         // It just inactivates immediately after storing the waker, so nothing else to do.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -600,7 +655,7 @@ mod tests {
             yield_future.await;
         };
 
-        _ = tasks.add(future);
+        _ = tasks.add_test(future);
 
         // The task is polled, which suspends due to the inner future's `Pending`.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
@@ -623,13 +678,13 @@ mod tests {
             let tasks = tasks.clone();
 
             async move {
-                tasks.add(async move {
+                tasks.add_test(async move {
                     inner_task_completed.set(true);
                 });
             }
         };
 
-        tasks.add(future);
+        tasks.add_test(future);
 
         // The outer task spawns a new task and completes. We get `Continue` because
         // the executor can see it has a new task enqueued, which it wants to process.
@@ -655,9 +710,9 @@ mod tests {
             for index in 0..2 {
                 let tasks_for_child = tasks.clone();
                 let polls = Rc::clone(&polls);
-                tasks.add(async move {
+                tasks.add_test(async move {
                     polls.borrow_mut().push(batch * 4 + index);
-                    tasks_for_child.add(async move {
+                    tasks_for_child.add_test(async move {
                         polls.borrow_mut().push(batch * 4 + index + 2);
                     });
                 });
@@ -691,7 +746,7 @@ mod tests {
             let polls = Rc::clone(&polls);
             move |_| polls.borrow_mut().push(2)
         });
-        tasks.add(future);
+        tasks.add_test(future);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         polls.borrow_mut().clear();
 
@@ -699,7 +754,7 @@ mod tests {
         completes.set(true);
         for index in 0..2 {
             let polls = Rc::clone(&polls);
-            tasks.add(async move {
+            tasks.add_test(async move {
                 polls.borrow_mut().push(index);
             });
         }
@@ -711,12 +766,11 @@ mod tests {
     }
 
     #[test]
-    fn completed_task_waker_survives_until_released() {
-        // SAFETY: The retained waker is released before the final shutdown cycle.
-        let executor = unsafe { Executor::builder().build() };
+    fn completed_task_waker_is_noop_after_executor_shutdown() {
+        let executor = Executor::builder().build();
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
-        executor.tasks().add(poll_fn({
+        executor.tasks().add_test(poll_fn({
             let waker = Rc::clone(&waker);
             let polls = Rc::clone(&polls);
             move |cx| {
@@ -728,13 +782,11 @@ mod tests {
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         executor.begin_shutdown();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
 
         waker.borrow().as_ref().unwrap().wake_by_ref();
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        drop(waker);
-
-        assert_eq!((executor.execute_cycle(), polls.get()), (CycleOutcome::Shutdown, 1));
+        assert_eq!(polls.get(), 1);
     }
 
     #[test]
@@ -749,7 +801,7 @@ mod tests {
                 let polls = Rc::clone(&polls);
                 move |_| polls.borrow_mut().push(index)
             });
-            executor.tasks().add(future);
+            executor.tasks().add_test(future);
         }
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -772,7 +824,7 @@ mod tests {
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
         let completes = future.completes_on_next_poll();
-        let mut handle = executor.tasks().add(future);
+        let mut handle = executor.tasks().add_test(future);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
         let waker = future_waker.borrow().as_ref().unwrap().clone();
@@ -787,56 +839,17 @@ mod tests {
 
         let outcome = executor.execute_cycle();
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(())));
+        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(Ok(()))));
     }
 
     #[test]
-    // The difficulty here is that while we could easily assert_panic!() the timeout, this test
-    // may also panic for other reasons after the timeout because the timeout is essentially a
-    // declaration of failure to clean up - the dirty state is invalid and may result in further
-    // panics or even memory safety violations in the test runner. This may break in the future,
-    // so be ready to adjust or remove as needed when additional complexity makes it impractical.
-    #[should_panic]
-    fn shutdown_times_out_with_leaked_join_handle() {
-        // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
-        let executor = unsafe {
-            Executor::builder()
-                // No delay allowed - shutdown must either succeed or fail immediately.
-                .shutdown_timeout(Duration::ZERO)
-                // Override the default behavior for testing purposes.
-                .shutdown_timeout_behavior(ShutdownTimeoutBehavior::Panic)
-                .build()
-        };
-        let tasks = executor.tasks();
-
-        let leaked_join_handle = tasks.add(async {});
-
-        executor.begin_shutdown();
-
-        // We expect this to panic.
-        _ = executor.execute_cycle();
-
-        // We only drop it after shutdown completes, which is a leak because shutdown
-        // will never complete like this.
-        drop(leaked_join_handle);
-    }
-
-    #[test]
-    fn shutdown_timeout_then_completes_after_waiter_release() {
-        // SAFETY: We expect to intentionally panic on shutdown due to failed cleanup.
-        let executor = unsafe {
-            Executor::builder()
-                // No delay allowed - shutdown must either succeed or fail immediately.
-                .shutdown_timeout(Duration::ZERO)
-                // Override the default behavior for testing purposes.
-                .shutdown_timeout_behavior(ShutdownTimeoutBehavior::Panic)
-                .build()
-        };
+    fn retained_waiter_does_not_delay_shutdown() {
+        let executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let retained_waiter = Rc::new(RefCell::new(None));
 
-        tasks.add({
+        let task = tasks.add_test({
             let retained_waiter = Rc::clone(&retained_waiter);
 
             poll_fn(move |cx| {
@@ -845,17 +858,15 @@ mod tests {
             })
         });
 
-        _ = executor.execute_cycle();
-
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        let retained_waiter = retained_waiter.borrow_mut().take().unwrap();
+        drop(task);
         executor.begin_shutdown();
-
-        let panic = catch_unwind(AssertUnwindSafe(|| executor.execute_cycle())).unwrap_err();
-        assert_eq!(panic.downcast_ref::<&str>(), Some(&"executor shutdown timed out"));
-
-        // Releasing the retained waiter lets shutdown complete and keeps this test from leaking
-        // the task when the expected panic unwinds.
-        drop(retained_waiter);
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        drop(executor);
+
+        retained_waiter.wake_by_ref();
+        retained_waiter.wake();
     }
 
     #[test]

@@ -172,4 +172,6 @@ exclude_re = [
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:52: replace \|\| with && in reject_crossing_polls$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:215:43: replace == with != in reject_crossing_polls$',
     'crates/seismograph_cli/src/commands/monitor/task_events/attribution.rs:\d+:\d+: replace \+= with \*= in (reject_crossing_polls|reject_concurrent_task_polls|assign)$',
+    # The bits of a composite's child Sinks never overlap, so OR and XOR are identical.
+    'crates/observed/src/sink/core.rs:\d+:\d+: replace \| with \^ in Sink::emit_impl$',
 ]

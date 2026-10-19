@@ -215,11 +215,10 @@ fn consumer_reads_exact_integer_values_from_concurrent_emitters() {
     let disabled = Query::open(13, instance);
     let active = Query::open(2, instance);
     let depth = Query::open(53, instance);
-    let sink = Sink::new(
-        "app",
-        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-        SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("app")
+        .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     assert_eq!(query.value(), 0);
     thread::scope(|scope| {
         for _ in 0..4 {
@@ -308,11 +307,10 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
             .build()
             .unwrap(),
     );
-    let sink = Sink::new(
-        "app",
-        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-        SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("app")
+        .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     emit!(sink, Malformed);
     assert!(
         processor

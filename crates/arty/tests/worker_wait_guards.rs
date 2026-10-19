@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public shutdown guards must prevent an async worker from waiting on itself.
+//! Cancellation destructors must retain the public async-worker wait guard.
 
 #![cfg(feature = "rt")]
 #![cfg(test)]
@@ -10,56 +10,72 @@ mod panic_support;
 
 mod support;
 
+use std::cell::RefCell;
 use std::future::pending;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
-use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
 
+thread_local! {
+    static BLOCKING_THREAD_EXIT: RefCell<Option<BlockingThreadExit>> = const { RefCell::new(None) };
+}
+
+struct BlockingThreadExit(mpsc::Sender<()>);
+
+impl Drop for BlockingThreadExit {
+    fn drop(&mut self) {
+        self.0.send(()).unwrap();
+    }
+}
+
+/// Exercises the wait guard while cancellation destroys a task on its worker.
+struct Probe {
+    block_on_runtime: Arc<Runtime>,
+    outcome: mpsc::Sender<bool>,
+}
+
+impl Drop for Probe {
+    fn drop(&mut self) {
+        let block_on_rejected = self.block_on_runtime.scheduler().block_on(async |_| ()).is_err();
+        self.outcome.send(block_on_rejected).unwrap();
+    }
+}
+
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
-)]
-fn async_worker_stop_returns_without_self_joining() {
+fn stop_waits_for_blocking_worker_thread_teardown() {
     let runtime = runtime();
-    let scheduler = runtime
+    let (exited, received) = mpsc::channel();
+
+    runtime
         .scheduler()
-        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+        .spawn_blocking(move || {
+            BLOCKING_THREAD_EXIT.with(|exit| {
+                assert!(exit.replace(Some(BlockingThreadExit(exited))).is_none());
+            });
+        })
         .join()
         .unwrap();
-    let result = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
-    assert!(result.is_err());
+
+    runtime.stop().unwrap();
+    received.try_recv().unwrap();
 }
 
 #[test]
 fn cancellation_destructors_remain_worker_guarded() {
-    struct Probe {
-        block_on_runtime: Runtime,
-        stop_runtime: Option<Runtime>,
-        outcomes: mpsc::Sender<(bool, bool)>,
-    }
-
-    impl Drop for Probe {
-        fn drop(&mut self) {
-            let block_on_rejected = self.block_on_runtime.scheduler().block_on(async |_| ()).is_err();
-            let stop_rejected = self.stop_runtime.take().unwrap().stop().is_err();
-            self.outcomes.send((block_on_rejected, stop_rejected)).unwrap();
-        }
-    }
-
     let source = runtime();
-    let (outcomes, received) = mpsc::channel();
+    // Keep the owner off the worker so the test can join it after cancellation.
+    // Consuming stop guards need the private join capability tested in runtime::handle.
+    let block_on_runtime = Arc::new(runtime());
+    let (outcome, received) = mpsc::channel();
     let pending_task = source.scheduler().spawn_anywhere(
         Unaware(Probe {
-            block_on_runtime: runtime(),
-            stop_runtime: Some(runtime()),
-            outcomes,
+            block_on_runtime: Arc::clone(&block_on_runtime),
+            outcome,
         }),
         |_, Unaware(probe)| async move {
             let _probe = probe;
@@ -68,6 +84,7 @@ fn cancellation_destructors_remain_worker_guarded() {
     );
 
     source.stop().unwrap();
-    assert_eq!(received.recv_timeout(TEST_TIMEOUT).unwrap(), (true, true));
+    Arc::try_unwrap(block_on_runtime).unwrap().stop().unwrap();
+    assert!(received.try_recv().unwrap());
     assert!(pending_task.join().unwrap_err().is_shutdown());
 }

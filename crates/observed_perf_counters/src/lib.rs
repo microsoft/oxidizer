@@ -43,7 +43,10 @@
 //!
 //! // Application startup uses the identities from the supplied definition.
 //! let processor = Arc::into_std_arc(Arc::new(builder.build()?));
-//! let sink = Sink::new("app", vec![processor], SimpleClock::new_system());
+//! let sink = Sink::builder("app")
+//!     .processors(vec![processor])
+//!     .clock(SimpleClock::new_system())
+//!     .build();
 //! emit!(sink, RequestCompleted { bytes_sent: 4096 });
 //! # Ok(())
 //! # }
@@ -130,7 +133,7 @@
 //! snapshot or returns a retryable busy response. Invalid callback state freezes
 //! snapshots until restart and surfaces through `flush`; emission still records.
 //!
-//! The conversion to a standard `Arc` above matches the `Sink::new` API boundary.
+//! The conversion to a standard `Arc` above matches the sink builder's processor boundary.
 //! Native state is local to one executable or library image; never unload an
 //! image with a live provider.
 //!

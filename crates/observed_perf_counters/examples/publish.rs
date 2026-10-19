@@ -52,11 +52,10 @@ fn main() -> Result<(), ohno::AppError> {
         .bind_event::<ActiveRequests>()
         .bind_event::<QueueDepth>()
         .build()?;
-    let sink = Sink::new(
-        "app",
-        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))],
-        SimpleClock::new_system(),
-    );
+    let sink = Sink::builder("app")
+        .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))])
+        .clock(SimpleClock::new_system())
+        .build();
     emit!(sink, ActiveRequests { delta: 1 });
     emit!(sink, RequestCompleted { bytes_sent: 1024 });
     emit!(sink, RequestCompleted { bytes_sent: 2048 });

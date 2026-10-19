@@ -10,9 +10,13 @@
 //! thread-local capture with [`Capture`] for unit tests, and the process-global
 //! [`write_to_stdout_and_buffer`] bridge for `#[serial]` integration tests.
 //!
+//! Silent tracing still evaluates field expressions and formats events and span
+//! fields synchronously, including during mutation testing. Only output is discarded.
+//!
 //! See `docs/tracing-tests.md` for the full design and rules.
 
 mod capture;
+mod format;
 mod output;
 
 pub use capture::*;

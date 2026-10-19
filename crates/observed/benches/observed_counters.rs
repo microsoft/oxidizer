@@ -53,7 +53,10 @@ fn counters(c: &mut Criterion) {
     bindings
         .bind_event::<RequestCompleted>(|_| Arc::clone(&counter))
         .expect("the event declares one unsigned counter and a typed identity");
-    let sink = Sink::new("counters", vec![Arc::new(Processor { bindings })], SimpleClock::new_system());
+    let sink = Sink::builder("counters")
+        .processors(vec![Arc::new(Processor { bindings })])
+        .clock(SimpleClock::new_system())
+        .build();
     // Both cases use the same arbitrary nonzero increment; its magnitude is not a workload model.
     let increment = 4096_u32;
     let mut group = c.benchmark_group("observed_counters/record");

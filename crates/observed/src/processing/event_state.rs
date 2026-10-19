@@ -36,7 +36,7 @@ impl<'a> IntermediateEvent<'a, fn() -> NoopEvent> {
 }
 
 impl<'a, T: Event, F: FnOnce() -> T> IntermediateEvent<'a, F> {
-    /// Returns the event description for the pre-construction interest check.
+    /// Returns the event description without building the event.
     ///
     /// For typed variants this is the static `T::DESCRIPTION` (no allocation).
     /// For dynamic variants this delegates to `DynEvent::description()`.
@@ -63,13 +63,11 @@ impl<'a, T: Event, F: FnOnce() -> T> IntermediateEvent<'a, F> {
 /// a single [`Sink::emit`](crate::Sink::emit) entry point.
 ///
 /// - **Typed** variant (`NotEvaluated`) carries a concrete `T: Event`
-///   and uses `T::DESCRIPTION` for the pre-construction interest check.
+///   and takes its description from `T::DESCRIPTION`.
 /// - **Dynamic** variant (`Dyn`) uses `NoopEvent` as the `T` parameter and
 ///   obtains the description from the `&dyn DynEvent` at runtime.
 enum Inner<'a, F> {
-    /// Lazy typed event - transitions to `ReadyEvent::Evaluated` via
-    /// [`evaluate`](IntermediateEvent::evaluate) only if at least one processor is interested in
-    /// `T::DESCRIPTION`.
+    /// Lazy typed event, built by [`evaluate`](IntermediateEvent::evaluate).
     NotEvaluated(F, SourceLocation),
     /// Pre-constructed dynamic event reference.
     Dyn(&'a dyn DynEvent),

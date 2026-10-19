@@ -111,7 +111,10 @@ impl EventProcessor for Processor {
 }
 
 fn sink(bindings: MetricBindings<Arc<AtomicU64>>) -> Sink {
-    Sink::new("counters", vec![Arc::new(Processor { bindings })], SimpleClock::new_frozen())
+    Sink::builder("counters")
+        .processors(vec![Arc::new(Processor { bindings })])
+        .clock(SimpleClock::new_frozen())
+        .build()
 }
 
 #[test]
@@ -548,7 +551,10 @@ fn missing_numeric_field_visits_are_reported() {
     }
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<MissingSlot>(|_| ()).unwrap();
-    let sink = Sink::new("inspect", vec![Arc::new(Inspect(bindings))], SimpleClock::new_frozen());
+    let sink = Sink::builder("inspect")
+        .processors(vec![Arc::new(Inspect(bindings))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     emit!(sink, MissingSlot);
 }
 
@@ -732,11 +738,10 @@ fn legacy_field_processors_and_bound_counters_receive_the_same_event() {
     let legacy = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<AnotherRequest>(|_| Arc::clone(&bound)).unwrap();
-    let sink = Sink::new(
-        "mixed",
-        vec![Arc::new(Processor { bindings }), Arc::new(Legacy(Arc::clone(&legacy)))],
-        SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("mixed")
+        .processors(vec![Arc::new(Processor { bindings }), Arc::new(Legacy(Arc::clone(&legacy)))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     emit!(sink, AnotherRequest { bytes_sent: 123 });
     assert_eq!((bound.load(Ordering::Relaxed), legacy.load(Ordering::Relaxed)), (123, 123));
 }
@@ -850,11 +855,10 @@ fn visitor_recording_preserves_signed_deltas_gauges_and_float_observations() {
             next
         })
         .unwrap();
-    let sink = Sink::new(
-        "numeric",
-        vec![Arc::new(Capture(bindings, Arc::clone(&values)))],
-        SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("numeric")
+        .processors(vec![Arc::new(Capture(bindings, Arc::clone(&values)))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     emit!(
         sink,
         NumericKinds {
@@ -942,7 +946,10 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
     }
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<WrongType>(|_| ()).unwrap();
-    let sink = Sink::new("wrong.type", vec![Arc::new(Inspect(bindings))], SimpleClock::new_frozen());
+    let sink = Sink::builder("wrong.type")
+        .processors(vec![Arc::new(Inspect(bindings))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     emit!(sink, WrongType);
 }
 

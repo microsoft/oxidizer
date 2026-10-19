@@ -19,7 +19,7 @@ This crate provides the `fakeable` attribute macro that can be applied to struct
 and their impl blocks to automatically generate a wrapper structure that can switch
 between real and fake implementations at runtime. The fake implementation is only
 compiled when the specified feature flag (default: “test-util”) is enabled or during
-test builds.
+unit test builds. Set `fakes_feature = false` for unit tests only.
 
 ## Stability
 

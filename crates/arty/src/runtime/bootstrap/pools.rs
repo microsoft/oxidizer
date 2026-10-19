@@ -7,17 +7,17 @@ use crate::runtime::blocking_worker::BlockingPool;
 
 /// Resolves whether workers share their blocking-task pool.
 #[derive(Debug, Clone)]
-pub(in crate::runtime) enum BlockingPools {
+pub(crate) enum BlockingPools {
     Shared(BlockingPool),
     PerWorker(Option<NonZeroUsize>),
 }
 
 impl BlockingPools {
-    pub(in crate::runtime) const fn per_worker(max_workers: Option<NonZeroUsize>) -> Self {
+    pub(crate) const fn per_worker(max_workers: Option<NonZeroUsize>) -> Self {
         Self::PerWorker(max_workers)
     }
 
-    pub(in crate::runtime) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
+    pub(crate) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
         Self::Shared(BlockingPool::new_with_mode(max_workers, "shared"))
     }
 

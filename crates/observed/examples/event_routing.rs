@@ -37,9 +37,8 @@ fn main() {
     let metric_events: Arc<Mutex<Vec<String>>> = Arc::default();
     let audit_events: Arc<Mutex<Vec<String>>> = Arc::default();
 
-    let sink = Sink::new(
-        "event_routing",
-        vec![
+    let sink = Sink::builder("event_routing")
+        .processors(vec![
             Arc::new(LogProcessor {
                 events: Arc::clone(&log_events),
             }) as Arc<dyn EventProcessor>,
@@ -51,9 +50,8 @@ fn main() {
                 allowed_names: &["internal.queue_depth"],
                 events: Arc::clone(&audit_events),
             }),
-        ],
-        tick::SimpleClock::new_system(),
-    );
+        ])
+        .build();
 
     // --- Emit events ---
 

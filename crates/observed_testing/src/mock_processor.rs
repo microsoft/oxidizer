@@ -197,11 +197,10 @@ impl CapturedEvent {
 /// static ID: SinkId = SinkId::new("mock_test");
 ///
 /// let processor = MockProcessor::new();
-/// let sink = Sink::new(
-///     ID,
-///     vec![std::sync::Arc::new(processor.clone())],
-///     tick::SimpleClock::new_frozen(),
-/// );
+/// let sink = Sink::builder(ID)
+///     .clock(tick::SimpleClock::new_frozen())
+///     .processors(vec![std::sync::Arc::new(processor.clone())])
+///     .build();
 ///
 /// # use observed::event;
 /// # #[event("test.event")]

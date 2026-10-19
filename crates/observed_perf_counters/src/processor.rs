@@ -463,11 +463,10 @@ mod tests {
     }
 
     fn test_sink(processor: &Arc<PerfCounterProcessor>) -> Sink {
-        Sink::new(
-            "integers",
-            vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(processor))],
-            SimpleClock::new_frozen(),
-        )
+        Sink::builder("integers")
+            .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(processor))])
+            .clock(SimpleClock::new_frozen())
+            .build()
     }
 
     #[test]
@@ -973,11 +972,10 @@ mod tests {
                 .bind_event::<RequestCompleted>()
                 .bind_event::<HugeIncrement>(),
         ));
-        let sink = Sink::new(
-            "app",
-            vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))],
-            SimpleClock::new_frozen(),
-        );
+        let sink = Sink::builder("app")
+            .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::clone(&processor))])
+            .clock(SimpleClock::new_frozen())
+            .build();
         // Miri retains concurrent emission and publication with less repeated work.
         let iterations = if cfg!(miri) { 8_u64 } else { 1000 };
         std::thread::scope(|scope| {

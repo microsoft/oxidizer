@@ -16,6 +16,9 @@ testing_aids::init_tracing!();
 
 mod support;
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 #[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
@@ -24,6 +27,7 @@ use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 use support::JoinHandleExt as _;
 #[cfg(all(debug_assertions, not(miri)))]
 use thread_aware::ThreadAware;
+use thread_aware::Unaware;
 
 const PROCESSORS: usize = 2;
 const TASKS: usize = 5;
@@ -34,6 +38,39 @@ fn events_named<'a>(events: &'a [CapturedEvent], name: &str) -> Vec<&'a Captured
 
 fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
     event.dimensions().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
+fn poll_count(event: &CapturedEvent) -> f64 {
+    event
+        .field_metrics()
+        .iter()
+        .find(|metric| metric.field_key() == "polls")
+        .expect("task terminal events include a poll-count histogram")
+        .value()
+}
+
+struct CancellationPanicFuture {
+    started: Option<std::sync::mpsc::Sender<()>>,
+}
+
+impl Future for CancellationPanicFuture {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.started
+            .take()
+            .expect("the cancellation probe is polled once")
+            .send(())
+            .expect("the cancellation test keeps its receiver alive while polling");
+        Poll::Pending
+    }
+}
+
+impl Drop for CancellationPanicFuture {
+    #[expect(clippy::panic, reason = "this test injects a destructor panic to verify telemetry")]
+    fn drop(&mut self) {
+        panic!("intentional cancellation destructor panic for telemetry test");
+    }
 }
 
 #[test]
@@ -263,6 +300,28 @@ fn spawned_task_emits_spawned_and_completed() {
 }
 
 #[test]
+fn same_worker_spawn_reports_same_thread_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.scheduler().spawn(async |_| {}).await.unwrap();
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    let events = processor.events();
+    assert!(
+        events_named(&events, "arty.rt.task.spawned")
+            .iter()
+            .any(|event| dimension(event, "placement") == Some("same_thread".into()))
+    );
+}
+
+#[test]
 fn panicking_task_emits_panicked_event() {
     let (sink, processor) = test_emitter(TEST_ID);
 
@@ -282,6 +341,88 @@ fn panicking_task_emits_panicked_event() {
     let events = processor.events();
     let panicked = events_named(&events, "arty.rt.task.panicked");
     assert_eq!(panicked.len(), 1);
+}
+
+#[test]
+fn successful_multi_poll_task_reports_aggregate_poll_count() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .spawn_anywhere((), |_, ()| async {
+            let mut remaining = 3;
+            std::future::poll_fn(move |cx| {
+                remaining -= 1;
+                if remaining == 0 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+        })
+        .join()
+        .unwrap();
+    runtime.stop().unwrap();
+
+    assert!(
+        events_named(&processor.events(), "arty.rt.task.succeeded")
+            .into_iter()
+            .any(|event| (poll_count(event) - 3.0).abs() < f64::EPSILON)
+    );
+}
+
+#[test]
+fn panicking_multi_poll_task_reports_aggregate_poll_count() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    let error = runtime
+        .scheduler()
+        .spawn_anywhere((), |_, ()| async {
+            let mut remaining = 3;
+            std::future::poll_fn(move |cx| -> Poll<()> {
+                remaining -= 1;
+                assert!(remaining != 0, "intentional multi-poll panic for telemetry test");
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            })
+            .await;
+        })
+        .join()
+        .unwrap_err();
+    assert!(error.is_panic());
+    runtime.stop().unwrap();
+
+    assert!(
+        events_named(&processor.events(), "arty.rt.task.panicked")
+            .into_iter()
+            .any(|event| (poll_count(event) - 3.0).abs() < f64::EPSILON)
+    );
+}
+
+#[test]
+fn cancellation_destructor_panic_emits_panicked_event() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let handle = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(started_tx), |_, Unaware(started)| CancellationPanicFuture {
+            started: Some(started),
+        });
+    started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+
+    runtime.stop().unwrap();
+
+    assert!(handle.join().unwrap_err().is_shutdown());
+    assert!(
+        events_named(&processor.events(), "arty.rt.task.panicked")
+            .into_iter()
+            .any(|event| (poll_count(event) - 1.0).abs() < f64::EPSILON)
+    );
 }
 
 #[test]

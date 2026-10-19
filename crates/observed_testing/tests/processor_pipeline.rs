@@ -17,7 +17,9 @@ use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use observed::{Severity, Sink, emit, event};
+use observed::metadata::EventDescription;
+use observed::processing::{EventProcessor, EventView};
+use observed::{FlushError, Severity, Sink, emit, event};
 use observed_testing::events::ProbeEvent;
 use observed_testing::types::{PublicBool, PublicI64, PublicString};
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID};
@@ -46,7 +48,10 @@ fn severity_filter_drops_low_severity_events() {
     }
 
     let processor = MockProcessor::with_filter(|desc| desc.log().is_some_and(|l| l.severity() >= Severity::Warn));
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     // Info-level -> dropped by filter
     emit!(
@@ -76,7 +81,10 @@ fn severity_filter_drops_low_severity_events() {
 #[test]
 fn uninterested_processor_receives_nothing() {
     let processor = MockProcessor::with_filter(|_| false);
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -93,7 +101,10 @@ fn uninterested_processor_receives_nothing() {
 #[test]
 fn flushing_a_failing_processor_reports_it_and_keeps_the_events() {
     let processor = MockProcessor::with_flush_error("mock", "exporter offline");
-    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
 
     emit!(sink, AuthFailed { attempts: PublicI64(3) });
 
@@ -109,11 +120,10 @@ fn multiple_processors_receive_events_independently() {
     let all_processor = MockProcessor::new();
     let warn_processor = MockProcessor::with_filter(|desc| desc.log().is_some_and(|l| l.severity() >= Severity::Warn));
 
-    let sink = Sink::new(
-        "test",
-        vec![Arc::new(all_processor.clone()), Arc::new(warn_processor.clone())],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(all_processor.clone()), Arc::new(warn_processor.clone())])
+        .build();
 
     emit!(
         sink,
@@ -137,9 +147,15 @@ fn composite_fans_out_to_each_child() {
     let base_processor = MockProcessor::new();
     let extra_processor = MockProcessor::new();
 
-    let base = Sink::new("test", vec![Arc::new(base_processor.clone())], tick::SimpleClock::new_frozen());
+    let base = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(base_processor.clone())])
+        .build();
 
-    let extra = Sink::new("test", vec![Arc::new(extra_processor.clone())], tick::SimpleClock::new_frozen());
+    let extra = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(extra_processor.clone())])
+        .build();
 
     let composed = Sink::composite([base.clone(), extra]);
 
@@ -208,11 +224,10 @@ fn lazy_construction() {
 
     // All processors reject via is_interested - closure should NOT be called.
     let rejected = MockProcessor::with_filter(|_| false);
-    let sink = Sink::new(
-        "test",
-        vec![Arc::new(rejected.clone()), Arc::new(rejected.clone())],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(rejected.clone()), Arc::new(rejected.clone())])
+        .build();
 
     emit!(
         sink,
@@ -231,11 +246,10 @@ fn lazy_construction() {
     // Multiple interested processors - closure called exactly once, both receive event.
     let processor_a = MockProcessor::new();
     let processor_b = MockProcessor::new();
-    let sink = Sink::new(
-        "test",
-        vec![Arc::new(processor_a.clone()), Arc::new(processor_b.clone())],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor_a.clone()), Arc::new(processor_b.clone())])
+        .build();
 
     emit!(
         sink,
@@ -295,11 +309,10 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
         events: Mutex::new(Vec::new()),
     });
 
-    let sink = Sink::new(
-        "test",
-        vec![Arc::clone(&processor) as Arc<dyn observed::processing::EventProcessor>],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::clone(&processor) as Arc<dyn observed::processing::EventProcessor>])
+        .build();
 
     // This should complete without deadlock. The inner Heartbeat should be silently dropped.
     emit!(sink, ProbeEvent::new(1));
@@ -312,6 +325,52 @@ fn reentrant_emit_from_processor_push_does_not_deadlock() {
     );
     assert_eq!(captured[0], "test.probe");
     assert!(inner_processor.is_empty(), "reentrant event should be dropped, not forwarded");
+}
+
+#[test]
+fn reentrant_emit_from_is_interested_is_dropped() {
+    #[event("internal.heartbeat")]
+    #[trace]
+    struct Heartbeat;
+
+    struct ReentrantInterestProcessor {
+        own_sink: Mutex<Option<Sink>>,
+        events: Mutex<Vec<String>>,
+    }
+
+    impl EventProcessor for ReentrantInterestProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            // Taken, not cloned, so a missing guard fails the test with an extra event
+            // instead of recursing until the stack overflows.
+            let own_sink = self.own_sink.lock().expect("lock is not poisoned").take();
+            if let Some(own_sink) = own_sink {
+                emit!(own_sink, Heartbeat);
+            }
+            true
+        }
+
+        fn process(&self, event: &EventView<'_>) {
+            self.events.lock().expect("lock is not poisoned").push(event.name().to_owned());
+        }
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    let processor = Arc::new(ReentrantInterestProcessor {
+        own_sink: Mutex::new(None),
+        events: Mutex::new(Vec::new()),
+    });
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+        .build();
+    *processor.own_sink.lock().expect("lock is not poisoned") = Some(sink.clone());
+
+    emit!(sink, ProbeEvent::new(1));
+
+    assert_eq!(*processor.events.lock().expect("lock is not poisoned"), ["test.probe"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -382,11 +441,10 @@ fn metric_only_sink(interested: bool) -> (Sink, Arc<Mutex<Vec<&'static str>>>) {
         extracted: Arc::clone(&extracted),
         engine: observed_testing::passthrough_redaction_engine(),
     };
-    let sink = Sink::new(
-        "cost",
-        vec![Arc::new(processor) as Arc<dyn observed::processing::EventProcessor>],
-        tick::SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("cost")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor) as Arc<dyn observed::processing::EventProcessor>])
+        .build();
     (sink, extracted)
 }
 

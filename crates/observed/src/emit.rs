@@ -25,12 +25,15 @@
 ///
 /// # What emitting costs
 ///
-/// The event expression is a closure, so it is evaluated only if at least one of
-/// the sink's processors declares interest in the event's compile-time
-/// [`EventDescription`](crate::metadata::EventDescription). If every processor
-/// declines, nothing in the expression runs.
+/// The event expression is a closure, so it is evaluated only when at least one
+/// processor receives the event: the Sink's
+/// [`EventSampler`](crate::EventSampler), if any, did not drop it, and the
+/// processor declared interest in the event's compile-time
+/// [`EventDescription`](crate::metadata::EventDescription). If no processor
+/// receives the event, nothing in the expression runs.
 ///
-/// Once *any* processor is interested the expression is evaluated **in full**.
+/// Once a processor receives the event, the expression is evaluated **in
+/// full**, and only once even when several Sinks deliver it.
 /// Laziness past that point is per field, not per signal: a processor pulls only
 /// the fields it wants, and a field nobody pulls costs no clone, no allocation,
 /// and no redaction call. But the expressions that *initialize* the fields have

@@ -46,11 +46,10 @@ fn valid_counter_updown_and_gauge_updates_allocate_nothing() {
         .bind_event::<Measurements>()
         .build()
         .unwrap();
-    let sink = Sink::new(
-        "allocations",
-        vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))],
-        SimpleClock::new_frozen(),
-    );
+    let sink = Sink::builder("allocations")
+        .processors(vec![Arc::<PerfCounterProcessor>::into_std_arc(Arc::new(processor))])
+        .clock(SimpleClock::new_frozen())
+        .build();
     let session = Session::new().no_stdout().no_file();
     let operation = session.operation("integer_emission");
     {

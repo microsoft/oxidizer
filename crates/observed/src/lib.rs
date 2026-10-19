@@ -220,6 +220,7 @@ pub(crate) mod sampling;
 pub(crate) mod severity;
 pub(crate) mod sink;
 pub(crate) mod text;
+pub mod typestates;
 pub(crate) mod value;
 
 // Re-export core types at the crate root for convenience.
@@ -504,7 +505,7 @@ pub use observed_macros::event;
 #[doc(inline)]
 pub use sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
 pub use severity::Severity;
-pub use sink::{Sink, SinkId};
+pub use sink::{Sink, SinkBuilder, SinkId};
 pub use text::Text;
 pub use value::Value;
 

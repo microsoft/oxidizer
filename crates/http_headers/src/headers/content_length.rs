@@ -199,6 +199,10 @@ mod tests {
     use super::parse_decimal_ows;
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the exhaustive decimal oracle; boundary and malformed-number cases remain interpreted"
+    )]
     fn decimal_parser_matches_independent_whitespace_and_digit_oracle() {
         for wire in [
             b" \t00123\t ".as_slice(),

@@ -2,6 +2,22 @@
 // Licensed under the MIT License.
 
 //! Telemetry-enabled reference-counted ownership.
+//!
+//! # Give each runtime thread its own value
+//!
+//! The constructor creates a value when the runtime first relocates the pointer
+//! to a new thread; later relocations reuse that thread's value. Use [`PerNuma`]
+//! instead for one value per NUMA node. The default [`Arc`] remains process-wide.
+//!
+//! ```rust
+//! use performables::arc::{Arc, PerThread};
+//!
+//! let message = Arc::<String, PerThread>::new_with(|| String::from("hello"));
+//! let shared = Arc::clone(&message);
+//! assert_eq!(shared.as_str(), "hello");
+//! # fn require_thread_aware(_: &impl thread_aware_core::ThreadAware) {}
+//! # require_thread_aware(&message);
+//! ```
 
 mod factory;
 
@@ -21,6 +37,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thread_aware_core::{Owner, Thread, ThreadAware};
 
 use self::factory::Factory;
+use crate::Error;
+use crate::error::ErrorKind;
 use crate::telemetry::{self, EventKind};
 
 /// Shares one value across the process.
@@ -151,8 +169,9 @@ impl MakeMutTarget for str {
 ///
 /// `Arc<T, PerProcess>` has the same representation size as
 /// `std::sync::Arc<T>`. Per-thread and per-NUMA strategies keep their factory and
-/// affinity storage in strategy-owned state shared by all clones. Only
-/// [`PerThread`] and [`PerNuma`] implement [`ThreadAware`] for this pointer.
+/// affinity storage in strategy-owned state shared by all clones.
+/// With [`PerThread`] or [`PerNuma`], this pointer implements [`ThreadAware`]
+/// when `T: Send + Sync`.
 /// [`PerProcess`] shares one allocation and does not implement [`ThreadAware`],
 /// even when its pointee does.
 ///
@@ -164,15 +183,6 @@ impl MakeMutTarget for str {
 ///
 /// require_thread_aware::<Arc<u64, PerThread>>();
 /// require_thread_aware::<Arc<u64, PerNuma>>();
-/// ```
-///
-/// ```compile_fail
-/// use performables::arc::{Arc, PerProcess};
-/// use thread_aware_core::ThreadAware;
-///
-/// fn require_thread_aware<T: ThreadAware>() {}
-///
-/// require_thread_aware::<Arc<u64, PerProcess>>();
 /// ```
 pub struct Arc<T: ?Sized, S = PerProcess>
 where
@@ -208,29 +218,6 @@ struct AffinityStorage<T, S: private::AffinityStrategy> {
     owner: Option<Owner>,
     values: HashMap<S::Key, T>,
 }
-
-/// Failure to construct an affinity-backed [`Arc`] from prebuilt values.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Error {
-    /// A supplied thread belongs to a different runtime owner.
-    ForeignOwner,
-    /// More than one value was supplied for the same strategy partition.
-    Duplicate,
-    /// No value was supplied for the current strategy partition.
-    MissingCurrent,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ForeignOwner => f.write_str("a supplied thread belongs to a different runtime owner"),
-            Self::Duplicate => f.write_str("multiple values were supplied for the same thread partition"),
-            Self::MissingCurrent => f.write_str("no value was supplied for the current thread partition"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl<T: ?Sized, S: private::AffinityStrategy> fmt::Debug for AffinityState<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -797,14 +784,16 @@ where
 
     for (thread, value) in values {
         if thread.owner() != current_thread.owner() {
-            return Err(Error::ForeignOwner);
+            return Err(Error::without_value(ErrorKind::ForeignOwner));
         }
         if storage.insert(S::key(&thread), Arc::into_std_arc(value)).is_err() {
-            return Err(Error::Duplicate);
+            return Err(Error::without_value(ErrorKind::Duplicate));
         }
     }
 
-    let current = storage.get_clone(&S::key(current_thread)).ok_or(Error::MissingCurrent)?;
+    let current = storage
+        .get_clone(&S::key(current_thread))
+        .ok_or(Error::without_value(ErrorKind::MissingCurrent))?;
 
     Ok(AffinityState {
         shared: StdArc::new(AffinityShared {
@@ -1589,7 +1578,7 @@ mod tests {
         let source = source.unwrap();
         let result = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10)), (source.clone(), Arc::new(20))]);
 
-        assert_eq!(result.unwrap_err(), Error::Duplicate);
+        assert!(result.unwrap_err().is_duplicate());
     }
 
     #[test]
@@ -1614,22 +1603,11 @@ mod tests {
         let foreign_owner = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(10)), (foreign, Arc::new(30))]);
 
         assert_eq!(
-            (missing_current.unwrap_err(), foreign_owner.unwrap_err()),
-            (Error::MissingCurrent, Error::ForeignOwner)
-        );
-    }
-
-    #[test]
-    fn affinity_errors_describe_each_failure() {
-        let errors = [Error::ForeignOwner, Error::Duplicate, Error::MissingCurrent];
-
-        assert_eq!(
-            errors.map(|error| error.to_string()),
-            [
-                "a supplied thread belongs to a different runtime owner",
-                "multiple values were supplied for the same thread partition",
-                "no value was supplied for the current thread partition",
-            ],
+            (
+                missing_current.unwrap_err().is_missing_current(),
+                foreign_owner.unwrap_err().is_foreign_owner()
+            ),
+            (true, true)
         );
     }
 

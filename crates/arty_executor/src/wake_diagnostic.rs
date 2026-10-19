@@ -148,6 +148,7 @@ impl DiagnosticWakerRegistry {
     /// Uses a closure to inspect every backtrace saved in the registry.
     ///
     /// Each backtrace is either a place where a waker was cloned.
+    #[cfg(test)]
     pub(crate) fn inspect_backtraces(&self, mut f: impl FnMut(&Backtrace)) {
         let backtraces = self.backtraces.lock().expect(ERR_POISONED_LOCK);
 

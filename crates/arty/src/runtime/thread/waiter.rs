@@ -5,21 +5,16 @@ use std::error::Error as StdError;
 use std::fmt::{self, Display};
 use std::thread::{self, ThreadId};
 
+use arty_executor::discard_task_panic_payload;
 use performables::arc::Arc;
 use performables::sync::condition::Condvar;
 use performables::sync::mutex::{Mutex, MutexGuard};
 
 use crate::runtime::Error;
-use crate::task::execution::discard_panic;
-
-#[cfg_attr(test, mockall::automock)]
-pub(in crate::runtime) trait WaitForShutdown {
-    fn wait(&self) -> Result<(), Error>;
-}
 
 /// Joins workers on one waiting caller; other callers wait for that join to finish.
 #[derive(Debug)]
-pub(in crate::runtime) struct ThreadWaiter {
+pub(crate) struct ThreadWaiter {
     shared: Arc<(Mutex<State>, Condvar)>,
 }
 
@@ -57,10 +52,16 @@ fn completion_result(failed_worker: Option<ThreadId>) -> Result<(), Error> {
 }
 
 impl ThreadWaiter {
-    pub(in crate::runtime) fn new(threads: Vec<thread::JoinHandle<()>>) -> Self {
+    pub(crate) fn new(threads: Vec<thread::JoinHandle<()>>) -> Self {
         Self {
             shared: Arc::new((Mutex::new(State::Ready(threads)), Condvar::new())),
         }
+    }
+
+    pub(crate) fn wait(&self) -> Result<(), Error> {
+        let (state, _) = &*self.shared;
+        let state_guard = state.lock();
+        self.wait_locked(state_guard)
     }
 
     fn wait_locked<'a>(&'a self, mut state_guard: MutexGuard<'a, State>) -> Result<(), Error> {
@@ -83,7 +84,7 @@ impl ThreadWaiter {
                             if failed_worker.is_none() {
                                 failed_worker = Some(worker_id);
                             }
-                            discard_panic(panic);
+                            discard_task_panic_payload(panic);
                         }
                     }
                     *state.lock() = State::Completed(failed_worker);
@@ -99,14 +100,6 @@ impl ThreadWaiter {
                 State::Completed(failed_worker) => return completion_result(*failed_worker),
             }
         }
-    }
-}
-
-impl WaitForShutdown for ThreadWaiter {
-    fn wait(&self) -> Result<(), Error> {
-        let (state, _) = &*self.shared;
-        let state_guard = state.lock();
-        self.wait_locked(state_guard)
     }
 }
 

@@ -84,6 +84,18 @@ Await required work before requesting shutdown or returning from an
 [shutdown guide](../src/documentation/shutdown.rs) and
 [critical-task guidance](CRITICAL_TASKS.md).
 
+### Cloned task wakers
+
+A task remains assigned to one worker. Calling a clone of its waker from another
+thread asks that worker to poll the task again; it never moves or polls the task
+on the calling thread.
+
+A cloned waker may outlive both its task and the runtime. Completion and
+cancellation disconnect every clone from the task before the task's resources
+are reclaimed. Later calls are safe no-ops, and keeping a clone does not delay
+shutdown. This lifetime separation is both a memory-safety invariant and part of
+the runtime's shutdown contract.
+
 ## Failure handling
 
 Application errors remain task results. A caught panic becomes `JoinError`;
