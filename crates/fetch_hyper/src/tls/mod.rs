@@ -6,4 +6,7 @@
 //! The only public symbol is [`TlsBackend`]; everything else is internal.
 
 mod connector;
+#[cfg(any(feature = "native-tls", test))]
+mod native_tls;
+
 pub(crate) use connector::TlsConnector;
