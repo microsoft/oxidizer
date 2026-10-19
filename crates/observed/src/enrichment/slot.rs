@@ -60,11 +60,7 @@ impl Slot {
 
     fn replace(&self, node: OptEnrichmentNode) -> OptEnrichmentNode {
         let cell = self.0.get_or(|| RefCell::new(None));
-        if let Some(node) = node {
-            cell.borrow_mut().replace(node)
-        } else {
-            cell.borrow_mut().take()
-        }
+        cell.replace(node)
     }
 
     /// Pushes entries onto the enrichment chain and returns a guard.
@@ -141,6 +137,29 @@ impl Drop for Guard {
     }
 }
 
+/// Restores slot heads installed by an [`EnrichmentTransfer`].
+///
+/// The transfer already owns every captured [`Slot`], so this guard borrows
+/// those handles instead of cloning their reference counts on every apply.
+#[must_use]
+pub(crate) struct AppliedGuard<'a> {
+    slots: SmallVec<[(&'a Slot, OptEnrichmentNode); INLINE_SLOT_CAPACITY]>,
+}
+
+impl std::fmt::Debug for AppliedGuard<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
+    }
+}
+
+impl Drop for AppliedGuard<'_> {
+    fn drop(&mut self) {
+        for (slot, prev) in self.slots.drain(..).rev() {
+            let _ = slot.replace(prev);
+        }
+    }
+}
+
 /// Captured enrichment state for cross-thread transfer.
 ///
 /// Created by [`Sink::transfer_context`](crate::Sink::transfer_context).
@@ -170,13 +189,13 @@ impl EnrichmentTransfer {
     ///
     /// Borrows `self` so the same transfer can be applied repeatedly (e.g.
     /// from a future's `poll` loop) without cloning the captured slots.
-    pub(crate) fn apply(&self) -> Guard {
+    pub(crate) fn apply(&self) -> AppliedGuard<'_> {
         let mut slots = SmallVec::with_capacity(self.slots.len());
         for (slot, head) in &self.slots {
             let prev = slot.replace(head.clone());
-            slots.push((slot.clone(), prev));
+            slots.push((slot, prev));
         }
-        Guard { slots }
+        AppliedGuard { slots }
     }
 
     /// Pushes an additional enrichment node onto every captured chain.
@@ -188,6 +207,10 @@ impl EnrichmentTransfer {
     /// nodes. [`push_entries`](Self::push_entries) relies on this and on the
     /// same check in [`push_for`](Self::push_for) for its non-empty input.
     pub(crate) fn push(&mut self, additional_enrichment: impl Enrichment) {
+        if self.slots.is_empty() {
+            return;
+        }
+
         let entries = additional_enrichment.into_entries();
         if entries.is_empty() {
             return;
@@ -200,6 +223,10 @@ impl EnrichmentTransfer {
     /// `target`, so only that sink observes it. Mirrors the `with_target`
     /// mapping that `EnrichFutureExt::enrich_for` applies.
     pub(crate) fn push_for(&mut self, target: SinkId, additional_enrichment: impl Enrichment) {
+        if self.slots.is_empty() {
+            return;
+        }
+
         let entries = additional_enrichment.into_entries();
         if entries.is_empty() {
             return;
@@ -247,6 +274,14 @@ mod coverage_tests {
     impl Enrichment for EmptyEnrichment {
         fn into_entries(self) -> Vec<EnrichmentEntry> {
             Vec::new()
+        }
+    }
+
+    struct UnreachableEnrichment;
+
+    impl Enrichment for UnreachableEnrichment {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            panic!("an empty transfer must not materialize enrichment entries")
         }
     }
 
@@ -351,6 +386,14 @@ mod coverage_tests {
 
         drop(guard);
         assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn empty_transfer_does_not_materialize_enrichment() {
+        let mut transfer = EnrichmentTransfer::default();
+
+        transfer.push(UnreachableEnrichment);
+        transfer.push_for(SinkId::new("target"), UnreachableEnrichment);
     }
 
     #[test]

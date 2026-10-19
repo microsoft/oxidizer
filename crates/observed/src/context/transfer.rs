@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{Enrichment, EnrichmentTransfer, Guard};
+use crate::enrichment::{Enrichment, EnrichmentTransfer};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -107,7 +107,7 @@ impl Transfer {
     /// so a guard dropped on another thread would wipe that thread's live
     /// enrichment and strand the entries it applied on the origin thread.
     #[must_use = "the enrichment is removed as soon as the returned guard is dropped"]
-    pub fn apply_current_thread(&self) -> impl Sized {
+    pub fn apply_current_thread(&self) -> impl Sized + '_ {
         ThreadBoundGuard {
             _guard: self.enrichment.apply(),
             _not_send: PhantomData,
@@ -122,12 +122,12 @@ impl Transfer {
 /// thread that created it.
 ///
 /// It deliberately has **no `Drop` impl of its own**. Dropping the wrapper drops
-/// the inner [`Guard`], whose own `Drop` pops each captured slot back to its
+/// the inner applied guard, whose own `Drop` pops each captured slot back to its
 /// prior head; a wrapper `Drop` could only repeat what field-drop order already
 /// guarantees, so it would be unobservable code.
-struct ThreadBoundGuard {
+struct ThreadBoundGuard<'a> {
     /// Restores the enrichment chain via its own `Drop`; never read.
-    _guard: Guard,
+    _guard: crate::enrichment::AppliedGuard<'a>,
     /// `Rc` is neither `Send` nor `Sync`, which is inherited by this struct.
     _not_send: PhantomData<Rc<()>>,
 }

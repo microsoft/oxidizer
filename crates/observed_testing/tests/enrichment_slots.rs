@@ -39,6 +39,10 @@ fn transfer_and_transferred_are_send() {
 
 const TEST_DC: DataClass = DataClass::new("test", "public");
 
+fn processor_free_sink() -> Sink {
+    Sink::builder("test").clock(SimpleClock::new_frozen()).build()
+}
+
 #[derive(Enrichment)]
 struct ServiceCtx {
     service: Sensitive<&'static str>,
@@ -75,7 +79,7 @@ struct AsyncCtx {
 
 #[test]
 fn enrichments_stack_and_unwind() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         (|| {
             let e = sink.current_enrichments();
@@ -103,7 +107,7 @@ fn enrichments_stack_and_unwind() {
 
 #[test]
 fn enrich_many_adds_multiple_entries() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let e = sink.current_enrichments();
         assert_eq!(e.len(), 2);
@@ -120,13 +124,22 @@ fn enrich_many_adds_multiple_entries() {
 }
 
 #[test]
-fn emit_event_noop_without_emitters() {
-    // Noop sink -> emit_event must not panic (silent drop).
+fn noop_sink_ignores_enrichment_and_transfer() {
+    let sink = Sink::noop();
+    let transfer = (|| sink.transfer_context()).enrich(
+        &sink,
+        ServiceCtx {
+            service: Sensitive::new("ignored", TEST_DC),
+        },
+    )();
+
+    let _guard = transfer.apply_current_thread();
+    assert!(sink.current_enrichments().is_empty());
 }
 
 #[test]
 fn cross_thread_enrichment_transfer() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let transfer = sink.transfer_context();
 
@@ -152,7 +165,7 @@ fn cross_thread_enrichment_transfer() {
 fn enrich_for_targets_specific_emitter() {
     static FETCH: SinkId = SinkId::new("fetch");
 
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let all = sink.current_enrichments();
         let fetch_entries: Vec<_> = all.iter().filter(|e| e.target() == Some(FETCH)).collect();
@@ -175,7 +188,7 @@ fn enrich_for_targets_specific_emitter() {
 async fn async_enriched_context_transfer_cross_thread() {
     use observed::enrichment::EnrichFutureExt;
 
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     let transfer = sink.transfer_context();
 
     let emitter_inner = sink.clone();
@@ -203,7 +216,7 @@ async fn async_enriched_context_transfer_cross_thread() {
 fn each_emitter_has_its_own_enrichment_slot() {
     static OTHER: SinkId = SinkId::new("ctx_test_other");
 
-    let source = Sink::noop();
+    let source = processor_free_sink();
     let observer = Sink::builder(OTHER).clock(SimpleClock::new_frozen()).build();
 
     (|| {

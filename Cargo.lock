@@ -3907,10 +3907,9 @@ dependencies = [
 name = "observed"
 version = "0.27.0"
 dependencies = [
- "all_the_time",
- "alloc_tracker",
  "criterion",
  "data_privacy",
+ "metabench",
  "mutants",
  "observed_macros",
  "ohno",
