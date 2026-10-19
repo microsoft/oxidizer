@@ -35,6 +35,8 @@ impl Drop for KnownFolder {
 struct Key(HKEY);
 
 impl Drop for Key {
+    #[cfg_attr(coverage_nightly, coverage(off))] // RegCloseKey failure requires a corrupted or externally invalidated owned handle.
+    #[cfg_attr(test, mutants::skip)] // Owned registry handles are exercised through native profile discovery.
     fn drop(&mut self) {
         // SAFETY: this key was opened by RegOpenKeyExW and is owned here.
         let result = unsafe { RegCloseKey(self.0) };
@@ -47,6 +49,8 @@ impl Drop for Key {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Known-folder lookup failures depend on Windows profile/COM configuration.
+#[cfg_attr(test, mutants::skip)] // Native startup tests retain lookup; profile/path interpretation remains measured.
 fn local_app_data() -> io::Result<PathBuf> {
     let mut path = ptr::null_mut();
     // SAFETY: the folder ID is valid and path is a writable output pointer.
@@ -91,6 +95,8 @@ pub(crate) fn registry_directories() -> io::Result<DirectoryEntries> {
     registry_directories_for(owner, local_app_data(), is_elevated()?)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Registry enumeration failures and malformed live ProfileList keys require machine-wide setup.
+#[cfg_attr(test, mutants::skip)] // Native enumeration tests remain; owner-aware deduplication and value/path validation stay measured.
 fn registry_directories_for(owner: MonitorOwner, base: io::Result<PathBuf>, elevated: bool) -> io::Result<DirectoryEntries> {
     let mut entries = vec![base.map(|base| DirectoryEntry {
         path: registry_path(&base),
@@ -155,6 +161,8 @@ fn deduplicate_entries(entries: &mut DirectoryEntries) {
     });
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Loaded user hives and profile registry lookup failures depend on other users' login state.
+#[cfg_attr(test, mutants::skip)] // Native profile discovery retains the lookup; profile-relative resolution has direct tests.
 fn profile_local_app_data(sid: &str) -> io::Result<PathBuf> {
     let profile = registry_string(HKEY_LOCAL_MACHINE, &format!(r"{PROFILES}\{sid}"), "ProfileImagePath", true)?;
     let settings = format!(r"{sid}\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders");
@@ -183,6 +191,8 @@ fn profile_relative_path(path: &Path, profile: &Path) -> io::Result<PathBuf> {
     ))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // RegGetValueW errors depend on live registry permissions and hive state.
+#[cfg_attr(test, mutants::skip)] // Registry byte/type/termination validation is tested independently.
 fn registry_string(root: HKEY, key: &str, value: &str, expand: bool) -> io::Result<PathBuf> {
     let key = wide(std::ffi::OsStr::new(key))?;
     let value = wide(std::ffi::OsStr::new(value))?;

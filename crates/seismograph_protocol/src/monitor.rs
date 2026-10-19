@@ -393,6 +393,14 @@ mod tests {
             MonitorEndpoint::NamedPipe(PathBuf::from(r"\\.\pipe\worker")).to_string(),
             r"\\.\pipe\worker"
         );
+        let maximum_authority = "S-1-281474976710655-4294967295";
+        assert_eq!(
+            maximum_authority.parse::<MonitorOwner>().unwrap(),
+            MonitorOwner::WindowsSid(maximum_authority.into())
+        );
+        let maximum_components = format!("S-1-5{}", "-1".repeat(15));
+        maximum_components.parse::<MonitorOwner>().unwrap();
+        format!("{maximum_components}-1").parse::<MonitorOwner>().unwrap_err();
     }
 
     #[test]
@@ -431,7 +439,10 @@ mod tests {
             ..descriptor()
         };
         let path = io.publish_descriptor(&directory, &value).unwrap();
-        control.put_file(&path, owner, vec![0; MAX_DESCRIPTOR_BYTES + 1]);
+        // The wire budget is three 65535-byte strings plus 1024 identity bytes.
+        control.put_file(&path, owner.clone(), vec![0; 197_629]);
+        assert!(matches!(MonitorDescriptor::read_file(&io, &path), Err(Error::InvalidDescriptor)));
+        control.put_file(&path, owner, vec![0; 197_630]);
         assert!(matches!(MonitorDescriptor::read_file(&io, &path), Err(Error::MessageTooLarge)));
         control.fail_next(crate::io::IoOperation::ReadDescriptor, io::Error::other("read refused"));
         assert!(
@@ -449,6 +460,40 @@ mod tests {
         assert!(matches!(encode_descriptor(&descriptor), Err(Error::InvalidDescriptor)));
         descriptor.endpoint = MonitorEndpoint::NamedPipe(PathBuf::from(r"\\server\pipe\monitor"));
         assert!(matches!(encode_descriptor(&descriptor), Err(Error::InvalidDescriptor)));
+    }
+
+    #[test]
+    fn descriptor_identity_rejects_zero_processes_invalid_owners_and_unrooted_paths() {
+        let mut value = descriptor();
+        value.process_id = 0;
+        value.endpoint = MonitorEndpoint::for_instance(Path::new("/registry"), &value.owner, 0, value.instance_id);
+        assert!(!value.endpoint_matches_identity());
+        value = descriptor();
+        value.owner = MonitorOwner::WindowsSid("1001".into());
+        value.endpoint = MonitorEndpoint::for_instance(Path::new(""), &value.owner, value.process_id, value.instance_id);
+        assert!(!value.endpoint_matches_identity());
+        let valid = descriptor();
+        for path in [
+            PathBuf::from("/"),
+            MonitorEndpoint::for_instance(Path::new("relative"), &valid.owner, valid.process_id, valid.instance_id)
+                .path()
+                .to_owned(),
+        ] {
+            value = descriptor();
+            value.endpoint = MonitorEndpoint::UnixSocket(path);
+            assert!(!value.endpoint_matches_identity());
+        }
+    }
+
+    #[test]
+    fn decoder_rejects_empty_display_names() {
+        let mut value = descriptor();
+        value.instance = None;
+        let mut bytes = encode_descriptor(&value).unwrap();
+        bytes.truncate(bytes.len() - value.name.len() - 3);
+        push_string(&mut bytes, "").unwrap();
+        bytes.push(0);
+        assert!(matches!(decode_descriptor(&bytes), Err(Error::InvalidDescriptor)));
     }
 
     #[test]

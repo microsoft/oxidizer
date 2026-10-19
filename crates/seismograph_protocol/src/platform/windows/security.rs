@@ -116,6 +116,8 @@ pub(super) fn owned_handle(handle: HANDLE) -> io::Result<OwnedHandle> {
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Token-query failures require inaccessible processes or invalidating an owned handle.
+#[cfg_attr(test, mutants::skip)] // Native restricted-token tests retain the OS token boundary.
 fn process_token(process: HANDLE) -> io::Result<OwnedHandle> {
     let mut token = ptr::null_mut();
     // SAFETY: process is valid, and token is a writable output pointer.
@@ -130,6 +132,8 @@ pub(crate) fn current_owner() -> io::Result<MonitorOwner> {
     process_owner(unsafe { GetCurrentProcess() })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Token buffer/query failures cannot be injected for a valid process token.
+#[cfg_attr(test, mutants::skip)] // Native identity tests retain actual token reads; SID/policy validation stays measured.
 pub(super) fn process_owner(process: HANDLE) -> io::Result<MonitorOwner> {
     let token = process_token(process)?;
     let mut length = 0;
@@ -158,6 +162,8 @@ pub(super) fn process_owner(process: HANDLE) -> io::Result<MonitorOwner> {
     sid_string(user.User.Sid).map(MonitorOwner::WindowsSid)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // OS-owned SIDs cannot safely be corrupted to force conversion failures.
+#[cfg_attr(test, mutants::skip)] // Native ACL and peer-identity tests retain SID conversion.
 fn sid_string(sid: PSID) -> io::Result<String> {
     let mut text = ptr::null_mut();
     // SAFETY: sid belongs to a live token/security descriptor, and text is writable.
@@ -186,6 +192,23 @@ fn directory_file(path: &Path) -> io::Result<File> {
     if components.next() != Some(Component::RootDir) {
         return Err(denied("monitor registry requires an absolute local disk path"));
     }
+    let root = drive_volume(drive)?;
+    let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL;
+    let mut file = open_native(None, root.as_os_str(), access, FILE_OPEN, FILE_DIRECTORY_FILE, None)?;
+    ordinary_directory(&file)?;
+    for component in components {
+        let Component::Normal(name) = component else {
+            return Err(denied("monitor registry path contains a traversal component"));
+        };
+        file = open_native(Some(&file), name, access, FILE_OPEN, FILE_DIRECTORY_FILE, None)?;
+        ordinary_directory(&file)?;
+    }
+    Ok(file)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // DOS-device query failures and malformed kernel mappings require changing machine drive configuration.
+#[cfg_attr(test, mutants::skip)] // Native traversal tests retain this call; local-volume acceptance stays measured separately.
+fn drive_volume(drive: u8) -> io::Result<PathBuf> {
     let device = [u16::from(drive), u16::from(b':'), 0];
     // DOS device queries inspect the local object namespace, not the target filesystem.
     let mut target = vec![0_u16; 32_768];
@@ -205,18 +228,7 @@ fn directory_file(path: &Path) -> io::Result<File> {
         .position(|unit| *unit == 0)
         .ok_or_else(|| denied("DOS device mapping is unterminated"))?;
     let target = String::from_utf16(&target[..end]).map_err(|source| io::Error::new(io::ErrorKind::InvalidData, source))?;
-    let root = local_volume_path(&target)?;
-    let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL;
-    let mut file = open_native(None, root.as_os_str(), access, FILE_OPEN, FILE_DIRECTORY_FILE, None)?;
-    ordinary_directory(&file)?;
-    for component in components {
-        let Component::Normal(name) = component else {
-            return Err(denied("monitor registry path contains a traversal component"));
-        };
-        file = open_native(Some(&file), name, access, FILE_OPEN, FILE_DIRECTORY_FILE, None)?;
-        ordinary_directory(&file)?;
-    }
-    Ok(file)
+    local_volume_path(&target)
 }
 
 fn local_volume_path(target: &str) -> io::Result<PathBuf> {
@@ -315,6 +327,45 @@ pub(crate) fn open_directory(path: &Path, owner: &MonitorOwner) -> io::Result<Fi
 }
 
 fn verify_access(file: &File, expected: &MonitorOwner) -> io::Result<MonitorOwner> {
+    verify_grants(native_access(file)?, expected)
+}
+
+fn verify_grants(access: NativeAccess, expected: &MonitorOwner) -> io::Result<MonitorOwner> {
+    let actual = access.owner;
+    let expected_sid = owner_sid(expected)?;
+    if actual != ADMINISTRATORS && actual != SYSTEM && expected_sid != actual {
+        return Err(denied("monitor registry has an untrusted OS owner"));
+    }
+    let mut administrators = false;
+    let mut system = false;
+    let mut user = false;
+    for (sid, mask) in access.grants {
+        let full = mask & GENERIC_ALL != 0 || mask & FILE_ALL_ACCESS == FILE_ALL_ACCESS;
+        if expected_sid == sid {
+            user |= full;
+        }
+        if sid == ADMINISTRATORS {
+            administrators |= full;
+        } else if sid == SYSTEM {
+            system |= full;
+        } else if expected_sid != sid {
+            return Err(denied("monitor registry ACL grants access to another user"));
+        }
+    }
+    if !administrators || !system || !user {
+        return Err(denied("monitor registry ACL must grant its user and administrators full access"));
+    }
+    Ok(MonitorOwner::WindowsSid(actual))
+}
+
+struct NativeAccess {
+    owner: String,
+    grants: Vec<(String, u32)>,
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Security-query/GetAce failures and malformed OS-owned ACL pointers cannot safely be injected.
+#[cfg_attr(test, mutants::skip)] // Native ACL rejection tests retain the boundary; owner/grant authorization stays measured in verify_access.
+fn native_access(file: &File) -> io::Result<NativeAccess> {
     let mut owner = ptr::null_mut();
     let mut acl: *mut ACL = ptr::null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
@@ -339,16 +390,10 @@ fn verify_access(file: &File, expected: &MonitorOwner) -> io::Result<MonitorOwne
         return Err(denied("monitor registry security descriptor is incomplete"));
     }
     let actual = sid_string(owner)?;
-    let expected_sid = owner_sid(expected)?;
-    if actual != ADMINISTRATORS && actual != SYSTEM && expected_sid != actual {
-        return Err(denied("monitor registry has an untrusted OS owner"));
-    }
     // An inherited owner/admin/System ACL is safe too; validate its grants
     // rather than rewriting an existing user directory's inheritance policy.
     let acl = std::ptr::NonNull::new(acl).ok_or_else(|| denied("monitor registry must have an access-control list"))?;
-    let mut administrators = false;
-    let mut system = false;
-    let mut user = false;
+    let mut grants = Vec::new();
     // SAFETY: GetSecurityInfo supplied a valid ACL within the live descriptor.
     for index in 0..unsafe { acl.as_ref().AceCount } {
         let mut entry = ptr::null_mut();
@@ -369,22 +414,9 @@ fn verify_access(file: &File, expected: &MonitorOwner) -> io::Result<MonitorOwne
         // SAFETY: an access-allowed ACE contains the mask followed by a SID.
         let entry = unsafe { entry.cast::<ACCESS_ALLOWED_ACE>().as_ref() };
         let sid = sid_string(ptr::from_ref(&entry.SidStart).cast_mut().cast())?;
-        let full = entry.Mask & GENERIC_ALL != 0 || entry.Mask & FILE_ALL_ACCESS == FILE_ALL_ACCESS;
-        if expected_sid == sid {
-            user |= full;
-        }
-        if sid == ADMINISTRATORS {
-            administrators |= full;
-        } else if sid == SYSTEM {
-            system |= full;
-        } else if expected_sid != sid {
-            return Err(denied("monitor registry ACL grants access to another user"));
-        }
+        grants.push((sid, entry.Mask));
     }
-    if !administrators || !system || !user {
-        return Err(denied("monitor registry ACL must grant its user and administrators full access"));
-    }
-    Ok(MonitorOwner::WindowsSid(actual))
+    Ok(NativeAccess { owner: actual, grants })
 }
 
 fn make_directory(path: &Path, attributes: &Attributes) -> io::Result<File> {
@@ -408,6 +440,8 @@ pub(crate) fn create_directory(path: &Path, owner: &MonitorOwner) -> io::Result<
     verify_access(&file, owner).map(drop)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Elevation query failures require invalidating a valid current-process token.
+#[cfg_attr(test, mutants::skip)] // Native discovery retains elevation checks; pure access policy remains measured.
 pub(super) fn is_elevated() -> io::Result<bool> {
     // SAFETY: current-process pseudo-handle is valid for token queries.
     let token = process_token(unsafe { GetCurrentProcess() })?;
@@ -444,6 +478,8 @@ pub(crate) fn create_descriptor(path: &Path, owner: &MonitorOwner) -> io::Result
     )
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Native opens already reject directories/reparse points; post-open metadata failures require external object changes.
+#[cfg_attr(test, mutants::skip)] // Native descriptor/ACL tests retain this boundary; path and grant policy stay measured separately.
 pub(crate) fn read_descriptor(path: &Path) -> io::Result<(File, MonitorOwner)> {
     let parent = path.parent().ok_or_else(|| denied("descriptor needs a directory"))?;
     let directory = directory_file(parent)?;
@@ -466,6 +502,8 @@ pub(crate) fn read_descriptor(path: &Path) -> io::Result<(File, MonitorOwner)> {
     Ok((file, owner))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // NtCreateFile status and object-manager failure paths depend on native handles and filesystem state.
+#[cfg_attr(test, mutants::skip)] // Native directory, descriptor, and junction tests retain no-reparse/relative-open behavior.
 fn open_native(
     directory: Option<&File>,
     name: &OsStr,
@@ -516,6 +554,8 @@ fn open_native(
     owned_handle(handle).map(File::from)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // GetSecurityInfo failure requires a native object/permission failure, not a portable fixture.
+#[cfg_attr(test, mutants::skip)] // Native pipe identity and descriptor ownership tests retain OS-owner verification.
 pub(super) fn handle_owner(handle: HANDLE) -> io::Result<MonitorOwner> {
     let mut owner = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
@@ -547,6 +587,93 @@ fn denied(message: &'static str) -> io::Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_names_and_owner_sids_reject_malformed_input() {
+        assert_eq!(wide(OsStr::new("bad\0name")).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        for owner in [
+            MonitorOwner::UnixUser(1001),
+            MonitorOwner::WindowsSid("1001".into()),
+            MonitorOwner::WindowsSid("invalid".into()),
+        ] {
+            assert_eq!(owner_sid(&owner).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native Windows descriptor conversion and directory enumeration")]
+    fn native_security_rejects_bad_descriptors_traversal_and_nondirectories() {
+        Attributes::from_sddl("invalid security descriptor").unwrap_err();
+        let temporary = tempfile::tempdir().unwrap();
+        assert_eq!(
+            directory_file(&temporary.path().join("..")).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let path = temporary.path().join("file");
+        std::fs::write(&path, []).unwrap();
+        let file = File::open(&path).unwrap();
+        assert_eq!(ordinary_directory(&file).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        let entries = read_directory(&file, &path).unwrap();
+        assert_eq!(entries.len(), 1);
+        entries.into_iter().next().unwrap().unwrap_err();
+        create_directory(Path::new(r"C:\"), &current_owner().unwrap()).unwrap_err();
+    }
+
+    #[test]
+    fn acl_policy_requires_trusted_ownership_and_all_three_full_access_grants() {
+        let sid = "S-1-5-21-1-2-3-1001";
+        let other = "S-1-5-21-1-2-3-1002";
+        let owner = MonitorOwner::WindowsSid(sid.into());
+        let grants = || {
+            vec![
+                (sid.into(), GENERIC_ALL),
+                (ADMINISTRATORS.into(), FILE_ALL_ACCESS),
+                (SYSTEM.into(), GENERIC_ALL),
+            ]
+        };
+        for actual in [sid, ADMINISTRATORS, SYSTEM] {
+            assert_eq!(
+                verify_grants(
+                    NativeAccess {
+                        owner: actual.into(),
+                        grants: grants()
+                    },
+                    &owner
+                )
+                .unwrap(),
+                MonitorOwner::WindowsSid(actual.into())
+            );
+        }
+        let mut invalid = vec![NativeAccess {
+            owner: other.into(),
+            grants: grants(),
+        }];
+        for index in 0..3 {
+            let mut missing = grants();
+            missing.remove(index);
+            invalid.push(NativeAccess {
+                owner: sid.into(),
+                grants: missing,
+            });
+            for mask in [GENERIC_READ, FILE_READ_ATTRIBUTES] {
+                let mut partial = grants();
+                partial[index].1 = mask;
+                invalid.push(NativeAccess {
+                    owner: sid.into(),
+                    grants: partial,
+                });
+            }
+        }
+        let mut foreign = grants();
+        foreign.push((other.into(), GENERIC_READ));
+        invalid.push(NativeAccess {
+            owner: sid.into(),
+            grants: foreign,
+        });
+        for access in invalid {
+            assert_eq!(verify_grants(access, &owner).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        }
+    }
 
     #[test]
     fn network_and_device_namespaces_are_rejected_before_opening() {

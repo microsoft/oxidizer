@@ -32,6 +32,9 @@ exclude_globs = [
     # Linux-only source is compiled out on Windows.
     "**/*linux.rs",
     "linux",
+    # Unix monitor sources are compiled out on Windows, not surviving mutations.
+    "crates/seismograph_protocol/src/platform/unix.rs",
+    "crates/seismograph_protocol/src/platform/unix/**",
 ]
 all_features = true
 cap_lints = true

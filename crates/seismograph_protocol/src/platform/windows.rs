@@ -66,6 +66,8 @@ impl Pipe {
             .ok_or_else(|| io::ErrorKind::ConnectionAborted.into())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Cancel/disconnect failures require kernel completion races or invalidating a live pipe handle.
+    #[cfg_attr(test, mutants::skip)] // Native close/cancellation/clone tests retain observable lifecycle behavior.
     fn close(&self) -> io::Result<()> {
         self.closed.store(true, Ordering::Release);
         let Some(handle) = self.handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else {
@@ -128,6 +130,8 @@ impl Operation {
         ptr::from_mut(self.overlapped.as_mut())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Kernel cancellation may race completion; draining cannot be observed without live overlapped I/O.
+    #[cfg_attr(test, mutants::skip)] // Native cancellation tests retain the lifetime boundary.
     fn cancel_and_drain(&mut self, handle: HANDLE) {
         // SAFETY: handle and OVERLAPPED remain live until completion is drained.
         unsafe { CancelIoEx(handle, self.pointer()) };
@@ -136,6 +140,8 @@ impl Operation {
         unsafe { GetOverlappedResult(handle, self.pointer(), &raw mut transferred, 1) };
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Completion status is supplied by the kernel, including cancellation races.
+    #[cfg_attr(test, mutants::skip)] // Native transfer/cancellation tests retain completed-operation handling.
     fn result(&mut self, handle: HANDLE) -> io::Result<usize> {
         let mut transferred = 0;
         // SAFETY: the completed operation and handle are still live.
@@ -145,6 +151,8 @@ impl Operation {
         Ok(transferred as usize)
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Event failures and all completion/deadline orderings cannot be forced on owned live events.
+    #[cfg_attr(test, mutants::skip)] // Native deadline/cancellation tests retain wait behavior.
     fn wait(&mut self, handle: HANDLE, timeout: Option<Duration>) -> io::Result<usize> {
         let wait = timeout.map_or(INFINITE, |duration| {
             u32::try_from(duration.as_millis().saturating_add(1)).unwrap_or(INFINITE - 1)
@@ -174,6 +182,8 @@ struct Accept {
 }
 
 impl Accept {
+    #[cfg_attr(coverage_nightly, coverage(off))] // ConnectNamedPipe immediate/pending/error outcomes depend on client/kernel scheduling.
+    #[cfg_attr(test, mutants::skip)] // Native first-instance, authorization, and handshake tests retain pipe creation/accept.
     fn new(descriptor: &MonitorDescriptor, first: bool) -> io::Result<Self> {
         let MonitorEndpoint::NamedPipe(path) = &descriptor.endpoint else {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "Windows requires a local named pipe"));
@@ -217,6 +227,8 @@ impl Accept {
         })
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Owned-event failures and disconnect-before-accept races are kernel-dependent.
+    #[cfg_attr(test, mutants::skip)] // Native blocking/nonblocking and abandoned-client tests retain accept behavior.
     fn complete(&mut self, nonblocking: bool) -> io::Result<()> {
         if !self.pending {
             return Ok(());
@@ -234,6 +246,8 @@ impl Accept {
 }
 
 impl Drop for Accept {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Whether an accept is still pending at destruction depends on kernel completion.
+    #[cfg_attr(test, mutants::skip)] // Native listener teardown tests retain cancellation/draining.
     fn drop(&mut self) {
         if self.pending {
             self.operation.cancel_and_drain(self.handle.as_raw_handle());
@@ -266,6 +280,8 @@ impl Listener {
         Ok(())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Recycling a disconnected pending instance requires a precise native completion race.
+    #[cfg_attr(test, mutants::skip)] // Native multi-client and abandoned-client tests retain instance recycling.
     pub(crate) fn accept(&self) -> io::Result<Connection> {
         let mut accept = self.accept.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Err(error) = accept.complete(self.nonblocking.load(Ordering::Acquire)) {
@@ -315,37 +331,8 @@ impl Connection {
             .checked_add(timeout)
             .filter(|deadline| *deadline > Instant::now())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "connection timeout must be positive and bounded"))?;
-        let handle = loop {
-            // Identification permits the server to inspect the client identity,
-            // never to borrow an elevated client's privileges.
-            // SAFETY: name is terminated; the returned handle is non-inheritable.
-            let handle = unsafe {
-                CreateFileW(
-                    name.as_ptr(),
-                    GENERIC_READ | GENERIC_WRITE,
-                    0,
-                    ptr::null(),
-                    OPEN_EXISTING,
-                    FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
-                    ptr::null_mut(),
-                )
-            };
-            match security::owned_handle(handle) {
-                Ok(handle) => break handle,
-                Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY.cast_signed()) => {
-                    let remaining = deadline
-                        .checked_duration_since(Instant::now())
-                        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "monitor pipe connection timed out"))?;
-                    std::thread::sleep(remaining.min(RETRY_DELAY));
-                }
-                Err(error) => return Err(error),
-            }
-        };
-        let mut process_id = 0;
-        // SAFETY: handle is a live connected pipe and process_id is writable.
-        if unsafe { GetNamedPipeServerProcessId(handle.as_raw_handle(), &raw mut process_id) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let handle = connect_pipe(&name, deadline)?;
+        let process_id = pipe_process_id(&handle)?;
         if process_id != descriptor.process_id || security::handle_owner(handle.as_raw_handle())? != descriptor.owner {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -379,6 +366,8 @@ impl Connection {
         Ok(())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // PeekNamedPipe failures and buffer/deadline races depend on kernel state.
+    #[cfg_attr(test, mutants::skip)] // Native peek, disconnect, and deadline tests retain observable behavior.
     pub(crate) fn peek(&self, bytes: &mut [u8]) -> io::Result<usize> {
         if bytes.is_empty() {
             return Ok(0);
@@ -434,6 +423,8 @@ impl Connection {
         Ok(())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Immediate/pending I/O, cancellation, and completion orderings depend on native scheduling.
+    #[cfg_attr(test, mutants::skip)] // Native transfer/backpressure/deadline/cancellation tests retain the overlapped-I/O boundary.
     fn perform(
         &self,
         direction: Direction,
@@ -464,6 +455,48 @@ impl Connection {
             .wait(handle.as_raw_handle(), timeout)
             .or_else(|error| if disconnected(&error) { Ok(0) } else { Err(error) })
     }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Busy-pipe/deadline orderings and native open failures require external pipe/kernel state.
+#[cfg_attr(test, mutants::skip)] // Native connect/authorization tests retain local-only, identification-level opens.
+fn connect_pipe(name: &[u16], deadline: Instant) -> io::Result<OwnedHandle> {
+    loop {
+        // Identification permits the server to inspect the client identity,
+        // never to borrow an elevated client's privileges.
+        // SAFETY: name is terminated; the returned handle is non-inheritable.
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                ptr::null_mut(),
+            )
+        };
+        match security::owned_handle(handle) {
+            Ok(handle) => return Ok(handle),
+            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY.cast_signed()) => {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "monitor pipe connection timed out"))?;
+                std::thread::sleep(remaining.min(RETRY_DELAY));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Server-PID query failure cannot be injected on a valid connected local pipe.
+#[cfg_attr(test, mutants::skip)] // Native mismatched-PID tests retain the identity check outside this wrapper.
+fn pipe_process_id(handle: &OwnedHandle) -> io::Result<u32> {
+    let mut process_id = 0;
+    // SAFETY: handle is a live connected pipe and process_id is writable.
+    if unsafe { GetNamedPipeServerProcessId(handle.as_raw_handle(), &raw mut process_id) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(process_id)
 }
 
 impl Read for Connection {
@@ -536,6 +569,59 @@ fn disconnected(error: &io::Error) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disconnection_statuses_do_not_hide_other_native_errors() {
+        for code in [ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED] {
+            assert!(disconnected(&io::Error::from_raw_os_error(code.cast_signed())));
+        }
+        assert!(!disconnected(&io::Error::from(io::ErrorKind::PermissionDenied)));
+        assert!(!disconnected(&io::Error::other("native failure")));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native pipe and event behavior is exercised natively")]
+    fn native_connections_validate_identity_deadlines_and_empty_io() {
+        let directory = crate::testing::Directory::new();
+        let mut descriptor = directory.descriptor();
+        let mut unsupported = descriptor.clone();
+        unsupported.endpoint = MonitorEndpoint::UnixSocket("unsupported".into());
+        assert_eq!(
+            Connection::connect(&unsupported, Duration::from_secs(1)).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        for timeout in [Duration::ZERO, Duration::MAX] {
+            assert_eq!(
+                Connection::connect(&descriptor, timeout).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        {
+            let _listener = Listener::bind(&descriptor).unwrap();
+            let process_id = descriptor.process_id;
+            descriptor.process_id = process_id.wrapping_add(1);
+            assert_eq!(
+                Connection::connect(&descriptor, Duration::from_secs(1)).unwrap_err().kind(),
+                io::ErrorKind::PermissionDenied
+            );
+            descriptor.process_id = process_id;
+        }
+        let listener = Listener::bind(&descriptor).unwrap();
+        let mut client = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
+        let _server = listener.accept().unwrap();
+        assert_eq!((client.read(&mut []).unwrap(), client.write(&[]).unwrap()), (0, 0));
+        for timeout in [Duration::ZERO, Duration::MAX] {
+            assert_eq!(
+                client.set_read_timeout(Some(timeout)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            assert_eq!(
+                client.set_write_timeout(Some(timeout)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        assert!(format!("{:?}", Operation::new().unwrap()).starts_with("Operation { event:"));
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "native and careful suites verify pipe impersonation limits")]

@@ -282,3 +282,31 @@ impl Write for Connection {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connections_reject_zero_and_overflowing_deadlines_before_opening() {
+        let (io, _) = MonitorIo::new_mocked();
+        let directory = crate::discovery::Directory::current(&io).unwrap();
+        let owner = directory.owner().clone();
+        let instance_id = crate::monitor::InstanceId::from_bytes([1; 16]);
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: 42,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(directory.path(), &owner, 42, instance_id),
+            instance_id,
+            owner,
+        };
+        for timeout in [Duration::ZERO, Duration::MAX] {
+            assert_eq!(
+                Connection::connect(&io, &descriptor, timeout).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
+}

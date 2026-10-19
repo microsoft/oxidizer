@@ -76,12 +76,18 @@ pub(crate) fn create_directory(path: &Path, owner: &MonitorOwner) -> io::Result<
         return Err(error);
     }
     let file = directory_file(path)?;
+    secure_directory(&file, *uid)?;
+    open_directory(path, owner).map(drop)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Failing fchown/chmod on our own live directory requires external privilege or filesystem changes.
+#[cfg_attr(test, mutants::skip)] // Native permission tests exercise the result; kernel error injection is unavailable.
+fn secure_directory(file: &File, uid: u32) -> io::Result<()> {
     // SAFETY: file owns a valid directory descriptor; -1 leaves the group unchanged.
-    if unsafe { libc::fchown(file.as_raw_fd(), *uid, !0) } != 0 {
+    if unsafe { libc::fchown(file.as_raw_fd(), uid, !0) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    file.set_permissions(fs::Permissions::from_mode(0o700))?;
-    open_directory(path, owner).map(drop)
+    file.set_permissions(fs::Permissions::from_mode(0o700))
 }
 
 fn open_relative(directory: &File, path: &Path, flags: libc::c_int) -> io::Result<File> {
@@ -169,6 +175,8 @@ impl Listener {
         self.socket.set_nonblocking(nonblocking)
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // Foreign users are normally rejected by directory/socket permissions before accept can inspect credentials.
+    #[cfg_attr(test, mutants::skip)] // Native cross-user tests retain access checks; owner/root peer policy is tested independently.
     pub(crate) fn accept(&self) -> io::Result<Connection> {
         let (stream, _) = self.socket.accept()?;
         stream.set_nonblocking(false)?;
@@ -181,6 +189,8 @@ impl Listener {
 }
 
 impl Drop for Listener {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Cleanup errors and pathname replacement require external filesystem races.
+    #[cfg_attr(test, mutants::skip)] // Native lifecycle tests verify socket cleanup; racing filesystem failures are not deterministic.
     fn drop(&mut self) {
         match fs::symlink_metadata(&self.path) {
             Ok(metadata) if (metadata.dev(), metadata.ino()) == self.identity => {
@@ -269,6 +279,8 @@ impl Connection {
         self.stream.shutdown(Shutdown::Both)
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // recv/poll interruption, failure, and deadline races cannot be forced reliably on live sockets.
+    #[cfg_attr(test, mutants::skip)] // Native read, peek, timeout, and cancellation tests retain kernel-I/O coverage.
     fn receive(&self, buf: &mut [u8], flags: libc::c_int) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -350,6 +362,8 @@ impl Write for Connection {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg_attr(coverage_nightly, coverage(off))] // SO_PEERCRED failures and invalid kernel credentials cannot be injected on a valid connected socket.
+#[cfg_attr(test, mutants::skip)] // Native cross-user tests verify authorization using actual kernel credentials.
 fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     // SAFETY: ucred is a C POD initialized before use by getsockopt.
     let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
@@ -379,6 +393,8 @@ fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     target_os = "netbsd",
     target_os = "dragonfly"
 ))]
+#[cfg_attr(coverage_nightly, coverage(off))] // getpeereid failures cannot be injected on a valid connected socket.
+#[cfg_attr(test, mutants::skip)] // Native authorization tests retain the peer-identity boundary.
 fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     let mut uid = 0;
     let mut gid = 0;
@@ -430,15 +446,30 @@ fn connect_timeout_with(path: &Path, timeout: Duration, mut wait: impl FnMut(Dur
     let length = libc::socklen_t::try_from(std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
         .expect("the pathname was bounded above by sockaddr_un's fixed buffer");
     let fd = connecting_socket()?;
+    connect_socket(&fd, &address, length, deadline, &mut wait)?;
+    let stream = UnixStream::from(fd);
+    stream.set_nonblocking(false)?;
+    Ok(stream)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Pending-connect and signal-interruption outcomes depend on kernel scheduling.
+#[cfg_attr(test, mutants::skip)] // Native connection and saturated-backlog tests retain timeout/backoff assertions.
+fn connect_socket(
+    fd: &OwnedFd,
+    address: &libc::sockaddr_un,
+    length: libc::socklen_t,
+    deadline: Instant,
+    wait: &mut impl FnMut(Duration),
+) -> io::Result<()> {
     loop {
         // SAFETY: address is initialized and length describes its populated bytes.
-        if unsafe { libc::connect(fd.as_raw_fd(), std::ptr::from_ref(&address).cast(), length) } == 0 {
+        if unsafe { libc::connect(fd.as_raw_fd(), std::ptr::from_ref(address).cast(), length) } == 0 {
             break;
         }
         let error = io::Error::last_os_error();
         match error.raw_os_error() {
             Some(libc::EINPROGRESS) => {
-                wait_connected(&fd, deadline)?;
+                wait_connected(fd, deadline)?;
                 break;
             }
             Some(libc::EAGAIN | libc::EINTR) if Instant::now() < deadline => {
@@ -448,11 +479,11 @@ fn connect_timeout_with(path: &Path, timeout: Duration, mut wait: impl FnMut(Dur
             _ => return Err(error),
         }
     }
-    let stream = UnixStream::from(fd);
-    stream.set_nonblocking(false)?;
-    Ok(stream)
+    Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Socket/fcntl failures require exhausting or invalidating process-owned descriptors.
+#[cfg_attr(test, mutants::skip)] // Native tests assert the resulting close-on-exec and nonblocking flags.
 fn connecting_socket() -> io::Result<OwnedFd> {
     // SAFETY: creating a stream socket has no pointer preconditions. Supported
     // kernels install close-on-exec atomically, before another thread can fork.
@@ -476,6 +507,8 @@ fn connecting_socket() -> io::Result<OwnedFd> {
     Ok(fd)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Unix-domain connects normally complete immediately; pending-connect poll/error paths are kernel-dependent.
+#[cfg_attr(test, mutants::skip)] // Native deadline tests exercise connection behavior without fabricating kernel outcomes.
 fn wait_connected(fd: &OwnedFd, deadline: Instant) -> io::Result<()> {
     loop {
         let remaining = deadline
@@ -530,6 +563,65 @@ fn denied(message: &'static str) -> io::Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native directory/socket input validation and peer credentials")]
+    fn native_inputs_and_server_identity_are_checked_before_use() {
+        let directory = crate::testing::Directory::new();
+        let descriptor = directory.descriptor();
+        let other_platform = MonitorOwner::WindowsSid("S-1-5-18".into());
+        assert_eq!(
+            open_directory(directory.path(), &other_platform).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            create_directory(directory.path(), &other_platform).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        create_directory(directory.path(), &descriptor.owner).unwrap();
+        assert_eq!(
+            create_directory(&directory.path().join("missing/child"), &descriptor.owner)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            create_descriptor(Path::new("/"), &descriptor.owner).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(read_descriptor(Path::new("/")).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        let mut unsupported = descriptor.clone();
+        unsupported.endpoint = MonitorEndpoint::NamedPipe("unsupported".into());
+        assert_eq!(Listener::bind(&unsupported).unwrap_err().kind(), io::ErrorKind::Unsupported);
+        assert_eq!(
+            Connection::connect(&unsupported, Duration::from_secs(1)).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        let _listener = Listener::bind(&descriptor).unwrap();
+        let mut wrong = descriptor.clone();
+        wrong.owner = MonitorOwner::UnixUser(!0);
+        assert_eq!(
+            Connection::connect(&wrong, Duration::from_secs(1)).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let connection = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
+        for timeout in [Duration::ZERO, Duration::MAX] {
+            assert_eq!(
+                connection.set_read_timeout(Some(timeout)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            assert_eq!(
+                connect_timeout(descriptor.endpoint.path(), timeout).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        for path in [PathBuf::from("/".repeat(200)), PathBuf::from("bad\0socket")] {
+            assert_eq!(
+                connect_timeout(&path, Duration::from_secs(1)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
 
     #[test]
     #[cfg(target_os = "linux")]
@@ -603,5 +695,7 @@ mod tests {
         // SAFETY: name is a valid terminated pathname in the test fixture.
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         assert_eq!(read_descriptor(&fifo).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(read_descriptor(&target).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
     }
 }

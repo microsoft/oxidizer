@@ -14,6 +14,8 @@ use super::{create_directory, current_owner, directory_file, open_directory};
 use crate::monitor::{InstanceId, MonitorEndpoint, MonitorOwner};
 use crate::platform::{DirectoryEntries, DirectoryEntry, RegistryDirectory};
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Login-managed environment selection varies by host; runtime/fallback selection is tested below.
+#[cfg_attr(test, mutants::skip)] // Native startup tests retain this environment boundary; deterministic selection stays measured.
 pub(crate) fn current_directory(owner: &MonitorOwner) -> io::Result<RegistryDirectory> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let directory = current_directory_in(runtime.as_deref(), Path::new("/tmp"), owner)?;
@@ -27,22 +29,10 @@ pub(crate) fn current_directory(owner: &MonitorOwner) -> io::Result<RegistryDire
 }
 
 fn current_directory_in(runtime: Option<&Path>, temporary_root: &Path, owner: &MonitorOwner) -> io::Result<RegistryDirectory> {
-    if let Some(runtime) = runtime.filter(|path| path.is_absolute()) {
-        match runtime_directory(runtime, owner) {
-            Ok(directory) => return Ok(directory),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied | io::ErrorKind::NotADirectory | io::ErrorKind::InvalidInput
-                ) || error.raw_os_error() == Some(libc::ELOOP) =>
-            {
-                eprintln!(
-                    "seismograph: ignoring unusable XDG runtime directory {}: {error}",
-                    runtime.display()
-                );
-            }
-            Err(error) => return Err(error),
-        }
+    if let Some(runtime) = runtime.filter(|path| path.is_absolute())
+        && let Some(directory) = optional_runtime_directory(runtime, owner)?
+    {
+        return Ok(directory);
     }
     let MonitorOwner::UnixUser(uid) = owner else {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Unix registry requires a Unix user ID"));
@@ -70,6 +60,27 @@ fn current_directory_in(runtime: Option<&Path>, temporary_root: &Path, owner: &M
     })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Unexpected runtime-directory failures require host filesystem faults or external permission races.
+#[cfg_attr(test, mutants::skip)] // Native runtime/fallback tests retain selection; private fallback ownership checks remain measured.
+fn optional_runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<Option<RegistryDirectory>> {
+    match runtime_directory(runtime, owner) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied | io::ErrorKind::NotADirectory | io::ErrorKind::InvalidInput
+            ) || error.raw_os_error() == Some(libc::ELOOP) =>
+        {
+            eprintln!(
+                "seismograph: ignoring unusable XDG runtime directory {}: {error}",
+                runtime.display()
+            );
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<RegistryDirectory> {
     if runtime.to_str().is_none() {
         return Err(io::Error::new(
@@ -90,6 +101,8 @@ fn runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<Registr
     })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Enumerating real login sessions and mount namespaces requires host-wide setup.
+#[cfg_attr(test, mutants::skip)] // Native discovery/cross-user tests retain this boundary; path filtering and scanners have fixture tests.
 pub(crate) fn registry_directories() -> io::Result<DirectoryEntries> {
     let MonitorOwner::UnixUser(caller) = current_owner()? else {
         return Err(io::Error::new(
@@ -136,6 +149,8 @@ fn add_directory(path: PathBuf, caller: u32, paths: &mut BTreeMap<PathBuf, Monit
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // read_dir iterator errors require filesystem failure after enumeration has started.
+#[cfg_attr(test, mutants::skip)] // Native fixture scans retain enumeration; owner filtering and identity parsing remain measured.
 fn scan_runtime_users(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, MonitorOwner>, errors: &mut DirectoryEntries) {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -161,6 +176,8 @@ fn scan_runtime_users(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, Mo
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // read_dir iterator errors require filesystem failure after enumeration has started.
+#[cfg_attr(test, mutants::skip)] // Native fixture scans retain enumeration; temporary-name and owner filtering remain measured.
 fn scan_temporary(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, MonitorOwner>, errors: &mut DirectoryEntries) {
     let entries = match fs::canonicalize(root).and_then(fs::read_dir) {
         Ok(entries) => entries,
@@ -250,6 +267,32 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native temporary directories and ownership")]
+    fn current_directory_rejects_nonunix_owners() {
+        assert_eq!(
+            current_directory_in(None, Path::new("/tmp"), &MonitorOwner::WindowsSid("S-1-5-18".into()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[cfg_attr(miri, ignore = "native socket-table files are exercised natively")]
+    fn native_socket_table_open_and_read_errors_are_reported() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut paths = BTreeMap::new();
+        let mut errors = Vec::new();
+        scan_socket_table(&temporary.path().join("missing"), 0, &mut paths, &mut errors);
+        scan_socket_table(temporary.path(), 0, &mut paths, &mut errors);
+        assert_eq!(
+            errors.into_iter().map(|entry| entry.unwrap_err().kind()).collect::<Vec<_>>(),
+            [io::ErrorKind::NotFound, io::ErrorKind::IsADirectory]
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "native directory enumeration and ownership are exercised natively")]
@@ -401,6 +444,14 @@ mod tests {
         assert_eq!(socket_directory(&line), Some(Path::new("/custom runtime/seismograph")));
         assert_eq!(socket_directory("0000: 2 0 10000 1 01 1234 @abstract"), None);
         assert_eq!(socket_directory("truncated"), None);
+        for path in [
+            "/seismograph/0-01010101010101010101010101010101.sock",
+            "/seismograph/42-short.sock",
+            "/seismograph/42-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.sock",
+            "relative/seismograph/42-01010101010101010101010101010101.sock",
+        ] {
+            assert_eq!(socket_directory(&format!("0000: 2 0 10000 1 01 1234 {path}")), None);
+        }
         assert!(!temporary_name("seismograph-not-a-uid-random"));
     }
 }

@@ -451,6 +451,7 @@ pub(crate) enum DirectoryGuard {
 pub(crate) struct TemporaryDirectory(Option<tempfile::TempDir>);
 
 impl Drop for TemporaryDirectory {
+    #[cfg_attr(test, mutants::skip)] // Field Drop still removes the directory; this body only adds diagnostics for native cleanup failures.
     fn drop(&mut self) {
         if let Some(directory) = self.0.take()
             && let Err(error) = directory.close()
@@ -485,6 +486,7 @@ impl Write for DescriptorFile {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // Both backends are unbuffered: forwarding flush and returning Ok(()) have identical effects.
     fn flush(&mut self) -> std_io::Result<()> {
         match self {
             Self::Native(file) => file.flush(),
@@ -523,6 +525,20 @@ impl std::error::Error for DescriptorCleanup {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mocked_descriptor_flush_preserves_written_data() {
+        let (io, _) = MonitorIo::new_mocked();
+        let directory = Directory::current(&io).unwrap();
+        let path = directory.path().join("flush.monitor");
+        let mut file = io.create_descriptor(&path, directory.owner()).unwrap();
+        file.write_all(b"descriptor").unwrap();
+        file.flush().unwrap();
+        let (mut reader, _) = io.read_descriptor(&path).unwrap();
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"descriptor");
+    }
 
     #[test]
     fn native_capabilities_share_the_os_but_never_a_mock_registry() {
