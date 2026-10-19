@@ -1,19 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{TaskPointer, TaskRef};
+use crate::{TaskHandle, TaskPtr};
 
 /// Intrusive owner-thread inventory of all pending tasks.
 #[derive(Default)]
 pub(crate) struct TaskList {
-    head: Option<TaskPointer>,
-    tail: Option<TaskPointer>,
+    head: Option<TaskPtr>,
+    tail: Option<TaskPtr>,
 }
 
 impl TaskList {
-    pub(crate) fn insert(&mut self, task_ref: TaskRef) {
-        let pointer = task_ref.pointer();
-        // SAFETY: `task_ref` keeps the pinned allocation alive on its owner thread.
+    pub(crate) fn insert(&mut self, task_handle: TaskHandle) {
+        let pointer = task_handle.as_ptr();
+        // SAFETY: `task_handle` keeps the pinned allocation alive on its owner thread.
         let links = unsafe { pointer.as_task() }.get_ref().links();
         assert!(!links.linked.replace(true), "a task may be linked only once");
         links.previous.set(self.tail);
@@ -27,11 +27,11 @@ impl TaskList {
         }
         self.tail = Some(pointer);
 
-        let owned = task_ref.into_owned_pointer();
+        let owned = task_handle.into_raw();
         debug_assert_eq!(owned, pointer);
     }
 
-    pub(crate) fn remove(&mut self, pointer: TaskPointer) -> Option<TaskRef> {
+    pub(crate) fn remove(&mut self, pointer: TaskPtr) -> Option<TaskHandle> {
         // SAFETY: Callers provide either a runnable strong reference or a pointer owned by this
         // list, so the allocation is live and accessed on its owner thread.
         let links = unsafe { pointer.as_task() }.get_ref().links();
@@ -55,10 +55,10 @@ impl TaskList {
         }
         // SAFETY: Insertion transferred exactly one raw strong reference to the list, and this
         // successful unlink returns that ownership exactly once.
-        Some(unsafe { pointer.into_task_ref() })
+        Some(unsafe { pointer.into_handle() })
     }
 
-    pub(crate) fn pop_front(&mut self) -> Option<TaskRef> {
+    pub(crate) fn pop_front(&mut self) -> Option<TaskHandle> {
         self.head.and_then(|head| self.remove(head))
     }
 
@@ -89,18 +89,18 @@ mod tests {
     use super::*;
     use crate::Task;
 
-    fn task(pool: &MultiPool) -> TaskRef {
+    fn task(pool: &MultiPool) -> TaskHandle {
         let (sender, _receiver) = LocalEventPool::<()>::new().rent();
-        TaskRef::new(pool.alloc_arc_pin(Task::new(pending(), sender)))
+        TaskHandle::new(pool.alloc_arc_pin(Task::new(pending(), sender)))
     }
 
     #[test]
     fn insertion_removal_and_drain_preserve_ownership_order() {
         let pool = MultiPool::new();
         let first = task(&pool);
-        let first_pointer = first.pointer();
+        let first_pointer = first.as_ptr();
         let second = task(&pool);
-        let second_pointer = second.pointer();
+        let second_pointer = second.as_ptr();
         let mut list = TaskList::default();
 
         list.insert(first);
@@ -108,11 +108,11 @@ mod tests {
         assert!(!list.is_empty());
 
         let removed = list.remove(first_pointer).unwrap();
-        assert_eq!(removed.pointer(), first_pointer);
+        assert_eq!(removed.as_ptr(), first_pointer);
         drop(removed);
 
         let remaining = list.pop_front().unwrap();
-        assert_eq!(remaining.pointer(), second_pointer);
+        assert_eq!(remaining.as_ptr(), second_pointer);
         drop(remaining);
         assert!(list.is_empty());
         assert!(pool.is_empty());

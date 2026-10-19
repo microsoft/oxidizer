@@ -19,12 +19,12 @@ use pin_project::{pin_project, pinned_drop};
 use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, TaskPointer, WakeSignal, discard_task_panic_payload};
+use crate::{TaskCreatedReporter, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal, discard_task_panic_payload};
 
 #[derive(Debug, Default)]
 pub(crate) struct TaskLinks {
-    pub(crate) previous: Cell<Option<TaskPointer>>,
-    pub(crate) next: Cell<Option<TaskPointer>>,
+    pub(crate) previous: Cell<Option<TaskPtr>>,
+    pub(crate) next: Cell<Option<TaskPtr>>,
     pub(crate) linked: Cell<bool>,
 }
 
@@ -52,6 +52,8 @@ where
 
     /// Initialized once on the owner, before any waker is exposed. The signal is never replaced.
     wake_signal: OnceCell<WakeSignal>,
+
+    handle_slot: TaskHandleSlot,
 
     options: TaskOptions,
 
@@ -140,6 +142,7 @@ where
                 result_target: Some(result_target),
             })),
             wake_signal: OnceCell::new(),
+            handle_slot: TaskHandleSlot::new(),
             options,
             sink,
             poll_count: Cell::new(0),
@@ -168,6 +171,10 @@ where
 
     fn links(&self) -> &TaskLinks {
         &self.links
+    }
+
+    fn handle_slot(&self) -> &TaskHandleSlot {
+        &self.handle_slot
     }
 
     fn clear_queued_notification(&self) {
@@ -509,6 +516,9 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     /// Returns owner-thread intrusive-list links for this task.
     fn links(&self) -> &TaskLinks;
 
+    /// Returns storage for the immutable handle template embedded in this task.
+    fn handle_slot(&self) -> &TaskHandleSlot;
+
     /// Records that the executor drained this task's queued wake notification.
     fn clear_queued_notification(&self);
 
@@ -551,15 +561,15 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::TaskRef;
+    use crate::TaskHandle;
     use crate::remote::Pool as RemotePool;
     use crate::testing::TestSubjectFuture;
 
-    fn fake_wake_owner() -> TaskRef {
-        crate::testing::new_test_task_ref()
+    fn fake_wake_owner() -> TaskHandle {
+        crate::testing::new_test_task_handle()
     }
 
-    fn fake_wake_signal(owner: &TaskRef) -> WakeSignal {
+    fn fake_wake_signal(owner: &TaskHandle) -> WakeSignal {
         WakeSignal::new_for_test(Waker::noop().clone(), owner)
     }
 
@@ -644,12 +654,12 @@ mod tests {
     #[test]
     fn clear_queued_notification_forwards_to_the_wake_signal() {
         let _executor = crate::Executor::builder().build();
-        let fake_task_ref = fake_wake_owner();
+        let fake_task_handle = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let task = pin!(Task::new(pending::<u64>(), tx));
         let task = task.as_ref();
-        let signal = WakeSignal::new_for_test(Waker::noop().clone(), &fake_task_ref);
+        let signal = WakeSignal::new_for_test(Waker::noop().clone(), &fake_task_handle);
         task.initialize(signal);
         let signal = task.pinned_wake_signal();
         // SAFETY: The pinned signal remains alive for this borrow.
