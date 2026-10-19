@@ -356,6 +356,7 @@ impl Write for Connection {
         self.stream.write(buf)
     }
 
+    #[cfg_attr(test, mutants::skip)] // UnixStream is unbuffered; its flush is equivalent to returning Ok(()).
     fn flush(&mut self) -> io::Result<()> {
         self.stream.flush()
     }
@@ -414,6 +415,8 @@ fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     target_os = "netbsd",
     target_os = "dragonfly"
 )))]
+#[cfg_attr(coverage_nightly, coverage(off))] // This fallback is compiled out on every supported native IPC target.
+#[cfg_attr(test, mutants::skip)] // Supported-target suites cannot exercise an unsupported-platform definition.
 fn peer_identity(_stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -597,14 +600,28 @@ mod tests {
             Connection::connect(&unsupported, Duration::from_secs(1)).unwrap_err().kind(),
             io::ErrorKind::Unsupported
         );
-        let _listener = Listener::bind(&descriptor).unwrap();
+        let listener = Listener::bind(&descriptor).unwrap();
         let mut wrong = descriptor.clone();
         wrong.owner = MonitorOwner::UnixUser(!0);
         assert_eq!(
             Connection::connect(&wrong, Duration::from_secs(1)).unwrap_err().kind(),
             io::ErrorKind::PermissionDenied
         );
-        let connection = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
+        drop(listener);
+        let listener = Listener::bind(&descriptor).unwrap();
+        let mut connection = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
+        let mut server = listener.accept().unwrap();
+        server.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        assert_eq!(connection.write(b"ok").unwrap(), 2);
+        let mut bytes = [0; 2];
+        assert_eq!(server.peek(&mut bytes).unwrap(), 2);
+        assert_eq!(&bytes, b"ok");
+        assert_eq!(server.read(&mut bytes).unwrap(), 2);
+        assert_eq!(&bytes, b"ok");
+        assert_eq!(
+            connection.set_write_timeout(Some(Duration::ZERO)).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
         for timeout in [Duration::ZERO, Duration::MAX] {
             assert_eq!(
                 connection.set_read_timeout(Some(timeout)).unwrap_err().kind(),
@@ -682,11 +699,33 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "native directory types, symlinks, and descriptor inheritance flags")]
+    fn directory_opens_reject_symlinks_and_regular_files() {
+        let directory = crate::testing::Directory::new();
+        let owner = current_owner().unwrap();
+        let parent = directory.path().parent().unwrap();
+        let link = parent.join("directory-link");
+        std::os::unix::fs::symlink(directory.path(), &link).unwrap();
+        open_directory(&link, &owner).unwrap_err();
+        let file = parent.join("file");
+        fs::write(&file, []).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        open_directory(&file, &owner).unwrap_err();
+        let file = create_descriptor(&directory.path().join("flags.monitor"), &owner).unwrap();
+        // SAFETY: the created file is live and F_GETFD has no pointer argument.
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_eq!(flags & libc::FD_CLOEXEC, libc::FD_CLOEXEC);
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "native and careful suites cover descriptor redirection")]
     fn descriptor_symlinks_and_fifos_are_rejected_without_blocking() {
         let directory = crate::testing::Directory::new();
         let target = directory.path().join("target");
         fs::write(&target, []).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        read_descriptor(&target).unwrap();
         let link = directory.path().join("link.monitor");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         read_descriptor(&link).unwrap_err();
@@ -694,7 +733,15 @@ mod tests {
         let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
         // SAFETY: name is a valid terminated pathname in the test fixture.
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
-        assert_eq!(read_descriptor(&fifo).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        let (completed, completion) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || completed.send(read_descriptor(&fifo)).unwrap());
+        assert_eq!(
+            completion.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        worker.join().unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(read_descriptor(&target).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
         fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(read_descriptor(&target).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
     }

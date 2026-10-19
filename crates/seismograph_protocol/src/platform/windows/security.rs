@@ -611,12 +611,14 @@ mod tests {
             io::ErrorKind::PermissionDenied
         );
         let path = temporary.path().join("file");
-        std::fs::write(&path, []).unwrap();
+        std::fs::write(&path, b"keep").unwrap();
         let file = File::open(&path).unwrap();
         assert_eq!(ordinary_directory(&file).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
         let entries = read_directory(&file, &path).unwrap();
         assert_eq!(entries.len(), 1);
         entries.into_iter().next().unwrap().unwrap_err();
+        create_directory(&path, &current_owner().unwrap()).unwrap_err();
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
         create_directory(Path::new(r"C:\"), &current_owner().unwrap()).unwrap_err();
     }
 

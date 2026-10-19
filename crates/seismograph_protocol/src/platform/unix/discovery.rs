@@ -41,7 +41,7 @@ fn current_directory_in(runtime: Option<&Path>, temporary_root: &Path, owner: &M
     let root = fs::canonicalize(temporary_root)?;
     let guard = directory_file(&root)?;
     let metadata = guard.metadata()?;
-    if metadata.uid() != 0 || metadata.mode() & 0o1000 == 0 {
+    if !trusted_temporary_root(metadata.uid(), metadata.mode()) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "shared temporary directory must be root-owned and sticky",
@@ -58,6 +58,10 @@ fn current_directory_in(runtime: Option<&Path>, temporary_root: &Path, owner: &M
         file,
         temporary: Some(temporary),
     })
+}
+
+fn trusted_temporary_root(uid: u32, mode: u32) -> bool {
+    uid == 0 && mode & 0o1000 != 0
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Unexpected runtime-directory failures require host filesystem faults or external permission races.
@@ -141,12 +145,16 @@ fn add_directory(path: PathBuf, caller: u32, paths: &mut BTreeMap<PathBuf, Monit
             paths.insert(path, MonitorOwner::UnixUser(metadata.uid()));
         }
         Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound || (caller != 0 && error.kind() == io::ErrorKind::PermissionDenied) => {}
+        Err(error) if ignorable_discovery_error(caller, error.kind()) => {}
         Err(error) => errors.push(Err(io::Error::new(
             error.kind(),
             format!("monitor discovery {}: {error}", path.display()),
         ))),
     }
+}
+
+fn ignorable_discovery_error(caller: u32, kind: io::ErrorKind) -> bool {
+    kind == io::ErrorKind::NotFound || (caller != 0 && kind == io::ErrorKind::PermissionDenied)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // read_dir iterator errors require filesystem failure after enumeration has started.
@@ -269,6 +277,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shared_temporary_roots_require_both_root_ownership_and_the_sticky_bit() {
+        for (uid, mode, trusted) in [
+            (0, 0o41777, true),
+            (0, 0o40755, false),
+            (1001, 0o41777, false),
+            (1001, 0o40700, false),
+        ] {
+            assert_eq!(trusted_temporary_root(uid, mode), trusted);
+        }
+    }
+
+    #[test]
+    fn discovery_reports_root_access_denials_and_preserves_other_errors() {
+        for (caller, denials_ignored) in [(0, false), (1001, true)] {
+            assert!(ignorable_discovery_error(caller, io::ErrorKind::NotFound));
+            assert_eq!(ignorable_discovery_error(caller, io::ErrorKind::PermissionDenied), denials_ignored);
+            assert!(!ignorable_discovery_error(caller, io::ErrorKind::NotADirectory));
+            assert!(!ignorable_discovery_error(caller, io::ErrorKind::Other));
+        }
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "native temporary directories and ownership")]
     fn current_directory_rejects_nonunix_owners() {
         assert_eq!(
@@ -287,10 +317,12 @@ mod tests {
         let mut paths = BTreeMap::new();
         let mut errors = Vec::new();
         scan_socket_table(&temporary.path().join("missing"), 0, &mut paths, &mut errors);
-        scan_socket_table(temporary.path(), 0, &mut paths, &mut errors);
+        let invalid = temporary.path().join("invalid");
+        fs::write(&invalid, b"\xff\n").unwrap();
+        scan_socket_table(&invalid, 0, &mut paths, &mut errors);
         assert_eq!(
             errors.into_iter().map(|entry| entry.unwrap_err().kind()).collect::<Vec<_>>(),
-            [io::ErrorKind::NotFound, io::ErrorKind::IsADirectory]
+            [io::ErrorKind::NotFound, io::ErrorKind::InvalidData]
         );
     }
 
@@ -426,9 +458,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn socket_table_read_failures_are_reported_without_looping() {
         let mut reads = 0;
-        let lines = std::iter::from_fn(|| {
+        let lines = (0..2).map(|_| {
             reads += 1;
-            Some(Err(io::Error::from(io::ErrorKind::IsADirectory)))
+            Err(io::Error::from(io::ErrorKind::IsADirectory))
         });
         let entries = socket_table_directories(lines)
             .map(|entry| entry.map_err(|error| error.kind()))
