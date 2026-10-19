@@ -114,3 +114,29 @@ impl Drop for CycleGuard {
         });
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foreign_owner_operations_leave_local_wakes_unchanged() {
+        std::thread::spawn(|| {
+            let foreign_owner = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
+            let task_handle = crate::testing::new_test_task_handle();
+            let pointer = task_handle.as_ptr();
+            let returned = enqueue(foreign_owner, task_handle).unwrap_err();
+            let mut target = VecDeque::new();
+
+            append_wakes(foreign_owner, &mut target);
+            remove_wake(foreign_owner, pointer);
+            clear_wakes(foreign_owner);
+
+            assert!(target.is_empty());
+            drop(returned);
+        })
+        .join()
+        .unwrap();
+    }
+}

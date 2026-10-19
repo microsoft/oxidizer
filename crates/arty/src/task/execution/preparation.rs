@@ -420,4 +420,23 @@ mod tests {
         result.unwrap();
         assert!(dropped.load(Ordering::Acquire));
     }
+
+    #[test]
+    fn queued_factory_without_enrichment_disposes_a_panicking_factory_without_unwinding() {
+        let dropped = AtomicBool::new(false);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            struct PanicOnDrop<'a>(&'a AtomicBool);
+
+            impl Drop for PanicOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                    panic!("factory drop");
+                }
+            }
+
+            drop(TaskFactory::new(PanicOnDrop(&dropped), None));
+        }));
+        result.unwrap();
+        assert!(dropped.load(Ordering::Acquire));
+    }
 }

@@ -121,6 +121,34 @@ fn completed_result_survives_executor_drop() {
     assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
 }
 
+struct ShutdownDuringRemoteConversion(TaskSet);
+
+impl IntoFuture for ShutdownDuringRemoteConversion {
+    type Output = usize;
+    type IntoFuture = Ready<usize>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        self.0.begin_shutdown();
+        ready(42)
+    }
+}
+
+#[test]
+fn shutdown_during_remote_conversion_rejects_the_task() {
+    let executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let result_pool = RemotePool::new();
+    let (result_tx, mut result) = result_pool.channel();
+
+    tasks.add_with_remote_result(ShutdownDuringRemoteConversion(tasks.clone()), TaskOptions::default(), result_tx);
+
+    assert!(!executor.has_tasks());
+    assert!(matches!(
+        Pin::new(&mut result).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(error)) if error.is_shutdown()
+    ));
+}
+
 #[test]
 fn retained_handle_reports_shutdown_without_delaying_shutdown() {
     let mut executor = Executor::builder().build();

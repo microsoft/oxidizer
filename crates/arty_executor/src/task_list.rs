@@ -106,6 +106,7 @@ mod tests {
         list.insert(first);
         list.insert(second);
         assert!(!list.is_empty());
+        assert_eq!(format!("{list:?}"), "TaskList { .. }");
 
         let removed = list.remove(first_pointer).unwrap();
         assert_eq!(removed.as_ptr(), first_pointer);
