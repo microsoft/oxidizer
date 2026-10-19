@@ -31,11 +31,11 @@ data_privacy = { workspace = true }
 events_once = { workspace = true }
 nm = { workspace = true }
 observed = { workspace = true }
-pin-project = { workspace = true }
 performables = { workspace = true }
+pin-project = { workspace = true }
 plurality = { workspace = true }
-tick = { workspace = true, features = ["fast-instant"] }
 thread_aware_core = { workspace = true, features = ["std"] }
+tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
