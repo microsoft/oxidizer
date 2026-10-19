@@ -51,6 +51,39 @@ fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
 }
 
 #[test]
+fn blocking_pool_limits_above_ten_thousand_are_rejected_when_the_runtime_is_built() {
+    for policy in [
+        BlockingPoolPolicy::shared().max(10_001),
+        BlockingPoolPolicy::per_worker().max(10_001),
+    ] {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let error: Error = Runtime::builder()
+            .workers(WorkersPolicy::at_most(1))
+            .blocking_pool(policy)
+            .sink(sink)
+            .build()
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "blocking pool max_workers must not exceed 10000");
+        assert!(error.source().is_some());
+        let events = processor.events();
+        let names: Vec<_> = events.iter().map(CapturedEvent::name).collect();
+        assert_eq!(names, vec!["arty.rt.start_failed"]);
+    }
+}
+
+#[test]
+fn blocking_pool_limit_of_ten_thousand_is_accepted() {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::at_most(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(10_000))
+        .build()
+        .unwrap();
+
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn zero_shared_blocking_limit_can_be_replaced_before_building() {
     let runtime = Runtime::builder()
         .blocking_pool(BlockingPoolPolicy::shared().max(0))

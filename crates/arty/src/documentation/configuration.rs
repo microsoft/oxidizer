@@ -35,7 +35,7 @@
 //! }
 //! ```
 //!
-//! This requests at most two async workers and a shared pool of up to four
+//! This requests at most two async workers and a fixed shared group of four
 //! blocking threads. The pool limit does not limit the whole process.
 //!
 //! Async worker stacks default to 2 MiB. Use
@@ -44,20 +44,20 @@
 //!
 //! # Blocking pools
 //!
-//! Blocking work runs off the async workers. By default, they share one pool.
-//! Use [`BlockingPoolPolicy::shared`](crate::runtime::BlockingPoolPolicy::shared)
-//! for one runtime-wide pool, or
-//! [`per_worker`](crate::runtime::BlockingPoolPolicy::per_worker) to give each
-//! worker its own pool. Chain [`max`](crate::runtime::BlockingPoolPolicy::max)
-//! to set the thread limit. Per-worker pools can use more threads in total.
+//! Blocking work runs off the async workers in one runtime-owned pool.
+//! [`BlockingPoolPolicy::per_worker`](crate::runtime::BlockingPoolPolicy::per_worker)
+//! maps an explicit limit to each submitting processor.
+//! [`shared`](crate::runtime::BlockingPoolPolicy::shared) uses one system-wide
+//! worker group with a default upper bound of 10,000 workers. An explicit
+//! [`max`](crate::runtime::BlockingPoolPolicy::max) can select a lower limit.
 //! Choose based on your workload rather than assuming one policy is faster.
 //!
 //! Each blocking callback occupies one pool thread until it returns. Do not
 //! create a cycle where a callback waits for async work that then awaits
-//! another callback from the same saturated pool. Shared pools expose every
-//! worker to that cycle; per-worker pools limit it to one worker's pool. Arty
-//! rejects direct polling of a same-pool blocking handle, but it does not track
-//! transitive dependencies through spawned async tasks.
+//! another callback from the same saturated worker group. Shared groups expose
+//! the entire runtime to that cycle; processor-local groups confine it to one
+//! submitting processor. Arty does not reject direct waits or track transitive
+//! dependencies through spawned async tasks.
 //!
 //! # Entry-point attributes
 //!

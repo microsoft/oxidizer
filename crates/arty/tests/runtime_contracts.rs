@@ -334,29 +334,6 @@ fn scoped_borrowed_storage_is_destroyed_before_success_or_error() {
 }
 
 #[test]
-fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
-    for policy in [BlockingPoolPolicy::per_worker(), BlockingPoolPolicy::shared().max(1)] {
-        let runtime = Runtime::builder()
-            .workers(WorkersPolicy::exactly(1))
-            .blocking_pool(policy)
-            .build()
-            .unwrap();
-        let scheduler = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
-            .join()
-            .unwrap();
-        let (finished, receive) = mpsc::channel();
-        let task = scheduler.spawn_blocking(move || {
-            drop(runtime);
-            finished.send(()).unwrap();
-        });
-        receive.recv_timeout(TEST_TIMEOUT).unwrap();
-        task.join().unwrap();
-    }
-}
-
-#[test]
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();

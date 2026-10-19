@@ -202,18 +202,6 @@ pub(crate) struct BuiltinsThreadMismatch {
     pub backtrace: BacktraceText,
 }
 
-/// Emitted when the blocking worker pool is already at its maximum size
-/// and cannot grow to absorb a fresh overload.
-#[event("arty.rt.blocking_worker.pool_saturated")]
-#[warning("blocking worker pool is saturated and cannot grow")]
-#[counter(name = "arty.rt.blocking_worker.pool_saturated")]
-pub(crate) struct BlockingWorkerPoolSaturated {
-    #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]
-    pub blocking_worker_pool_mode: BlockingWorkerPoolMode,
-    #[dimension(log = "blocking_worker_pool.max_threads", metric = "blocking_worker_pool.max_threads")]
-    pub max_threads: SystemMetricCount,
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
@@ -480,28 +468,6 @@ mod tests {
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
                 .dimension("backtrace", "<backtrace>")
-        );
-    }
-
-    #[test]
-    fn blocking_worker_pool_saturated_logs_and_counts() {
-        let (sink, processor) = test_emitter(TEST_ID);
-
-        emit!(
-            sink,
-            BlockingWorkerPoolSaturated {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode("per_worker"),
-                max_threads: SystemMetricCount(64),
-            }
-        );
-
-        assert_eq!(
-            processor.single_event(),
-            ExpectedEvent::new("arty.rt.blocking_worker.pool_saturated", Severity::Warn)
-                .body("blocking worker pool is saturated and cannot grow")
-                .dimension("blocking_worker_pool.mode", "per_worker")
-                .dimension("blocking_worker_pool.max_threads", "64")
-                .metric()
         );
     }
 }

@@ -14,7 +14,6 @@ use performables::sync::channel;
 use thread_aware::Thread;
 use tick::runtime::{ClockDriver, InactiveClock};
 
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
@@ -81,8 +80,8 @@ pub(crate) struct AsyncWorker {
     // JoinError rather than registering a task.
     tasks: TaskSet,
 
-    // We keep a reference to the blocking worker so that we can send it a shutdown signal.
-    blocking_worker: Arc<BlockingWorker>,
+    // Dropped when shutdown starts so worker-local submissions release the pool.
+    blocking_scheduler: Option<vicinal::Scheduler>,
 
     // This drives moves the timers registered with the clock forward.
     clock_driver: ClockDriver,
@@ -97,7 +96,7 @@ impl AsyncWorker {
         dispatcher: DispatcherClient,
         thread: Thread,
         sink: Sink,
-        blocking_worker: Arc<BlockingWorker>,
+        blocking_scheduler: vicinal::Scheduler,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
@@ -106,7 +105,7 @@ impl AsyncWorker {
 
         let executor = Executor::builder()
             .owner_waker(WorkerSignal::waker(&signal))
-            .sink(blocking_worker.sink().clone())
+            .sink(sink.clone())
             .build();
         let tasks = executor.tasks();
 
@@ -120,7 +119,7 @@ impl AsyncWorker {
             executor: Some(executor),
             tasks,
             clock_driver,
-            blocking_worker,
+            blocking_scheduler: Some(blocking_scheduler),
             signal,
             _single_threaded: PhantomData,
         }
@@ -225,7 +224,7 @@ impl AsyncWorker {
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
 
-        self.blocking_worker.shutdown();
+        self.blocking_scheduler = None;
 
         // Safe executor drop synchronously cancels and releases all remaining task storage.
         self.executor = None;
@@ -246,6 +245,7 @@ impl Drop for AsyncWorker {
 mod tests {
     #[cfg(not(miri))]
     use std::pin::Pin;
+    use std::sync::LazyLock;
     use std::sync::atomic::AtomicUsize;
     #[cfg(not(miri))]
     use std::task::{Wake, Waker};
@@ -261,8 +261,6 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
-    use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::BoxedRemoteFutureFactory;
@@ -293,7 +291,7 @@ mod tests {
     fn test_worker(
         command_tx: channel::Sender<AsyncWorkerCommand>,
         command_rx: channel::Receiver<AsyncWorkerCommand>,
-        blocking_worker: Arc<BlockingWorker>,
+        blocking_scheduler: vicinal::Scheduler,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> AsyncWorker {
@@ -303,17 +301,22 @@ mod tests {
             command_tx,
             waker: WorkerSignal::waker(&signal),
             thread: thread.clone(),
-            blocking_worker: Arc::clone(&blocking_worker),
         };
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new_with_shutdown(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
+            test_blocking_scheduler(),
             sink.clone(),
             Arc::clone(&shutdown_signal),
         )));
 
-        AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_worker, clock, signal)
+        AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_scheduler, clock, signal)
+    }
+
+    fn test_blocking_scheduler() -> vicinal::Scheduler {
+        static POOL: LazyLock<vicinal::Pool> = LazyLock::new(vicinal::Pool::new);
+        POOL.scheduler()
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {
@@ -362,7 +365,7 @@ mod tests {
             let worker = test_worker(
                 command_tx.clone(),
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_scheduler(),
                 control.clone().into(),
                 Arc::clone(&signal),
             );
@@ -541,7 +544,7 @@ mod tests {
         let worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_scheduler(),
             control.clone().into(),
             Arc::new(WorkerSignal::default()),
         );
@@ -579,7 +582,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_scheduler(),
             InactiveClock::default(),
             Arc::clone(&signal),
         );
@@ -617,7 +620,7 @@ mod tests {
         let worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_scheduler(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -642,22 +645,12 @@ mod tests {
             let worker_command_tx = command_tx.clone();
 
             let async_worker_thread = thread::spawn(move || {
-                let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+                let blocking_scheduler = test_blocking_scheduler();
 
                 let signal = Arc::new(WorkerSignal::default());
 
-                let worker = test_worker(
-                    worker_command_tx,
-                    command_rx,
-                    Arc::clone(&blocking_worker),
-                    InactiveClock::default(),
-                    signal,
-                );
+                let worker = test_worker(worker_command_tx, command_rx, blocking_scheduler, InactiveClock::default(), signal);
                 worker.run();
-
-                // The async worker owns the blocking worker in our current implementation,
-                // so we verify that we properly terminated it together with the async worker.
-                assert!(is_blocking_worker_shutting_down(&blocking_worker));
             });
 
             // Signals that the task waiting on the nested task has completed.
@@ -707,7 +700,7 @@ mod tests {
                 let worker = test_worker(
                     worker_command_tx,
                     command_rx,
-                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                    test_blocking_scheduler(),
                     InactiveClock::default(),
                     signal,
                 );
@@ -756,7 +749,7 @@ mod tests {
             let worker = test_worker(
                 worker_command_tx,
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_scheduler(),
                 InactiveClock::default(),
                 signal,
             );
@@ -792,7 +785,7 @@ mod tests {
         let worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_scheduler(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -818,7 +811,7 @@ mod tests {
         let worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_scheduler(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -847,28 +840,26 @@ mod tests {
     #[test]
     fn dropping_worker_without_run_cleans_up_safely() {
         let (commands, receiver) = channel::unbounded();
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let blocking_scheduler = test_blocking_scheduler();
         let worker = test_worker(
             commands,
             receiver,
-            Arc::clone(&blocking_worker),
+            blocking_scheduler,
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
 
         drop(worker);
-
-        assert!(is_blocking_worker_shutting_down(&blocking_worker));
     }
 
     #[test]
     fn explicit_executor_shutdown_completes_worker_shutdown() {
         let (commands, receiver) = channel::unbounded();
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let blocking_scheduler = test_blocking_scheduler();
         let mut worker = test_worker(
             commands.clone(),
             receiver,
-            Arc::clone(&blocking_worker),
+            blocking_scheduler,
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -879,7 +870,7 @@ mod tests {
 
         assert!(outcome.is_break());
         assert!(worker.executor.is_none());
-        assert!(is_blocking_worker_shutting_down(&blocking_worker));
+        assert!(worker.blocking_scheduler.is_none());
         assert!(!worker.process_commands());
         drop(commands);
     }

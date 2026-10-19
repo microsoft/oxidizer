@@ -1,34 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 
-use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::error::Error;
 
-/// A sharing policy for blocking-task thread pools.
+const MAX_BLOCKING_WORKERS: u32 = 10_000;
+const DEFAULT_SHARED_WORKERS: NonZeroU32 =
+    NonZeroU32::new(MAX_BLOCKING_WORKERS).expect("the default shared blocking worker limit is nonzero");
+
+/// A locality and worker-count policy for the runtime's blocking-task pool.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::blocking_pool`](crate::runtime::RuntimeBuilder::blocking_pool).
 /// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
 /// callbacks separately from async workers.
 ///
-/// # Choosing between per-worker and shared
+/// # Choosing locality
 ///
-/// [`per_worker`](Self::per_worker) gives each async worker its own pool. This
-/// separates blocking work between workers, but can use more threads as
-/// the number of workers grows.
+/// [`per_worker`](Self::per_worker) maps an explicit limit to a
+/// processor-local worker group.
 ///
-/// [`shared`](Self::shared), the default, gives all workers one pool with a
-/// common thread limit. Chain [`max`](Self::max) to cap the threads in either
-/// the shared pool or each per-worker pool.
+/// [`shared`](Self::shared), the default, uses one system-wide worker group
+/// capped at 10,000 workers unless [`max`](Self::max) selects a lower limit.
+/// All modes use one runtime-owned pool.
 ///
-/// Choose based on your workload; neither policy is faster in every case.
-/// Pool sizing must also account for dependency cycles. A blocking callback
-/// that waits for async work which in turn waits for the same saturated pool
-/// can deadlock. Shared pools make the dependency runtime-wide; per-worker pools
-/// confine it to one async worker's pool. Arty does not track transitive task
-/// dependencies to detect such cycles.
+/// Pool sizing must account for dependency cycles. A blocking callback that
+/// waits for async work which then waits for the same saturated worker group
+/// can deadlock. Arty does not track transitive task dependencies.
 ///
 /// # Examples
 ///
@@ -50,10 +49,9 @@ enum Mode {
 }
 
 impl BlockingPoolPolicy {
-    /// Creates a policy with one pool per async worker.
+    /// Creates a processor-local blocking-worker policy.
     ///
-    /// Each pool uses the runtime's default blocking-thread limit. The total
-    /// blocking-thread resources therefore grow with the async worker count.
+    /// Without [`max`](Self::max), the runtime's default worker policy is used.
     ///
     /// # Examples
     ///
@@ -70,7 +68,10 @@ impl BlockingPoolPolicy {
         }
     }
 
-    /// Creates a policy sharing one blocking pool across all async workers.
+    /// Creates a system-wide shared blocking-worker policy.
+    ///
+    /// Without [`max`](Self::max), the shared worker group is capped at 10,000
+    /// workers. An explicit limit is shared by all submitters.
     ///
     /// # Examples
     ///
@@ -87,10 +88,10 @@ impl BlockingPoolPolicy {
         }
     }
 
-    /// Sets the maximum number of threads in the shared pool or in each
-    /// per-worker pool.
+    /// Sets the fixed worker count for the selected locality.
     ///
-    /// A zero count is retained in the policy and rejected by
+    /// The supported range is `1..=10_000`. Values outside that range are
+    /// retained in the policy and rejected by
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
     #[must_use]
     pub const fn max(mut self, max_workers: usize) -> Self {
@@ -98,7 +99,6 @@ impl BlockingPoolPolicy {
         self
     }
 
-    /// Telemetry label identifying the pool mode (`per_worker` / `shared`).
     pub(crate) const fn mode_label(&self) -> &'static str {
         match self.mode {
             Mode::PerWorker => "per_worker",
@@ -106,18 +106,20 @@ impl BlockingPoolPolicy {
         }
     }
 
-    /// Resolves this configuration into the concrete pool resources used by
-    /// workers at runtime.
-    pub(crate) fn into_pools(self) -> Result<BlockingPools, Error> {
+    /// Resolves this policy into the `vicinal::WorkerPolicy` for the runtime's single
+    /// blocking pool. `None` keeps the default per-processor policy from Vicinal.
+    pub(in crate::runtime) fn worker_policy(&self) -> Result<Option<vicinal::WorkerPolicy>, Error> {
+        let max_workers = validated_max(self.max_workers)?;
+
         match self.mode {
-            Mode::PerWorker => {
-                let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::per_worker(max_workers))
-            }
-            Mode::Shared => {
-                let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::shared(max_workers))
-            }
+            // `per_worker()` used to mean "one dedicated pool per
+            // async worker, growing independently". vicinal's default (no explicit
+            // WorkerPolicy) schedules each task near its *submitting processor* instead of
+            // its arty worker index, which is a finer-grained analogue but not identical.
+            Mode::PerWorker => Ok(max_workers.map(vicinal::WorkerPolicy::per_processor)),
+            Mode::Shared => Ok(Some(vicinal::WorkerPolicy::per_system(
+                max_workers.unwrap_or(DEFAULT_SHARED_WORKERS),
+            ))),
         }
     }
 }
@@ -128,9 +130,18 @@ impl Default for BlockingPoolPolicy {
     }
 }
 
-fn validated_max(max_workers: Option<usize>) -> Result<Option<NonZeroUsize>, Error> {
+fn validated_max(max_workers: Option<usize>) -> Result<Option<NonZeroU32>, Error> {
     max_workers
-        .map(|max_workers| NonZeroUsize::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit))
+        .map(|max_workers| {
+            if max_workers > MAX_BLOCKING_WORKERS as usize {
+                return Err(Error::blocking_pool_limit_too_large());
+            }
+            let max_workers = u32::try_from(max_workers)
+                .expect("validated above to fit within the 10,000-worker u32 limit");
+            let max_workers =
+                NonZeroU32::new(max_workers).ok_or_else(Error::invalid_blocking_pool_limit)?;
+            Ok(max_workers)
+        })
         .transpose()
 }
 
@@ -140,33 +151,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn per_worker_into_pools_is_per_worker() {
+    fn per_worker_resolves_to_default_policy() {
         assert!(
-            matches!(
-                BlockingPoolPolicy::per_worker().into_pools().unwrap(),
-                BlockingPools::PerWorker(None)
-            ),
-            "expected PerWorker variant"
+            BlockingPoolPolicy::per_worker().worker_policy().unwrap().is_none(),
+            "expected the default (per-processor) vicinal policy"
         );
     }
 
     #[test]
-    fn shared_into_pools_is_shared() {
+    fn per_worker_with_max_resolves_to_explicit_policy() {
+        assert!(BlockingPoolPolicy::per_worker().max(4).worker_policy().unwrap().is_some());
+    }
+
+    #[test]
+    fn shared_without_max_resolves_to_system_policy() {
         assert!(
-            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), BlockingPools::Shared(_)),
-            "expected Shared variant"
+            BlockingPoolPolicy::shared().worker_policy().unwrap().is_some(),
+            "expected the default shared system-wide policy"
         );
     }
 
     #[test]
-    fn maximum_applies_to_both_pool_modes() {
-        assert!(matches!(
-            BlockingPoolPolicy::per_worker().max(3).into_pools().unwrap(),
-            BlockingPools::PerWorker(Some(max)) if max.get() == 3
-        ));
-        assert!(matches!(
-            BlockingPoolPolicy::shared().max(4).into_pools().unwrap(),
-            BlockingPools::Shared(pool) if pool.max_thread_count() == 4
-        ));
+    fn shared_with_max_resolves_to_system_policy() {
+        assert!(BlockingPoolPolicy::shared().max(4).worker_policy().unwrap().is_some());
+    }
+
+    #[test]
+    fn maximum_supported_limit_resolves() {
+        assert!(
+            BlockingPoolPolicy::shared()
+                .max(MAX_BLOCKING_WORKERS as usize)
+                .worker_policy()
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn limit_above_supported_maximum_is_rejected() {
+        let error = BlockingPoolPolicy::shared()
+            .max(MAX_BLOCKING_WORKERS as usize + 1)
+            .worker_policy()
+            .unwrap_err();
+        assert_eq!(error.to_string(), "blocking pool max_workers must not exceed 10000");
     }
 }

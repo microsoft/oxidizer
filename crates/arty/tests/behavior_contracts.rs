@@ -126,7 +126,6 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
         .unwrap_or_default();
     let dimensions = started[0].dimensions();
     assert!(dimensions.contains(&("processors.used".into(), "2".into())));
-    assert!(dimensions.contains(&("blocking_worker_pool.mode".into(), "shared".into())));
     assert!(dimensions.contains(&("stack_size_bytes".into(), STACK.max(configured_minimum).to_string().into())));
 }
 
@@ -166,18 +165,6 @@ fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
         let outcome = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
         assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
     });
-}
-
-#[test]
-fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
-    let runtime = runtime(1);
-    let scheduler = worker_scheduler(&runtime);
-    assert_ne!(
-        scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
-        scheduler.spawn(async |_| thread::current().id()).join().unwrap()
-    );
-    let outcome = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap();
-    assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
 }
 
 #[test]
@@ -354,7 +341,7 @@ fn configured_clock_control_remains_the_worker_time_source() {
 }
 
 #[test]
-fn default_blocking_pools_are_shared_between_workers() {
+fn default_blocking_tasks_run_away_from_async_workers() {
     let runtime = runtime(2);
     let schedulers: Vec<_> = (0..2).map(|_| worker_scheduler(&runtime)).collect();
     let workers: Vec<_> = schedulers
@@ -366,8 +353,7 @@ fn default_blocking_pools_are_shared_between_workers() {
         .iter()
         .map(|scheduler| scheduler.spawn_blocking(|| thread::current().id()).join().unwrap())
         .collect();
-    assert_eq!(blocking[0], blocking[1]);
-    assert!(!workers.contains(&blocking[0]));
+    assert!(blocking.iter().all(|thread| !workers.contains(thread)));
     runtime.stop().unwrap();
 }
 

@@ -25,7 +25,8 @@
 //! Once shutdown begins, new submissions return an immediately ready
 //! [`JoinError`](crate::task::JoinError) with `is_shutdown() == true` without
 //! invoking their factories. Pending async tasks are cancelled on their worker,
-//! and queued blocking callbacks do not start.
+//! but blocking callbacks admitted before the shutdown flag was observed may
+//! still start.
 //!
 //! Already-running blocking callbacks finish before shutdown completes; one
 //! that never returns can prevent it. Await work you need before stopping the
@@ -52,13 +53,12 @@
 //! # Calling from a worker
 //!
 //! `Runtime::stop` requests shutdown but returns an error rather than waiting
-//! when called from an async Arty worker or one of the runtime's blocking
-//! callbacks. Dropping the owner on any async Arty worker also requests shutdown
-//! without waiting or panicking.
+//! when called from an async Arty worker. Dropping the owner on an async Arty
+//! worker also requests shutdown without waiting or panicking.
 //!
-//! Dropping the owner from its own blocking callback requests shutdown without
-//! waiting for that callback. Neither case guarantees that shutdown has completed
-//! when destruction returns.
+//! Do not call `Runtime::stop` or drop the owner from one of that runtime's
+//! blocking callbacks. Destroying the blocking pool may wait for the callback
+//! that is performing the destruction and deadlock.
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.

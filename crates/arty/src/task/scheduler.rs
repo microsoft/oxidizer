@@ -4,10 +4,8 @@
 use std::cell::{Cell, RefCell};
 
 use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
-use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
 use crate::task::execution::DeferredTask;
@@ -72,7 +70,6 @@ pub struct Scheduler {
 struct Binding {
     thread: Thread,
     worker_index: WorkerIndex,
-    blocking_worker: Arc<BlockingWorker>,
 }
 
 impl Scheduler {
@@ -117,13 +114,11 @@ impl Scheduler {
         let worker_index = dispatcher
             .worker_index(current.id())
             .expect("scheduler thread must be registered with its dispatcher");
-        let blocking_worker = dispatcher.blocking_worker(worker_index);
         Self {
             dispatcher,
             binding: Binding {
                 thread: current,
                 worker_index,
-                blocking_worker,
             },
         }
     }
@@ -139,7 +134,6 @@ impl Scheduler {
         self.binding = Binding {
             thread: destination.clone(),
             worker_index,
-            blocking_worker: self.dispatcher.blocking_worker(worker_index),
         };
     }
 
@@ -336,7 +330,12 @@ impl Scheduler {
     ///
     /// Use this for synchronous I/O or library calls that would otherwise prevent
     /// an async worker from polling tasks and advancing timers. The callback
-    /// runs on a separate pool thread; its panic is reported through the join.
+    /// runs on a separate pool thread. When unwinding is enabled, a panic from
+    /// the callback body is reported through the join.
+    ///
+    /// This containment guarantee does not extend to panics from destructors of
+    /// callback captures or results, or from a join receiver's waker. Values used
+    /// with blocking work and custom wakers must not panic during those operations.
     ///
     /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
@@ -376,12 +375,7 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.binding.blocking_worker.spawn_blocking(body)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn blocking_worker(&self) -> &Arc<BlockingWorker> {
-        &self.binding.blocking_worker
+        self.dispatcher.spawn_blocking(body)
     }
 }
 

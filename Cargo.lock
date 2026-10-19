@@ -275,9 +275,9 @@ dependencies = [
  "testing_aids",
  "thread_aware",
  "thread_aware_core",
- "threadpool",
  "tick",
  "tokio",
+ "vicinal",
 ]
 
 [[package]]
@@ -1388,9 +1388,9 @@ dependencies = [
 
 [[package]]
 name = "cpulist"
-version = "1.1.8"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c486bbc92a4c933fed0f062b7922927f646a8b986e147710eace6cf0713fee6"
+checksum = "f5e1271b0cf819fdcb002ac5d2d60e1d6e2010ccc52c040541051d9c0bd1a43c"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
@@ -1861,9 +1861,9 @@ dependencies = [
 
 [[package]]
 name = "events_once"
-version = "0.5.38"
+version = "0.5.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "122b2d1aff277fdcefd06b3c53937f4853c885dbd8bd56370436742de6ee681f"
+checksum = "f045fbd77ae109664ea0bd4565b197b4d73ed8aac29121881aa137baa1acbdef"
 dependencies = [
  "plurality",
 ]
@@ -1901,9 +1901,9 @@ dependencies = [
 
 [[package]]
 name = "fast_time"
-version = "0.1.31"
+version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8b60acfa8189da6083fd44c0d1530fbe3651a8b1c58a7f974e5d052dc23310d"
+checksum = "633dff44507f5ee0d05ce3b55a8e520267bb284c42983d9fae3e88f83e427a7b"
 dependencies = [
  "libc",
  "windows",
@@ -2169,9 +2169,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "folo_ffi"
-version = "0.1.17"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "679bbe168884a5e08197be1287db706cc8400603cff5029f3bb00ca51e234bfa"
+checksum = "69f23613736875af86b64a6d01eb250229c931baa9f3befbdae33f83c9d43666"
 
 [[package]]
 name = "folo_utils"
@@ -3452,18 +3452,18 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "many_cpus"
-version = "2.4.17"
+version = "2.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09e439d967331b69a61a11634f4bf0cc0af49ce87b4511a0f0f76e828943f356"
+checksum = "11cf5e47eed5e1bf5d0a5b98f63f474c219a578d7a6f0a254cb87abe22373323"
 dependencies = [
  "many_cpus_impl",
 ]
 
 [[package]]
 name = "many_cpus_impl"
-version = "2.4.17"
+version = "2.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16a7a835f56a56b101398cb8b4bd50b5409d5fd944fa8c5119599b390d09bc13"
+checksum = "60e12db537633d19e4f5e3df5a79cb62c7ea02630cc7dbfb619857683c568a20"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -3762,9 +3762,9 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "new_zealand"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c592b50b567a2fd70a7f5d3dfa454f57530ac68f5346f35ca276ec2496d0bca"
+checksum = "cae63ddf0a56e48e86741f2d855845012c31dc02eb615d90d52e5b879a8c9256"
 
 [[package]]
 name = "nix"
@@ -3791,18 +3791,18 @@ dependencies = [
 
 [[package]]
 name = "nm"
-version = "0.1.49"
+version = "0.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2db6c8e78e4baee3aa7c7a97f78fd48181ec2b5e99f81f9b7457cdc84ba037b"
+checksum = "d5cb921f9d65d43985f3f5f1229686b6cb39031244e023d4b3aef627fd611169"
 dependencies = [
  "nm_impl",
 ]
 
 [[package]]
 name = "nm_impl"
-version = "0.1.49"
+version = "0.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08dc3248a0b5be409ee2509eee4eeb0d3291d9459266c6bec3541053fa576609"
+checksum = "0cb109e6c0592db09f48b805434175230bcc4b66a79442f5918bddf3b7ad67ea"
 dependencies = [
  "fast_time",
  "num-traits",
@@ -5989,15 +5989,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "threadpool"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
-dependencies = [
- "num_cpus",
-]
-
-[[package]]
 name = "tick"
 version = "0.7.1"
 dependencies = [
@@ -6636,6 +6627,24 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vicinal"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8411838c4627b30f7a1fd4f471fe88b90f46198a2cfd62492d2157feacfcb47"
+dependencies = [
+ "event-listener",
+ "events_once",
+ "fast_time",
+ "many_cpus",
+ "new_zealand",
+ "nm",
+ "ohno",
+ "pin-project",
+ "plurality",
+ "tracing",
+]
 
 [[package]]
 name = "walkdir"
