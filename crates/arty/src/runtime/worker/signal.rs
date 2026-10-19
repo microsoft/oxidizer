@@ -38,7 +38,7 @@ impl WorkerSignalTestHooks {
     }
 
     #[cfg(test)]
-    fn notify_idle_wait(&self) {
+    fn notify_wait_started(&self) {
         if let Some(notifier) = &self.idle_wait_notifier {
             _ = notifier.send(());
         }
@@ -96,7 +96,7 @@ impl WorkerSignal {
                 return;
             }
             #[cfg(test)]
-            self.test_hooks.notify_idle_wait();
+            self.test_hooks.notify_wait_started();
             notified = self.ready.wait(notified);
         }
     }
@@ -114,12 +114,18 @@ impl WorkerSignal {
             },
             |_| start.elapsed(),
             |notified, remaining| {
+                #[cfg(test)]
+                self.test_hooks.notify_wait_started();
                 let (guard, elapsed) = self.ready.wait_timeout(
                     notified
                         .take()
                         .expect("the previous timed wait always replaced its notification guard"),
                     remaining,
                 );
+                #[cfg(test)]
+                if *guard {
+                    self.test_hooks.notify_notification_release();
+                }
                 *notified = Some(guard);
                 elapsed.timed_out()
             },

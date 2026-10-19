@@ -407,7 +407,7 @@ mod tests {
         let (clock, worker_waker) = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
         idle_wait
             .recv_timeout(TEST_TIMEOUT)
-            .expect("the worker must establish its no-deadline notification wait");
+            .expect("the worker must establish its idle wait");
         let (completed, completion) = mpsc::channel();
         let waker = Waker::from(std::sync::Arc::new(CompletionWake(completed)));
         let mut delay = Box::pin(clock.delay(Duration::from_millis(20)));
