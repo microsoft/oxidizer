@@ -16,6 +16,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_execut
 keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
+[package.metadata.release-plan]
+private-api = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["observed::context::transfer::Transfer", "observed::sink::core::Sink"]
 
