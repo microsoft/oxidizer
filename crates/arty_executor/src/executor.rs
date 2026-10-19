@@ -126,6 +126,9 @@ impl Executor {
     ///
     /// Panics if called in a reentrant manner (e.g. from external code called
     /// from within `execute_cycle()`).
+    ///
+    /// Panics from cleanup and notification hooks may also propagate. Continued operation
+    /// after such a panic is not guaranteed.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
@@ -221,7 +224,9 @@ impl Executor {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
-        while let Some(task_handle) = self.active.pop_front() {
+        // Keep the scheduling owner queued until polling and context restoration both return.
+        // Otherwise an unwind could leave a remote waker owning a live non-Send payload.
+        while let Some(task_handle) = self.active.front() {
             // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
             // and retires its payload on the task's owner thread.
             let task = unsafe { task_handle.as_task() };
@@ -233,10 +238,13 @@ impl Executor {
                 self.shared.decrement_task_count(1);
                 drop(self.pending.remove(pointer));
                 completed_count = completed_count.saturating_add(1);
+                self.active.pop_front();
                 continue;
             }
 
-            match task.poll() {
+            let outcome = task.poll();
+            let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
+            match outcome {
                 task::Poll::Ready(()) => {
                     if linked {
                         drop(self.pending.remove(pointer));
