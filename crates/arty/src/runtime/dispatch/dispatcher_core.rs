@@ -203,6 +203,14 @@ impl DispatcherCore {
         )
     }
 
+    pub(crate) fn wake_worker(&self, worker_index: WorkerIndex) {
+        self.worker_endpoints
+            .get(usize::from(worker_index))
+            .expect("worker index must identify a registered runtime worker")
+            .waker
+            .wake_by_ref();
+    }
+
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,

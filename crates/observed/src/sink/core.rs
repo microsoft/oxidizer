@@ -232,6 +232,37 @@ impl Sink {
         }
     }
 
+    /// Returns whether any processor currently wants the described event.
+    ///
+    /// Calls [`EventProcessor::is_interested`] until a processor accepts,
+    /// including across composite children. No-op and empty sinks return `false`.
+    /// The query does not construct or dispatch events, flush processors,
+    /// invoke samplers, or read timestamps or enrichments.
+    ///
+    /// Use this before collecting fields from an external event source.
+    /// This is an independent probe, not a delivery guarantee or a recipient
+    /// reservation. Emission performs its own sampling and interest checks.
+    /// Query each candidate event rather than caching an answer for the sink's
+    /// lifetime; processor answers may change between the query and emission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use observed::{Event, Sink, event};
+    ///
+    /// #[event("request.completed")]
+    /// struct RequestCompleted;
+    ///
+    /// assert!(!Sink::noop().is_interested(&RequestCompleted::DESCRIPTION));
+    /// ```
+    #[must_use]
+    // External sources call this on their hot path; allow cross-crate inlining.
+    #[inline]
+    pub fn is_interested(&self, description: &EventDescription) -> bool {
+        self.sinks_with_shift()
+            .any(|(sink, _)| sink.processors.iter().any(|processor| processor.is_interested(description)))
+    }
+
     /// Forces buffered telemetry out by calling
     /// [`EventProcessor::flush`] on every registered processor (and, for
     /// a [`composite`](Self::composite), recursively on each child's

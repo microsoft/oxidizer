@@ -23,12 +23,14 @@ allowed_external_types = [
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
     # External dependencies surfaced in the public API
+    "http::uri::authority::Authority",
     "http::version::Version",
     # TLS backends (feature-gated)
     "rustls::client::client_conn::ClientConfig",
     "rustls::client::client_conn::ResolvesClientCert",
     "rustls::crypto::CryptoProvider",
     "rustls::verify::ServerCertVerifier",
+    "native_tls::Certificate",
     "native_tls::TlsConnector",
 ]
 

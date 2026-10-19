@@ -35,6 +35,10 @@ pub trait EventProcessor: Send + Sync {
     /// [`EventSampler`](crate::EventSampler) drops the event without asking.
     /// Keep it cheap.
     ///
+    /// [`Sink::is_interested`](crate::Sink::is_interested) can also call this
+    /// independently of emission. Those probes do not reserve recipients or
+    /// replace the checks performed for a later emission.
+    ///
     /// It is both the lazy-construction gate and the per-processor routing
     /// decision: the event closure runs only when at least one processor
     /// returns `true`, and a processor that returns `false` never receives the

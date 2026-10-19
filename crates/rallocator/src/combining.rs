@@ -199,6 +199,7 @@ impl<T: Send> Combining<T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::{Arc, Barrier};
 
@@ -325,6 +326,40 @@ mod tests {
         assert!(shared.flag.load(Ordering::Acquire));
         assert_eq!(shared.last.load(Ordering::Acquire), &raw mut successor);
         assert_eq!(shared.value.get_mut().invocations, 1);
+    }
+
+    #[test]
+    fn completed_successor_returns_without_waiting_or_combining() {
+        unsafe fn unreachable_invoke(_node: *mut Node<usize>, _value: *mut usize) {
+            panic!("a completed successor must not be invoked");
+        }
+
+        let shared = Combining::new(0_usize);
+        let mut predecessor = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: unreachable_invoke,
+        };
+        let mut completed = Node {
+            status: AtomicU32::new(DONE),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: unreachable_invoke,
+        };
+        // This fixture is single-threaded, so these orderings are not needed
+        // for synchronization here. They intentionally mirror the production
+        // queue protocol: Release publishes the tail, Acquire observes links
+        // and completion, and AcqRel clears the fixture's published tail.
+        shared.last.store(&raw mut predecessor, Ordering::Release);
+
+        // SAFETY: Both stationary stack nodes remain alive throughout attach.
+        // The completed status makes this caller return without becoming the
+        // combiner; the fixture resets last before either node leaves scope.
+        unsafe { shared.attach(&raw mut completed) };
+
+        assert_eq!(predecessor.next.load(Ordering::Acquire), &raw mut completed);
+        assert_eq!(completed.status.load(Ordering::Acquire), DONE);
+        assert!(!shared.flag.load(Ordering::Acquire));
+        assert_eq!(shared.last.swap(std::ptr::null_mut(), Ordering::AcqRel), &raw mut completed);
     }
 
     #[test]
