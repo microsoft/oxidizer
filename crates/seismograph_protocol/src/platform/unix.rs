@@ -428,7 +428,7 @@ fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
 fn connect_timeout_with(path: &Path, timeout: Duration, mut wait: impl FnMut(Duration)) -> io::Result<UnixStream> {
     let deadline = Instant::now()
         .checked_add(timeout)
-        .filter(|deadline| *deadline > Instant::now())
+        .filter(|_| !timeout.is_zero())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "connection timeout must be positive and bounded"))?;
     // SAFETY: sockaddr_un is C POD; fields are initialized below.
     let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };

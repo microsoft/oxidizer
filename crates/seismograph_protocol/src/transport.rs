@@ -289,6 +289,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configuration_and_write_calls_preserve_injected_failures() {
+        let (io, control) = MonitorIo::new_mocked();
+        let directory = crate::discovery::Directory::current(&io).unwrap();
+        let owner = directory.owner().clone();
+        let instance_id = crate::monitor::InstanceId::from_bytes([2; 16]);
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: io.process_id(),
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(directory.path(), &owner, io.process_id(), instance_id),
+            instance_id,
+            owner,
+        };
+        let listener = Listener::bind(&io, &descriptor).unwrap();
+        control.fail_next(IoOperation::ConfigureListener, io::ErrorKind::PermissionDenied.into());
+        assert_eq!(listener.set_nonblocking(true).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        let (mut connection, _peer) = control.connected_pair();
+        control.fail_next(IoOperation::ReadTimeout, io::ErrorKind::PermissionDenied.into());
+        assert_eq!(
+            connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        control.fail_next(IoOperation::WriteTimeout, io::ErrorKind::PermissionDenied.into());
+        assert_eq!(
+            connection.set_write_timeout(Some(Duration::from_secs(1))).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        control.fail_next(IoOperation::Write, io::ErrorKind::PermissionDenied.into());
+        assert_eq!(connection.write(b"bytes").unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
     fn connections_reject_zero_and_overflowing_deadlines_before_opening() {
         let (io, _) = MonitorIo::new_mocked();
         let directory = crate::discovery::Directory::current(&io).unwrap();

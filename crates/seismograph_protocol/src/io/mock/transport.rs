@@ -337,6 +337,10 @@ mod tests {
             owner,
         };
         let listener = Listener::bind(&runtime, &descriptor).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        assert!(runtime.state().listeners.get(&listener.path).unwrap().nonblocking);
+        listener.set_nonblocking(false).unwrap();
+        assert!(!runtime.state().listeners.get(&listener.path).unwrap().nonblocking);
         let (send, receive) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || send.send(listener.accept()).unwrap());
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -346,9 +350,12 @@ mod tests {
         }
         let mut client = Connection::connect(&runtime, &descriptor).unwrap();
         let mut server = receive.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
-        client.write_all(b"ready").unwrap();
+        let (completed, written) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || completed.send(client.write(b"ready")).unwrap());
+        assert_eq!(written.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), 5);
+        writer.join().unwrap();
         let mut bytes = [0; 5];
-        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(server.read(&mut bytes).unwrap(), 5);
         assert_eq!(&bytes, b"ready");
         worker.join().unwrap();
     }
@@ -358,6 +365,7 @@ mod tests {
         let runtime = Runtime::new();
         let (mut client, mut server) = Connection::pair(&runtime);
         client.close();
+        assert!(client.channel.state.lock().unwrap().closed[client.side]);
         assert_eq!(client.read(&mut []).unwrap(), 0);
         assert_eq!(client.peek(&mut []).unwrap(), 0);
         assert_eq!(client.write(&[]).unwrap(), 0);
@@ -365,7 +373,26 @@ mod tests {
         assert_eq!(client.write(&[0]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
         assert_eq!(client.flush().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
         assert_eq!(server.write(&[0]).unwrap_err().kind(), io::ErrorKind::BrokenPipe);
-        assert_eq!(server.read(&mut [0]).unwrap(), 0);
+        let (send, receive) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || send.send(server.read(&mut [0])).unwrap());
+        assert_eq!(receive.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), 0);
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn dropping_the_last_clone_closes_only_its_side() {
+        let runtime = Runtime::new();
+        let (client, _server) = Connection::pair(&runtime);
+        let clone = client.try_clone().unwrap();
+        let channel = Arc::clone(&client.channel);
+        drop(client);
+        {
+            let state = channel.state.lock().unwrap();
+            assert_eq!((state.handles, state.closed), ([1, 1], [false, false]));
+        }
+        drop(clone);
+        let state = channel.state.lock().unwrap();
+        assert_eq!((state.handles, state.closed), ([0, 1], [true, false]));
     }
 
     #[test]

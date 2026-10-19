@@ -63,14 +63,26 @@ fn listener_reports_fatal_accept_errors_without_using_native_io() {
     let error = Arc::new(Mutex::new(None));
     control.fail_next(IoOperation::Accept, io::ErrorKind::PermissionDenied.into());
     control.fail_next(IoOperation::Accept, io::Error::other("accept failed"));
-    run_listener(
-        &io,
-        &listener,
-        &descriptor,
-        &Arc::new(AtomicBool::new(false)),
-        &Arc::new(ActiveClients::new()),
-        &error,
-    );
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    let worker_error = Arc::clone(&error);
+    let (completed, completion) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        run_listener(
+            &io,
+            &listener,
+            &descriptor,
+            &worker_stop,
+            &Arc::new(ActiveClients::new()),
+            &worker_error,
+        );
+        completed.send(()).unwrap();
+    });
+    let result = completion.recv_timeout(Duration::from_secs(5));
+    stop.store(true, Ordering::Release);
+    result.unwrap();
+    worker.join().unwrap();
     assert_eq!(error.lock().unwrap().as_deref(), Some("accept failed"));
     assert_eq!(
         control
@@ -135,10 +147,10 @@ fn shutdown_still_cancels_clients_when_a_close_reports_an_error() {
     let _registration = clients.register(&server).unwrap().unwrap();
     control.fail_next(IoOperation::Close, io::Error::other("close refused"));
     clients.shutdown_all();
-    assert_eq!(peer.read(&mut [0]).unwrap(), 0);
     assert!(clients.register(&server).unwrap().is_none());
     assert!(clients.state.lock().unwrap().streams.is_empty());
     assert!(control.operations().contains(&IoOperation::Close));
+    assert_eq!(peer.read(&mut [0]).unwrap(), 0);
 }
 
 #[test]

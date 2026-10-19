@@ -66,6 +66,7 @@ fn local_handshake_is_secret_free_and_connections_are_independent() {
 fn cloned_connection_can_cancel_a_blocked_read() {
     let (_peer, mut server) = seismograph_protocol::testing::connected_pair();
     let cancellation = server.try_clone().unwrap();
+    assert!(!seismograph_protocol::testing::read_is_pending(&cancellation).unwrap());
     server.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let (completed, completion) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {

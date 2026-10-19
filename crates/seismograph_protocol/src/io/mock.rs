@@ -162,6 +162,7 @@ impl Runtime {
             .expect("mock clock advancement is checked by the controller")
     }
 
+    #[cfg_attr(test, mutants::skip)] // A scheduler handoff does not advance mocked time or change observable I/O.
     pub(crate) fn wait(&self) {
         // This is only a scheduler hand-off, not advancement of observable time.
         // Activity wakes the waiter; the short real timeout keeps shutdown
@@ -550,6 +551,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn partial_descriptor_transfers_advance_the_cursor_and_preserve_the_chunk_limit() {
+        let runtime = Runtime::new();
+        let control = MonitorIoControl::new(runtime.clone());
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let path = directory.join("partial");
+        let mut writer = runtime.create_file(&path, &owner).unwrap();
+        control.set_max_chunk(3);
+        assert_eq!(writer.write(b"abcdef").unwrap(), 3);
+        assert_eq!(writer.read(&mut [0; 8]).unwrap(), 0);
+        assert_eq!(control.file_bytes(&path).unwrap(), b"abc");
+        let (mut reader, _) = runtime.read_file(&path).unwrap();
+        control.set_max_chunk(2);
+        let mut bytes = [0; 8];
+        assert_eq!(reader.read(&mut bytes).unwrap(), 2);
+        assert_eq!(&bytes[..2], b"ab");
+        assert_eq!(reader.read(&mut bytes).unwrap(), 1);
+        assert_eq!(bytes[0], b'c');
+        assert_eq!(reader.read(&mut bytes).unwrap(), 0);
+    }
+
+    #[test]
+    fn snapshot_writes_require_access_to_both_the_parent_and_an_existing_file() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let parent = runtime.current_directory(&owner).unwrap();
+        let foreign = match &owner {
+            MonitorOwner::UnixUser(_) => MonitorOwner::UnixUser(2002),
+            MonitorOwner::WindowsSid(_) => MonitorOwner::WindowsSid("S-1-5-21-1-2-3-2002".into()),
+        };
+        let path = parent.join("snapshot");
+        runtime.state().entries.insert(
+            path.clone(),
+            Entry {
+                owner: foreign.clone(),
+                secure: true,
+                data: Some(b"original".to_vec()),
+            },
+        );
+        assert_eq!(
+            runtime.write_snapshot(&path, b"new").unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        runtime.state().entries.get_mut(&path).unwrap().owner = owner;
+        runtime.state().entries.get_mut(&parent).unwrap().owner = foreign;
+        assert_eq!(
+            runtime.write_snapshot(&path, b"new").unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(runtime.state().entries.get(&path).unwrap().data.as_deref(), Some(&b"original"[..]));
+    }
+
+    #[test]
     fn filesystem_operations_reject_invalid_parent_and_entry_types() {
         let runtime = Runtime::new();
         let owner = runtime.owner();
@@ -600,7 +654,7 @@ mod tests {
         let mut writer = runtime.create_file(&path, &owner).unwrap();
         writer.write_all(b"original").unwrap();
         let (mut reader, _) = runtime.read_file(&path).unwrap();
-        reader.read_exact(&mut [0; 8]).unwrap();
+        assert_eq!(reader.read(&mut [0; 8]).unwrap(), 8);
         runtime.write_snapshot(&path, b"short").unwrap();
         assert_eq!(reader.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::InvalidData);
         runtime.remove_file(&path).unwrap();

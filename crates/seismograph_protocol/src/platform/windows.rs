@@ -126,6 +126,7 @@ impl Operation {
         Ok(Self { overlapped, event })
     }
 
+    #[cfg_attr(test, mutants::skip)] // This accessor returns owned storage; a null replacement violates the native OVERLAPPED precondition.
     fn pointer(&mut self) -> *mut OVERLAPPED {
         ptr::from_mut(self.overlapped.as_mut())
     }
@@ -329,7 +330,7 @@ impl Connection {
         let name = security::wide(path.as_os_str())?;
         let deadline = Instant::now()
             .checked_add(timeout)
-            .filter(|deadline| *deadline > Instant::now())
+            .filter(|_| !timeout.is_zero())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "connection timeout must be positive and bounded"))?;
         let handle = connect_pipe(&name, deadline)?;
         let process_id = pipe_process_id(&handle)?;
@@ -607,8 +608,14 @@ mod tests {
             descriptor.process_id = process_id;
         }
         let listener = Listener::bind(&descriptor).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.nonblocking.load(Ordering::Acquire));
+        listener.set_nonblocking(false).unwrap();
+        assert!(!listener.nonblocking.load(Ordering::Acquire));
         let mut client = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
         let _server = listener.accept().unwrap();
+        assert!(!client.read_is_pending());
+        assert_eq!(client.write(b"ok").unwrap(), 2);
         assert_eq!((client.read(&mut []).unwrap(), client.write(&[]).unwrap()), (0, 0));
         for timeout in [Duration::ZERO, Duration::MAX] {
             assert_eq!(
@@ -621,6 +628,9 @@ mod tests {
             );
         }
         assert!(format!("{:?}", Operation::new().unwrap()).starts_with("Operation { event:"));
+        client.close().unwrap();
+        assert_eq!(client.ensure_open().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(client.flush().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
     }
 
     #[test]
@@ -646,6 +656,7 @@ mod tests {
         let mut client = Connection::connect(&descriptor, Duration::from_secs(1)).unwrap();
         let mut server = listener.accept().unwrap();
         client.write_all(&[1]).unwrap();
+        server.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         server.read_exact(&mut [0]).unwrap();
         let handle = server.pipe.handle().unwrap();
         // SAFETY: the connected server pipe has read the client's data.

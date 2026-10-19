@@ -535,9 +535,10 @@ mod tests {
         file.write_all(b"descriptor").unwrap();
         file.flush().unwrap();
         let (mut reader, _) = io.read_descriptor(&path).unwrap();
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).unwrap();
-        assert_eq!(bytes, b"descriptor");
+        let mut bytes = [0; 16];
+        assert_eq!(reader.read(&mut bytes).unwrap(), 10);
+        assert_eq!(&bytes[..10], b"descriptor");
+        assert_eq!(reader.read(&mut bytes).unwrap(), 0);
     }
 
     #[test]

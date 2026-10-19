@@ -42,6 +42,7 @@ const SYSTEM: &str = "S-1-5-18";
 struct LocalAllocation(*mut c_void);
 
 impl Drop for LocalAllocation {
+    #[cfg_attr(test, mutants::skip)] // LocalFree releases an OS allocation; its absence is only observable as a native memory leak.
     fn drop(&mut self) {
         // SAFETY: this pointer is owned and was returned by a LocalAlloc-family API.
         unsafe { LocalFree(self.0) };
@@ -741,7 +742,7 @@ mod tests {
         }
         let length = std::mem::offset_of!(FILE_FULL_DIR_INFO, FileNameLength);
         let mut odd = first.clone();
-        odd[length..length + 4].copy_from_slice(&1_u32.to_ne_bytes());
+        odd[length..length + 4].copy_from_slice(&3_u32.to_ne_bytes());
         assert_eq!(directory_names(&odd).unwrap_err().kind(), io::ErrorKind::InvalidData);
         for next in [1, u32::try_from(first.len() + 1).unwrap(), u32::MAX] {
             let mut bytes = first.clone();
@@ -757,6 +758,12 @@ mod tests {
             directory_names(&multiple).unwrap(),
             [OsString::from("entry.monitor"), OsString::from("entry.monitor")]
         );
+        let unaligned = first.len() + 1;
+        let mut multiple = first.clone();
+        multiple.resize(unaligned, 0);
+        multiple[..4].copy_from_slice(&u32::try_from(unaligned).unwrap().to_ne_bytes());
+        multiple.extend_from_slice(&first);
+        assert_eq!(directory_names(&multiple).unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
@@ -779,6 +786,28 @@ mod tests {
         actual.sort();
         expected.sort();
         assert_eq!(actual, expected);
+        let mut actual = directory_entries(temporary.path())
+            .unwrap()
+            .into_iter()
+            .collect::<io::Result<Vec<_>>>()
+            .unwrap();
+        let mut expected = expected
+            .iter()
+            .map(|path| temporary.path().join(path.file_name().unwrap()))
+            .collect::<Vec<_>>();
+        actual.sort();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native Windows named-pipe security descriptors")]
+    fn native_pipe_attributes_grant_only_the_owner_administrators_and_system() {
+        let directory = crate::testing::Directory::new();
+        let descriptor = directory.descriptor();
+        let listener = super::super::Listener::bind(&descriptor).unwrap();
+        let file = File::from(listener.accept.lock().unwrap().handle.try_clone().unwrap());
+        assert_eq!(verify_access(&file, &descriptor.owner).unwrap(), descriptor.owner);
     }
 
     fn junction(path: &Path, target: &Path) {

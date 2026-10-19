@@ -26,6 +26,7 @@ const MAX_PATH_UNITS: usize = 32_768;
 struct KnownFolder(*mut u16);
 
 impl Drop for KnownFolder {
+    #[cfg_attr(test, mutants::skip)] // CoTaskMemFree releases an OS allocation; its absence is only observable as a native memory leak.
     fn drop(&mut self) {
         // SAFETY: SHGetKnownFolderPath allocated this string with CoTaskMemAlloc.
         unsafe { CoTaskMemFree(self.0.cast()) };
@@ -315,7 +316,7 @@ mod tests {
         let entries = registry_directories_for(owner.clone(), Ok(base.clone()), false).unwrap();
         assert_eq!(entries.len(), 1);
         let entry = entries.into_iter().next().unwrap().unwrap();
-        assert_eq!((entry.path, entry.owner), (registry_path(&base), owner));
+        assert_eq!((entry.path, entry.owner), (base.join("Seismograph").join("monitor"), owner));
     }
 
     #[test]
@@ -329,5 +330,11 @@ mod tests {
             Path::new(r"D:\Redirected\Alice")
         );
         profile_relative_path(Path::new("relative"), Path::new(r"C:\Users\Alice")).unwrap_err();
+        assert_eq!(
+            profile_relative_path(Path::new("%USERPROFILE%"), Path::new(r"C:\Users\Alice"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }

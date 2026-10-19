@@ -4,6 +4,7 @@
 use std::io::Write as _;
 use std::path::Path;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use seismograph_protocol::discovery::Directory;
 use seismograph_protocol::io::IoOperation;
@@ -38,9 +39,20 @@ fn hello(descriptor: &MonitorDescriptor) -> Response {
 
 fn serve(io: &MonitorIo, descriptor: &MonitorDescriptor, conversations: Vec<Vec<(Request, Response)>>) -> JoinHandle<()> {
     let listener = Listener::bind(io, descriptor).unwrap();
+    listener.set_nonblocking(true).unwrap();
     thread::spawn(move || {
         for conversation in conversations {
-            let mut stream = listener.accept().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok(stream) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "client did not connect for the scripted conversation");
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("scripted accept failed: {error}"),
+                }
+            };
             for (request, response) in conversation {
                 let (id, actual) = read_request(&mut stream).unwrap();
                 assert_eq!(actual, request);
@@ -145,14 +157,35 @@ fn discovery_reports_invalid_entries_and_ignores_only_stale_endpoints() {
         ],
     );
     let discovery = discover(&io).unwrap();
-    worker.join().unwrap();
     assert_eq!(discovery.instances.len(), 1);
     assert_eq!(discovery.instances[0].descriptor, live);
     assert_eq!(discovery.instances[0].server_version.as_deref(), Some("test-version"));
     assert_eq!(discovery.warnings.len(), 2);
+    worker.join().unwrap();
 
     control.fail_next(IoOperation::DiscoverDirectories, io::Error::other("registry unavailable"));
     assert!(discover(&io).err().unwrap().to_string().contains("registry unavailable"));
+}
+
+#[test]
+fn discovery_suppresses_only_missing_or_refused_connections() {
+    for (kind, warnings) in [
+        (io::ErrorKind::NotFound, 0),
+        (io::ErrorKind::ConnectionRefused, 0),
+        (io::ErrorKind::PermissionDenied, 1),
+        (io::ErrorKind::TimedOut, 1),
+    ] {
+        let (io, control) = MonitorIo::new_mocked();
+        let (directory, descriptor) = descriptor(&io);
+        io.publish_descriptor(&directory, &descriptor).unwrap();
+        control.fail_next(IoOperation::Connect, io::Error::new(kind, "probe failed"));
+        let discovery = discover(&io).unwrap();
+        assert!(discovery.instances.is_empty());
+        assert_eq!(discovery.warnings.len(), warnings, "{kind:?}");
+        if let Some(warning) = discovery.warnings.first() {
+            assert!(warning.contains("probe failed"));
+        }
+    }
 }
 
 #[test]
