@@ -41,6 +41,11 @@ pub trait Driver: 'static {
     /// does not need to wake the worker for later completions because its next `execute_cycle`
     /// call performs the worker's I/O wait.
     ///
+    /// This method, and the [`Display`](core::fmt::Display) implementation of an error it returns,
+    /// must not retrieve an I/O context from the same worker. The host keeps its driver collection
+    /// borrowed while executing a cycle to avoid allocation and reference-counting on this hot
+    /// path.
+    ///
     /// # Errors
     ///
     /// Returns an error if the driver cannot continue. The runtime treats this as fatal and starts
