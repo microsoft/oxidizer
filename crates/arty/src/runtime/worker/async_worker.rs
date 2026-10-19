@@ -102,6 +102,10 @@ pub(crate) struct AsyncWorker {
 }
 
 impl AsyncWorker {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "worker construction wires its independently owned runtime subsystems"
+    )]
     pub(crate) fn new(
         command_rx: channel::Receiver<AsyncWorkerCommand>,
         dispatcher: DispatcherClient,
@@ -184,8 +188,7 @@ impl AsyncWorker {
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
         let max_wait = if should_suspend {
             next_timer
-                .map(|deadline| suspend_wait(deadline, self.time.instant()))
-                .unwrap_or(IO_IDLE_WAIT)
+                .map_or(IO_IDLE_WAIT, |deadline| suspend_wait(deadline, self.time.instant()))
                 .min(IO_IDLE_WAIT)
         } else {
             Duration::ZERO
@@ -297,7 +300,7 @@ mod tests {
     use events_once::{Event, IntoValueError};
     use nonempty::NonEmpty;
     use testing_aids::{TEST_TIMEOUT, async_test};
-    use thread_aware::ThreadBuilder;
+    use thread_aware::{ThreadAware, ThreadBuilder};
     use tick::ClockControl;
 
     use super::*;
@@ -538,8 +541,23 @@ mod tests {
             sink.clone(),
             Arc::clone(&shutdown_signal),
         )));
+        let mut io_runtime = arty_io_host::IoRuntime::new(sink.clone());
+        io_runtime.relocate(None, &thread);
+        let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
+        let driver_host = crate::io::RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
+        signal.set_driver_waker(driver_host.waker());
 
-        AsyncWorker::new(command_rx, dispatcher, thread, sink, blocking_worker, clock, signal)
+        AsyncWorker::new(
+            command_rx,
+            dispatcher,
+            thread,
+            sink,
+            io,
+            driver_host,
+            blocking_worker,
+            clock,
+            signal,
+        )
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {

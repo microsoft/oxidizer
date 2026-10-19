@@ -28,7 +28,7 @@ pub(crate) struct RuntimeDriverHost {
 
 impl RuntimeDriverHost {
     pub(crate) fn new(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Rc<Self> {
-        let driver_host = runtime.driver_host(owner_waker);
+        let driver_host = runtime.clone().driver_host(owner_waker);
         let host = Rc::new(Self {
             runtime: runtime.to_owned(),
             dispatcher,

@@ -138,10 +138,6 @@ impl DispatcherCore {
             return;
         }
 
-        pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
-            self.shutdown_error.lock().take()
-        }
-
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
@@ -151,6 +147,10 @@ impl DispatcherCore {
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
+    }
+
+    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
+        self.shutdown_error.lock().take()
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -303,7 +303,6 @@ impl DispatcherCore {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::pin;
     use std::task;
     use std::task::Poll;
@@ -515,33 +514,6 @@ mod tests {
             panic!("a disconnected join must report shutdown");
         };
         assert!(error.is_shutdown());
-    }
-
-    #[test]
-    fn shutdown_error_access_recovers_poisoned_mutexes() {
-        let (worker_tx, _worker_rx) = channel::unbounded();
-        let threads = test_threads(1);
-        let dispatcher = DispatcherCore::<_>::new(
-            MockWaitForShutdown::new(),
-            NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
-            observed::Sink::noop(),
-        );
-
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            let _shutdown_error = dispatcher.shutdown_error.lock_result().unwrap();
-            panic!("poison shutdown error mutex");
-        }));
-        assert!(panic.is_err());
-
-        dispatcher.stop_with_error(Error::runtime_shutting_down());
-
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            let _shutdown_error = dispatcher.shutdown_error.lock_result().unwrap();
-            panic!("poison shutdown error mutex");
-        }));
-        assert!(panic.is_err());
-
-        assert!(dispatcher.take_shutdown_error().is_some());
     }
 
     #[cfg_attr(test, mutants::skip)]

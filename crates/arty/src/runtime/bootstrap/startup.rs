@@ -228,8 +228,7 @@ impl AsyncWorkerStartInfo {
             .expect("RuntimeBuilder failed between initializing and starting a worker - impossible to continue worker execution");
         let dispatcher = start_signal.dispatcher;
         let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
-        let driver_host =
-            RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
+        let driver_host = RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_host.waker());
 
         let worker = AsyncWorker::new(
