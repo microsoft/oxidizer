@@ -198,6 +198,10 @@ Rust services and libraries need structured telemetry that is:
 
 ### Sink
 
+External sources can call `Sink::is_interested` with an event description before collecting fields.
+This independent probe aggregates processor interest without sampling, construction, timestamps, or enrichment lookup.
+Its answer is not a delivery guarantee: emission makes its own decisions, and callers must not cache query results across events.
+
 A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the unit of telemetry configuration - each sink owns:
 
 - One or more **processors** (`EventProcessor`), each targeting one destination and owning its own `RedactionEngine` and any OTel providers it needs.

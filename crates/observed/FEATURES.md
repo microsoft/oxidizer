@@ -34,6 +34,8 @@
 
 ## Emission & Routing
 
+- **Independent interest query** - `Sink::is_interested` checks processor interest from an event description without sampling or constructing an event; emission makes its own decisions
+
 - **Processor-based dispatch** - `emit!(sink, ...)` sends to the sink's interested processors via `EventProcessor::process`
 - **Per-Sink event sampling** - `SinkBuilder::event_sampler` attaches a synchronous keep-or-drop decision that runs before that Sink's processors are asked; the sampler is fixed once the sink is built, and each sink in a composite decides with its own sampler; see `EventSampler::sample` for the invocation contract
 - **Lazy event views** - each processor receives an `EventView` and pulls only the fields it needs; skipped getters do not evaluate, convert, or redact their values, but field enumeration and visitor work still occur. Laziness past construction is per field, not per signal - see `emit!`'s "What emitting costs"
