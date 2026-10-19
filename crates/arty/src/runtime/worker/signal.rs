@@ -172,15 +172,17 @@ mod tests {
             return;
         }
         let signal = Arc::new(WorkerSignal::default());
-        let (ready_tx, ready_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&signal);
         let worker = thread::spawn(move || {
-            ready_tx.send(()).unwrap();
             waiter.wait(TEST_TIMEOUT.saturating_mul(2));
             done_tx.send(()).unwrap();
         });
-        ready_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        let deadline = std::time::Instant::now() + TEST_TIMEOUT;
+        while signal.worker.get().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::yield_now();
+        }
         WorkerSignal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         worker.join().unwrap();
