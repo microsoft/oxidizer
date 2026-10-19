@@ -46,6 +46,12 @@ struct LocalContext {
     context_name: &'static str,
 }
 
+#[derive(Default)]
+struct DriverSet {
+    primary: Option<LocalContext>,
+    secondaries: Vec<LocalContext>,
+}
+
 impl LocalContext {
     fn clone_context<C>(&self) -> C
     where
@@ -149,8 +155,7 @@ pub struct DriverHost {
     thread: Thread,
     owner_waker: Waker,
     interrupt: Arc<DriverInterrupt>,
-    primary: RefCell<Option<LocalContext>>,
-    secondaries: RefCell<Vec<LocalContext>>,
+    drivers: RefCell<DriverSet>,
     initializing: Cell<bool>,
     _single_threaded: PhantomData<Rc<()>>,
 }
@@ -168,8 +173,7 @@ impl DriverHost {
             thread,
             owner_waker,
             interrupt: Arc::new(DriverInterrupt::default()),
-            primary: RefCell::new(None),
-            secondaries: RefCell::new(Vec::new()),
+            drivers: RefCell::new(DriverSet::default()),
             initializing: Cell::new(false),
             _single_threaded: PhantomData,
         }
@@ -201,14 +205,16 @@ impl DriverHost {
         C::ContextOptions: Clone,
     {
         self.runtime.check_failed()?;
-        let context = {
-            let primary = self.primary.borrow();
-            primary.as_ref().and_then(LocalContext::context_handle::<C>)
-        }
-        .or_else(|| {
-            let secondaries = self.secondaries.borrow();
-            secondaries.iter().find_map(LocalContext::context_handle::<C>)
-        });
+        let drivers = self
+            .drivers
+            .try_borrow()
+            .map_err(|_borrow_error| DriverError::from_message("I/O context retrieval cannot overlap driver cycle execution"))?;
+        let context = drivers
+            .primary
+            .as_ref()
+            .and_then(LocalContext::context_handle::<C>)
+            .or_else(|| drivers.secondaries.iter().find_map(LocalContext::context_handle::<C>));
+        drop(drivers);
         if let Some(context) = context {
             let context = context
                 .downcast_ref::<C>()
@@ -233,15 +239,20 @@ impl DriverHost {
             }
         };
         let context = local.clone_context::<C>();
+        let mut drivers = self
+            .drivers
+            .try_borrow_mut()
+            .map_err(|_borrow_error| DriverError::from_message("I/O driver initialization cannot overlap cycle execution"))?;
         match local.role {
             DriverRole::Primary => {
                 assert!(
-                    self.primary.borrow_mut().replace(local).is_none(),
+                    drivers.primary.replace(local).is_none(),
                     "a worker has at most one primary I/O driver"
                 );
             }
-            DriverRole::Secondary => self.secondaries.borrow_mut().push(local),
+            DriverRole::Secondary => drivers.secondaries.push(local),
         }
+        drop(drivers);
         self.runtime.check_failed()?;
         Ok(context)
     }
@@ -290,10 +301,14 @@ impl DriverHost {
     /// Propagates panics from drivers, diagnostics, and violated host
     /// invariants.
     pub fn execute_cycle(&self, max_wait: Duration) -> Result<(), DriverError> {
-        for local in self.secondaries.borrow_mut().iter_mut() {
+        let mut drivers = self
+            .drivers
+            .try_borrow_mut()
+            .map_err(|_borrow_error| DriverError::from_message("I/O driver cycle execution cannot be nested"))?;
+        for local in &mut drivers.secondaries {
             local.execute_cycle(Duration::ZERO, self.runtime.sink())?;
         }
-        if let Some(primary) = self.primary.borrow_mut().as_mut() {
+        if let Some(primary) = drivers.primary.as_mut() {
             primary.execute_cycle(max_wait, self.runtime.sink())?;
         }
         Ok(())
@@ -304,8 +319,9 @@ impl Drop for DriverHost {
     fn drop(&mut self) {
         self.interrupt.clear();
 
-        let primary = self.primary.get_mut().take();
-        let secondaries = std::mem::take(self.secondaries.get_mut());
+        let drivers = self.drivers.get_mut();
+        let primary = drivers.primary.take();
+        let secondaries = std::mem::take(&mut drivers.secondaries);
         for local in secondaries.into_iter().chain(primary) {
             if let Err(error) = local.driver.shutdown() {
                 emit!(

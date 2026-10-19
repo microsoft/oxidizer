@@ -6,6 +6,7 @@
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
@@ -28,6 +29,7 @@ enum Kind {
 struct State {
     roles: Mutex<Vec<(Kind, DriverRole)>>,
     cycles: Mutex<Vec<(Kind, Duration)>>,
+    nested_cycle_errors: Mutex<Vec<String>>,
     driver_waker: Mutex<Option<Waker>>,
     context_calls: AtomicUsize,
     format_calls: AtomicUsize,
@@ -35,6 +37,7 @@ struct State {
     panic_context: AtomicBool,
     fail_initialization: AtomicBool,
     fail_cycle: AtomicBool,
+    reenter_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
     interrupts: AtomicUsize,
 }
@@ -223,6 +226,16 @@ impl Driver for TestDriver {
     }
 
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
+        if self.state.reenter_cycle.load(Ordering::SeqCst) {
+            NESTED_CYCLE_HOST.with_borrow(|host| {
+                let host = host
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .expect("the nested cycle test retains its host");
+                let error = host.execute_cycle(Duration::ZERO).unwrap_err();
+                self.state.nested_cycle_errors.lock().unwrap().push(error.to_string());
+            });
+        }
         self.state.cycles.lock().unwrap().push((self.kind, cycle.max_wait()));
         if self.state.fail_cycle.load(Ordering::SeqCst) {
             Err(DriverError::from_message("cycle failed"))
@@ -239,6 +252,10 @@ impl Driver for TestDriver {
             Ok(())
         }
     }
+}
+
+thread_local! {
+    static NESTED_CYCLE_HOST: RefCell<Option<Weak<DriverHost>>> = const { RefCell::new(None) };
 }
 
 struct InterruptWake(Arc<State>);
@@ -404,6 +421,23 @@ fn cycle_failures_are_returned_to_the_runtime() {
     let error = host.execute_cycle(Duration::ZERO).unwrap_err();
 
     assert_eq!(error.to_string(), "cycle failed");
+}
+
+#[test]
+fn nested_cycle_execution_returns_an_error() {
+    let host = Rc::new(host(&test_runtime()));
+    let state = Arc::new(State::default());
+    NESTED_CYCLE_HOST.with_borrow_mut(|installed| *installed = Some(Rc::downgrade(&host)));
+    let _ = host.context::<Context<false>>(&state).unwrap();
+    state.reenter_cycle.store(true, Ordering::SeqCst);
+
+    host.execute_cycle(Duration::ZERO).unwrap();
+
+    assert_eq!(
+        *state.nested_cycle_errors.lock().unwrap(),
+        ["I/O driver cycle execution cannot be nested"]
+    );
+    NESTED_CYCLE_HOST.with_borrow_mut(Option::take);
 }
 
 #[test]
