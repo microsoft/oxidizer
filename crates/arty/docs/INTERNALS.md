@@ -31,7 +31,11 @@ it does not own a separate runtime or worker set.
 `Builtins`, join, clock, and operations handles can outlive individual tasks,
 but they do not keep the runtime running. `Runtime::stop` and `Runtime::drop`
 request shutdown through the dispatcher; the waiter joins async workers, and
-each worker joins its blocking pool before its thread exits.
+each worker closes its blocking queue and joins every owned blocking thread
+before its own thread exits. Blocking task completion alone is not a shutdown
+barrier because a pool thread may still be running thread-local destructors.
+Blocking-thread membership remains registered through those destructors so a
+runtime owner released there requests shutdown without waiting on itself.
 
 ### Shutdown guard tests
 
