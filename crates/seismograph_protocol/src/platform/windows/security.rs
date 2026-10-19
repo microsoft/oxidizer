@@ -335,6 +335,9 @@ fn verify_access(file: &File, expected: &MonitorOwner) -> io::Result<MonitorOwne
         return Err(io::Error::from_raw_os_error(status.cast_signed()));
     }
     let _allocation = LocalAllocation(descriptor);
+    if descriptor.is_null() || owner.is_null() {
+        return Err(denied("monitor registry security descriptor is incomplete"));
+    }
     let actual = sid_string(owner)?;
     let expected_sid = owner_sid(expected)?;
     if actual != ADMINISTRATORS && actual != SYSTEM && expected_sid != actual {
@@ -342,27 +345,29 @@ fn verify_access(file: &File, expected: &MonitorOwner) -> io::Result<MonitorOwne
     }
     // An inherited owner/admin/System ACL is safe too; validate its grants
     // rather than rewriting an existing user directory's inheritance policy.
-    if acl.is_null() {
-        return Err(denied("monitor registry must have an access-control list"));
-    }
+    let acl = std::ptr::NonNull::new(acl).ok_or_else(|| denied("monitor registry must have an access-control list"))?;
     let mut administrators = false;
     let mut system = false;
     let mut user = false;
     // SAFETY: GetSecurityInfo supplied a valid ACL within the live descriptor.
-    for index in 0..unsafe { (*acl).AceCount } {
+    for index in 0..unsafe { acl.as_ref().AceCount } {
         let mut entry = ptr::null_mut();
         // SAFETY: index is bounded by AceCount, and entry is writable.
-        if unsafe { GetAce(acl, u32::from(index), &raw mut entry) } == 0 {
+        if unsafe { GetAce(acl.as_ptr(), u32::from(index), &raw mut entry) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        let entry = std::ptr::NonNull::new(entry).ok_or_else(|| denied("monitor registry ACL contains a null entry"))?;
         // SAFETY: OS-generated ACL entries contain an ACE_HEADER.
-        let header = unsafe { &*entry.cast::<windows_sys::Win32::Security::ACE_HEADER>() };
+        let header = unsafe { entry.cast::<windows_sys::Win32::Security::ACE_HEADER>().as_ref() };
         // ACCESS_ALLOWED_ACE_TYPE is zero in the Windows ACL wire format.
-        if header.AceType != 0 || u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 {
+        if header.AceType != 0
+            || usize::from(header.AceSize) < std::mem::size_of::<ACCESS_ALLOWED_ACE>()
+            || u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0
+        {
             return Err(denied("monitor registry ACL contains an unexpected entry"));
         }
         // SAFETY: an access-allowed ACE contains the mask followed by a SID.
-        let entry = unsafe { &*entry.cast::<ACCESS_ALLOWED_ACE>() };
+        let entry = unsafe { entry.cast::<ACCESS_ALLOWED_ACE>().as_ref() };
         let sid = sid_string(ptr::from_ref(&entry.SidStart).cast_mut().cast())?;
         let full = entry.Mask & GENERIC_ALL != 0 || entry.Mask & FILE_ALL_ACCESS == FILE_ALL_ACCESS;
         if expected_sid == sid {

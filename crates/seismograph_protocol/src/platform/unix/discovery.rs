@@ -71,6 +71,12 @@ fn current_directory_in(runtime: Option<&Path>, temporary_root: &Path, owner: &M
 }
 
 fn runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<RegistryDirectory> {
+    if runtime.to_str().is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "runtime directory cannot be represented in a monitor descriptor",
+        ));
+    }
     let _runtime = open_directory(runtime, owner)?;
     let path = runtime.join("seismograph");
     let endpoint = MonitorEndpoint::for_instance(&path, owner, std::process::id(), InstanceId::from_bytes([0; 16]));
@@ -240,6 +246,7 @@ fn socket_directory(mut line: &str) -> Option<&Path> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::os::unix::ffi::OsStringExt as _;
     use std::os::unix::fs::PermissionsExt as _;
 
     use super::*;
@@ -273,7 +280,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "native temporary files and socket path limits")]
-    fn long_runtime_paths_fall_back_without_weakening_permissions() {
+    fn unusable_runtime_paths_fall_back_without_weakening_permissions() {
         let parent = tempfile::tempdir().unwrap();
         let runtime = parent.path().join("long-runtime-name-".repeat(8));
         fs::create_dir(&runtime).unwrap();
@@ -285,6 +292,14 @@ mod tests {
         std::os::unix::net::SocketAddr::from_pathname(endpoint.path()).unwrap();
         assert_eq!(runtime.metadata().unwrap().mode() & 0o777, 0o700);
         assert!(!runtime.join("seismograph").exists());
+
+        let runtime = parent.path().join(std::ffi::OsString::from_vec(b"runtime-\xff".to_vec()));
+        fs::create_dir(&runtime).unwrap();
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+        let directory = current_directory_in(Some(&runtime), Path::new("/tmp"), &owner).unwrap();
+        assert!(directory.temporary.is_some());
+        assert!(!runtime.join("seismograph").exists());
+        assert_eq!(runtime.metadata().unwrap().mode() & 0o777, 0o700);
     }
 
     #[test]

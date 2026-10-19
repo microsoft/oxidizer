@@ -70,14 +70,13 @@ mod tests {
         let mut server = command.stdout(Stdio::piped()).spawn().unwrap();
         let mut output = BufReader::new(server.stdout.take().unwrap());
         let mut line = String::new();
-        loop {
+        let path = loop {
             line.clear();
             assert_ne!(output.read_line(&mut line).unwrap(), 0, "server failed before publishing");
-            if line.starts_with("READY ") {
-                break;
+            if let Some(path) = readiness_path(&line) {
+                break path;
             }
-        }
-        let path = PathBuf::from(line.trim().strip_prefix("READY ").unwrap());
+        };
         let directory = path.parent().unwrap();
         let descriptor = MonitorDescriptor::read_file(&seismograph_protocol::io::MonitorIo::new_native(), &path).unwrap();
         assert_eq!(descriptor.owner, MonitorOwner::UnixUser(OWNER));
@@ -115,6 +114,22 @@ mod tests {
         write_request(&mut finish, 1, &Request::Hello).unwrap();
         assert_eq!(read_response(&mut finish).unwrap(), (1, Response::Acknowledged));
         assert!(server.wait().unwrap().success());
+    }
+
+    fn readiness_path(line: &str) -> Option<PathBuf> {
+        let (_, path) = line.split_once("READY ")?;
+        Some(PathBuf::from(path.trim_end_matches(['\r', '\n'])))
+    }
+
+    #[test]
+    fn readiness_accepts_libtest_prefixes_without_trimming_path_spaces() {
+        for prefix in ["", "test tests::identity_worker ... "] {
+            assert_eq!(
+                readiness_path(&format!("{prefix}READY /path with spaces/monitor \n")),
+                Some(PathBuf::from("/path with spaces/monitor "))
+            );
+        }
+        assert_eq!(readiness_path("unrelated output"), None);
     }
 
     #[test]

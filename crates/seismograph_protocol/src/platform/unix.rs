@@ -18,6 +18,23 @@ pub(crate) use discovery::{current_directory, registry_directories};
 
 use crate::monitor::{MonitorDescriptor, MonitorEndpoint, MonitorOwner};
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+const SOCKET_CLOEXEC: libc::c_int = libc::SOCK_CLOEXEC;
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+)))]
+const SOCKET_CLOEXEC: libc::c_int = 0;
+
 #[expect(
     clippy::unnecessary_wraps,
     reason = "shared platform API also covers fallible Windows token queries"
@@ -158,7 +175,7 @@ impl Listener {
         if !peer_allowed(self.owner, uid) {
             return Err(denied("monitor connections require the owning user or root"));
         }
-        Ok(Connection { stream })
+        Ok(Connection::new(stream))
     }
 }
 
@@ -184,9 +201,19 @@ const fn peer_allowed(owner: u32, peer: u32) -> bool {
 #[derive(Debug)]
 pub(crate) struct Connection {
     stream: UnixStream,
+    #[cfg(any(test, feature = "test-util"))]
+    pending_reads: std::sync::Arc<super::PendingReads>,
 }
 
 impl Connection {
+    fn new(stream: UnixStream) -> Self {
+        Self {
+            stream,
+            #[cfg(any(test, feature = "test-util"))]
+            pending_reads: std::sync::Arc::default(),
+        }
+    }
+
     pub(crate) fn connect(descriptor: &MonitorDescriptor, timeout: Duration) -> io::Result<Self> {
         let (MonitorEndpoint::UnixSocket(path), MonitorOwner::UnixUser(owner)) = (&descriptor.endpoint, &descriptor.owner) else {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "Unix requires a pathname socket"));
@@ -196,11 +223,20 @@ impl Connection {
         if uid != *owner || pid.is_some_and(|pid| pid != descriptor.process_id) {
             return Err(denied("connected monitor server has a different OS identity"));
         }
-        Ok(Self { stream })
+        Ok(Self::new(stream))
     }
 
     pub(crate) fn try_clone(&self) -> io::Result<Self> {
-        self.stream.try_clone().map(|stream| Self { stream })
+        self.stream.try_clone().map(|stream| Self {
+            stream,
+            #[cfg(any(test, feature = "test-util"))]
+            pending_reads: std::sync::Arc::clone(&self.pending_reads),
+        })
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn read_is_pending(&self) -> bool {
+        self.pending_reads.active()
     }
 
     pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -227,7 +263,60 @@ impl Connection {
 
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stream.read(buf)
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let deadline = self
+            .stream
+            .read_timeout()?
+            .map(|timeout| {
+                Instant::now()
+                    .checked_add(timeout)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "monitor read timeout is too large"))
+            })
+            .transpose()?;
+        loop {
+            // SAFETY: the socket is live and buf is writable for its length.
+            // MSG_DONTWAIT affects this receive only, not concurrent writes.
+            let count = unsafe { libc::recv(self.stream.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), libc::MSG_DONTWAIT) };
+            if let Ok(count) = usize::try_from(count) {
+                return Ok(count);
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            if error.kind() != io::ErrorKind::WouldBlock {
+                return Err(error);
+            }
+            let timeout = match deadline {
+                Some(deadline) => {
+                    let remaining = deadline
+                        .checked_duration_since(Instant::now())
+                        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "monitor read timed out"))?;
+                    i32::try_from(remaining.as_millis().saturating_add(1)).unwrap_or(i32::MAX)
+                }
+                None => -1,
+            };
+            let mut poll = libc::pollfd {
+                fd: self.stream.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            #[cfg(any(test, feature = "test-util"))]
+            let _pending = self.pending_reads.enter();
+            // SAFETY: poll points to one initialized pollfd; shutdown wakes this wait.
+            let result = unsafe { libc::poll(&raw mut poll, 1, timeout) };
+            if result == 0 {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor read timed out"));
+            }
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::Interrupted {
+                    return Err(error);
+                }
+            }
+        }
     }
 }
 
@@ -317,21 +406,7 @@ fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
     }
     let length = libc::socklen_t::try_from(std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
         .expect("the pathname was bounded above by sockaddr_un's fixed buffer");
-    // SAFETY: creating a stream socket has no pointer preconditions.
-    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: socket returned a fresh owned descriptor.
-    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    // SAFETY: fd is valid and fcntl uses integer close-on-exec flags.
-    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: fd is valid and fcntl uses integer socket status flags.
-    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let fd = connecting_socket()?;
     loop {
         // SAFETY: address is initialized and length describes its populated bytes.
         if unsafe { libc::connect(fd.as_raw_fd(), std::ptr::from_ref(&address).cast(), length) } == 0 {
@@ -343,7 +418,9 @@ fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
                 wait_connected(&fd, deadline)?;
                 break;
             }
-            Some(libc::EAGAIN | libc::EINTR) if Instant::now() < deadline => std::thread::yield_now(),
+            Some(libc::EAGAIN | libc::EINTR) if Instant::now() < deadline => {
+                std::thread::sleep(deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(2)));
+            }
             Some(libc::EAGAIN | libc::EINTR) => return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor connection timed out")),
             _ => return Err(error),
         }
@@ -351,6 +428,29 @@ fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
     let stream = UnixStream::from(fd);
     stream.set_nonblocking(false)?;
     Ok(stream)
+}
+
+fn connecting_socket() -> io::Result<OwnedFd> {
+    // SAFETY: creating a stream socket has no pointer preconditions. Supported
+    // kernels install close-on-exec atomically, before another thread can fork.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | SOCKET_CLOEXEC, 0) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: socket returned a fresh owned descriptor.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    if SOCKET_CLOEXEC == 0 {
+        // Apple and other kernels without SOCK_CLOEXEC require this non-atomic fallback.
+        // SAFETY: fd is valid and fcntl uses integer close-on-exec flags.
+        if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    // SAFETY: fd is valid and fcntl uses integer socket status flags.
+    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(fd)
 }
 
 fn wait_connected(fd: &OwnedFd, deadline: Instant) -> io::Result<()> {
@@ -409,6 +509,37 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "linux")]
+    #[cfg_attr(miri, ignore = "native backlog and per-thread CPU accounting are exercised natively")]
+    fn saturated_backlog_waits_without_busy_spinning() {
+        fn cpu_time() -> Duration {
+            // SAFETY: rusage is a C POD output buffer initialized by getrusage.
+            let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+            // SAFETY: the thread selector is valid and usage is writable for rusage.
+            assert_eq!(unsafe { libc::getrusage(libc::RUSAGE_THREAD, &raw mut usage) }, 0);
+            [usage.ru_utime, usage.ru_stime]
+                .into_iter()
+                .map(|time| Duration::from_secs(time.tv_sec.try_into().unwrap()) + Duration::from_micros(time.tv_usec.try_into().unwrap()))
+                .sum()
+        }
+
+        let temporary = tempfile::tempdir_in("/tmp").unwrap();
+        let path = temporary.path().join("saturated.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        // SAFETY: the bound listener is live; reducing the backlog needs no pointers.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let _queued = UnixStream::connect(&path).unwrap();
+        let cpu = cpu_time();
+        let start = Instant::now();
+        let error = connect_timeout(&path, Duration::from_millis(40)).unwrap_err();
+        let elapsed = start.elapsed();
+        let cpu = cpu_time().saturating_sub(cpu);
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(elapsed < Duration::from_secs(1), "connection deadline exceeded: {elapsed:?}");
+        assert!(cpu < elapsed / 2, "backlog retries consumed {cpu:?} CPU during {elapsed:?}");
+    }
+
+    #[test]
     fn peer_policy_allows_only_owner_and_root() {
         assert_eq!(
             [
@@ -424,6 +555,14 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "native and careful suites cover OS directory and socket permissions")]
     fn native_directory_and_socket_permissions_are_private() {
+        let socket = connecting_socket().unwrap();
+        // SAFETY: the fresh socket is live and F_GETFD takes no pointer argument.
+        let descriptor_flags = unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_GETFD) };
+        // SAFETY: the fresh socket is live and F_GETFL takes no pointer argument.
+        let status_flags = unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_GETFL) };
+        assert!(descriptor_flags >= 0 && status_flags >= 0);
+        assert_eq!(descriptor_flags & libc::FD_CLOEXEC, libc::FD_CLOEXEC);
+        assert_ne!(status_flags & libc::O_NONBLOCK, 0);
         let listener = crate::testing::listener();
         let descriptor = listener.descriptor();
         assert_eq!(fs::metadata(descriptor.endpoint.path()).unwrap().mode() & 0o777, 0o600);

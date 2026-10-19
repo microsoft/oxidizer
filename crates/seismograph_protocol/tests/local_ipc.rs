@@ -66,14 +66,19 @@ fn local_handshake_is_secret_free_and_connections_are_independent() {
 fn cloned_connection_can_cancel_a_blocked_read() {
     let (_peer, mut server) = seismograph_protocol::testing::connected_pair();
     let cancellation = server.try_clone().unwrap();
-    let (ready, waiting) = std::sync::mpsc::channel();
+    server.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let (completed, completion) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {
-        ready.send(()).unwrap();
-        server.read(&mut [0])
+        completed.send(server.read(&mut [0])).unwrap();
     });
-    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !seismograph_protocol::testing::read_is_pending(&cancellation).unwrap() {
+        assert!(Instant::now() < deadline, "native read did not become pending");
+        thread::yield_now();
+    }
     cancellation.close().unwrap();
-    assert!(matches!(worker.join().unwrap(), Ok(0) | Err(_)));
+    assert!(matches!(completion.recv_timeout(Duration::from_secs(1)).unwrap(), Ok(0) | Err(_)));
+    worker.join().unwrap();
 }
 
 #[test]
@@ -82,12 +87,18 @@ fn client_close_notifies_the_peer_while_client_clones_are_alive() {
     let mut clone = client.try_clone().unwrap();
     server.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
     client.close().unwrap();
-    clone.close().unwrap();
     assert_eq!(server.read(&mut [0]).unwrap(), 0);
     assert!(matches!(
         clone.write(&[1]).unwrap_err().kind(),
         io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe
     ));
+}
+
+#[test]
+fn closing_a_connection_repeatedly_is_idempotent() {
+    let (client, _server) = seismograph_protocol::testing::connected_pair();
+    client.close().unwrap();
+    client.close().unwrap();
 }
 
 #[test]

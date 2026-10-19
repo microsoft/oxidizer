@@ -42,6 +42,8 @@ struct Pipe {
     handle: Mutex<Option<Arc<OwnedHandle>>>,
     server: bool,
     closed: AtomicBool,
+    #[cfg(any(test, feature = "test-util"))]
+    pending_reads: super::PendingReads,
 }
 
 impl Pipe {
@@ -50,6 +52,8 @@ impl Pipe {
             handle: Mutex::new(Some(Arc::new(handle))),
             server,
             closed: AtomicBool::new(false),
+            #[cfg(any(test, feature = "test-util"))]
+            pending_reads: super::PendingReads::default(),
         }
     }
 
@@ -287,6 +291,12 @@ pub(crate) struct Connection {
     write_timeout: Mutex<Option<Duration>>,
 }
 
+#[derive(Clone, Copy)]
+enum Direction {
+    Read,
+    Write,
+}
+
 impl Connection {
     fn new(pipe: Arc<Pipe>) -> Self {
         Self {
@@ -412,6 +422,11 @@ impl Connection {
         self.pipe.close()
     }
 
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn read_is_pending(&self) -> bool {
+        self.pipe.pending_reads.active()
+    }
+
     fn ensure_open(&self) -> io::Result<()> {
         if self.pipe.closed.load(Ordering::Acquire) {
             return Err(io::ErrorKind::ConnectionAborted.into());
@@ -419,8 +434,15 @@ impl Connection {
         Ok(())
     }
 
-    fn perform(&self, timeout: Option<Duration>, start: impl FnOnce(HANDLE, *mut OVERLAPPED) -> i32) -> io::Result<usize> {
+    fn perform(
+        &self,
+        direction: Direction,
+        timeout: Option<Duration>,
+        start: impl FnOnce(HANDLE, *mut OVERLAPPED) -> i32,
+    ) -> io::Result<usize> {
         self.ensure_open()?;
+        #[cfg(not(any(test, feature = "test-util")))]
+        let _ = direction;
         let handle = self.pipe.handle()?;
         let mut operation = Operation::new()?;
         if start(handle.as_raw_handle(), operation.pointer()) != 0 {
@@ -430,6 +452,8 @@ impl Connection {
         if error.raw_os_error() != Some(ERROR_IO_PENDING.cast_signed()) {
             return if disconnected(&error) { Ok(0) } else { Err(error) };
         }
+        #[cfg(any(test, feature = "test-util"))]
+        let _pending = matches!(direction, Direction::Read).then(|| self.pipe.pending_reads.enter());
         // Close may have raced with starting the operation; cancel again after
         // it is registered so a clone cannot remain blocked indefinitely.
         if self.pipe.closed.load(Ordering::Acquire) {
@@ -448,7 +472,7 @@ impl Read for Connection {
             return Ok(0);
         }
         let timeout = *self.read_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.perform(timeout, |handle, overlapped| {
+        self.perform(Direction::Read, timeout, |handle, overlapped| {
             // SAFETY: buf and OVERLAPPED remain live until perform drains the
             // operation, including on cancellation or a deadline.
             unsafe {
@@ -470,7 +494,7 @@ impl Write for Connection {
             return Ok(0);
         }
         let timeout = *self.write_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.perform(timeout, |handle, overlapped| {
+        self.perform(Direction::Write, timeout, |handle, overlapped| {
             // SAFETY: buf and OVERLAPPED remain live until perform drains the operation.
             unsafe {
                 WriteFile(

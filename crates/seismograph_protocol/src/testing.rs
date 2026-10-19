@@ -13,6 +13,8 @@
     reason = "native test fixtures intentionally panic when test setup or assertions fail"
 )]
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -44,6 +46,15 @@ impl Directory {
     /// Panics when creating, securing, or opening the native test directory fails.
     #[must_use]
     pub fn new() -> Self {
+        // macOS's per-user TMPDIR can exceed sockaddr_un's pathname limit
+        // after appending the registry and monitor identity.
+        #[cfg(unix)]
+        let temporary = tempfile::Builder::new()
+            .prefix("sg-")
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        #[cfg(windows)]
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("monitor");
         let owner = MonitorOwner::current().unwrap();
@@ -118,4 +129,16 @@ pub fn connected_pair() -> (Connection, Connection) {
     let client = Connection::connect(&crate::io::MonitorIo::new_native(), listener.descriptor(), Duration::from_secs(2)).unwrap();
     let server = listener.accept().unwrap();
     (client, server)
+}
+
+/// Reports whether a native read is waiting for data on this connection or a clone.
+///
+/// Windows reports an operation registered as pending with the kernel. Unix
+/// reports a receive that would block and has entered its readiness wait.
+///
+/// # Errors
+///
+/// Returns `Unsupported` for mocked connections.
+pub fn read_is_pending(connection: &Connection) -> std::io::Result<bool> {
+    connection.read_is_pending()
 }

@@ -27,11 +27,20 @@ fn ordinary_native_startup_initializes_and_discovers_its_own_registry() {
     let descriptor = monitor.descriptor().clone();
     let mut own_directory = None;
     for directory in seismograph_protocol::discovery::directories(&io).unwrap() {
-        let directory = directory.unwrap();
-        let found = directory
-            .descriptors()
-            .unwrap()
-            .any(|entry| entry.as_ref().is_ok_and(|entry| *entry == descriptor));
+        let directory = match directory {
+            Ok(directory) => directory,
+            Err(error) => {
+                eprintln!("ignoring unrelated registry: {error}");
+                continue;
+            }
+        };
+        let found = match directory.descriptors() {
+            Ok(mut entries) => entries.any(|entry| entry.as_ref().is_ok_and(|entry| *entry == descriptor)),
+            Err(error) => {
+                eprintln!("ignoring unavailable registry {}: {error}", directory.path().display());
+                continue;
+            }
+        };
         if found {
             own_directory = Some(directory);
             break;

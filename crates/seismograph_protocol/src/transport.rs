@@ -115,7 +115,22 @@ enum ConnectionInner {
 }
 
 impl Connection {
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn read_is_pending(&self) -> io::Result<bool> {
+        match &self.inner {
+            ConnectionInner::Native(inner) => Ok(inner.read_is_pending()),
+            ConnectionInner::Mocked(_) => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "pending native reads require a native connection",
+            )),
+        }
+    }
+
     /// Connects and checks the server's OS identity against its descriptor.
+    ///
+    /// Unix kernels without atomic socket close-on-exec, including Apple
+    /// platforms, require callers using raw fork/exec to serialize process
+    /// spawning with connection creation.
     ///
     /// # Errors
     ///

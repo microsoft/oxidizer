@@ -117,6 +117,46 @@ mod tests {
     }
 
     #[test]
+    fn publication_replaces_an_existing_descriptor() {
+        let (io, _) = MonitorIo::new_mocked();
+        let (directory, mut value) = descriptor(&io);
+        let path = io.publish_descriptor(&directory, &value).unwrap();
+        value.name = "replacement".into();
+        assert_eq!(io.publish_descriptor(&directory, &value).unwrap(), path);
+        assert_eq!(MonitorDescriptor::read_file(&io, &path).unwrap(), value);
+    }
+
+    #[test]
+    fn descriptor_removal_requires_parent_access() {
+        let (io, control) = MonitorIo::new_mocked();
+        let (directory, value) = descriptor(&io);
+        let path = io.publish_descriptor(&directory, &value).unwrap();
+        let original = control.file_bytes(&path).unwrap();
+        #[cfg(unix)]
+        control.set_owner(MonitorOwner::UnixUser(1002));
+        #[cfg(windows)]
+        control.set_owner(MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1002".into()));
+        assert_eq!(
+            error_kind(&io.remove_descriptor(&path).unwrap_err()),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(control.file_bytes(&path), Some(original));
+        control.set_administrator(true);
+        io.remove_descriptor(&path).unwrap();
+        assert_eq!(control.file_bytes(&path), None);
+    }
+
+    #[test]
+    fn pending_native_read_observation_rejects_mocked_connections() {
+        let (_, control) = MonitorIo::new_mocked();
+        let (connection, _) = control.connected_pair();
+        assert_eq!(
+            seismograph_protocol::testing::read_is_pending(&connection).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+    }
+
+    #[test]
     fn publication_failures_clean_up_only_exclusively_created_files() {
         for operation in [
             IoOperation::CreateDescriptor,

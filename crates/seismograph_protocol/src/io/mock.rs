@@ -296,8 +296,15 @@ impl Runtime {
 
     pub(crate) fn rename_file(&self, from: &Path, to: &Path) -> io::Result<()> {
         let mut state = self.state();
-        if state.entries.contains_key(to) {
-            return Err(io::ErrorKind::AlreadyExists.into());
+        for path in [from, to] {
+            let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+            let directory = Self::directory(&state, parent, None)?;
+            if state.owner != directory.owner && !Self::administrative(&state) {
+                return Err(access_denied());
+            }
+        }
+        if state.entries.get(to).is_some_and(|entry| entry.data.is_none()) {
+            return Err(io::ErrorKind::IsADirectory.into());
         }
         let entry = state.entries.remove(from).ok_or(io::ErrorKind::NotFound)?;
         state.entries.insert(to.to_owned(), entry);
@@ -306,6 +313,11 @@ impl Runtime {
 
     pub(crate) fn remove_file(&self, path: &Path) -> io::Result<()> {
         let mut state = self.state();
+        let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+        let directory = Self::directory(&state, parent, None)?;
+        if state.owner != directory.owner && !Self::administrative(&state) {
+            return Err(access_denied());
+        }
         let entry = state.entries.get(path).ok_or(io::ErrorKind::NotFound)?;
         if entry.data.is_none() {
             return Err(io::ErrorKind::IsADirectory.into());
@@ -530,4 +542,58 @@ fn access_denied() -> io::Error {
     #[cfg(unix)]
     let code = libc::EACCES;
     io::Error::from_raw_os_error(code)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moving_another_users_file_requires_administrative_access() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let parent = runtime.current_directory(&owner).unwrap();
+        let source = parent.join("source");
+        let target = parent.join("target");
+        runtime.create_file(&source, &owner).unwrap();
+        runtime.state().owner = match &owner {
+            MonitorOwner::UnixUser(_) => MonitorOwner::UnixUser(1002),
+            MonitorOwner::WindowsSid(_) => MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1002".into()),
+        };
+        assert_eq!(
+            runtime.rename_file(&source, &target).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert!(runtime.state().entries.contains_key(&source));
+        runtime.state().administrator = true;
+        runtime.rename_file(&source, &target).unwrap();
+        let state = runtime.state();
+        assert!(!state.entries.contains_key(&source));
+        assert_eq!(state.entries.get(&target).unwrap().owner, owner);
+    }
+
+    #[test]
+    fn file_publication_does_not_replace_a_directory() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let parent = runtime.current_directory(&owner).unwrap();
+        let source = parent.join("source");
+        let target = parent.join("target");
+        runtime.state().entries.insert(
+            target.clone(),
+            Entry {
+                owner: owner.clone(),
+                secure: true,
+                data: None,
+            },
+        );
+        runtime.create_file(&source, &owner).unwrap();
+        assert_eq!(
+            runtime.rename_file(&source, &target).unwrap_err().kind(),
+            io::ErrorKind::IsADirectory
+        );
+        assert!(runtime.state().entries.contains_key(&source));
+        assert!(runtime.state().entries.get(&target).unwrap().data.is_none());
+    }
 }

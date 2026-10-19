@@ -119,7 +119,13 @@ mod tests {
             let discovered = seismograph_protocol::discovery::directories(&io)
                 .unwrap()
                 .filter_map(Result::ok)
-                .flat_map(|directory| directory.descriptors().unwrap().collect::<Vec<_>>())
+                .flat_map(|directory| match directory.descriptors() {
+                    Ok(entries) => entries.collect::<Vec<_>>(),
+                    Err(error) => {
+                        eprintln!("ignoring unavailable registry {}: {error}", directory.path().display());
+                        Vec::new()
+                    }
+                })
                 .any(|candidate| candidate.as_ref().is_ok_and(|candidate| candidate == descriptor));
             assert!(discovered, "the same discovery path used by the CLI must find the workload");
             let mut stream = Connection::connect(&io, descriptor, Duration::from_secs(2)).unwrap();
