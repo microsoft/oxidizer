@@ -3,13 +3,17 @@
 
 use thread_aware_core::ThreadAware;
 
-use crate::{Driver, DriverError, DriverInstance, DriverOptions};
+use crate::{Driver, DriverError, DriverOptions};
 
 /// A consumer-facing I/O handle that creates worker-local drivers.
 ///
 /// The runtime creates one registration for each concrete context type. The first context
 /// retrieval creates the context, clones and relocates it to every async worker, and creates one
 /// driver on each worker. Later retrievals return a clone of the existing context.
+///
+/// An implementation of [`Clone`] must not retrieve the same concrete context type. The runtime
+/// may serialize clones of one registered context, so same-type re-entry would recursively wait
+/// for the clone currently in progress. Cloning may retrieve a different context type.
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// Configuration used to create the context.
     type ContextOptions;
@@ -30,9 +34,8 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     /// execute on another async worker. The context may outlive the driver and must reject new
     /// operations after [`Driver::shutdown`] closes it.
     ///
-    /// A successful instance must select a role listed by [`DriverOptions::allowed_roles`].
-    /// One context registration must select the same role on every async worker. Return an error
-    /// when the driver supports none of the allowed roles.
+    /// The driver must support the role assigned through [`DriverOptions::role`]. Return an error
+    /// when it does not.
     ///
     /// # Errors
     ///
@@ -40,5 +43,5 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     /// construction before returning. The runtime treats the failure as fatal, does not publish
     /// the context, and starts runtime shutdown on every async worker. It calls
     /// [`Driver::shutdown`] on every driver that was created successfully.
-    fn driver(&mut self, options: DriverOptions) -> Result<DriverInstance<Self::Driver>, DriverError>;
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError>;
 }
