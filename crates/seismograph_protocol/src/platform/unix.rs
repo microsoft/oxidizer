@@ -679,6 +679,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "native listener flags are exercised by native and careful tests")]
+    fn listener_nonblocking_mode_is_applied_and_can_be_cleared() {
+        let directory = crate::testing::Directory::new();
+        let listener = Listener::bind(&directory.descriptor()).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        // SAFETY: the listener owns a live socket; F_GETFL has no pointer argument.
+        let flags = unsafe { libc::fcntl(listener.socket.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::O_NONBLOCK, 0);
+        assert_eq!(listener.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        listener.set_nonblocking(false).unwrap();
+        // SAFETY: the listener still owns the socket; F_GETFL has no pointer argument.
+        let flags = unsafe { libc::fcntl(listener.socket.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_eq!(flags & libc::O_NONBLOCK, 0);
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "native and careful suites cover OS directory and socket permissions")]
     fn native_directory_and_socket_permissions_are_private() {
         let socket = connecting_socket().unwrap();

@@ -189,6 +189,59 @@ fn discovery_suppresses_only_missing_or_refused_connections() {
 }
 
 #[test]
+fn monitor_order_uses_owner_then_name_instance_and_process_not_discovery_order() {
+    use seismograph_protocol::monitor::{InstanceId, MonitorOwner};
+
+    let instance_id = InstanceId::from_bytes([1; 16]);
+    let mut instances = [
+        (1002, "alpha", None, 1),
+        (1001, "zeta", None, 1),
+        (1001, "alpha", Some("b"), 1),
+        (1001, "alpha", Some("a"), 2),
+        (1001, "alpha", Some("a"), 1),
+        (1001, "alpha", None, 99),
+    ]
+    .map(|(uid, name, instance, process_id)| {
+        let owner = MonitorOwner::UnixUser(uid);
+        Instance {
+            descriptor: MonitorDescriptor {
+                endpoint: MonitorEndpoint::for_instance(Path::new("/registry"), &owner, process_id, instance_id),
+                owner,
+                name: name.into(),
+                instance: instance.map(str::to_owned),
+                process_id,
+                instance_id,
+            },
+            recording: RecordingConfiguration::default(),
+            server_version: None,
+        }
+    });
+    sort_instances(&mut instances);
+    let actual = instances
+        .iter()
+        .map(|instance| {
+            (
+                instance.descriptor.owner.to_string(),
+                instance.descriptor.name.as_str(),
+                instance.descriptor.instance.as_deref(),
+                instance.descriptor.process_id,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        [
+            ("1001".into(), "alpha", None, 99),
+            ("1001".into(), "alpha", Some("a"), 1),
+            ("1001".into(), "alpha", Some("a"), 2),
+            ("1001".into(), "alpha", Some("b"), 1),
+            ("1001".into(), "zeta", None, 1),
+            ("1002".into(), "alpha", None, 1),
+        ]
+    );
+}
+
+#[test]
 fn snapshot_saving_uses_mocked_wall_time_and_preserves_write_errors() {
     let (io, control) = MonitorIo::new_mocked();
     let (_, descriptor) = descriptor(&io);
