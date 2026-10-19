@@ -10,10 +10,6 @@ use crate::{Driver, DriverError, DriverOptions};
 /// The runtime creates one registration for each concrete context type. The first context
 /// retrieval creates the context, clones and relocates it to every async worker, and creates one
 /// driver on each worker. Later retrievals return a clone of the existing context.
-///
-/// An implementation of [`Clone`] must not retrieve an I/O context. The runtime may serialize
-/// context clones, so retrieving another context while cloning can create a lock-order cycle
-/// between registrations on different workers.
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// Configuration used to create the context.
     type ContextOptions;

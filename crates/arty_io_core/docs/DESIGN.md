@@ -34,10 +34,6 @@ Later retrievals return a clone of the existing context. The runtime does not
 register the same concrete context type twice. Libraries that need two
 independent registrations use two distinct context types.
 
-Cloning a registered context must not retrieve an I/O context. The runtime may
-serialize context clones, so retrieving another context while cloning can create
-a lock-order cycle between registrations on different workers.
-
 `IoContext::driver` completes driver setup before the context is published. A
 driver must not wait for another async worker to run during creation. If driver
 creation fails, the runtime treats the failure as fatal and starts runtime
@@ -84,11 +80,6 @@ ready completions after waking; the requirement is that it stop waiting promptly
 `execute_cycle` processes completed I/O operations. It must return rather than
 loop indefinitely, so other drivers and application tasks get time on the async
 worker. The contract does not require a fixed number of completions per call.
-
-Driver cycle callbacks, including formatting an error returned by
-`execute_cycle`, must not retrieve an I/O context from the same worker. The host
-keeps its driver collection borrowed during cycle execution to avoid allocation
-and reference-counting on this hot path.
 
 An error from `execute_cycle` means the driver cannot continue. The runtime
 starts shutdown on every async worker. Errors for individual application I/O
