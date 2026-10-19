@@ -25,16 +25,27 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-The changelogs are updated by `scripts/release-packages.ps1` at release time, based on Git history. It is not necessary to make manual edits
-to the changelogs, though you are permitted to do so if explicitly instructed.
+Existing changelogs are retained as historical records. The version-planning
+skill does not generate changelogs; do not update them unless explicitly instructed.
 
 ## Releasing Packages
 
-See [docs/releasing.md](docs/releasing.md) for the release tooling
-reference: glossary (direct/transitive dependent vs dependency, cascade
-direction, change type vs version component, release set, pending
-release, elevation), the cascade-organisation invariants, and the
-workflow for `scripts/release-packages.ps1`.
+Use the [increment-versions skill](.github/skills/increment-versions/SKILL.md)
+in **standalone mode** when explicitly asked to prepare package versions.
+Version preparation is on demand, not required for every code PR.
+See [docs/releasing.md](docs/releasing.md) for prerequisites, invocation
+inputs, upstream provenance, and the publication boundary.
+
+Require an explicitly selected local release-history ref and, for stacked PRs,
+the actual parent target ref. Do not infer these from the publication setup.
+Keep release evidence outside the repository or in an already ignored location.
+Include the complete **Version/release plan** in the PR, including dependent
+packages, version alignment, and retained pending increments.
+
+This process replaces the legacy version-preparation scripts. It does not
+authorize merging, tagging, publication, or changes to the existing internal
+Microsoft publishing automation or GitHub release workflow. Existing merge-triggered
+publication still applies to version PRs; standalone mode does not disable it.
 
 ## Packaging
 
