@@ -102,6 +102,15 @@ fn closing_a_connection_repeatedly_is_idempotent() {
 }
 
 #[test]
+fn peer_disconnect_does_not_prevent_configuring_read_deadlines() {
+    let (client, mut server) = seismograph_protocol::testing::connected_pair();
+    drop(client);
+    server.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+    assert_eq!(server.peek(&mut [0]).unwrap(), 0);
+    assert_eq!(server.read(&mut [0]).unwrap(), 0);
+}
+
+#[test]
 fn read_and_write_deadlines_remain_bounded() {
     let (_peer, mut server) = seismograph_protocol::testing::connected_pair();
     server.set_read_timeout(Some(Duration::from_millis(20))).unwrap();

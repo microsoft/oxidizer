@@ -12,6 +12,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub(crate) use discovery::{current_directory, registry_directories};
@@ -201,16 +202,21 @@ const fn peer_allowed(owner: u32, peer: u32) -> bool {
 #[derive(Debug)]
 pub(crate) struct Connection {
     stream: UnixStream,
+    reads: Arc<Reads>,
+}
+
+#[derive(Debug, Default)]
+struct Reads {
+    timeout: Mutex<Option<Duration>>,
     #[cfg(any(test, feature = "test-util"))]
-    pending_reads: std::sync::Arc<super::PendingReads>,
+    pending: super::PendingReads,
 }
 
 impl Connection {
     fn new(stream: UnixStream) -> Self {
         Self {
             stream,
-            #[cfg(any(test, feature = "test-util"))]
-            pending_reads: std::sync::Arc::default(),
+            reads: Arc::default(),
         }
     }
 
@@ -229,18 +235,26 @@ impl Connection {
     pub(crate) fn try_clone(&self) -> io::Result<Self> {
         self.stream.try_clone().map(|stream| Self {
             stream,
-            #[cfg(any(test, feature = "test-util"))]
-            pending_reads: std::sync::Arc::clone(&self.pending_reads),
+            reads: Arc::clone(&self.reads),
         })
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn read_is_pending(&self) -> bool {
-        self.pending_reads.active()
+        self.reads.pending.active()
     }
 
     pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.stream.set_read_timeout(timeout)
+        if timeout.is_some_and(|timeout| timeout.is_zero() || Instant::now().checked_add(timeout).is_none()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "monitor read timeout must be positive and bounded",
+            ));
+        }
+        // Read and peek use explicit poll deadlines, not socket timeout options.
+        // This also permits configuring deadlines after a peer disconnects.
+        *self.reads.timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = timeout;
+        Ok(())
     }
 
     pub(crate) fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -248,27 +262,19 @@ impl Connection {
     }
 
     pub(crate) fn peek(&self, bytes: &mut [u8]) -> io::Result<usize> {
-        if bytes.is_empty() {
-            return Ok(0);
-        }
-        // SAFETY: stream owns a valid socket and bytes is writable for its length.
-        let count = unsafe { libc::recv(self.stream.as_raw_fd(), bytes.as_mut_ptr().cast(), bytes.len(), libc::MSG_PEEK) };
-        usize::try_from(count).map_err(|_error| io::Error::last_os_error())
+        self.receive(bytes, libc::MSG_PEEK)
     }
 
     pub(crate) fn close(&self) -> io::Result<()> {
         self.stream.shutdown(Shutdown::Both)
     }
-}
 
-impl Read for Connection {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn receive(&self, buf: &mut [u8], flags: libc::c_int) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
-        let deadline = self
-            .stream
-            .read_timeout()?
+        let timeout = *self.reads.timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let deadline = timeout
             .map(|timeout| {
                 Instant::now()
                     .checked_add(timeout)
@@ -278,7 +284,14 @@ impl Read for Connection {
         loop {
             // SAFETY: the socket is live and buf is writable for its length.
             // MSG_DONTWAIT affects this receive only, not concurrent writes.
-            let count = unsafe { libc::recv(self.stream.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), libc::MSG_DONTWAIT) };
+            let count = unsafe {
+                libc::recv(
+                    self.stream.as_raw_fd(),
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    flags | libc::MSG_DONTWAIT,
+                )
+            };
             if let Ok(count) = usize::try_from(count) {
                 return Ok(count);
             }
@@ -304,7 +317,7 @@ impl Read for Connection {
                 revents: 0,
             };
             #[cfg(any(test, feature = "test-util"))]
-            let _pending = self.pending_reads.enter();
+            let _pending = self.reads.pending.enter();
             // SAFETY: poll points to one initialized pollfd; shutdown wakes this wait.
             let result = unsafe { libc::poll(&raw mut poll, 1, timeout) };
             if result == 0 {
@@ -317,6 +330,12 @@ impl Read for Connection {
                 }
             }
         }
+    }
+}
+
+impl Read for Connection {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.receive(buf, 0)
     }
 }
 
