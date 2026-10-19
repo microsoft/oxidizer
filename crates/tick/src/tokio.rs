@@ -94,6 +94,15 @@ mod tests {
     #[derive(Debug)]
     struct CountingWake(AtomicUsize);
 
+    fn run_with_paused_time(test: impl Future<Output = ()>) {
+        ::tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(test);
+    }
+
     async fn next_driver_event(
         observed_events: &mut ::tokio::sync::mpsc::UnboundedReceiver<(Option<Instant>, Option<WaitOutcome>)>,
     ) -> (Option<Instant>, Option<WaitOutcome>) {
@@ -160,8 +169,12 @@ mod tests {
         assert_eq!(notified.as_mut().poll(&mut context), Poll::Ready(()));
     }
 
-    #[::tokio::test(start_paused = true)]
-    async fn no_deadline_wait_remains_parked_without_periodic_wakes() {
+    #[test]
+    fn no_deadline_wait_remains_parked_without_periodic_wakes() {
+        run_with_paused_time(no_deadline_wait_remains_parked_without_periodic_wakes_case());
+    }
+
+    async fn no_deadline_wait_remains_parked_without_periodic_wakes_case() {
         let notify = Notify::new();
         let mut waiter = std::pin::pin!(wait_for_driver_event(&notify, None));
         let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
@@ -180,8 +193,12 @@ mod tests {
         assert_eq!(waiter.as_mut().poll(&mut context), Poll::Ready(WaitOutcome::Notified));
     }
 
-    #[::tokio::test(start_paused = true)]
-    async fn earlier_timer_interrupts_an_established_long_deadline_wait() {
+    #[test]
+    fn earlier_timer_interrupts_an_established_long_deadline_wait() {
+        run_with_paused_time(earlier_timer_interrupts_an_established_long_deadline_wait_case());
+    }
+
+    async fn earlier_timer_interrupts_an_established_long_deadline_wait_case() {
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
         let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
@@ -220,8 +237,12 @@ mod tests {
         drop(clock);
     }
 
-    #[::tokio::test(start_paused = true)]
-    async fn deadline_wait_fires_at_the_exact_requested_instant() {
+    #[test]
+    fn deadline_wait_fires_at_the_exact_requested_instant() {
+        run_with_paused_time(deadline_wait_fires_at_the_exact_requested_instant_case());
+    }
+
+    async fn deadline_wait_fires_at_the_exact_requested_instant_case() {
         let notify = Arc::new(Notify::new());
         let driver_waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
         let (clock, driver) = crate::runtime::InactiveClock::new_shared().activate(driver_waker);
