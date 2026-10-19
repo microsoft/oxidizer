@@ -216,14 +216,11 @@ impl Scheduler {
                 return Err(future_factory);
             }
             let sink = current.builtins.sink();
-            let parent_task_enrichment = (!sink.is_noop()).then(|| sink.transfer_context());
+            let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = current.results.channel();
             let inner = DeferredTask::new(future_factory, builtins);
-            let options = parent_task_enrichment.map_or_else(
-                || TaskOptions::new(TaskPlacement::SameThread),
-                |context| TaskOptions::observed(context, TaskPlacement::SameThread),
-            );
+            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
             Ok(JoinHandle::new(result_rx))
