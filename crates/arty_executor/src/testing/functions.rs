@@ -14,9 +14,9 @@ pub(crate) fn new_test_task() -> impl crate::TypeErasedTask {
     crate::Task::new(std::future::pending(), sender)
 }
 
-pub(crate) fn new_test_task_ref() -> crate::TaskRef {
+pub(crate) fn new_test_task_handle() -> crate::TaskHandle {
     let pool = plurality::Pool::new();
-    crate::TaskRef::new(pool.alloc_arc_pin(new_test_task()))
+    crate::TaskHandle::new(pool.alloc_arc_pin(new_test_task()))
 }
 
 /// Creates an executor with unit-test cleanup that drives explicit shutdown.

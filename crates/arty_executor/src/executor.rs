@@ -10,7 +10,7 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
 use tick::SimpleClock;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskList, TaskRef, TaskSet, executor_context};
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskHandle, TaskList, TaskSet, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -69,7 +69,7 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskList, TaskRef, Ta
 #[derive(Debug)]
 pub struct Executor {
     shared: ExecutorShared,
-    active: VecDeque<TaskRef>,
+    active: VecDeque<TaskHandle>,
     pending: TaskList,
     clock: SimpleClock,
     last_cycle_ended: Option<Instant>,
@@ -210,9 +210,9 @@ impl Executor {
 
         let first_awakened = self.active.len();
         executor_context::append_wakes(self.shared.wake().thread_id(), &mut self.active);
-        for task_ref in self.active.range(first_awakened..) {
+        for task_handle in self.active.range(first_awakened..) {
             // SAFETY: Retirement removes queued notifications before releasing their live tasks.
-            unsafe { task_ref.as_task() }.clear_queued_notification();
+            unsafe { task_handle.as_task() }.clear_queued_notification();
             TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
         }
     }
@@ -221,11 +221,11 @@ impl Executor {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
-        while let Some(task_ref) = self.active.pop_front() {
+        while let Some(task_handle) = self.active.pop_front() {
             // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
             // and retires its payload on the task's owner thread.
-            let task = unsafe { task_ref.as_task() };
-            let pointer = task_ref.pointer();
+            let task = unsafe { task_handle.as_task() };
+            let pointer = task_handle.as_ptr();
             let linked = task.links().linked.get();
 
             if self.shared.is_shutting_down() {
@@ -247,7 +247,7 @@ impl Executor {
                 task::Poll::Pending => {
                     pending_count = pending_count.saturating_add(1);
                     if !linked {
-                        self.pending.insert(task_ref);
+                        self.pending.insert(task_handle);
                     }
                 }
             }
@@ -266,12 +266,12 @@ impl Executor {
 
     fn prepare_task_abort(&mut self) -> usize {
         executor_context::clear_wakes(self.shared.wake().thread_id());
-        for task_ref in &self.active {
-            drop(self.pending.remove(task_ref.pointer()));
+        for task_handle in &self.active {
+            drop(self.pending.remove(task_handle.as_ptr()));
         }
         self.shared.drain_new_tasks(&mut self.active);
-        while let Some(task_ref) = self.pending.pop_front() {
-            self.active.push_back(task_ref);
+        while let Some(task_handle) = self.pending.pop_front() {
+            self.active.push_back(task_handle);
         }
         let aborted_count = self.active.len();
         self.shared.decrement_task_count(aborted_count);
@@ -286,9 +286,9 @@ impl Executor {
     }
 
     fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool) {
-        while let Some(task_ref) = self.active.pop_front() {
+        while let Some(task_handle) = self.active.pop_front() {
             // SAFETY: The cancellation batch owns each pinned task on its owner thread.
-            unsafe { task_ref.as_task() }.abort();
+            unsafe { task_handle.as_task() }.abort();
         }
         if record_drop_metric && aborted_count != 0 {
             TASKS_DROPPED.with(|event| event.observe(aborted_count));

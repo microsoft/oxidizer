@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::thread::ThreadId;
 
-use crate::{TaskPointer, TaskRef};
+use crate::{TaskHandle, TaskPtr};
 
 thread_local! {
     static CURRENT: RefCell<State> = const {
@@ -19,7 +19,7 @@ thread_local! {
 
 struct State {
     owner: Option<ThreadId>,
-    awakened: VecDeque<TaskRef>,
+    awakened: VecDeque<TaskHandle>,
     executing: bool,
 }
 
@@ -72,15 +72,15 @@ pub(crate) fn is_executing(owner: ThreadId) -> bool {
     CURRENT.with_borrow(|current| current.owner == Some(owner) && current.executing)
 }
 
-pub(crate) fn enqueue(owner: ThreadId, task_ref: TaskRef) -> Result<(), TaskRef> {
+pub(crate) fn enqueue(owner: ThreadId, task_handle: TaskHandle) -> Result<(), TaskHandle> {
     if !is_current(owner) {
-        return Err(task_ref);
+        return Err(task_handle);
     }
-    CURRENT.with_borrow_mut(|current| current.awakened.push_back(task_ref));
+    CURRENT.with_borrow_mut(|current| current.awakened.push_back(task_handle));
     Ok(())
 }
 
-pub(crate) fn append_wakes(owner: ThreadId, target: &mut VecDeque<TaskRef>) {
+pub(crate) fn append_wakes(owner: ThreadId, target: &mut VecDeque<TaskHandle>) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| target.append(&mut current.awakened));
     }
@@ -90,10 +90,10 @@ pub(crate) fn has_wakes(owner: ThreadId) -> bool {
     is_current(owner) && CURRENT.with_borrow(|current| !current.awakened.is_empty())
 }
 
-pub(crate) fn remove_wake(owner: ThreadId, task_ref: TaskPointer) {
+pub(crate) fn remove_wake(owner: ThreadId, task_ptr: TaskPtr) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| {
-            current.awakened.retain(|queued| queued.pointer() != task_ref);
+            current.awakened.retain(|queued| queued.as_ptr() != task_ptr);
         });
     }
 }
