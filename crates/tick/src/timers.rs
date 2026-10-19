@@ -133,7 +133,7 @@ impl Timers {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-
+    // `Timers`, `TimerKey`, discriminators, and raw registration are private storage details.
     use super::*;
     use crate::Clock;
     use crate::state::ClockState;
@@ -212,7 +212,7 @@ mod tests {
 
         match clock.clock_state() {
             ClockState::ClockControl(_) => panic!("we are using the system clock"),
-            ClockState::System(timers) => assert!(timers.with_timers(|t| t.contains(id))),
+            ClockState::System(storage) => assert!(storage.with_timers(|timers| timers.contains(id))),
         }
     }
 
