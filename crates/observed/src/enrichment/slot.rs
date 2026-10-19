@@ -456,15 +456,29 @@ mod coverage_tests {
     }
 
     #[test]
+    fn push_entries_ignores_an_empty_transfer() {
+        let mut transfer = EnrichmentTransfer::default();
+        let entries = Arc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]);
+
+        transfer.push_entries(&entries);
+
+        assert!(transfer.slots.is_empty());
+    }
+
+    #[test]
     fn debug_impls() {
         let slot = Slot::new();
         assert!(format!("{slot:?}").contains("Slot"));
+
+        let guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("k", 1_i64)]));
+        assert!(format!("{guard:?}").contains("Guard"));
+        drop(guard);
 
         let mut transfer = EnrichmentTransfer::default();
         transfer.add_slot(&slot);
         assert!(format!("{transfer:?}").contains("EnrichmentTransfer"));
 
-        let guard = transfer.apply();
-        assert!(format!("{guard:?}").contains("Guard"));
+        let applied_guard = transfer.apply();
+        assert!(format!("{applied_guard:?}").contains("AppliedGuard"));
     }
 }

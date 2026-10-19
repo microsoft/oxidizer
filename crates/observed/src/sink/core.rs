@@ -524,6 +524,26 @@ mod tests {
         drop(transfer.apply_current_thread());
     }
 
+    #[test]
+    fn test_enrichment_guard_holds_scope_open() {
+        struct TestEnrichment;
+
+        impl Enrichment for TestEnrichment {
+            fn into_entries(self) -> Vec<EnrichmentEntry> {
+                vec![EnrichmentEntry::unclassified("test", 1_i64)]
+            }
+        }
+
+        let sink = Sink::builder("test").clock(SimpleClock::new_frozen()).build();
+        let guard = sink.push_test_enrichment(TestEnrichment);
+
+        assert_eq!(sink.current_enrichments().len(), 1);
+        assert!(format!("{guard:?}").contains("EnrichmentGuard"));
+
+        drop(guard);
+        assert!(sink.current_enrichments().is_empty());
+    }
+
     struct DummyDyn;
 
     impl crate::interop::DynEvent for DummyDyn {
