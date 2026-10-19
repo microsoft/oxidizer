@@ -166,6 +166,24 @@ struct EmitState {
     _provider: SdkLoggerProvider,
 }
 
+struct EnrichedEmitState {
+    state: EmitState,
+    _scopes: EnrichmentScopes,
+}
+
+struct EnrichedSinkState {
+    sink: Sink,
+    _scopes: EnrichmentScopes,
+}
+
+struct EnrichmentScopes(Vec<observed::__private::EnrichmentGuard>);
+
+impl Drop for EnrichmentScopes {
+    fn drop(&mut self) {
+        while self.0.pop().is_some() {}
+    }
+}
+
 fn replacing_engine() -> data_privacy::RedactionEngine {
     data_privacy::RedactionEngine::builder()
         .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::new())
@@ -190,6 +208,38 @@ fn emit_state_with(redaction_engine: data_privacy::RedactionEngine) -> EmitState
 
 fn processor_free_sink() -> Sink {
     Sink::builder("bench").build()
+}
+
+fn enriched_emit_state(depth: usize) -> EnrichedEmitState {
+    let state = emit_state();
+    let scopes = enrichment_scopes(&state.sink, depth);
+    EnrichedEmitState { state, _scopes: scopes }
+}
+
+fn enriched_sink_state(depth: usize) -> EnrichedSinkState {
+    let sink = processor_free_sink();
+    let scopes = enrichment_scopes(&sink, depth);
+    EnrichedSinkState { sink, _scopes: scopes }
+}
+
+fn enrichment_scopes(sink: &Sink, depth: usize) -> EnrichmentScopes {
+    if depth == 3 {
+        return EnrichmentScopes(vec![sink.push_test_enrichment(BenchEnrich3 {
+            service: 1,
+            region: 2,
+            env: 3,
+        })]);
+    }
+
+    EnrichmentScopes(
+        (0..depth)
+            .map(|value| {
+                sink.push_test_enrichment(BenchEnrich1 {
+                    val: i64::try_from(value).expect("benchmark enrichment depth fits in i64"),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn transfer_with_entries(slot_count: usize) -> Transfer {
@@ -258,32 +308,15 @@ fn emit_redacted_strings(state: &EmitState) {
 }
 
 #[metabench::benchmark(EMIT_WITH_ENRICHMENTS, EMIT_ENRICHMENT, "emit_with_3_enrichments")]
-#[bench::run(&emit_state())]
-fn emit_with_enrichments(state: &EmitState) {
-    (|| emit_simple_log(state)).enrich(
-        &state.sink,
-        BenchEnrich3 {
-            service: 1,
-            region: 2,
-            env: 3,
-        },
-    )();
+#[bench::run(&enriched_emit_state(3))]
+fn emit_with_enrichments(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
 }
 
 #[metabench::benchmark(EMIT_DEEP_ENRICHMENTS, EMIT_ENRICHMENT, "emit_with_10_nested_enrichments")]
-#[bench::run(&emit_state())]
-fn emit_deep_enrichments(state: &EmitState) {
-    (|| emit_simple_log(state))
-        .enrich(&state.sink, BenchEnrich1 { val: 9 })
-        .enrich(&state.sink, BenchEnrich1 { val: 8 })
-        .enrich(&state.sink, BenchEnrich1 { val: 7 })
-        .enrich(&state.sink, BenchEnrich1 { val: 6 })
-        .enrich(&state.sink, BenchEnrich1 { val: 5 })
-        .enrich(&state.sink, BenchEnrich1 { val: 4 })
-        .enrich(&state.sink, BenchEnrich1 { val: 3 })
-        .enrich(&state.sink, BenchEnrich1 { val: 2 })
-        .enrich(&state.sink, BenchEnrich1 { val: 1 })
-        .enrich(&state.sink, BenchEnrich1 { val: 0 })();
+#[bench::run(&enriched_emit_state(10))]
+fn emit_deep_enrichments(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
 }
 
 #[metabench::benchmark(ENRICH_PUSH_POP, EMIT_ENRICHMENT, "enrich_push_pop")]
@@ -326,35 +359,10 @@ fn emit_to_noop_sink(sink: &Sink) {
 }
 
 #[metabench::benchmark(ENRICHMENT_COLLECT, ALLOCATION, "enrichment_collect")]
-#[bench::three_entries(&processor_free_sink(), 3)]
-#[bench::ten_nested(&processor_free_sink(), 10)]
-fn enrichment_collect(sink: &Sink, entry_count: usize) -> Vec<EnrichmentEntry> {
-    fn collect(sink: &Sink) -> Vec<EnrichmentEntry> {
-        black_box(sink.current_enrichments())
-    }
-
-    match entry_count {
-        3 => (|| collect(sink)).enrich(
-            sink,
-            BenchEnrich3 {
-                service: 1,
-                region: 2,
-                env: 3,
-            },
-        )(),
-        10 => (|| collect(sink))
-            .enrich(sink, BenchEnrich1 { val: 9 })
-            .enrich(sink, BenchEnrich1 { val: 8 })
-            .enrich(sink, BenchEnrich1 { val: 7 })
-            .enrich(sink, BenchEnrich1 { val: 6 })
-            .enrich(sink, BenchEnrich1 { val: 5 })
-            .enrich(sink, BenchEnrich1 { val: 4 })
-            .enrich(sink, BenchEnrich1 { val: 3 })
-            .enrich(sink, BenchEnrich1 { val: 2 })
-            .enrich(sink, BenchEnrich1 { val: 1 })
-            .enrich(sink, BenchEnrich1 { val: 0 })(),
-        _ => unreachable!("benchmark cases only use 3 or 10 entries"),
-    }
+#[bench::three_entries(&enriched_sink_state(3))]
+#[bench::ten_nested(&enriched_sink_state(10))]
+fn enrichment_collect(state: &EnrichedSinkState) -> Vec<EnrichmentEntry> {
+    black_box(state.sink.current_enrichments())
 }
 
 fn enrichment_entries() -> Vec<EnrichmentEntry> {
@@ -432,19 +440,10 @@ fn redacted_value_creation(engine: &data_privacy::RedactionEngine, direct: bool)
 }
 
 #[metabench::benchmark(EMIT_ENRICHMENT_DEPTH, ALLOCATION, "emit_enrichment_depth")]
-#[bench::depth_0(&emit_state(), 0)]
-#[bench::depth_5(&emit_state(), 5)]
-fn emit_enrichment_depth(state: &EmitState, depth: usize) {
-    match depth {
-        0 => emit_simple_log(state),
-        5 => (|| emit_simple_log(state))
-            .enrich(&state.sink, BenchEnrich1 { val: 4 })
-            .enrich(&state.sink, BenchEnrich1 { val: 3 })
-            .enrich(&state.sink, BenchEnrich1 { val: 2 })
-            .enrich(&state.sink, BenchEnrich1 { val: 1 })
-            .enrich(&state.sink, BenchEnrich1 { val: 0 })(),
-        _ => unreachable!("benchmark cases only use depth 0 or 5"),
-    }
+#[bench::depth_0(&enriched_emit_state(0))]
+#[bench::depth_5(&enriched_emit_state(5))]
+fn emit_enrichment_depth(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
 }
 
 #[metabench::benchmark(APPLY_TRANSFER, ENRICHMENT_TRANSFER, "apply_current_thread")]
@@ -457,30 +456,32 @@ fn apply_transfer(transfer: &Transfer) {
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut emit_pipeline = criterion.benchmark_group(EMIT_PIPELINE);
     let emit = emit_state();
-    emit_pipeline.bench_function(EMIT_SIMPLE_LOG.benchmark_name(), |bencher| {
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_SIMPLE_LOG.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_simple_log(black_box(&emit)));
     });
-    emit_pipeline.bench_function(EMIT_MANY_FIELDS.benchmark_name(), |bencher| {
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_MANY_FIELDS.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_many_fields(black_box(&emit)));
     });
-    emit_pipeline.bench_function(EMIT_WITH_BODY.benchmark_name(), |bencher| {
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_WITH_BODY.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_with_body(black_box(&emit)));
     });
-    emit_pipeline.bench_function(EMIT_METRIC_EVENT.benchmark_name(), |bencher| {
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_METRIC_EVENT.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_metric_event(black_box(&emit)));
     });
     let redacted = redacted_emit_state();
-    emit_pipeline.bench_function(EMIT_REDACTED_STRINGS.benchmark_name(), |bencher| {
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_REDACTED_STRINGS.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_redacted_strings(black_box(&redacted)));
     });
     emit_pipeline.finish();
 
     let mut enrichment = criterion.benchmark_group(EMIT_ENRICHMENT);
-    enrichment.bench_function(EMIT_WITH_ENRICHMENTS.benchmark_name(), |bencher| {
-        bencher.iter(|| emit_with_enrichments(black_box(&emit)));
+    let enriched = enriched_emit_state(3);
+    enrichment.bench_function(BenchmarkId::new(EMIT_WITH_ENRICHMENTS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_with_enrichments(black_box(&enriched)));
     });
-    enrichment.bench_function(EMIT_DEEP_ENRICHMENTS.benchmark_name(), |bencher| {
-        bencher.iter(|| emit_deep_enrichments(black_box(&emit)));
+    let deeply_enriched = enriched_emit_state(10);
+    enrichment.bench_function(BenchmarkId::new(EMIT_DEEP_ENRICHMENTS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_deep_enrichments(black_box(&deeply_enriched)));
     });
     let sink = processor_free_sink();
     for (case, count) in [("three_entries", 3), ("five_entries", 5)] {
@@ -492,23 +493,23 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 
     let mut sink_operations = criterion.benchmark_group(SINK_OPERATIONS);
     let clock = tick::SimpleClock::new_system();
-    sink_operations.bench_function(CONSTRUCT_PROCESSOR_FREE_SINK.benchmark_name(), |bencher| {
+    sink_operations.bench_function(BenchmarkId::new(CONSTRUCT_PROCESSOR_FREE_SINK.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| construct_processor_free_sink(black_box(&clock)));
     });
     let noop = Sink::noop();
-    sink_operations.bench_function(EMIT_TO_NOOP_SINK.benchmark_name(), |bencher| {
+    sink_operations.bench_function(BenchmarkId::new(EMIT_TO_NOOP_SINK.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| emit_to_noop_sink(black_box(&noop)));
     });
     sink_operations.finish();
 
     let mut allocation = criterion.benchmark_group(ALLOCATION);
-    for (case, count) in [("three_entries", 3), ("ten_nested", 10)] {
+    for (case, state) in [("three_entries", enriched_sink_state(3)), ("ten_nested", enriched_sink_state(10))] {
         allocation.bench_function(BenchmarkId::new(ENRICHMENT_COLLECT.benchmark_name(), case), |bencher| {
-            bencher.iter(|| enrichment_collect(black_box(&sink), count));
+            bencher.iter(|| enrichment_collect(black_box(&state)));
         });
     }
     let entries = enrichment_entries();
-    allocation.bench_function(ENRICHMENT_ENTRY_CLONE.benchmark_name(), |bencher| {
+    allocation.bench_function(BenchmarkId::new(ENRICHMENT_ENTRY_CLONE.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| enrichment_entry_clone(black_box(&entries)));
     });
     let composite = composite_sink();
@@ -528,9 +529,9 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             bencher.iter(|| redacted_value_creation(black_box(&engine), direct));
         });
     }
-    for (case, depth) in [("depth_0", 0), ("depth_5", 5)] {
+    for (case, state) in [("depth_0", enriched_emit_state(0)), ("depth_5", enriched_emit_state(5))] {
         allocation.bench_function(BenchmarkId::new(EMIT_ENRICHMENT_DEPTH.benchmark_name(), case), |bencher| {
-            bencher.iter(|| emit_enrichment_depth(black_box(&emit), depth));
+            bencher.iter(|| emit_enrichment_depth(black_box(&state)));
         });
     }
     allocation.finish();

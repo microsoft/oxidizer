@@ -11,6 +11,8 @@ use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
+#[cfg(any(test, feature = "test-util"))]
+use crate::enrichment::Enrichment;
 use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
@@ -232,6 +234,14 @@ impl Sink {
 
     pub(crate) fn supports_enrichment(&self) -> bool {
         !matches!(&*self.inner, SinkInner::Noop)
+    }
+
+    /// Opens an enrichment scope for test and benchmark setup.
+    #[cfg(any(test, feature = "test-util"))]
+    #[doc(hidden)]
+    pub fn push_test_enrichment(&self, enrichment: impl Enrichment) -> crate::__private::EnrichmentGuard {
+        let entries = enrichment.into_entries().into();
+        crate::__private::EnrichmentGuard::new(self.push_enrichment(entries))
     }
 
     /// Forces buffered telemetry out by calling
@@ -497,12 +507,21 @@ mod tests {
 
     #[test]
     fn noop_sink_is_noop() {
+        struct UnreachableEnrichment;
+
+        impl Enrichment for UnreachableEnrichment {
+            fn into_entries(self) -> Vec<EnrichmentEntry> {
+                panic!("a no-op sink transfer must not materialize enrichment entries")
+            }
+        }
+
         let sink = Sink::noop();
         let _guard = sink.push_enrichment(PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]));
+        let transfer = sink.transfer_context().with_enrichment(UnreachableEnrichment);
 
         assert!(sink.is_noop());
         assert!(sink.current_enrichments().is_empty());
-        assert!(format!("{:?}", sink.transfer_context()).contains("Transfer"));
+        drop(transfer.apply_current_thread());
     }
 
     struct DummyDyn;

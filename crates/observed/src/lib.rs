@@ -464,4 +464,6 @@ pub mod __private {
     pub use ::data_privacy::{RedactedDisplay, RedactedToString, Sensitive};
 
     pub use crate::enrichment::EnrichmentEntry;
+    #[cfg(any(test, feature = "test-util"))]
+    pub use crate::enrichment::EnrichmentGuard;
 }

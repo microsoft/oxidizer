@@ -103,6 +103,21 @@ pub(crate) struct Guard {
     slots: SmallVec<[(Slot, OptEnrichmentNode); INLINE_SLOT_CAPACITY]>,
 }
 
+/// Holds an enrichment scope open for test and benchmark setup.
+#[cfg(any(test, feature = "test-util"))]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct EnrichmentGuard {
+    _guard: Guard,
+}
+
+#[cfg(any(test, feature = "test-util"))]
+impl EnrichmentGuard {
+    pub(crate) fn new(guard: Guard) -> Self {
+        Self { _guard: guard }
+    }
+}
+
 impl Guard {
     pub(crate) fn empty() -> Self {
         Self { slots: SmallVec::new() }
