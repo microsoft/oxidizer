@@ -28,25 +28,11 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(Isolated: Send, Sync, Clone, Copy);
 }
 
-#[test]
-fn compatibility_driver_requires_periodic_polling() {
-    let (_clock, driver) = InactiveClock::default().activate();
-
-    assert!(driver.requires_periodic_poll());
-}
-
-#[test]
-fn notification_aware_system_driver_can_park_without_periodic_polling() {
-    let (_clock, driver) = InactiveClock::default().activate_with_driver_waker(Waker::noop().clone());
-
-    assert!(!driver.requires_periodic_poll());
-}
-
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
 fn system_clock_reads_current_system_time() {
     let before = SystemTime::now();
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
 
     assert!(clock.system_time() >= before);
 }
@@ -64,7 +50,7 @@ fn simple_clock_system_time_as_converts_successfully() {
 
 #[test]
 fn system_clock_instant_uses_the_system_instant_domain() {
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let clock_instant = clock.instant();
     let system_instant = Instant::now();
 
@@ -109,7 +95,7 @@ fn simple_system_clock_is_monotonic() {
 #[test]
 fn stopwatch_accepts_every_public_time_source_shape() {
     let simple_clock = SimpleClock::new_system();
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
 
     let _ = Stopwatch::new(&clock);
     let _ = Stopwatch::new(clock);
@@ -119,7 +105,7 @@ fn stopwatch_accepts_every_public_time_source_shape() {
 
 #[test]
 fn stopwatch_into_instant_returns_its_start() {
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let watch = clock.stopwatch();
 
     let start: Instant = watch.into();
@@ -130,7 +116,7 @@ fn stopwatch_into_instant_returns_its_start() {
 #[cfg_attr(miri, ignore)] // Uses real elapsed time.
 #[test]
 fn system_stopwatch_measures_elapsed_time() {
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let watch = clock.stopwatch();
 
     thread::sleep(Duration::from_millis(1));
@@ -140,7 +126,7 @@ fn system_stopwatch_measures_elapsed_time() {
 
 #[test]
 fn zero_delay_is_immediately_ready() {
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut delay = Delay::new(&clock, Duration::ZERO);
 
     assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
@@ -148,7 +134,7 @@ fn zero_delay_is_immediately_ready() {
 
 #[test]
 fn maximum_delay_stays_pending_without_a_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut delay = Delay::new(&clock, Duration::MAX);
 
     assert_eq!(poll_delay(&mut delay), Poll::Pending);
@@ -157,7 +143,7 @@ fn maximum_delay_stays_pending_without_a_driver_deadline() {
 
 #[test]
 fn overflowing_delay_stays_pending_without_a_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
     assert_eq!(poll_delay(&mut delay), Poll::Pending);
@@ -167,7 +153,7 @@ fn overflowing_delay_stays_pending_without_a_driver_deadline() {
 
 #[test]
 fn dropping_a_delay_removes_its_public_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut delay = Delay::new(&clock, Duration::from_mins(1));
     assert_eq!(poll_delay(&mut delay), Poll::Pending);
     assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
@@ -180,7 +166,7 @@ fn dropping_a_delay_removes_its_public_driver_deadline() {
 #[cfg_attr(miri, ignore)] // Uses real elapsed time.
 #[test]
 fn completing_a_delay_removes_its_public_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let period = Duration::from_millis(1);
     let before_registration = Instant::now();
     let mut delay = Delay::new(&clock, period);
@@ -195,7 +181,7 @@ fn completing_a_delay_removes_its_public_driver_deadline() {
 
 #[test]
 fn periodic_timer_is_lazy_and_first_poll_is_pending() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
     assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
 
@@ -207,7 +193,7 @@ fn periodic_timer_is_lazy_and_first_poll_is_pending() {
 
 #[test]
 fn registered_periodic_timer_remains_pending_before_its_deadline() {
-    let (clock, _driver) = InactiveClock::default().activate();
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
 
     assert_eq!(poll_timer(&mut timer), Poll::Pending);
@@ -216,7 +202,7 @@ fn registered_periodic_timer_remains_pending_before_its_deadline() {
 
 #[test]
 fn near_maximum_period_never_registers_a_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
     assert_eq!(poll_timer(&mut timer), Poll::Pending);
@@ -226,7 +212,7 @@ fn near_maximum_period_never_registers_a_deadline() {
 
 #[test]
 fn dropping_a_periodic_timer_removes_its_public_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
     assert_eq!(poll_timer(&mut timer), Poll::Pending);
     assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
@@ -239,7 +225,7 @@ fn dropping_a_periodic_timer_removes_its_public_driver_deadline() {
 #[cfg_attr(miri, ignore)] // Uses real elapsed time.
 #[test]
 fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let period = Duration::from_millis(1);
     let before_registration = Instant::now();
     let mut timer = PeriodicTimer::new(&clock, period);
@@ -254,7 +240,7 @@ fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
 
 #[test]
 fn clock_gone_error_is_public_and_has_no_source() {
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     drop(clock);
 
     let error = driver.advance_timers(Instant::now()).unwrap_err();
@@ -278,7 +264,7 @@ fn system_time_error_conversion_preserves_message_and_source() {
 #[test]
 fn pending_delay_keeps_the_driver_alive_after_the_original_clock_is_dropped() {
     let now = Instant::now();
-    let (clock, mut driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut delay = clock.delay(Duration::from_secs(1));
     assert_eq!(poll_delay(&mut delay), Poll::Pending);
     drop(clock);

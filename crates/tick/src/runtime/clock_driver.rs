@@ -9,9 +9,9 @@ use crate::state::{ClockState, DriverId};
 /// Drives timer advancement for the clock.
 ///
 /// The `ClockDriver` is responsible for advancing and firing timers associated with
-/// the clock. The runtime advances it and parks until the returned deadline. Drivers created by
-/// [`InactiveClock::activate_with_driver_waker`](crate::runtime::InactiveClock::activate_with_driver_waker)
-/// can also interrupt that wait when an earlier timer is registered.
+/// the clock. The runtime advances it, parks until the returned deadline, and uses the waker passed
+/// to [`InactiveClock::activate`](crate::runtime::InactiveClock::activate) to interrupt that wait
+/// when an earlier timer is registered.
 ///
 /// In thread-isolated runtime architectures using one coordinate owner, each
 /// worker owns its own `ClockDriver` that advances only the timers registered
@@ -28,31 +28,13 @@ impl ClockDriver {
         Self { state, driver_id }
     }
 
-    /// Returns whether the runtime must retain bounded periodic polling between driver iterations.
-    ///
-    /// This is `false` only for a system clock activated with
-    /// [`InactiveClock::activate_with_driver_waker`](crate::runtime::InactiveClock::activate_with_driver_waker).
-    /// Those drivers receive first-timer, newly earlier-timer, and final-owner notifications and
-    /// may park indefinitely when [`Self::advance_timers`] returns `Ok(None)`.
-    ///
-    /// Compatibility drivers created by [`InactiveClock::activate`](crate::runtime::InactiveClock::activate)
-    /// return `true` because timer registration cannot interrupt either a no-deadline wait or a
-    /// wait for an existing later deadline. Externally advanced controlled clocks also return
-    /// `true`.
-    #[must_use]
-    pub const fn requires_periodic_poll(&self) -> bool {
-        self.driver_id.is_none()
-    }
-
     /// Advances and fires all timers scheduled to execute by the given time.
     ///
     /// This method processes all timers scheduled to fire at or before the
     /// specified `now` time, waking their associated tasks.
     ///
     /// Returns the next system-clock deadline suitable for parking. Controlled clocks return
-    /// `None` because their time advances externally rather than with [`Instant`]; runtimes using
-    /// controlled clocks must retain a periodic poll so external-owner drops are eventually
-    /// observed.
+    /// `None` because their time and timer wakeups are driven externally by their owner.
     ///
     /// # Errors
     ///

@@ -21,32 +21,10 @@ use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
-/// Maximum fallback wait for drivers without timer-registration notifications.
-const SUSPEND_POLL_INTERVAL: Duration = Duration::from_secs(1);
-
 const COMMANDS_PER_CYCLE: usize = 256;
 
-fn suspend_wait(deadline: Instant, now: Instant, requires_periodic_poll: bool) -> Duration {
-    let until_deadline = deadline.saturating_duration_since(now);
-    if requires_periodic_poll {
-        until_deadline.min(SUSPEND_POLL_INTERVAL)
-    } else {
-        until_deadline
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkerWait {
-    Timed(Duration),
-    Notification,
-}
-
-fn worker_wait(next_timer: Option<Instant>, now: Instant, requires_periodic_poll: bool) -> WorkerWait {
-    match (next_timer, requires_periodic_poll) {
-        (Some(deadline), periodic_poll) => WorkerWait::Timed(suspend_wait(deadline, now, periodic_poll)),
-        (None, true) => WorkerWait::Timed(SUSPEND_POLL_INTERVAL),
-        (None, false) => WorkerWait::Notification,
-    }
+fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
+    deadline.saturating_duration_since(now)
 }
 
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
@@ -127,7 +105,7 @@ impl AsyncWorker {
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
         let shutdown_signal = dispatcher.shutdown_signal();
-        let (clock, clock_driver) = clock.activate_with_driver_waker(worker_waker.clone());
+        let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let time = clock.simple_clock().clone();
 
         let executor = Executor::builder()
@@ -192,16 +170,14 @@ impl AsyncWorker {
 
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
-        let requires_periodic_poll = self.clock_driver.requires_periodic_poll();
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
             // Timer advancement invokes wakers synchronously, so account for that work before
             // starting a relative deadline wait.
-            let wait_now = next_timer.map_or(advance_now, |_| self.time.instant());
-            match worker_wait(next_timer, wait_now, requires_periodic_poll) {
-                WorkerWait::Timed(timeout) => self.signal.wait(timeout),
-                WorkerWait::Notification => self.signal.wait_for_notification(),
+            match next_timer {
+                Some(deadline) => self.signal.wait(suspend_wait(deadline, self.time.instant())),
+                None => self.signal.wait_for_notification(),
             }
         }
 
@@ -302,42 +278,21 @@ mod tests {
     use crate::task::execution::BoxedRemoteFutureFactory;
 
     #[test]
-    fn private_suspend_wait_uses_timer_deadline_and_caps_fail_safe_polling() {
+    fn private_suspend_wait_uses_the_exact_timer_deadline() {
         // The exact wait calculation is private worker-loop policy; public timer wake and
         // completion behavior is covered by integration tests in `tests/time.rs`.
         let now = Instant::now();
 
-        assert_eq!(
-            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, true),
-            SUSPEND_POLL_INTERVAL
-        );
-        assert_eq!(
-            suspend_wait(now + SUSPEND_POLL_INTERVAL + Duration::from_secs(1), now, false),
-            SUSPEND_POLL_INTERVAL + Duration::from_secs(1)
-        );
-        assert_eq!(suspend_wait(now + Duration::from_millis(20), now, false), Duration::from_millis(20));
+        assert_eq!(suspend_wait(now + Duration::from_secs(2), now), Duration::from_secs(2));
+        assert_eq!(suspend_wait(now + Duration::from_millis(20), now), Duration::from_millis(20));
         assert_eq!(
             suspend_wait(
                 now.checked_sub(Duration::from_millis(1))
                     .expect("the current instant supports a 1 ms subtraction"),
-                now,
-                false
+                now
             ),
             Duration::ZERO
         );
-    }
-
-    #[test]
-    fn private_worker_wait_distinguishes_deadlines_polling_and_notifications() {
-        let now = Instant::now();
-        let deadline = now + Duration::from_millis(20);
-
-        assert_eq!(
-            worker_wait(Some(deadline), now, false),
-            WorkerWait::Timed(Duration::from_millis(20))
-        );
-        assert_eq!(worker_wait(None, now, true), WorkerWait::Timed(SUSPEND_POLL_INTERVAL));
-        assert_eq!(worker_wait(None, now, false), WorkerWait::Notification);
     }
 
     #[test]
@@ -502,6 +457,7 @@ mod tests {
         }
 
         fn setup_step(&mut self, failure: &'static str) {
+            WorkerSignal::waker(&self.signal).wake_by_ref();
             if self.worker.execute_step().is_break() {
                 self.progress_failure = Some(failure);
             }

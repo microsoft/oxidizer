@@ -432,8 +432,8 @@ fn isolated_relocation_keeps_timer_deadlines_independent() {
     let destination = builder.with_numa_node(1).build(destination_id);
     inactive_1.relocate(Some(&source), &source);
     inactive_2.relocate(Some(&source), &destination);
-    let (clock_1, mut driver_1) = inactive_1.activate();
-    let (clock_2, mut driver_2) = inactive_2.activate();
+    let (clock_1, mut driver_1) = inactive_1.activate(Waker::noop().clone());
+    let (clock_2, mut driver_2) = inactive_2.activate(Waker::noop().clone());
     let now = Instant::now();
     let mut delay_1 = clock_1.delay(Duration::from_secs(100));
     assert_eq!(poll_delay(&mut delay_1), Poll::Pending);
@@ -461,8 +461,8 @@ fn controlled_clock_relocation_keeps_shared_time_and_timers() {
     let (source, _thread_2) = Relocator::between_numa_nodes().relocate(&mut inactive_2);
     let thread_1 = source.as_ref().unwrap();
     inactive_1.relocate(source.as_ref(), thread_1);
-    let (clock_1, _driver_1) = inactive_1.activate();
-    let (clock_2, _driver_2) = inactive_2.activate();
+    let (clock_1, _driver_1) = inactive_1.activate(Waker::noop().clone());
+    let (clock_2, _driver_2) = inactive_2.activate(Waker::noop().clone());
     let first_notifications = Arc::new(WakeCounter(AtomicUsize::new(0)));
     let second_notifications = Arc::new(WakeCounter(AtomicUsize::new(0)));
     let first_waker = Waker::from(Arc::clone(&first_notifications));
@@ -497,7 +497,7 @@ fn controlled_clock_relocation_keeps_shared_time_and_timers() {
 
 #[test]
 fn controlled_driver_finishes_after_the_final_clock_owner_is_dropped() {
-    let (clock, mut driver) = InactiveClock::from(ClockControl::new()).activate();
+    let (clock, mut driver) = InactiveClock::from(ClockControl::new()).activate(Waker::noop().clone());
 
     assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
     drop(clock);
@@ -506,16 +506,9 @@ fn controlled_driver_finishes_after_the_final_clock_owner_is_dropped() {
 }
 
 #[test]
-fn controlled_driver_requires_periodic_polling_even_with_a_driver_waker() {
-    let (_clock, driver) = InactiveClock::from(ClockControl::new()).activate_with_driver_waker(Waker::noop().clone());
-
-    assert!(driver.requires_periodic_poll());
-}
-
-#[test]
 fn controlled_driver_has_no_system_parking_deadline() {
     let control = ClockControl::new();
-    let (clock, mut driver) = InactiveClock::from(control).activate();
+    let (clock, mut driver) = InactiveClock::from(control).activate(Waker::noop().clone());
     let mut delay = clock.delay(Duration::from_secs(1));
     assert_eq!(poll_delay(&mut delay), Poll::Pending);
 
