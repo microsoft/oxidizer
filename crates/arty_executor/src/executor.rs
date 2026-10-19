@@ -313,6 +313,7 @@ impl Drop for Executor {
         struct FinishDrop<'a>(&'a mut Executor);
 
         impl Drop for FinishDrop<'_> {
+            #[cfg_attr(coverage_nightly, coverage(off))] // A second panic during unwinding aborts before a test can observe this safety fallback.
             fn drop(&mut self) {
                 if std::thread::panicking() {
                     // Retire remaining payloads on their owner if cancellation unwinds.
@@ -857,6 +858,22 @@ mod tests {
         let executor = Executor::builder().build();
         let mut handle = executor.tasks().add_test(std::future::pending::<()>());
 
+        drop(executor);
+
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+    }
+
+    #[test]
+    fn direct_drop_unlinks_a_woken_pending_task() {
+        let mut executor = Executor::builder().build();
+        let future = TestSubjectFuture::new();
+        let retained = future.waker();
+        let mut handle = executor.tasks().add_test(future);
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        retained.borrow().as_ref().unwrap().wake_by_ref();
+        executor.activate_awakened_tasks();
         drop(executor);
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));

@@ -56,11 +56,16 @@ impl WakeShared {
         if !self.inner.remote_wakes_pending.swap(false, atomic::Ordering::Acquire) {
             return;
         }
-        while !remote_wakes.is_empty() {
+        loop {
             match remote_wakes.try_recv() {
                 Ok(notification) => notification.schedule_local(self.inner.thread_id),
-                Err(error) if error.is_empty() || error.is_closed() => return,
-                Err(error) => unreachable!("remote wake channel reports only empty or closed: {error}"),
+                Err(error) => {
+                    debug_assert!(
+                        error.is_empty() || error.is_closed(),
+                        "remote wake channel reports only empty or closed: {error}"
+                    );
+                    return;
+                }
             }
         }
     }
@@ -166,38 +171,20 @@ impl WakeSignal {
 
     fn begin_notification(&self, remote: bool) -> bool {
         let notification = if remote { TASK_REMOTE_NOTIFIED } else { TASK_LOCAL_NOTIFIED };
-        let mut state = self.schedule_state.load(atomic::Ordering::Acquire);
-        loop {
-            if state & TASK_ACTIVE == 0 || state & TASK_NOTIFIED != 0 {
-                return false;
-            }
-            match self.schedule_state.compare_exchange_weak(
-                state,
-                state | notification,
-                atomic::Ordering::AcqRel,
-                atomic::Ordering::Acquire,
-            ) {
-                Ok(_) => return true,
-                Err(observed) => state = observed,
-            }
-        }
+        self.schedule_state
+            .try_update(atomic::Ordering::AcqRel, atomic::Ordering::Acquire, |state| {
+                (state & TASK_ACTIVE != 0 && state & TASK_NOTIFIED == 0).then_some(state | notification)
+            })
+            .is_ok()
     }
 
     pub(crate) fn promote_remote_notification(&self) -> bool {
-        let mut state = self.schedule_state.load(atomic::Ordering::Acquire);
-        loop {
-            if state & TASK_ACTIVE == 0 || state & TASK_REMOTE_NOTIFIED == 0 {
-                return false;
-            }
-            let local = (state & !TASK_REMOTE_NOTIFIED) | TASK_LOCAL_NOTIFIED;
-            match self
-                .schedule_state
-                .compare_exchange_weak(state, local, atomic::Ordering::AcqRel, atomic::Ordering::Acquire)
-            {
-                Ok(_) => return true,
-                Err(observed) => state = observed,
-            }
-        }
+        self.schedule_state
+            .try_update(atomic::Ordering::AcqRel, atomic::Ordering::Acquire, |state| {
+                (state & TASK_ACTIVE != 0 && state & TASK_REMOTE_NOTIFIED != 0)
+                    .then_some((state & !TASK_REMOTE_NOTIFIED) | TASK_LOCAL_NOTIFIED)
+            })
+            .is_ok()
     }
 
     fn clear_notification(&self) {
@@ -296,6 +283,7 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 mod tests {
     use std::pin::pin;
     use std::sync::atomic::Ordering;
+    use std::thread;
 
     use super::*;
     use crate::testing::TestWaker;
@@ -334,5 +322,42 @@ mod tests {
         assert!(!executor_context::has_wakes(signal.shared.thread_id()));
         waker.wake_by_ref();
         assert!(!executor_context::has_wakes(signal.shared.thread_id()));
+    }
+
+    #[test]
+    fn local_schedule_after_owner_loss_notifies_parent() {
+        let foreign_owner = thread::spawn(|| thread::current().id()).join().unwrap();
+        let parent = Arc::new(TestWaker::new());
+        let task_handle = crate::testing::new_test_task_handle();
+        let (shared, _remote_wakes) = WakeShared::new(Arc::clone(&parent).into(), foreign_owner);
+        let signal = pin!(WakeSignal::new(shared, task_handle.as_ptr()));
+
+        assert!(signal.begin_notification(false));
+        signal.schedule_local();
+
+        assert!(parent.awakened.load(Ordering::Relaxed));
+        assert!(!signal.has_queued_notification());
+    }
+
+    #[test]
+    fn closed_remote_channel_clears_notification() {
+        let foreign_owner = thread::spawn(|| thread::current().id()).join().unwrap();
+        let task_handle = crate::testing::new_test_task_handle();
+        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone(), foreign_owner);
+        drop(remote_wakes);
+        let signal = pin!(WakeSignal::new(shared, task_handle.as_ptr()));
+
+        // SAFETY: The signal remains pinned for the borrowed wake.
+        unsafe { signal.as_ref().waker_ref() }.wake_by_ref();
+
+        assert!(!signal.has_queued_notification());
+    }
+
+    #[test]
+    fn remote_wake_has_non_exhaustive_diagnostics() {
+        let task_handle = crate::testing::new_test_task_handle();
+        let remote = RemoteWake(task_handle.clone());
+
+        assert_eq!(format!("{remote:?}"), "RemoteWake { .. }");
     }
 }
