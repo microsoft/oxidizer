@@ -235,7 +235,7 @@ impl DispatcherCore {
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
-        let parent_task_enrichment = (!self.sink.is_noop()).then(|| self.sink.transfer_context());
+        let parent_task_enrichment = Some(self.sink.transfer_context());
         let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, parent_task_enrichment, placement);
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
