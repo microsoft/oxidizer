@@ -115,9 +115,16 @@ impl From<std::sync::Arc<::rustls::ClientConfig>> for TlsBackend {
 }
 
 #[cfg(any(feature = "native-tls", test))]
+impl From<::native_tls::TlsConnector> for NativeTlsBackend {
+    fn from(connector: ::native_tls::TlsConnector) -> Self {
+        Self::new(connector, HashMap::new())
+    }
+}
+
+#[cfg(any(feature = "native-tls", test))]
 impl From<::native_tls::TlsConnector> for TlsBackend {
     fn from(connector: ::native_tls::TlsConnector) -> Self {
-        Self::NativeTls(NativeTlsBackend::new(connector, HashMap::new()))
+        Self::NativeTls(connector.into())
     }
 }
 
@@ -192,5 +199,12 @@ mod tests {
             NativeTlsBackend: std::panic::UnwindSafe,
             std::panic::RefUnwindSafe
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    fn native_tls_connector_converts_to_backend_payload() {
+        let backend: NativeTlsBackend = ::native_tls::TlsConnector::new().unwrap().into();
+        assert!(backend.server_name_overrides.is_empty());
     }
 }

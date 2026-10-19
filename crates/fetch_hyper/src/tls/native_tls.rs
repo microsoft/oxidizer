@@ -845,8 +845,7 @@ mod tests {
         let acceptor = server.acceptor(&["h2"]);
         let peer = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let _stream = acceptor.accept(stream).await.unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            acceptor.accept(stream).await.unwrap()
         });
         let connector = RecordingTcpConnector {
             address: server.address,
@@ -866,7 +865,7 @@ mod tests {
         .unwrap();
 
         assert!(stream.connected().is_negotiated_h2());
-        peer.await.unwrap();
+        let _peer_stream = peer.await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]
