@@ -147,6 +147,19 @@ mod tests {
         assert_eq!(notified.as_mut().poll(&mut context), Poll::Ready(()));
     }
 
+    #[test]
+    fn driver_wake_by_ref_notifies_waiter() {
+        let notify = Arc::new(Notify::new());
+        let mut notified = std::pin::pin!(notify.notified());
+        let mut context = Context::from_waker(Waker::noop());
+        assert_eq!(notified.as_mut().poll(&mut context), Poll::Pending);
+        let waker = Waker::from(Arc::new(DriverWake(Arc::clone(&notify))));
+
+        waker.wake_by_ref();
+
+        assert_eq!(notified.as_mut().poll(&mut context), Poll::Ready(()));
+    }
+
     #[::tokio::test(start_paused = true)]
     async fn no_deadline_wait_remains_parked_without_periodic_wakes() {
         let notify = Notify::new();
