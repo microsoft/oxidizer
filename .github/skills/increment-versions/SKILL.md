@@ -141,6 +141,17 @@ does not verify those declarations against compiled APIs. Published implementati
 packages are not automatically private APIs; do not add `private-api = true`
 merely to bypass a compatibility finding.
 
+Packages marked `[package.metadata.release-plan] private-api = true` are
+implementation-only, not independently supported consumer APIs. Keep published
+workspace dependency requirements on these packages exact; path-only
+dev-dependencies remain versionless. Assess exposed APIs and behavior through
+the public facade rather than treating the flag as a blanket patch exemption.
+`seismograph_protocol` is a supported public API and must remain unmarked.
+
+When preparing versions, resolve group alignment as part of the complete plan,
+including any differently versioned members joined by exact dependencies.
+Do not skip alignment or change exact requirements to evade it.
+
 Retain required `Cargo.lock` changes and run applicable Anvil checks after
 upstream verification. Keep generated README files generated, and do not update
 historical changelogs unless explicitly requested.
