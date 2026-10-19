@@ -75,11 +75,14 @@ impl WorkerSignal {
 
     pub(crate) fn wait_for_notification(&self) {
         let mut notified = self.notified.lock();
-        while !*notified {
+        loop {
+            if *notified {
+                *notified = false;
+                return;
+            }
             self.test_hooks.notify_idle_wait();
             notified = self.ready.wait(notified);
         }
-        *notified = false;
     }
 
     pub(crate) fn wait(&self, timeout: Duration) {
@@ -185,6 +188,16 @@ mod tests {
         WorkerSignal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn notification_before_indefinite_wait_is_retained_and_consumed() {
+        let signal = Arc::new(WorkerSignal::default());
+        WorkerSignal::waker(&signal).wake_by_ref();
+
+        signal.wait_for_notification();
+
+        assert!(!*signal.notified.lock());
     }
 
     #[test]
