@@ -179,16 +179,19 @@ mod tests {
         let mut waiter = std::pin::pin!(wait_for_driver_event(&notify, None));
         let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
         let waker = Waker::from(Arc::clone(&wake_count));
-        let mut context = Context::from_waker(&waker);
-        assert_eq!(waiter.as_mut().poll(&mut context), Poll::Pending);
+        {
+            let mut context = Context::from_waker(&waker);
+            assert_eq!(waiter.as_mut().poll(&mut context), Poll::Pending);
+        }
 
         ::tokio::time::advance(Duration::from_millis(100)).await;
         ::tokio::task::yield_now().await;
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 0);
+
+        let mut context = Context::from_waker(&waker);
         assert_eq!(waiter.as_mut().poll(&mut context), Poll::Pending);
 
         notify.notify_one();
-
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
         assert_eq!(waiter.as_mut().poll(&mut context), Poll::Ready(WaitOutcome::Notified));
     }
