@@ -35,6 +35,20 @@ fn suspend_wait(deadline: Instant, now: Instant, requires_periodic_poll: bool) -
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkerWait {
+    Timed(Duration),
+    Notification,
+}
+
+fn worker_wait(next_timer: Option<Instant>, now: Instant, requires_periodic_poll: bool) -> WorkerWait {
+    match (next_timer, requires_periodic_poll) {
+        (Some(deadline), periodic_poll) => WorkerWait::Timed(suspend_wait(deadline, now, periodic_poll)),
+        (None, true) => WorkerWait::Timed(SUSPEND_POLL_INTERVAL),
+        (None, false) => WorkerWait::Notification,
+    }
+}
+
 /// The async worker has exclusive use of a runtime thread, one per processor selected by
 /// the configured processor-count policy. The worker executes async tasks that are
 /// woken by local or remote futures, incoming commands, and timers.
@@ -182,17 +196,12 @@ impl AsyncWorker {
 
         if matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted {
             // A notification arriving before this wait is retained by WorkerSignal.
-            match next_timer {
-                Some(deadline) => {
-                    // Timer advancement invokes wakers synchronously, so account for that work
-                    // before starting a relative deadline wait.
-                    self.signal
-                        .wait(suspend_wait(deadline, self.time.instant(), requires_periodic_poll));
-                }
-                None if requires_periodic_poll => {
-                    self.signal.wait(SUSPEND_POLL_INTERVAL);
-                }
-                None => self.signal.wait_for_notification(),
+            // Timer advancement invokes wakers synchronously, so account for that work before
+            // starting a relative deadline wait.
+            let wait_now = next_timer.map_or(advance_now, |_| self.time.instant());
+            match worker_wait(next_timer, wait_now, requires_periodic_poll) {
+                WorkerWait::Timed(timeout) => self.signal.wait(timeout),
+                WorkerWait::Notification => self.signal.wait_for_notification(),
             }
         }
 
@@ -317,6 +326,20 @@ mod tests {
             Duration::ZERO
         );
     }
+
+    #[test]
+    fn private_worker_wait_distinguishes_deadlines_polling_and_notifications() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(20);
+
+        assert_eq!(
+            worker_wait(Some(deadline), now, false),
+            WorkerWait::Timed(Duration::from_millis(20))
+        );
+        assert_eq!(worker_wait(None, now, true), WorkerWait::Timed(SUSPEND_POLL_INTERVAL));
+        assert_eq!(worker_wait(None, now, false), WorkerWait::Notification);
+    }
+
     #[test]
     fn injected_time_advances_worker_timers_without_elapsed_wall_time() {
         let (command_tx, command_rx) = channel::unbounded();
@@ -665,6 +688,7 @@ mod tests {
             InactiveClock::default(),
             Arc::clone(&signal),
         );
+        WorkerSignal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
 
         WorkerSignal::waker(&signal).wake_by_ref();
@@ -722,18 +746,18 @@ mod tests {
             // Run worker, execute one remote task which awaits a nested task, then shut down.
             let (command_tx, command_rx) = channel::unbounded();
             let worker_command_tx = command_tx.clone();
+            let signal = Arc::new(WorkerSignal::default());
+            let worker_signal = Arc::clone(&signal);
 
             let async_worker_thread = thread::spawn(move || {
                 let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-
-                let signal = Arc::new(WorkerSignal::default());
 
                 let worker = test_worker(
                     worker_command_tx,
                     command_rx,
                     Arc::clone(&blocking_worker),
                     InactiveClock::default(),
-                    signal,
+                    worker_signal,
                 );
                 worker.run();
 
@@ -761,12 +785,14 @@ mod tests {
                     }
                 })))
                 .unwrap();
+            WorkerSignal::waker(&signal).wake_by_ref();
 
             // Command sent! Now wait for something to happen.
             outer_completed_rx.await.unwrap();
 
             // Test body completed. Now let's shut it down.
             command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+            WorkerSignal::waker(&signal).wake_by_ref();
 
             // Wait for the worker to finish. It is harmless to continue immediately but we wait
             // just in case some errors occurred during shutdown - in which case we want to panic here.
@@ -783,15 +809,15 @@ mod tests {
 
             let (command_tx, command_rx) = channel::unbounded();
             let worker_command_tx = command_tx.clone();
+            let signal = Arc::new(WorkerSignal::default());
+            let worker_signal = Arc::clone(&signal);
             let worker_thread = thread::spawn(move || {
-                let signal = Arc::new(WorkerSignal::default());
-
                 let worker = test_worker(
                     worker_command_tx,
                     command_rx,
                     BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                     InactiveClock::default(),
-                    signal,
+                    worker_signal,
                 );
                 drop(worker.tasks.add_test(async move { initial_completed_tx.send(()) }));
 
@@ -807,12 +833,14 @@ mod tests {
                     }
                 })))
                 .unwrap();
+            WorkerSignal::waker(&signal).wake_by_ref();
 
             spawned_completed_rx.await.unwrap();
             initial_completed_rx.into_value().unwrap();
 
             // Tasks worked fine. Now let's shut it down.
             command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+            WorkerSignal::waker(&signal).wake_by_ref();
 
             // Wait for the worker to finish. It is harmless to continue immediately but we wait
             // just in case some errors occurred during shutdown - in which case we want to panic here.
@@ -831,21 +859,22 @@ mod tests {
 
         let (command_tx, command_rx) = channel::unbounded();
         let worker_command_tx = command_tx.clone();
+        let signal = Arc::new(WorkerSignal::default());
+        let worker_signal = Arc::clone(&signal);
 
         let async_worker_thread = thread::spawn(move || {
-            let signal = Arc::new(WorkerSignal::default());
-
             let worker = test_worker(
                 worker_command_tx,
                 command_rx,
                 BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
                 InactiveClock::default(),
-                signal,
+                worker_signal,
             );
             worker.run();
         });
 
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        WorkerSignal::waker(&signal).wake_by_ref();
 
         let (completed_tx, completed_rx) = Event::boxed();
 
@@ -947,13 +976,15 @@ mod tests {
     fn explicit_executor_shutdown_completes_worker_shutdown() {
         let (commands, receiver) = channel::unbounded();
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let signal = Arc::new(WorkerSignal::default());
         let mut worker = test_worker(
             commands.clone(),
             receiver,
             Arc::clone(&blocking_worker),
             InactiveClock::default(),
-            Arc::new(WorkerSignal::default()),
+            Arc::clone(&signal),
         );
+        WorkerSignal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
         worker.executor.as_ref().unwrap().begin_shutdown();
 

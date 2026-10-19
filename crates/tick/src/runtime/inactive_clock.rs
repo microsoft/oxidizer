@@ -43,8 +43,9 @@ pub struct Shared;
 ///   [`ThreadAware`].
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
-/// its associated [`ClockDriver`]. This compatibility path requires bounded periodic polling when
-/// no deadline is present. Notification-aware runtimes can instead call
+/// its associated [`ClockDriver`]. This compatibility path requires bounded periodic polling
+/// between every driver iteration, including while a deadline is pending. Notification-aware
+/// runtimes can instead call
 /// [`InactiveClock::activate_with_driver_waker`] so first and newly earlier timer registrations can
 /// interrupt the driver's current wait.
 ///
@@ -67,9 +68,11 @@ pub struct Shared;
 /// // notifications.
 /// loop {
 ///     match driver.advance_timers(Instant::now()) {
-///         Ok(Some(deadline)) => {
-///             thread::park_timeout(deadline.saturating_duration_since(Instant::now()))
-///         }
+///         Ok(Some(deadline)) => thread::park_timeout(
+///             deadline
+///                 .saturating_duration_since(Instant::now())
+///                 .min(std::time::Duration::from_millis(10)),
+///         ),
 ///         Ok(None) => thread::park_timeout(std::time::Duration::from_millis(10)),
 ///         Err(_) => break,
 ///     }
@@ -137,8 +140,9 @@ impl<S> InactiveClock<S> {
     ///
     /// Consumes this inactive clock and returns a working [`Clock`] instance along with
     /// its [`ClockDriver`]. This source-compatible activation path does not receive timer
-    /// registration notifications, so the driver requires bounded periodic polling whenever
-    /// [`ClockDriver::advance_timers`] returns no deadline.
+    /// registration notifications, so the driver requires bounded periodic polling between every
+    /// driver iteration, including while waiting for a returned deadline. Without that bound, a
+    /// newly registered earlier timer could not interrupt the existing wait.
     ///
     /// # Returns
     ///

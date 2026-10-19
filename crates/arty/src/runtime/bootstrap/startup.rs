@@ -27,13 +27,14 @@ use crate::runtime::thread::spawn;
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
-use crate::runtime::worker::signal::WorkerSignal;
+use crate::runtime::worker::signal::{WorkerSignal, WorkerSignalTestHooks};
 
 pub(crate) fn build(
     processor_config: RuntimeConfig,
     clock: &InactiveClock,
     sink: Sink,
     thread_builder: &ThreadBuilder,
+    worker_signal_test_hooks: &WorkerSignalTestHooks,
 ) -> Result<Runtime, Error> {
     let pool_mode = processor_config.blocking_pool_policy.mode_label();
     let available = available_processors();
@@ -95,6 +96,7 @@ pub(crate) fn build(
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
                 sink: sink.clone(),
+                worker_signal_test_hooks: worker_signal_test_hooks.clone(),
             }
             .start(),
         );
@@ -163,6 +165,7 @@ struct AsyncWorkerStartInfo {
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
     sink: Sink,
+    worker_signal_test_hooks: WorkerSignalTestHooks,
 }
 
 impl AsyncWorkerStartInfo {
@@ -190,6 +193,7 @@ impl AsyncWorkerStartInfo {
             blocking_pools,
             shutdown_started,
             sink,
+            worker_signal_test_hooks,
         } = self;
 
         let worker_sink = sink.clone();
@@ -206,7 +210,7 @@ impl AsyncWorkerStartInfo {
         let blocking_worker =
             BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
 
-        let signal = Arc::new(WorkerSignal::default());
+        let signal = Arc::new(WorkerSignal::new(worker_signal_test_hooks));
         let worker_waker = WorkerSignal::waker(&signal);
 
         worker_endpoint_tx

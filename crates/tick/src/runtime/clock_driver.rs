@@ -28,7 +28,7 @@ impl ClockDriver {
         Self { state, driver_id }
     }
 
-    /// Returns whether the runtime must retain a bounded periodic poll when no deadline exists.
+    /// Returns whether the runtime must retain bounded periodic polling between driver iterations.
     ///
     /// This is `false` only for a system clock activated with
     /// [`InactiveClock::activate_with_driver_waker`](crate::runtime::InactiveClock::activate_with_driver_waker).
@@ -36,7 +36,9 @@ impl ClockDriver {
     /// may park indefinitely when [`Self::advance_timers`] returns `Ok(None)`.
     ///
     /// Compatibility drivers created by [`InactiveClock::activate`](crate::runtime::InactiveClock::activate)
-    /// and externally advanced controlled clocks return `true`.
+    /// return `true` because timer registration cannot interrupt either a no-deadline wait or a
+    /// wait for an existing later deadline. Externally advanced controlled clocks also return
+    /// `true`.
     #[must_use]
     pub const fn requires_periodic_poll(&self) -> bool {
         self.driver_id.is_none()

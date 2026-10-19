@@ -9,7 +9,6 @@ testing_aids::init_tracing!();
 
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Wake, Waker};
-use std::thread;
 use std::time::Duration;
 
 use arty::runtime::{Runtime, WorkersPolicy};
@@ -27,12 +26,21 @@ impl Wake for CompletionWake {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn first_cross_thread_timer_interrupts_idle_worker_wait() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let (idle_wait_started, idle_wait) = mpsc::channel();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .notify_on_idle_wait(idle_wait_started)
+        .build()
+        .unwrap();
+    idle_wait
+        .recv_timeout(Duration::from_millis(900))
+        .expect("the worker must establish its initial no-deadline notification wait");
     let clock = runtime.scheduler().block_on(async |builtins| builtins.clock().clone()).unwrap();
-
-    // Let the worker return to its no-deadline wait before registering the first timer remotely.
-    thread::sleep(Duration::from_millis(50));
+    idle_wait
+        .recv_timeout(Duration::from_millis(900))
+        .expect("the worker must consume the submission wake and reestablish its idle wait");
     let (completed, completion) = mpsc::channel();
     let waker = Waker::from(Arc::new(CompletionWake(completed)));
     let mut context = Context::from_waker(&waker);
