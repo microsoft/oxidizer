@@ -21,7 +21,7 @@ pub enum EventSamplingDecision {
 /// Decides whether an event reaches a Sink's processors.
 ///
 /// Attach an implementation with
-/// [`Sink::with_event_sampler`](crate::Sink::with_event_sampler). Each Sink
+/// [`SinkBuilder::event_sampler`](crate::SinkBuilder::event_sampler). Each Sink
 /// takes its own sampler; to share state between Sinks, keep the state behind
 /// an [`Arc`](std::sync::Arc) and give each Sink a sampler holding a clone.
 ///
