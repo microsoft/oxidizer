@@ -70,6 +70,7 @@ impl Listener {
             if listener.nonblocking {
                 return Err(io::ErrorKind::WouldBlock.into());
             }
+            state.operations.push(IoOperation::Wait);
             state = self
                 .runtime
                 .shared
@@ -320,6 +321,79 @@ impl Write for Connection {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocking_accept_wakes_when_a_connection_arrives() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let instance_id = runtime.instance_id();
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: runtime.process_id(),
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(&directory, &owner, runtime.process_id(), instance_id),
+            owner,
+        };
+        let listener = Listener::bind(&runtime, &descriptor).unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || send.send(listener.accept()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !runtime.state().operations.contains(&IoOperation::Wait) {
+            assert!(Instant::now() < deadline, "mock accept did not wait");
+            std::thread::yield_now();
+        }
+        let mut client = Connection::connect(&runtime, &descriptor).unwrap();
+        let mut server = receive.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+        client.write_all(b"ready").unwrap();
+        let mut bytes = [0; 5];
+        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"ready");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn closed_streams_reject_io_without_changing_empty_buffer_semantics() {
+        let runtime = Runtime::new();
+        let (mut client, mut server) = Connection::pair(&runtime);
+        client.close();
+        assert_eq!(client.read(&mut []).unwrap(), 0);
+        assert_eq!(client.peek(&mut []).unwrap(), 0);
+        assert_eq!(client.write(&[]).unwrap(), 0);
+        assert_eq!(client.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(client.write(&[0]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(client.flush().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(server.write(&[0]).unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(server.read(&mut [0]).unwrap(), 0);
+    }
+
+    #[test]
+    fn deadlines_must_be_positive_and_representable() {
+        let runtime = Runtime::new();
+        let (client, _server) = Connection::pair(&runtime);
+        for timeout in [Duration::ZERO, Duration::MAX] {
+            assert_eq!(
+                client.set_read_timeout(Some(timeout)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            assert_eq!(
+                client.set_write_timeout(Some(timeout)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        client.set_read_timeout(None).unwrap();
+        client.set_write_timeout(None).unwrap();
+    }
+
+    #[test]
+    fn a_connection_does_not_keep_a_destroyed_mock_runtime_alive() {
+        let runtime = Runtime::new();
+        let (mut client, _server) = Connection::pair(&runtime);
+        drop(runtime);
+        assert_eq!(client.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert_eq!(client.write(&[0]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+    }
 
     #[test]
     fn listener_drops_pending_clients_without_holding_the_registry_lock() {

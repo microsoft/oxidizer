@@ -550,6 +550,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn filesystem_operations_reject_invalid_parent_and_entry_types() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let file = directory.join("file");
+        let mut handle = runtime.create_file(&file, &owner).unwrap();
+        handle.write_all(b"value").unwrap();
+        handle.flush().unwrap();
+        assert_eq!(
+            runtime.write_snapshot(&directory, b"x").unwrap_err().kind(),
+            io::ErrorKind::IsADirectory
+        );
+        assert_eq!(
+            runtime.write_snapshot(&file.join("child"), b"x").unwrap_err().kind(),
+            io::ErrorKind::NotADirectory
+        );
+        assert_eq!(
+            runtime.open_directory(&file, None).unwrap_err().kind(),
+            io::ErrorKind::NotADirectory
+        );
+        assert_eq!(runtime.remove_file(&directory).unwrap_err().kind(), io::ErrorKind::IsADirectory);
+
+        let foreign = match owner {
+            MonitorOwner::UnixUser(_) => MonitorOwner::UnixUser(2002),
+            MonitorOwner::WindowsSid(_) => MonitorOwner::WindowsSid("S-1-5-21-1-2-3-2002".into()),
+        };
+        assert_eq!(
+            runtime.current_directory(&foreign).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        runtime.state().owner = foreign;
+        assert_eq!(runtime.entries(&directory).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            runtime.write_snapshot(&file, b"new").unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        runtime.state().administrator = true;
+        runtime.write_snapshot(&file, b"new").unwrap();
+        assert_eq!(runtime.state().entries.get(&file).unwrap().data.as_deref(), Some(&b"new"[..]));
+    }
+
+    #[test]
+    fn descriptor_handles_report_removal_and_truncation_instead_of_panicking() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let path = directory.join("file");
+        let mut writer = runtime.create_file(&path, &owner).unwrap();
+        writer.write_all(b"original").unwrap();
+        let (mut reader, _) = runtime.read_file(&path).unwrap();
+        reader.read_exact(&mut [0; 8]).unwrap();
+        runtime.write_snapshot(&path, b"short").unwrap();
+        assert_eq!(reader.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        runtime.remove_file(&path).unwrap();
+        assert_eq!(reader.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(writer.write(&[0]).unwrap_err().kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
     fn moving_another_users_file_requires_administrative_access() {
         let runtime = Runtime::new();
         let owner = runtime.owner();

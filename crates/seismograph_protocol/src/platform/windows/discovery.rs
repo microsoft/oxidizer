@@ -88,11 +88,15 @@ pub(crate) fn current_directory(owner: &MonitorOwner) -> io::Result<RegistryDire
 
 pub(crate) fn registry_directories() -> io::Result<DirectoryEntries> {
     let owner = current_owner()?;
-    let mut entries = vec![local_app_data().map(|base| DirectoryEntry {
+    registry_directories_for(owner, local_app_data(), is_elevated()?)
+}
+
+fn registry_directories_for(owner: MonitorOwner, base: io::Result<PathBuf>, elevated: bool) -> io::Result<DirectoryEntries> {
+    let mut entries = vec![base.map(|base| DirectoryEntry {
         path: registry_path(&base),
         owner,
     })];
-    if !is_elevated()? {
+    if !elevated {
         return Ok(entries);
     }
     let name = wide(std::ffi::OsStr::new(PROFILES))?;
@@ -202,13 +206,17 @@ fn registry_string(root: HKEY, key: &str, value: &str, expand: bool) -> io::Resu
     if result != 0 {
         return Err(io::Error::from_raw_os_error(result.cast_signed()));
     }
-    if !matches!(kind, REG_SZ | REG_EXPAND_SZ) || bytes % 2 != 0 || bytes as usize > data.len() * 2 {
+    registry_value_path(kind, bytes as usize, &data, expand)
+}
+
+fn registry_value_path(kind: u32, bytes: usize, data: &[u16], expand: bool) -> io::Result<PathBuf> {
+    if !matches!(kind, REG_SZ | REG_EXPAND_SZ) || !bytes.is_multiple_of(2) || bytes > data.len() * 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "user profile path is not a bounded UTF-16 string",
         ));
     }
-    let units = &data[..bytes as usize / 2];
+    let units = &data[..bytes / 2];
     let length = units
         .iter()
         .position(|unit| *unit == 0)
@@ -224,6 +232,32 @@ fn registry_string(root: HKEY, key: &str, value: &str, expand: bool) -> io::Resu
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_values_require_a_bounded_terminated_utf16_string() {
+        let data = r"C:\Users\Alice".encode_utf16().chain([0]).collect::<Vec<_>>();
+        assert_eq!(
+            registry_value_path(REG_SZ, data.len() * 2, &data, true).unwrap(),
+            Path::new(r"C:\Users\Alice")
+        );
+        let relative = "%USERPROFILE%".encode_utf16().chain([0]).collect::<Vec<_>>();
+        assert_eq!(
+            registry_value_path(REG_EXPAND_SZ, relative.len() * 2, &relative, false).unwrap(),
+            Path::new("%USERPROFILE%")
+        );
+        for (kind, bytes, units, expand) in [
+            (0, data.len() * 2, data.as_slice(), false),
+            (REG_SZ, 3, data.as_slice(), false),
+            (REG_SZ, data.len() * 2 + 2, data.as_slice(), false),
+            (REG_SZ, (data.len() - 1) * 2, data.as_slice(), false),
+            (REG_SZ, relative.len() * 2, relative.as_slice(), true),
+        ] {
+            assert_eq!(
+                registry_value_path(kind, bytes, units, expand).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+    }
 
     #[test]
     fn conflicting_owner_claims_do_not_hide_a_registry() {
@@ -259,6 +293,19 @@ mod tests {
                 .filter_map(Result::ok)
                 .any(|entry| entry.owner == owner && entry.path == registry_path(&path))
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native profile enumeration is exercised by native and careful tests")]
+    fn profile_discovery_preserves_current_user_lookup_failures() {
+        let owner = current_owner().unwrap();
+        let entries = registry_directories_for(owner.clone(), Err(io::Error::other("current folder unavailable")), true).unwrap();
+        assert_eq!(entries[0].as_ref().unwrap_err().to_string(), "current folder unavailable");
+        let base = local_app_data().unwrap();
+        let entries = registry_directories_for(owner.clone(), Ok(base.clone()), false).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = entries.into_iter().next().unwrap().unwrap();
+        assert_eq!((entry.path, entry.owner), (registry_path(&base), owner));
     }
 
     #[test]

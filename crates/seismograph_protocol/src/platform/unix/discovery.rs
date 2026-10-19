@@ -252,6 +252,51 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "native directory enumeration and ownership are exercised natively")]
+    fn runtime_and_temporary_scans_keep_valid_users_and_report_broken_roots() {
+        let temporary = tempfile::tempdir_in("/tmp").unwrap();
+        let root = temporary.path().join("runtime");
+        let uid = temporary.path().metadata().unwrap().uid();
+        let registry = root.join(uid.to_string()).join("seismograph");
+        fs::create_dir_all(&registry).unwrap();
+        fs::create_dir_all(root.join("unrelated").join("seismograph")).unwrap();
+        let mut paths = BTreeMap::new();
+        let mut errors = Vec::new();
+        scan_runtime_users(&root, uid, &mut paths, &mut errors);
+        assert_eq!(paths, BTreeMap::from([(registry.clone(), MonitorOwner::UnixUser(uid))]));
+        assert!(errors.is_empty());
+        paths.clear();
+        scan_runtime_users(&root, 0, &mut paths, &mut errors);
+        assert!(paths.contains_key(&registry));
+        paths.clear();
+        add_directory(registry, uid.wrapping_add(1), &mut paths, &mut errors);
+        assert!(paths.is_empty());
+        add_directory(root.join("missing"), uid, &mut paths, &mut errors);
+        assert!(errors.is_empty());
+
+        let private = temporary.path().join(format!("seismograph-{uid}-fixture"));
+        fs::create_dir(&private).unwrap();
+        fs::create_dir(temporary.path().join("seismograph-no-user-fixture")).unwrap();
+        scan_temporary(temporary.path(), uid, &mut paths, &mut errors);
+        assert_eq!(paths, BTreeMap::from([(private, MonitorOwner::UnixUser(uid))]));
+        assert!(errors.is_empty());
+        scan_runtime_users(&root.join("missing"), uid, &mut paths, &mut errors);
+        assert!(errors.is_empty());
+
+        let file = temporary.path().join("file");
+        fs::write(&file, []).unwrap();
+        scan_runtime_users(&file, uid, &mut paths, &mut errors);
+        scan_temporary(&file, uid, &mut paths, &mut errors);
+        add_directory(file.join("child"), uid, &mut paths, &mut errors);
+        assert_eq!(errors.len(), 3);
+        assert!(
+            errors
+                .into_iter()
+                .all(|entry| entry.unwrap_err().kind() == io::ErrorKind::NotADirectory)
+        );
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "native permissions are exercised by native tests")]
     fn runtime_registry_is_created_without_root_and_unsafe_parents_are_not_used() {
         let runtime = tempfile::tempdir().unwrap();

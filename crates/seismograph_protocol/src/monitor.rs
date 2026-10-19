@@ -384,6 +384,62 @@ mod tests {
         for owner in ["", "01001", "-1", "S-1-", "S-1-5", "S-1-5-01", "S-1-5-1)(A;;GA;;;WD)", "../1001"] {
             assert!(owner.parse::<MonitorOwner>().is_err(), "{owner}");
         }
+        for owner in ["S-1-281474976710656-1", "S-1-05-1", "S-1-5-4294967296"] {
+            owner.parse::<MonitorOwner>().unwrap_err();
+        }
+        assert_eq!(MonitorOwner::UnixUser(1001).to_string(), "1001");
+        assert_eq!("S-1-5-32-544".parse::<MonitorOwner>().unwrap().to_string(), "S-1-5-32-544");
+        assert_eq!(
+            MonitorEndpoint::NamedPipe(PathBuf::from(r"\\.\pipe\worker")).to_string(),
+            r"\\.\pipe\worker"
+        );
+    }
+
+    #[test]
+    fn decoder_rejects_unknown_owner_endpoint_and_instance_tags() {
+        let mut value = descriptor();
+        let bytes = encode_descriptor(&value).unwrap();
+        for offset in [26, 31] {
+            let mut invalid = bytes.clone();
+            invalid[offset] = 9;
+            assert!(matches!(decode_descriptor(&invalid), Err(Error::InvalidDescriptor)));
+        }
+        value.instance = None;
+        let mut invalid = encode_descriptor(&value).unwrap();
+        *invalid.last_mut().unwrap() = 9;
+        assert!(matches!(decode_descriptor(&invalid), Err(Error::InvalidDescriptor)));
+        value.name.clear();
+        assert!(matches!(encode_descriptor(&value), Err(Error::InvalidDescriptor)));
+
+        let mut invalid = bytes;
+        // The owner tag follows the 26-byte magic/version/process/instance header.
+        invalid.splice(26..31, [2, 4, 0, b'1', b'0', b'0', b'1']);
+        assert!(matches!(decode_descriptor(&invalid), Err(Error::InvalidDescriptor)));
+    }
+
+    #[test]
+    fn descriptor_reads_are_bounded_and_propagate_read_errors() {
+        let (io, control) = MonitorIo::new_mocked();
+        let directory = crate::discovery::Directory::current(&io).unwrap();
+        let owner = directory.owner().clone();
+        let instance_id = InstanceId::from_bytes([9; 16]);
+        let value = MonitorDescriptor {
+            endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, 42, instance_id),
+            owner: owner.clone(),
+            process_id: 42,
+            instance_id,
+            ..descriptor()
+        };
+        let path = io.publish_descriptor(&directory, &value).unwrap();
+        control.put_file(&path, owner, vec![0; MAX_DESCRIPTOR_BYTES + 1]);
+        assert!(matches!(MonitorDescriptor::read_file(&io, &path), Err(Error::MessageTooLarge)));
+        control.fail_next(crate::io::IoOperation::ReadDescriptor, io::Error::other("read refused"));
+        assert!(
+            MonitorDescriptor::read_file(&io, &path)
+                .unwrap_err()
+                .to_string()
+                .contains("read refused")
+        );
     }
 
     #[test]

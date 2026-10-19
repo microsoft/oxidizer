@@ -406,6 +406,10 @@ fn peer_identity(_stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
 }
 
 fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    connect_timeout_with(path, timeout, std::thread::sleep)
+}
+
+fn connect_timeout_with(path: &Path, timeout: Duration, mut wait: impl FnMut(Duration)) -> io::Result<UnixStream> {
     let deadline = Instant::now()
         .checked_add(timeout)
         .filter(|deadline| *deadline > Instant::now())
@@ -438,7 +442,7 @@ fn connect_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
                 break;
             }
             Some(libc::EAGAIN | libc::EINTR) if Instant::now() < deadline => {
-                std::thread::sleep(deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(2)));
+                wait(deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(2)));
             }
             Some(libc::EAGAIN | libc::EINTR) => return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor connection timed out")),
             _ => return Err(error),
@@ -529,33 +533,27 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    #[cfg_attr(miri, ignore = "native backlog and per-thread CPU accounting are exercised natively")]
+    #[cfg_attr(miri, ignore = "native backlog behavior is exercised by native and careful tests")]
     fn saturated_backlog_waits_without_busy_spinning() {
-        fn cpu_time() -> Duration {
-            // SAFETY: rusage is a C POD output buffer initialized by getrusage.
-            let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-            // SAFETY: the thread selector is valid and usage is writable for rusage.
-            assert_eq!(unsafe { libc::getrusage(libc::RUSAGE_THREAD, &raw mut usage) }, 0);
-            [usage.ru_utime, usage.ru_stime]
-                .into_iter()
-                .map(|time| Duration::from_secs(time.tv_sec.try_into().unwrap()) + Duration::from_micros(time.tv_usec.try_into().unwrap()))
-                .sum()
-        }
-
         let temporary = tempfile::tempdir_in("/tmp").unwrap();
         let path = temporary.path().join("saturated.sock");
         let listener = UnixListener::bind(&path).unwrap();
         // SAFETY: the bound listener is live; reducing the backlog needs no pointers.
         assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
         let _queued = UnixStream::connect(&path).unwrap();
-        let cpu = cpu_time();
         let start = Instant::now();
-        let error = connect_timeout(&path, Duration::from_millis(40)).unwrap_err();
+        let mut waits = Vec::new();
+        let error = connect_timeout_with(&path, Duration::from_millis(40), |delay| {
+            waits.push(delay);
+            std::thread::sleep(delay);
+        })
+        .unwrap_err();
         let elapsed = start.elapsed();
-        let cpu = cpu_time().saturating_sub(cpu);
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(elapsed < Duration::from_secs(1), "connection deadline exceeded: {elapsed:?}");
-        assert!(cpu < elapsed / 2, "backlog retries consumed {cpu:?} CPU during {elapsed:?}");
+        assert!(!waits.is_empty(), "full-backlog retries must wait instead of spinning");
+        assert!(waits.iter().all(|wait| *wait <= Duration::from_millis(2)));
+        assert!(waits.into_iter().sum::<Duration>() > Duration::ZERO);
     }
 
     #[test]

@@ -518,3 +518,75 @@ impl std::error::Error for DescriptorCleanup {
         Some(&self.failure)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_capabilities_share_the_os_but_never_a_mock_registry() {
+        let native = MonitorIo::new_native();
+        let (mocked, _) = MonitorIo::new_mocked();
+        assert!(native.same_instance(&MonitorIo::new_native()));
+        assert!(!native.same_instance(&mocked));
+        assert!(!mocked.same_instance(&native));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native clock and file side effects are exercised by native and careful tests")]
+    fn native_wait_and_snapshot_persistence_have_observable_effects() {
+        let io = MonitorIo::new_native();
+        let start = Instant::now();
+        let wall = SystemTime::now();
+        io.wait(Duration::from_millis(2));
+        assert!(start.elapsed() >= Duration::from_millis(2));
+        assert!(io.system_time() >= wall);
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("snapshot");
+        io.write_snapshot(&path, b"snapshot").unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"snapshot");
+    }
+
+    #[test]
+    fn descriptor_cleanup_ignores_absence_but_preserves_both_other_failures() {
+        let (io, control) = MonitorIo::new_mocked();
+        let directory = Directory::current(&io).unwrap();
+        let path = directory.path().join("missing.monitor");
+        assert!(matches!(io.cleanup_descriptor(&path, Error::InvalidMessage), Error::InvalidMessage));
+        control.fail_next(IoOperation::RemoveDescriptor, std_io::Error::other("cleanup refused"));
+        let error = io.cleanup_descriptor(&path, Error::InvalidDescriptor);
+        let Error::Registry { source, .. } = error else {
+            panic!("cleanup failure must retain filesystem context");
+        };
+        let details = source.get_ref().unwrap().downcast_ref::<DescriptorCleanup>().unwrap();
+        assert_eq!(
+            std::error::Error::source(details).unwrap().to_string(),
+            Error::InvalidDescriptor.to_string()
+        );
+        assert!(details.to_string().contains("cleanup refused"));
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native descriptor flush and directory cleanup are exercised by native and careful tests"
+    )]
+    fn descriptor_writes_flush_and_temporary_cleanup_reports_wrong_entry_types() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("file");
+        let mut file = DescriptorFile::Native(File::create(&path).unwrap());
+        file.write_all(b"native").unwrap();
+        file.flush().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"native");
+        drop(file);
+
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().to_owned();
+        fs::remove_dir(&path).unwrap();
+        fs::write(&path, b"replacement").unwrap();
+        drop(TemporaryDirectory(Some(temporary)));
+        assert_eq!(fs::read(&path).unwrap(), b"replacement");
+        fs::remove_file(path).unwrap();
+    }
+}
