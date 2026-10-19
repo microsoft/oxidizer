@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc as StdArc, OnceLock};
 #[cfg(test)]
 use std::sync::mpsc;
+use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::thread::{self, Thread};
 use std::time::Duration;
@@ -143,7 +143,6 @@ impl Wake for WorkerSignal {
 mod tests {
     use std::cell::Cell;
     use std::collections::VecDeque;
-    use std::sync::mpsc;
 
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
