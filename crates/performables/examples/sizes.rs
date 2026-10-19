@@ -6,10 +6,11 @@
 use performables::arc::{Arc, PerNuma, PerThread, Weak};
 use performables::sync;
 use performables::sync::barrier::Barrier;
-use performables::sync::channel::{OneshotReceiver, OneshotSender, Receiver, Sender, WatchReceiver, WatchSender};
+use performables::sync::channel::{OneshotReceiver, OneshotSender, Receiver, Sender, WatchReceiver, WatchRef, WatchSender};
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
+use performables::sync::notify::Notify;
 use performables::sync::once::{LazyLock, OnceLock};
 
 fn main() {
@@ -19,6 +20,7 @@ fn main() {
     modes::<RwLock<u64>, RwLock<u64, sync::Async>>("RwLock");
     modes::<Condvar, Condvar<sync::Async>>("Condvar");
     modes::<Barrier, Barrier<sync::Async>>("Barrier");
+    modes::<Notify, Notify<sync::Async>>("Notify");
     println!();
     fixed::<Arc<u64>>("Arc");
     fixed::<Weak<u64>>("Weak");
@@ -32,6 +34,8 @@ fn main() {
     fixed::<OneshotReceiver<u64>>("OneshotReceiver");
     fixed::<WatchSender<u64>>("WatchSender");
     fixed::<WatchReceiver<u64>>("WatchReceiver");
+    fixed::<WatchRef<'_, u64>>("WatchRef");
+    fixed::<std::sync::MutexGuard<'_, u64>>("std::MutexGuard");
 }
 
 fn modes<S, A>(name: &str) {

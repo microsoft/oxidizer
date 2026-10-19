@@ -147,6 +147,18 @@ exclude_re = [
     'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace == with != in wait$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
+    # Exact ownership/progress mutations strand native RwLock tests, as confirmed
+    # by bounded Windows mutation runs. Keep all other mutations in these methods.
+    'crates/performables/src/sync/lock/native.rs:\d+:\d+: replace RwLockWriteGuard.*::release_native with \(\)$',
+    'crates/performables/src/sync/lock/hal/address.rs:12:\d+: replace - with (\+|/)$',
+    'crates/performables/src/sync/lock/hal/address.rs:14:\d+: replace - with \+$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace RwLock::try_read -> .* with None$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with (==|>) in RwLock::try_read$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace (== with !=|& with (\||\^)) in RwLock::write_contended_with$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace RwLock::(read_unlock|write_unlock|write_unlock_with) with \(\)$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with > in RwLock::read_contended_with$',
+    # The preceding saturation assertion already rejects the equality case.
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with <= in RwLock::read_contended_with$',
     'crates/rallocator/src/tuning_telemetry.rs:50:48: replace - with (\+|/)$',
     'crates/rallocator/src/tuning_telemetry.rs:\d+:\d+: replace close_recording -> usize with 1$',
     'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace - with \+ in MediumCache::refill_count$',

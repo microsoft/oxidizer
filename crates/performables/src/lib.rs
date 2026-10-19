@@ -8,9 +8,17 @@
 //! `seismograph` integration.
 //!
 //! `performables` provides [`Arc`](arc::Arc), mutex and reader-writer locks,
-//! barriers, condition variables, one-time initialization, and channels.
+//! barriers, condition variables, retained notifications, one-time initialization,
+//! and channels.
 //! Synchronization supports blocking callers and executor-independent async
 //! waits.
+//!
+//! [`sync::notify::Notify`] retains one coalesced notification for a later wait,
+//! with blocking and executor-independent async support through the same modes.
+//! Ready blocking channel operations do not allocate waiter storage. Queue
+//! payload storage and enabled telemetry may allocate independently. Final
+//! arrivals at an async-capable barrier do not allocate their own waiter storage;
+//! releasing other participants can still execute their wakers.
 //!
 //! # Why use this instead of `std` or `tokio`?
 //!

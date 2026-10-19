@@ -612,7 +612,17 @@ pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Option<Record>) 
 #[inline]
 pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Option<Record>) -> Option<RecordingSession> {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) || is_suppressed() {
+    if !policy_enabled(policy) {
+        return None;
+    }
+    record_session_enabled(class, event, policy)
+}
+
+// Keep TLS access and event construction out of disabled callers, even under LTO.
+#[cold]
+#[inline(never)]
+fn record_session_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>, policy: u64) -> Option<RecordingSession> {
+    if is_suppressed() {
         return None;
     }
     let session = ACTIVE_SESSION.load(Ordering::Relaxed);
@@ -2590,6 +2600,41 @@ mod tests {
     }
 
     #[test]
+    fn recording_switches_preserve_lazy_event_construction() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        clear_event_buffers().unwrap();
+        let constructed = Cell::new(0);
+        let event = || {
+            constructed.set(constructed.get() + 1);
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(42)))
+        };
+
+        assert!(record_session(EventClass::General, event).is_none());
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            ..Default::default()
+        });
+        let session = active_recording_session().unwrap();
+        assert_eq!(record_session(EventClass::General, event), Some(session));
+        {
+            let _suppression = SuppressionGuard::enter();
+            assert!(record_session(EventClass::General, event).is_none());
+        }
+        assert_eq!(record_session(EventClass::General, event), Some(session));
+        configure(Configuration::default());
+        assert!(record_session(EventClass::General, event).is_none());
+
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        assert_eq!(constructed.get(), 2);
+        assert_eq!(
+            captured.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::MutexAccess, EventKind::MutexAccess]
+        );
+    }
+
+    #[test]
     fn event_classes_are_enabled_independently_before_record_construction() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
@@ -3209,6 +3254,22 @@ mod tests {
 
     #[test]
     fn standalone_clear_reuses_rings_and_preserves_enabled_and_disabled_policies() {
+        fn install_recorder() -> &'static ThreadRecorder {
+            LOCAL_RECORDER.with(|local| {
+                assert!(local.recorder.get().is_null());
+                // Recorder headers outlive their threads and stay linked until process exit.
+                let recorder: &'static ThreadRecorder = Box::leak(Box::new(ThreadRecorder::new()));
+                RECORDERS
+                    .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+                        recorder.next.store(head, Ordering::Relaxed);
+                        Some(ptr::from_ref(recorder).cast_mut())
+                    })
+                    .unwrap();
+                local.recorder.set(ptr::from_ref(recorder));
+                recorder
+            })
+        }
+
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = Configuration {
             allocations: RecordingPolicy {
@@ -3224,23 +3285,43 @@ mod tests {
             ..timeout_configuration()
         };
         configure(enabled);
+        let recorder = install_recorder();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
-        let before = statistics().allocated_bytes;
+        let retired = std::thread::spawn(|| {
+            let recorder = install_recorder();
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+            });
+            recorder
+        })
+        .join()
+        .unwrap();
+        assert!(retired.retired.load(Ordering::Acquire));
+        let active_storage = || {
+            let ring = recorder.ring().unwrap();
+            (ring.slots.as_ptr(), ring.capacity())
+        };
+        let before = active_storage();
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (enabled, 0, before)
         );
+        {
+            let _ring = retired.ring_lock();
+            assert!(retired.ring().is_none());
+            assert_eq!(retired.ring_capacity.load(Ordering::Acquire), 0);
+        }
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
-        assert_eq!(statistics().retained_events, 1);
+        assert_eq!(try_statistics().unwrap().retained_events, 1);
         configure(Configuration::default());
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (Configuration::default(), 0, before)
         );
     }

@@ -197,6 +197,56 @@ fn queue_receive_timeout_returns_buffered_values() {
 }
 
 #[test]
+fn zero_timeout_drains_closed_queues_before_reporting_close() {
+    for bounded_queue in [false, true] {
+        let (sender, receiver) = if bounded_queue { bounded(2) } else { unbounded() };
+        sender.send(17).unwrap();
+        sender.send(23).unwrap();
+        assert!(sender.close());
+
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(23));
+        assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+        assert_eq!(sender.send(29).unwrap_err().into_value(), Some(29));
+    }
+}
+
+#[test]
+fn zero_timeout_does_not_consume_the_next_queue_value() {
+    let (sender, receiver) = bounded(1);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    sender.try_send(17).unwrap();
+
+    assert_eq!(receiver.recv(), Ok(17));
+}
+
+#[test]
+fn zero_timeout_preserves_ready_closed_and_cancelled_oneshots() {
+    let (sender, receiver) = oneshot();
+    sender.send(17).unwrap();
+    assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+
+    let (sender, receiver) = oneshot::<usize>();
+    drop(sender);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+
+    let (sender, receiver) = oneshot::<usize>();
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    assert_eq!(sender.send(23).unwrap_err().into_value(), Some(23));
+}
+
+#[test]
+fn blocking_watch_change_observes_the_final_version_before_close() {
+    let (sender, receiver) = watch(1);
+    sender.send(2).unwrap();
+    drop(sender);
+
+    assert_eq!(receiver.changed(), Ok(()));
+    assert_eq!(*receiver.borrow(), 2);
+    assert!(receiver.changed().unwrap_err().is_closed());
+}
+
+#[test]
 fn unbounded_channel_supports_multiple_producers_and_consumers() {
     let (sender, receiver) = unbounded();
     let producer_a = sender.clone();

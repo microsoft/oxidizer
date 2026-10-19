@@ -427,6 +427,11 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         RuntimeEventKind::CondvarContention,
         RuntimeEventKind::CondvarNotify,
     ];
+    let notify_kinds = [
+        RuntimeEventKind::NotifyAccess,
+        RuntimeEventKind::NotifyContention,
+        RuntimeEventKind::NotifySignal,
+    ];
     let once_kinds = [
         RuntimeEventKind::OnceAccess,
         RuntimeEventKind::OnceContention,
@@ -489,6 +494,14 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         &once_kinds,
         &[RuntimeEventKind::OnceAccess],
     );
+    let notify_metrics = runtime_object_metrics(
+        "notify",
+        "Notify",
+        &runtime_events.events,
+        &notify_kinds,
+        &notify_kinds,
+        &[RuntimeEventKind::NotifyAccess],
+    );
     let channel_metrics = runtime_object_metrics(
         "channel",
         "Channel",
@@ -531,6 +544,12 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
     );
     render_runtime_cluster(
         html,
+        "Notify",
+        &format!("{} observed objects, ranked by completed waits.", notify_metrics.len()),
+        &notify_metrics,
+    );
+    render_runtime_cluster(
+        html,
         "OnceLock / LazyLock",
         &format!("{} observed objects, ranked by accesses.", once_metrics.len()),
         &once_metrics,
@@ -548,6 +567,7 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         .chain(rw_lock_metrics.iter())
         .chain(barrier_metrics.iter())
         .chain(condvar_metrics.iter())
+        .chain(notify_metrics.iter())
         .chain(once_metrics.iter())
         .chain(channel_metrics.iter())
     {
@@ -772,6 +792,12 @@ fn runtime_object_detail(id_prefix: &str, events: &[&seismograph::recorder::even
             format_count(count(RuntimeEventKind::CondvarAccess)),
             format_count(count(RuntimeEventKind::CondvarContention)),
             format_count(count(RuntimeEventKind::CondvarNotify)),
+        ),
+        "notify" => format!(
+            "{} waits · {} blocked · {} notifications · {threads}",
+            format_count(count(RuntimeEventKind::NotifyAccess)),
+            format_count(count(RuntimeEventKind::NotifyContention)),
+            format_count(count(RuntimeEventKind::NotifySignal)),
         ),
         "once" => format!(
             "{} accesses · {} initializations · {} contentions · {threads}",

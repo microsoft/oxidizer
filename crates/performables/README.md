@@ -17,9 +17,17 @@ Shared ownership and synchronization with thread-aware runtime and
 `seismograph` integration.
 
 `performables` provides [`Arc`][__link0], mutex and reader-writer locks,
-barriers, condition variables, one-time initialization, and channels.
+barriers, condition variables, retained notifications, one-time initialization,
+and channels.
 Synchronization supports blocking callers and executor-independent async
 waits.
+
+[`sync::notify::Notify`][__link1] retains one coalesced notification for a later wait,
+with blocking and executor-independent async support through the same modes.
+Ready blocking channel operations do not allocate waiter storage. Queue
+payload storage and enabled telemetry may allocate independently. Final
+arrivals at an async-capable barrier do not allocate their own waiter storage;
+releasing other participants can still execute their wakers.
 
 ## Why use this instead of `std` or `tokio`?
 
@@ -31,14 +39,14 @@ The crate offers:
   ownership, lock contention, and channel activity through Seismograph’s
   recorder. Normal operations supply the events without manual
   instrumentation at each call site.
-* **Thread-aware ownership.** `Arc` with [`PerThread`][__link1] or
-  [`PerNuma`][__link2] implements
-  [`ThreadAware`][__link3] when its pointee is
+* **Thread-aware ownership.** `Arc` with [`PerThread`][__link2] or
+  [`PerNuma`][__link3] implements
+  [`ThreadAware`][__link4] when its pointee is
   `Send + Sync`. A thread-aware runtime can relocate the pointer to a value
   local to the destination thread or NUMA node, rather than sharing one
   process-wide value as `std::sync::Arc` does.
 
-See [`arc`][__link4] and [`sync`][__link5] for the available types and their full APIs.
+See [`arc`][__link5] and [`sync`][__link6] for the available types and their full APIs.
 
 
 <hr/>
@@ -46,10 +54,11 @@ See [`arc`][__link4] and [`sync`][__link5] for the available types and their ful
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEWLxBG1R_bUbennpOCnOulkbhCiln7flkhsbllVBCnf-UodhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbgJ0_wVvIQX4bBpor4zQG5ZIbDJtpfJ3_pwIbxtuOpJyiB2phZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
- [__link1]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread
- [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerNuma
- [__link3]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
- [__link4]: https://docs.rs/performables/0.2.0/performables/arc/index.html
- [__link5]: https://docs.rs/performables/0.2.0/performables/sync/index.html
+ [__link1]: https://docs.rs/performables/0.2.0/performables/?search=sync::notify::Notify
+ [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread
+ [__link3]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerNuma
+ [__link4]: https://docs.rs/thread_aware_core/0.1.1/thread_aware_core/?search=ThreadAware
+ [__link5]: https://docs.rs/performables/0.2.0/performables/arc/index.html
+ [__link6]: https://docs.rs/performables/0.2.0/performables/sync/index.html

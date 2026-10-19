@@ -6,14 +6,12 @@ use std::task::{Wake, Waker};
 use std::time::Duration;
 
 use performables::arc::Arc;
-use performables::sync::condition::Condvar;
-use performables::sync::mutex::Mutex;
+use performables::sync::notify::Notify;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
 pub(crate) struct WorkerSignal {
-    notified: Mutex<bool>,
-    ready: Condvar,
+    ready: Notify,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -41,30 +39,21 @@ fn wait_until_deadline<S>(
 
 impl WorkerSignal {
     pub(crate) fn wait(&self, timeout: Duration) {
+        if self.ready.try_wait() {
+            return;
+        }
         let start = std::time::Instant::now();
-        let mut notified = Some(self.notified.lock());
+        let mut notified = false;
         wait_until_deadline(
             &mut notified,
             timeout,
-            |notified| {
-                !**notified
-                    .as_ref()
-                    .expect("the wait always retains or immediately replaces its notification guard")
-            },
+            |notified| !*notified,
             |_| start.elapsed(),
             |notified, remaining| {
-                let (guard, elapsed) = self.ready.wait_timeout(
-                    notified
-                        .take()
-                        .expect("the previous timed wait always replaced its notification guard"),
-                    remaining,
-                );
-                *notified = Some(guard);
-                elapsed.timed_out()
+                *notified = self.ready.wait_timeout(remaining);
+                !*notified
             },
         );
-        let mut notified = notified.expect("the final timed wait always replaced its notification guard");
-        *notified = false;
     }
 
     pub(crate) fn waker(signal: &Arc<Self>) -> Waker {
@@ -76,16 +65,10 @@ impl WorkerSignal {
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn is_notified(&self) -> bool {
-        *self.notified.lock()
+        self.ready.is_notified()
     }
 
     fn notify(&self) {
-        *self.notified.lock() = true;
-        self.wake_waiter();
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Removing the native notification strands the smoke test; flag handling is tested separately.
-    fn wake_waiter(&self) {
         self.ready.notify_one();
     }
 }
@@ -116,13 +99,13 @@ mod tests {
         let signal = Arc::new(WorkerSignal::default());
         let waker = WorkerSignal::waker(&signal);
         waker.wake_by_ref();
-        assert!(*signal.notified.lock());
+        assert!(signal.is_notified());
         signal.wait(Duration::ZERO);
-        assert!(!*signal.notified.lock());
+        assert!(!signal.is_notified());
         waker.wake();
-        assert!(*signal.notified.lock());
+        assert!(signal.is_notified());
         signal.wait(Duration::ZERO);
-        assert!(!*signal.notified.lock());
+        assert!(!signal.is_notified());
     }
 
     #[test]
@@ -155,7 +138,7 @@ mod tests {
         let start = std::time::Instant::now();
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
-        assert!(!*signal.notified.lock());
+        assert!(!signal.is_notified());
     }
 
     #[test]
@@ -173,14 +156,12 @@ mod tests {
             elapsed_after_wait: VecDeque<Duration>,
             wait_budgets: Vec<Duration>,
         }
-
         let timeout = Duration::from_millis(10);
         let mut script = Script {
             elapsed: Duration::from_millis(4),
             elapsed_after_wait: VecDeque::from([Duration::from_millis(7), Duration::from_millis(11)]),
             wait_budgets: Vec::new(),
         };
-
         wait_until_deadline(
             &mut script,
             timeout,
@@ -192,7 +173,6 @@ mod tests {
                 false
             },
         );
-
         assert_eq!(script.wait_budgets, [Duration::from_millis(6), Duration::from_millis(3)]);
         assert_eq!(script.elapsed, Duration::from_millis(11));
         assert!(script.elapsed_after_wait.is_empty());

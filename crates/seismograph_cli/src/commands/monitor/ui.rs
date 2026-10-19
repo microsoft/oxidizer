@@ -4761,6 +4761,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (691_592, 3_962_280_200_487_367_007));
+        assert_eq!(stable_digest(&output), (691_592, 7_907_043_087_817_797_991));
     }
 }

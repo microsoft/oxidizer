@@ -4,7 +4,6 @@
 #[derive(Clone, Copy)]
 pub(crate) enum EventKind {
     ArcCreate,
-    ArcDrop,
     ArcDeref,
     ArcClone,
     ArcRelocate,
@@ -23,6 +22,9 @@ pub(crate) enum EventKind {
     CondvarAccess,
     CondvarContention,
     CondvarNotify,
+    NotifyAccess,
+    NotifyContention,
+    NotifySignal,
     OnceAccess,
     OnceContention,
     OnceInitialize,
@@ -38,21 +40,12 @@ pub(crate) enum EventKind {
 
 #[inline]
 pub(crate) fn record(kind: EventKind, object: *const ()) {
-    record_if(kind, object, || true);
-}
-
-#[inline]
-pub(crate) fn record_if(kind: EventKind, object: *const (), condition: impl FnOnce() -> bool) {
     #[cfg(feature = "seismograph")]
-    seismograph::record(kind.class(), || {
+    seismograph::record(kind.class(), move || {
         use seismograph::recorder::event::{EventKind as SeismographEventKind, ObjectId, Record};
 
-        if !condition() {
-            return None;
-        }
         let kind = match kind {
             EventKind::ArcCreate => SeismographEventKind::ArcCreate,
-            EventKind::ArcDrop => SeismographEventKind::ArcDrop,
             EventKind::ArcDeref => SeismographEventKind::ArcDeref,
             EventKind::ArcClone => SeismographEventKind::ArcClone,
             EventKind::ArcRelocate => SeismographEventKind::ArcRelocate,
@@ -71,6 +64,9 @@ pub(crate) fn record_if(kind: EventKind, object: *const (), condition: impl FnOn
             EventKind::CondvarAccess => SeismographEventKind::CondvarAccess,
             EventKind::CondvarContention => SeismographEventKind::CondvarContention,
             EventKind::CondvarNotify => SeismographEventKind::CondvarNotify,
+            EventKind::NotifyAccess => SeismographEventKind::NotifyAccess,
+            EventKind::NotifyContention => SeismographEventKind::NotifyContention,
+            EventKind::NotifySignal => SeismographEventKind::NotifySignal,
             EventKind::OnceAccess => SeismographEventKind::OnceAccess,
             EventKind::OnceContention => SeismographEventKind::OnceContention,
             EventKind::OnceInitialize => SeismographEventKind::OnceInitialize,
@@ -87,7 +83,7 @@ pub(crate) fn record_if(kind: EventKind, object: *const (), condition: impl FnOn
     });
 
     #[cfg(not(feature = "seismograph"))]
-    let _ = (kind, object, condition);
+    let _ = (kind, object);
 }
 
 #[cfg(feature = "seismograph")]
@@ -98,6 +94,21 @@ impl EventKind {
             _ => seismograph::recorder::event::EventClass::General,
         }
     }
+}
+
+#[inline]
+pub(crate) fn record_arc_drop(object: impl FnOnce() -> Option<*const ()>) {
+    // A fixed event kind keeps conditional drop captures small enough to pass
+    // by value, without preparing an aggregate on the disabled path.
+    #[cfg(feature = "seismograph")]
+    seismograph::record(seismograph::recorder::event::EventClass::General, move || {
+        use seismograph::recorder::event::{EventKind, ObjectId, Record};
+
+        Some(Record::object(EventKind::ArcDrop, ObjectId::from_ptr(object()?)))
+    });
+
+    #[cfg(not(feature = "seismograph"))]
+    let _ = object;
 }
 
 #[inline]
@@ -118,6 +129,7 @@ pub(crate) fn record_channel_high_watermark(object: *const (), high_watermark: u
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
     use std::ptr;
@@ -125,16 +137,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn disabled_recording_does_not_evaluate_conditions() {
-        let evaluated = Cell::new(false);
-        let condition = || {
-            evaluated.set(true);
-            true
-        };
-        record_if(EventKind::ArcDrop, ptr::null(), condition);
+    fn disabled_drop_recording_does_not_resolve_objects() {
+        let resolved = Cell::new(false);
+        record_arc_drop(|| {
+            resolved.set(true);
+            Some(ptr::null())
+        });
 
-        assert!(!evaluated.get());
-        assert!(condition());
-        assert!(evaluated.get());
+        assert!(!resolved.get());
     }
 }

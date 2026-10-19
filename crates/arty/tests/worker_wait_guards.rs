@@ -17,6 +17,7 @@ use std::sync::{Arc, mpsc};
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -44,6 +45,48 @@ impl Drop for Probe {
         let block_on_rejected = self.block_on_runtime.scheduler().block_on(async |_| ()).is_err();
         self.outcome.send(block_on_rejected).unwrap();
     }
+}
+
+#[test]
+fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
+    struct RemoteWake {
+        ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        waker: Option<mpsc::Sender<std::task::Waker>>,
+    }
+
+    impl Future for RemoteWake {
+        type Output = u64;
+
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<u64> {
+            if self.ready.load(std::sync::atomic::Ordering::Acquire) {
+                return std::task::Poll::Ready(7);
+            }
+            if let Some(sender) = self.waker.take() {
+                sender.send(cx.waker().clone()).unwrap();
+            }
+            std::task::Poll::Pending
+        }
+    }
+
+    let runtime = runtime();
+    for _ in 0..if cfg!(miri) { 2 } else { 20 } {
+        let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (sent, received) = mpsc::channel();
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((std::sync::Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| {
+                RemoteWake {
+                    ready,
+                    waker: Some(sender),
+                }
+            });
+        let waker = received.recv_timeout(TEST_TIMEOUT).unwrap();
+        ready.store(true, std::sync::atomic::Ordering::Release);
+        waker.wake_by_ref();
+        waker.wake_by_ref();
+        assert_eq!(task.join().unwrap(), 7);
+    }
+    runtime.stop().unwrap();
 }
 
 #[test]

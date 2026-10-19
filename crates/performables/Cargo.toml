@@ -39,16 +39,24 @@ seismograph = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker.workspace = true
 criterion.workspace = true
 metabench.workspace = true
 mutants.workspace = true
 serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
+tokio = { workspace = true, features = ["sync"] }
 trybuild.workspace = true
 
 [[bench]]
@@ -57,6 +65,14 @@ harness = false
 
 [[bench]]
 name = "performables_arc_clone"
+harness = false
+
+[[bench]]
+name = "performables_ready"
+harness = false
+
+[[bench]]
+name = "performables_watch"
 harness = false
 
 [[bench]]
