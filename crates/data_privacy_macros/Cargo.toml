@@ -17,6 +17,9 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_macros"
 
+[package.metadata.release-plan]
+private-api = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["data_privacy_macros::*"]
 
