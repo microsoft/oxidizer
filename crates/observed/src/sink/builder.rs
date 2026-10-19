@@ -56,19 +56,21 @@ use crate::{Sink, SinkId};
 /// # Type State
 ///
 /// - `P`: Tracks whether [`processors`](Self::processors) has been called
+/// - `C`: Tracks whether [`clock`](Self::clock) has been called
+/// - `S`: Tracks whether [`event_sampler`](Self::event_sampler) has been called
 ///
 /// [`enrich`]: crate::enrichment::EnrichFutureExt::enrich
 /// [`enrich_for`]: crate::enrichment::EnrichFutureExt::enrich_for
-pub struct SinkBuilder<P = NotSet> {
+pub struct SinkBuilder<P = NotSet, C = NotSet, S = NotSet> {
     id: SinkId,
     clock: SimpleClock,
     processors: Vec<Arc<dyn EventProcessor>>,
     isolated_enrichment: bool,
     sampler: Option<PerformableArc<dyn EventSampler>>,
-    _state: PhantomData<P>,
+    _state: PhantomData<(P, C, S)>,
 }
 
-impl SinkBuilder<NotSet> {
+impl SinkBuilder {
     pub(super) fn new(id: SinkId) -> Self {
         Self {
             id,
@@ -79,57 +81,41 @@ impl SinkBuilder<NotSet> {
             _state: PhantomData,
         }
     }
+}
 
+impl<C, S> SinkBuilder<NotSet, C, S> {
     /// Sets the [`EventProcessor`]s the sink fans each event out to.
     ///
     /// Can be called only once. Without processors the sink drops every event.
     #[must_use]
-    pub fn processors(self, processors: Vec<Arc<dyn EventProcessor>>) -> SinkBuilder<Set> {
-        SinkBuilder {
-            id: self.id,
-            clock: self.clock,
-            processors,
-            isolated_enrichment: self.isolated_enrichment,
-            sampler: self.sampler,
-            _state: PhantomData,
-        }
+    pub fn processors(mut self, processors: Vec<Arc<dyn EventProcessor>>) -> SinkBuilder<Set, C, S> {
+        self.processors = processors;
+        self.into_state()
     }
 }
 
-impl<P> SinkBuilder<P> {
+impl<P, S> SinkBuilder<P, NotSet, S> {
     /// Sets the clock that stamps the timestamp on every event the sink
     /// dispatches, replacing the default system clock.
     ///
-    /// Accepts a [`tick::SimpleClock`], or a [`tick::Clock`] by value or by
-    /// reference. Pass the application's clock if it has one. In tests pass a
-    /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
-    /// timestamps.
+    /// Can be called only once. Accepts a [`tick::SimpleClock`], or a
+    /// [`tick::Clock`] by value or by reference. Pass the application's clock
+    /// if it has one. In tests pass a frozen clock
+    /// (`SimpleClock::new_frozen()`) for deterministic, Miri-safe timestamps.
     #[must_use]
-    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
+    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> SinkBuilder<P, Set, S> {
         self.clock = clock.into();
-        self
+        self.into_state()
     }
+}
 
-    /// Makes the sink ignore entries added with
-    /// [`enrich`](crate::enrichment::EnrichFutureExt::enrich): it sees only
-    /// entries that [`enrich_for`](crate::enrichment::EnrichFutureExt::enrich_for)
-    /// addresses to its id.
+impl<P, C> SinkBuilder<P, C, NotSet> {
+    /// Attaches one [`EventSampler`] to the sink.
     ///
-    /// Useful for library sinks that must not inherit application-level
-    /// context.
-    #[must_use]
-    pub fn isolated_enrichment(mut self) -> Self {
-        self.isolated_enrichment = true;
-        self
-    }
-
-    /// Attaches one [`EventSampler`] to the sink, replacing any sampler set
-    /// earlier.
-    ///
-    /// Takes the sampler itself or a `Box<dyn EventSampler>`, for example a
-    /// sampler chosen at runtime. A boxed sampler must already have the type
-    /// `Box<dyn EventSampler>`; a `Box<MySampler>` is not accepted, so pass
-    /// `MySampler` itself instead.
+    /// Can be called only once. Takes the sampler itself or a
+    /// `Box<dyn EventSampler>`, for example a sampler chosen at runtime. A
+    /// boxed sampler must already have the type `Box<dyn EventSampler>`; a
+    /// `Box<MySampler>` is not accepted, so pass `MySampler` itself instead.
     ///
     /// A sink with processors calls the sampler once per event, before asking
     /// its processors. See [`EventSampler::sample`] for the invocation and
@@ -169,8 +155,23 @@ impl<P> SinkBuilder<P> {
     /// let sink = Sink::builder("service").event_sampler(sampler).build();
     /// ```
     #[must_use]
-    pub fn event_sampler(mut self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
+    pub fn event_sampler(mut self, sampler: impl Into<Box<dyn EventSampler>>) -> SinkBuilder<P, C, Set> {
         self.sampler = Some(PerformableArc::from(sampler.into()));
+        self.into_state()
+    }
+}
+
+impl<P, C, S> SinkBuilder<P, C, S> {
+    /// Makes the sink ignore entries added with
+    /// [`enrich`](crate::enrichment::EnrichFutureExt::enrich): it sees only
+    /// entries that [`enrich_for`](crate::enrichment::EnrichFutureExt::enrich_for)
+    /// addresses to its id.
+    ///
+    /// Useful for library sinks that must not inherit application-level
+    /// context.
+    #[must_use]
+    pub fn isolated_enrichment(mut self) -> Self {
+        self.isolated_enrichment = true;
         self
     }
 
@@ -183,9 +184,20 @@ impl<P> SinkBuilder<P> {
     pub fn build(self) -> Sink {
         Sink::new(self.id, self.processors, self.clock, self.isolated_enrichment, self.sampler)
     }
+
+    fn into_state<P2, C2, S2>(self) -> SinkBuilder<P2, C2, S2> {
+        SinkBuilder {
+            id: self.id,
+            clock: self.clock,
+            processors: self.processors,
+            isolated_enrichment: self.isolated_enrichment,
+            sampler: self.sampler,
+            _state: PhantomData,
+        }
+    }
 }
 
-impl<P> fmt::Debug for SinkBuilder<P> {
+impl<P, C, S> fmt::Debug for SinkBuilder<P, C, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("id", &self.id)

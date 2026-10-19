@@ -523,31 +523,6 @@ fn clones_share_the_sampler() {
 }
 
 #[test]
-fn later_event_sampler_replaces_earlier_one() {
-    let processor = MockProcessor::new();
-    let (first, first_calls) = constant_sampler(EventSamplingDecision::Continue);
-    let (second, second_calls) = constant_sampler(EventSamplingDecision::Drop);
-    let sink = Sink::builder(TEST_ID)
-        .clock(tick::SimpleClock::new_frozen())
-        .processors(vec![Arc::new(processor.clone())])
-        .event_sampler(first)
-        .event_sampler(second)
-        .build();
-
-    emit!(
-        sink,
-        UserAction {
-            user: PiiString("Alice".into()),
-            action_code: 1,
-        }
-    );
-
-    assert_eq!(first_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(second_calls.load(Ordering::Relaxed), 1);
-    assert!(processor.is_empty());
-}
-
-#[test]
 fn boxed_sampler_decides_for_sink() {
     let (sampler, calls) = constant_sampler(EventSamplingDecision::Drop);
     let (sink, processor) = sampled_emitter(TEST_ID, Box::new(sampler) as Box<dyn EventSampler>);

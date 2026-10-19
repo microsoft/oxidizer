@@ -771,7 +771,7 @@ mod tests {
         }
     }
 
-    fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> SinkBuilder<Set> {
+    fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> SinkBuilder<Set, Set> {
         Sink::builder(id).clock(SimpleClock::new_frozen()).processors(
             processors
                 .iter()
