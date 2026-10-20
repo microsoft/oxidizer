@@ -261,9 +261,6 @@ impl DriverHost {
     }
 
     fn shutdown_local(&self, local: LocalContext) {
-        if local.role == DriverRole::Primary {
-            self.interrupt.clear();
-        }
         let context = IoContextName(local.context_name);
         let role = IoDriverRoleLabel::from(local.role);
         match local.driver.shutdown() {
