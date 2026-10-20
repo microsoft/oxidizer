@@ -50,7 +50,7 @@ pub(crate) struct IoDriverInitializationFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "error.message")]
+    #[dimension(log = "exception.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
 
@@ -62,8 +62,18 @@ pub(crate) struct IoDriverCycleFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "error.message")]
+    #[dimension(log = "exception.message")]
     pub(crate) error: IoDriverErrorMessage,
+}
+
+#[event("arty.rt.io.driver.stopped")]
+#[debug("I/O driver stopped")]
+#[counter(name = "arty.rt.io.driver.stopped")]
+pub(crate) struct IoDriverStopped {
+    #[dimension(log = "io.context")]
+    pub(crate) context: IoContextName,
+    #[dimension(log = "io.driver.role", metric = "io.driver.role")]
+    pub(crate) role: IoDriverRoleLabel,
 }
 
 #[event("arty.rt.io.driver.shutdown_failed")]
@@ -74,7 +84,7 @@ pub(crate) struct IoDriverShutdownFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "error.message")]
+    #[dimension(log = "exception.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
 

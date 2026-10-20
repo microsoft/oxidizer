@@ -320,10 +320,10 @@ dependencies = [
  "data_privacy",
  "foldhash 0.2.0",
  "observed",
+ "observed_testing",
  "static_assertions",
  "thread_aware",
  "thread_aware_core",
- "tick",
 ]
 
 [[package]]

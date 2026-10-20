@@ -5,21 +5,22 @@
 
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
+use std::any::type_name;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::task::{RawWaker, RawWakerVTable, Wake, Waker};
 use std::time::Duration;
 use std::{error, fmt};
 
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use arty_io_host::{DriverHost, IoRuntime};
-use observed::metadata::EventDescription;
-use observed::processing::{EventProcessor, EventView};
+use observed::{Severity, Value};
+use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     First,
     Second,
@@ -28,13 +29,18 @@ enum Kind {
 #[derive(Default)]
 struct State {
     roles: Mutex<Vec<(Kind, DriverRole)>>,
+    relocations: Mutex<Vec<(Kind, Thread)>>,
+    driver_threads: Mutex<Vec<(Kind, Thread)>>,
     cycles: Mutex<Vec<(Kind, Duration)>>,
+    shutdown_order: Mutex<Vec<Kind>>,
     nested_cycle_errors: Mutex<Vec<String>>,
     driver_waker: Mutex<Option<Waker>>,
+    panic_shutdown: Mutex<Option<Kind>>,
     context_calls: AtomicUsize,
     format_calls: AtomicUsize,
     shutdowns: AtomicUsize,
     panic_context: AtomicBool,
+    panic_initialization: AtomicBool,
     fail_initialization: AtomicBool,
     fail_cycle: AtomicBool,
     reenter_cycle: AtomicBool,
@@ -48,8 +54,10 @@ struct Context<const SECOND: bool> {
 }
 
 impl<const SECOND: bool> ThreadAware for Context<SECOND> {
-    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         assert!(source.is_none());
+        let kind = if SECOND { Kind::Second } else { Kind::First };
+        self.state.relocations.lock().unwrap().push((kind, destination.clone()));
     }
 }
 
@@ -70,10 +78,8 @@ impl IoContext for ReentrantContext {
 
     fn context((runtime, state): Self::ContextOptions) -> Self {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let mut worker_runtime = runtime;
-        worker_runtime.relocate(None, &thread);
-        let host = worker_runtime.driver_host(Waker::noop().clone());
-        let _ = host.context::<Context<true>>(&state).unwrap();
+        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
+        let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
         Self { state }
     }
 
@@ -104,7 +110,7 @@ impl IoContext for HandledFailureContext {
     fn context((runtime, state): Self::ContextOptions) -> Self {
         state.fail_initialization.store(true, Ordering::SeqCst);
         let host = host(&runtime);
-        let _ = host.context::<Context<true>>(&state);
+        let _ = host.context::<Context<true>>(Arc::clone(&state));
         state.fail_initialization.store(false, Ordering::SeqCst);
         Self { state }
     }
@@ -175,7 +181,7 @@ impl fmt::Display for ReentrantFormatError {
         self.state.format_calls.fetch_add(1, Ordering::SeqCst);
         FORMAT_RUNTIME.with_borrow(|runtime| {
             let host = host(runtime.as_ref().expect("the formatter test installs its runtime"));
-            let _ = host.context::<Context<true>>(&self.state).unwrap();
+            let _ = host.context::<Context<true>>(Arc::clone(&self.state)).unwrap();
         });
         f.write_str("formatting failed")
     }
@@ -200,11 +206,47 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
         let kind = if SECOND { Kind::Second } else { Kind::First };
         self.state.roles.lock().unwrap().push((kind, options.role()));
+        self.state.driver_threads.lock().unwrap().push((kind, options.thread().clone()));
+        assert!(
+            !self.state.panic_initialization.load(Ordering::SeqCst),
+            "driver initialization panicked"
+        );
         if self.state.fail_initialization.load(Ordering::SeqCst) {
             return Err(DriverError::from_message("initialization failed"));
         }
         Ok(TestDriver {
             kind,
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
+struct MoveOnlyOptions(Arc<State>);
+
+#[derive(Clone)]
+struct MoveOnlyContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for MoveOnlyContext {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        assert!(source.is_none());
+        self.state.relocations.lock().unwrap().push((Kind::First, destination.clone()));
+    }
+}
+
+impl IoContext for MoveOnlyContext {
+    type ContextOptions = MoveOnlyOptions;
+    type Driver = TestDriver;
+
+    fn context(options: Self::ContextOptions) -> Self {
+        Self { state: options.0 }
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.state.roles.lock().unwrap().push((Kind::First, options.role()));
+        Ok(TestDriver {
+            kind: Kind::First,
             state: Arc::clone(&self.state),
         })
     }
@@ -245,7 +287,13 @@ impl Driver for TestDriver {
     }
 
     fn shutdown(self) -> Result<(), DriverError> {
+        self.state.shutdown_order.lock().unwrap().push(self.kind);
         self.state.shutdowns.fetch_add(1, Ordering::SeqCst);
+        assert_ne!(
+            *self.state.panic_shutdown.lock().unwrap(),
+            Some(self.kind),
+            "driver shutdown panicked"
+        );
         if self.state.fail_shutdown.load(Ordering::SeqCst) {
             Err(DriverError::from_message("shutdown failed"))
         } else {
@@ -263,20 +311,6 @@ struct InterruptWake(Arc<State>);
 impl Wake for InterruptWake {
     fn wake(self: Arc<Self>) {
         self.0.interrupts.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
-struct TestProcessor;
-
-impl EventProcessor for TestProcessor {
-    fn is_interested(&self, _description: &EventDescription) -> bool {
-        true
-    }
-
-    fn process(&self, _event: &EventView<'_>) {}
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
     }
 }
 
@@ -338,18 +372,20 @@ static CLONE_HOST_VTABLE: RawWakerVTable =
 
 fn host(runtime: &IoRuntime) -> DriverHost {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
-    let mut runtime = runtime.clone();
-    runtime.relocate(None, &thread);
-    runtime.driver_host(Waker::noop().clone())
+    runtime.clone().driver_host(thread, Waker::noop().clone()).unwrap()
 }
 
 fn test_runtime() -> IoRuntime {
-    IoRuntime::new(
-        observed::Sink::builder("arty_io_host_test")
-            .clock(tick::SimpleClock::new_frozen())
-            .processors(vec![Arc::new(TestProcessor)])
-            .build(),
-    )
+    IoRuntime::new(observed::Sink::noop())
+}
+
+fn telemetry_runtime() -> (IoRuntime, MockProcessor) {
+    let (sink, processor) = test_emitter(TEST_ID);
+    (IoRuntime::new(sink), processor)
+}
+
+fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
+    event.dimensions().into_iter().find(|(name, _)| name == key).map(|(_, value)| value)
 }
 
 #[test]
@@ -358,8 +394,8 @@ fn first_context_is_primary_and_later_contexts_are_secondary() {
     let host = host(&runtime);
     let state = Arc::new(State::default());
 
-    let _ = host.context::<Context<false>>(&state).unwrap();
-    let _ = host.context::<Context<true>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
 
     assert_eq!(
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
@@ -383,15 +419,52 @@ fn worker_local_drivers_are_created_lazily() {
     let second = host(&runtime);
     let state = Arc::new(State::default());
 
-    let _ = first.context::<Context<false>>(&state).unwrap();
+    let _ = first.context::<Context<false>>(Arc::clone(&state)).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 1);
 
-    let _ = first.context::<Context<false>>(&state).unwrap();
+    let _ = first.context::<Context<false>>(Arc::clone(&state)).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 1);
 
-    let _ = second.context::<Context<false>>(&state).unwrap();
+    let _ = second.context::<Context<false>>(Arc::clone(&state)).unwrap();
     assert_eq!(state.roles.lock().unwrap().len(), 2);
     assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn context_accepts_move_only_options() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+
+    let _ = host.context::<MoveOnlyContext>(MoveOnlyOptions(Arc::clone(&state))).unwrap();
+
+    assert_eq!(state.roles.lock().unwrap().as_slice(), [(Kind::First, DriverRole::Primary)]);
+}
+
+#[test]
+fn worker_thread_identity_is_used_for_relocation_and_driver_creation() {
+    let runtime = test_runtime();
+    let state = Arc::new(State::default());
+    let worker_state = Arc::clone(&state);
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+
+    let worker = std::thread::spawn(move || {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let host = runtime.driver_host(thread.clone(), Waker::noop().clone()).unwrap();
+        let _ = host.context::<Context<false>>(Arc::clone(&worker_state)).unwrap();
+        ready_tx.send((host.waker(), thread)).unwrap();
+        release_rx.recv().unwrap();
+        drop(host);
+    });
+    let (interrupt, thread) = ready_rx.recv().unwrap();
+
+    interrupt.wake_by_ref();
+    assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
+    assert_eq!(state.relocations.lock().unwrap().as_slice(), [(Kind::First, thread.clone())]);
+    assert_eq!(state.driver_threads.lock().unwrap().as_slice(), [(Kind::First, thread)]);
+
+    release_tx.send(()).unwrap();
+    worker.join().unwrap();
 }
 
 #[test]
@@ -399,8 +472,8 @@ fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let wait = Duration::from_millis(7);
-    let _ = host.context::<Context<false>>(&state).unwrap();
-    let _ = host.context::<Context<true>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
 
     host.execute_cycle(wait).unwrap();
 
@@ -415,7 +488,7 @@ fn cycles_run_secondaries_before_primary_with_zero_secondary_wait() {
 fn cycle_failures_are_returned_to_the_runtime() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.fail_cycle.store(true, Ordering::SeqCst);
 
     let error = host.execute_cycle(Duration::ZERO).unwrap_err();
@@ -424,11 +497,112 @@ fn cycle_failures_are_returned_to_the_runtime() {
 }
 
 #[test]
+fn telemetry_reports_successful_driver_lifecycle_in_order() {
+    let (runtime, processor) = telemetry_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
+
+    drop(host);
+
+    let events = processor.events();
+    assert_eq!(
+        events.iter().map(CapturedEvent::name).collect::<Vec<_>>(),
+        [
+            "arty.rt.io.driver.initialized",
+            "arty.rt.io.driver.initialized",
+            "arty.rt.io.driver.stopped",
+            "arty.rt.io.driver.stopped",
+        ]
+    );
+    assert_eq!(
+        events.iter().map(CapturedEvent::severity).collect::<Vec<_>>(),
+        [Some(Severity::Debug); 4]
+    );
+    assert_eq!(dimension(&events[0], "io.context"), Some(type_name::<Context<false>>().into()));
+    assert_eq!(dimension(&events[0], "io.driver.role"), Some("primary".into()));
+    assert_eq!(dimension(&events[1], "io.context"), Some(type_name::<Context<true>>().into()));
+    assert_eq!(dimension(&events[1], "io.driver.role"), Some("secondary".into()));
+    assert_eq!(dimension(&events[2], "io.context"), Some(type_name::<Context<true>>().into()));
+    assert_eq!(dimension(&events[2], "io.driver.role"), Some("secondary".into()));
+    assert_eq!(dimension(&events[3], "io.context"), Some(type_name::<Context<false>>().into()));
+    assert_eq!(dimension(&events[3], "io.driver.role"), Some("primary".into()));
+}
+
+#[test]
+fn telemetry_reports_failures_with_standard_exception_dimensions() {
+    let (runtime, processor) = telemetry_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    state.fail_cycle.store(true, Ordering::SeqCst);
+
+    let _ = host.execute_cycle(Duration::ZERO).unwrap_err();
+    drop(host);
+
+    let events = processor.events();
+    assert_eq!(
+        events.iter().map(CapturedEvent::name).collect::<Vec<_>>(),
+        [
+            "arty.rt.io.driver.initialized",
+            "arty.rt.io.driver.cycle_failed",
+            "arty.rt.io.driver.stopped",
+        ]
+    );
+    let failed = &events[1];
+    assert_eq!(failed.severity(), Some(Severity::Error));
+    assert_eq!(dimension(failed, "io.context"), Some(type_name::<Context<false>>().into()));
+    assert_eq!(dimension(failed, "io.driver.role"), Some("primary".into()));
+    assert_eq!(dimension(failed, "exception.message"), Some("cycle failed".into()));
+    assert_eq!(dimension(failed, "error.message"), None);
+}
+
+#[test]
+fn telemetry_reports_initialization_and_shutdown_failures() {
+    let (runtime, initialization_processor) = telemetry_runtime();
+    let initialization_host = host(&runtime);
+    let state = Arc::new(State::default());
+    state.fail_initialization.store(true, Ordering::SeqCst);
+
+    let Err(_error) = initialization_host.context::<Context<false>>(Arc::clone(&state)) else {
+        panic!("driver initialization should fail");
+    };
+
+    let initialization_events = initialization_processor.events();
+    assert_eq!(
+        initialization_events.iter().map(CapturedEvent::name).collect::<Vec<_>>(),
+        ["arty.rt.io.driver.initialization_failed"]
+    );
+    assert_eq!(initialization_events[0].severity(), Some(Severity::Error));
+    assert_eq!(
+        dimension(&initialization_events[0], "exception.message"),
+        Some("initialization failed".into())
+    );
+
+    let (runtime, shutdown_processor) = telemetry_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    state.fail_shutdown.store(true, Ordering::SeqCst);
+
+    drop(host);
+
+    let shutdown_events = shutdown_processor.events();
+    assert_eq!(
+        shutdown_events.iter().map(CapturedEvent::name).collect::<Vec<_>>(),
+        ["arty.rt.io.driver.initialized", "arty.rt.io.driver.shutdown_failed"]
+    );
+    assert_eq!(shutdown_events[1].severity(), Some(Severity::Error));
+    assert_eq!(dimension(&shutdown_events[1], "exception.message"), Some("shutdown failed".into()));
+}
+
+#[test]
 fn nested_cycle_execution_returns_an_error() {
     let host = Rc::new(host(&test_runtime()));
     let state = Arc::new(State::default());
     NESTED_CYCLE_HOST.with_borrow_mut(|installed| *installed = Some(Rc::downgrade(&host)));
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.reenter_cycle.store(true, Ordering::SeqCst);
 
     host.execute_cycle(Duration::ZERO).unwrap();
@@ -446,32 +620,71 @@ fn driver_initialization_failures_are_returned_to_the_runtime() {
     let state = Arc::new(State::default());
     state.fail_initialization.store(true, Ordering::SeqCst);
 
-    let Err(error) = host.context::<Context<false>>(&state) else {
+    let Err(error) = host.context::<Context<false>>(Arc::clone(&state)) else {
         panic!("driver initialization should fail");
     };
 
     assert_eq!(error.to_string(), "initialization failed");
 
     state.fail_initialization.store(false, Ordering::SeqCst);
-    let Err(retry_error) = host.context::<Context<false>>(&state) else {
+    let Err(retry_error) = host.context::<Context<false>>(Arc::clone(&state)) else {
         panic!("runtime failure should reject later retrievals");
     };
     assert_eq!(retry_error.to_string(), "initialization failed");
 }
 
 #[test]
+fn driver_initialization_failure_cleans_up_existing_local_drivers() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    state.fail_initialization.store(true, Ordering::SeqCst);
+
+    let Err(error) = host.context::<Context<true>>(Arc::clone(&state)) else {
+        panic!("driver initialization should fail");
+    };
+
+    assert_eq!(error.to_string(), "initialization failed");
+    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::First]);
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+    drop(host);
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn panicking_driver_initialization_unpublishes_context_and_releases_primary_role() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    state.panic_initialization.store(true, Ordering::SeqCst);
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = host.context::<Context<false>>(Arc::clone(&state));
+    }));
+    assert!(panicked.is_err());
+
+    state.panic_initialization.store(false, Ordering::SeqCst);
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
+        [DriverRole::Primary, DriverRole::Primary]
+    );
+}
+
+#[test]
 fn runtime_failure_rejects_cached_context_retrievals() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.fail_initialization.store(true, Ordering::SeqCst);
-    let Err(error) = host.context::<Context<true>>(&state) else {
+    let Err(error) = host.context::<Context<true>>(Arc::clone(&state)) else {
         panic!("driver initialization should fail");
     };
     assert_eq!(error.to_string(), "initialization failed");
 
     state.fail_initialization.store(false, Ordering::SeqCst);
-    let Err(cached_error) = host.context::<Context<false>>(&state) else {
+    let Err(cached_error) = host.context::<Context<false>>(Arc::clone(&state)) else {
         panic!("runtime failure should reject cached retrievals");
     };
     assert_eq!(cached_error.to_string(), "initialization failed");
@@ -484,14 +697,14 @@ fn failure_formatting_can_reenter_context_retrieval() {
     let state = Arc::new(State::default());
     FORMAT_RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
 
-    let Err(_error) = host.context::<FormattingFailureContext>(&state) else {
+    let Err(_error) = host.context::<FormattingFailureContext>(Arc::clone(&state)) else {
         panic!("driver initialization should fail");
     };
     FORMAT_RUNTIME.with_borrow_mut(Option::take);
 
-    assert!(state.format_calls.load(Ordering::SeqCst) >= 2);
+    assert_eq!(state.format_calls.load(Ordering::SeqCst), 1);
     assert_eq!(state.roles.lock().unwrap().last().unwrap().1, DriverRole::Secondary);
-    let Err(stored_error) = host.context::<Context<false>>(&state) else {
+    let Err(stored_error) = host.context::<Context<false>>(Arc::clone(&state)) else {
         panic!("runtime failure should reject later retrievals");
     };
     assert_eq!(stored_error.to_string(), "formatting failed");
@@ -504,12 +717,12 @@ fn context_construction_panics_do_not_poison_the_registry() {
     state.panic_context.store(true, Ordering::SeqCst);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = host.context::<Context<false>>(&state);
+        let _ = host.context::<Context<false>>(Arc::clone(&state));
     }));
     assert!(result.is_err());
 
     state.panic_context.store(false, Ordering::SeqCst);
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     assert_eq!(state.roles.lock().unwrap().last().unwrap().1, DriverRole::Primary);
 }
 
@@ -519,7 +732,7 @@ fn context_construction_can_reenter_the_runtime_registry() {
     let host = host(&runtime);
     let state = Arc::new(State::default());
 
-    let _ = host.context::<ReentrantContext>(&(runtime, Arc::clone(&state))).unwrap();
+    let _ = host.context::<ReentrantContext>((runtime, Arc::clone(&state))).unwrap();
 
     assert_eq!(
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
@@ -528,16 +741,16 @@ fn context_construction_can_reenter_the_runtime_registry() {
 }
 
 #[test]
-fn handled_inner_failure_rejects_outer_retrieval_and_keeps_driver_owned() {
+fn handled_inner_failure_rejects_outer_retrieval_and_cleans_up_its_driver() {
     let runtime = test_runtime();
     let host = host(&runtime);
     let state = Arc::new(State::default());
 
-    let Err(error) = host.context::<HandledFailureContext>(&(runtime, Arc::clone(&state))) else {
+    let Err(error) = host.context::<HandledFailureContext>((runtime, Arc::clone(&state))) else {
         panic!("the outer retrieval should observe the runtime failure");
     };
     assert_eq!(error.to_string(), "initialization failed");
-    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 0);
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
 
     drop(host);
 
@@ -556,7 +769,7 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let interrupt = host.waker();
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     assert!(format!("{host:?}").starts_with("DriverHost { thread: "));
 
     interrupt.wake_by_ref();
@@ -581,7 +794,7 @@ fn dropping_the_primary_waker_can_reenter_the_host_interrupt() {
         dropped: Arc::clone(&dropped),
     }));
     *state.driver_waker.lock().unwrap() = Some(driver_waker);
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
 
     drop(host);
 
@@ -596,7 +809,7 @@ fn waking_the_primary_does_not_clone_the_provider_waker() {
     let cloned = Arc::new(AtomicBool::new(false));
     let driver_waker = clone_host_waker(host.waker(), Arc::clone(&cloned));
     *state.driver_waker.lock().unwrap() = Some(driver_waker);
-    let _ = host.context::<Context<false>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
 
     host.waker().wake_by_ref();
 
@@ -608,10 +821,25 @@ fn drop_attempts_every_driver_after_shutdown_errors() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
     state.fail_shutdown.store(true, Ordering::SeqCst);
-    let _ = host.context::<Context<false>>(&state).unwrap();
-    let _ = host.context::<Context<true>>(&state).unwrap();
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
 
     drop(host);
 
     assert_eq!(state.shutdowns.load(Ordering::SeqCst), 2);
+    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::Second, Kind::First]);
+}
+
+#[test]
+fn shutdown_panics_propagate_without_skipping_the_panicking_driver() {
+    let host = host(&test_runtime());
+    let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
+    *state.panic_shutdown.lock().unwrap() = Some(Kind::Second);
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(host)));
+
+    assert!(panicked.is_err());
+    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::Second]);
 }

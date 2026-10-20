@@ -7,40 +7,34 @@ use std::task::Waker;
 
 use arty_io_host::{DriverHost, IoRuntime};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
-use thread_aware::{ThreadAware, ThreadBuilder};
+use thread_aware::ThreadBuilder;
 
-assert_impl_all!(IoRuntime: Clone, std::fmt::Debug, Eq, Send, Sync, ThreadAware);
+assert_impl_all!(IoRuntime: Clone, std::fmt::Debug, Eq, Send, Sync);
 assert_not_impl_any!(DriverHost: Send, Sync);
 
 #[test]
 fn approved_public_constructors_are_available() {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
-    let mut runtime = IoRuntime::new(observed::Sink::noop());
-    runtime.relocate(None, &thread);
-    let host = runtime.driver_host(Waker::noop().clone());
+    let runtime = IoRuntime::new(observed::Sink::noop());
+    let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
     drop(host.waker());
 }
 
 #[test]
-#[should_panic(expected = "IoRuntime must be relocated onto its worker before creating a driver host")]
-fn driver_host_requires_a_relocated_runtime() {
-    let _ = IoRuntime::new(observed::Sink::noop()).driver_host(Waker::noop().clone());
-}
-
-#[test]
-fn driver_host_requires_the_relocation_destination_thread() {
+fn driver_host_requires_the_current_worker_thread() {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
-    let mut runtime = IoRuntime::new(observed::Sink::noop());
-    runtime.relocate(None, &thread);
+    let runtime = IoRuntime::new(observed::Sink::noop());
 
-    let panicked = std::thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = runtime.driver_host(Waker::noop().clone());
-        }))
-        .is_err()
+    let error = std::thread::spawn(move || {
+        runtime
+            .driver_host(thread, Waker::noop().clone())
+            .expect_err("a remote worker coordinate must be rejected")
     })
     .join()
     .unwrap();
 
-    assert!(panicked);
+    assert_eq!(
+        error.to_string(),
+        "I/O driver host must be created on the worker identified by its thread coordinate"
+    );
 }
