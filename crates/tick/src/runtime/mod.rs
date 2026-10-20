@@ -105,6 +105,8 @@
 //! // Keep `driver` on a single thread to advance timers
 //! ```
 //!
+//! ## Controlled clocks
+//!
 //! Controlled clocks advance externally. Their owner is responsible for advancing controlled time
 //! and waking timers; the supplied activation waker is ignored and the runtime driver has no
 //! system parking deadline. External lifecycle state must wake, exit, and drop every controlled
