@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.0] - 2026-10-20
+
+### Release assessment
+
+- Native TLS server-name override changes the public client contract.
+
 ## [0.18.0] - 2026-10-05
 
 - ⚠️ Breaking

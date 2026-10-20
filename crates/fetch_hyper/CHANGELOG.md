@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-10-20
+
+### Release assessment
+
+- Native TLS server-name override changes the backend contract.
+
 ## [0.9.0] - 2026-10-05
 
 - ⚠️ Breaking

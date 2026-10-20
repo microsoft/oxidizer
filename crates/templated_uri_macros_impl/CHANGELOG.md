@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.0] - 2026-10-20
+
+### Release assessment
+
+- Includes accumulated released-content changes since 0.6.0.
+
 ## [0.6.0] - 2026-09-10
 
 ### Maintenance

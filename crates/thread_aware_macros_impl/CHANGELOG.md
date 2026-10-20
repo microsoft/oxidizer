@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.1] - 2026-10-20
+
+### Release assessment
+
+- Includes accumulated released-content changes since 0.12.0.
+
 ## [0.12.0] - 2026-09-10
 
 ### Breaking

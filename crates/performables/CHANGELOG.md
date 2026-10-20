@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+### Release assessment
+
+- Includes breaking API changes identified by cargo-semver-checks.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

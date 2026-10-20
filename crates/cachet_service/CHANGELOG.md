@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+### Release assessment
+
+- Updates exposed workspace API origins with breaking releases: recoverable.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance

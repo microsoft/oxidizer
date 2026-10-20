@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.3] - 2026-10-20
+
+### Release assessment
+
+- Includes accumulated released-content changes since 0.5.2.
+
 ## [0.5.2] - 2026-09-10
 
 ### Compatibility

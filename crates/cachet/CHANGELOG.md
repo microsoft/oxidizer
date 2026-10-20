@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.0] - 2026-10-20
+
+### Release assessment
+
+- Updates exposed workspace API origins with breaking releases: recoverable, seismograph, tick.
+
 ## [0.15.0] - 2026-10-05
 
 - ⚠️ Breaking

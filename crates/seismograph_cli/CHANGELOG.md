@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+### Release assessment
+
+- Native v4/Seismograph state transition changes CLI and persisted diagnostics.
+
 ## [0.2.0] - 2026-10-05
 
 - 🔧 Maintenance

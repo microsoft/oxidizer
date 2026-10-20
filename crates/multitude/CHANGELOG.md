@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.0] - 2026-10-20
+
+### Release assessment
+
+- Updates exposed workspace API origins with breaking releases: seismograph.
+
 ## [0.11.0] - 2026-10-05
 
 - ⚠️ Breaking

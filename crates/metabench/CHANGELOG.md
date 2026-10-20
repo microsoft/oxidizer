@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-10-20
+
+### Release assessment
+
+- Aligns the exact-version metabench package group.
+
 ## [0.2.0] - 2026-10-13
 
 - 🔧 Maintenance

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.2] - 2026-10-20
+
+### Release assessment
+
+- Updates workspace dependency requirements: performables, thread_aware.
+
 ## [0.9.1] - 2026-10-05
 
 - 🔧 Maintenance

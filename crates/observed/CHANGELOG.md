@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.29.0] - 2026-10-20
+
+### Release assessment
+
+- Updates exposed workspace API origins with breaking releases: tick.
 
 ### Added
 

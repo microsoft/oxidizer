@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+### Release assessment
+
+- Transcoding hardening is explicitly breaking.
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

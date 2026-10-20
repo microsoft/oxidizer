@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.0] - 2026-10-20
+
+### Release assessment
+
+- Updates exposed workspace API origins with breaking releases: fetch, fetch_tls, recoverable, seismograph, templated_uri, tick.
+
 ## [0.8.0] - 2026-10-05
 
 - ⚠️ Breaking
