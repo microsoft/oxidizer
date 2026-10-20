@@ -150,6 +150,7 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_primary.store(true, Ordering::SeqCst);
+    scenario.block_primary_until_woken.store(true, Ordering::SeqCst);
 
     worker
         .spawn({
@@ -160,12 +161,17 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
         })
         .join()
         .unwrap();
-    wait_until(|| scenario.normal_cycles.load(Ordering::SeqCst) > 0);
+    wait_until(|| scenario.primary_wait_entries.load(Ordering::SeqCst) > 0);
 
     let (completed, completion) = mpsc::channel();
     worker.spawn(async move |_| completed.send(()).unwrap());
-    completion.recv_timeout(Duration::from_millis(500)).unwrap();
+    let result = completion.recv_timeout(Duration::from_millis(500));
+    if result.is_err() {
+        scenario.wake_driver_interrupts();
+    }
+    result.unwrap();
     assert!(scenario.driver_wakes.load(Ordering::SeqCst) > 0);
+    assert_eq!(scenario.primary_wait_timeouts.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
 }
 

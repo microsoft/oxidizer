@@ -526,9 +526,8 @@ mod tests {
             );
             assert!(!task_ran.load(Ordering::Relaxed));
 
-            assert!(worker.execute_step().is_continue());
-            assert!(task_ran.load(Ordering::Relaxed));
             assert!(worker.execute_step().is_break());
+            assert!(task_ran.load(Ordering::Relaxed));
             worker_done.send(()).unwrap();
         });
         let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();

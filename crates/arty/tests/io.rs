@@ -173,17 +173,21 @@ struct Scenario {
     driver_attempts: AtomicUsize,
     initialized: AtomicUsize,
     normal_cycles: AtomicUsize,
+    primary_wait_entries: AtomicUsize,
+    primary_wait_timeouts: AtomicUsize,
     shutdowns: AtomicUsize,
     fail_driver_at: AtomicUsize,
     driver_failure_message: Mutex<&'static str>,
     fail_normal_cycle: AtomicBool,
     fail_shutdown: AtomicBool,
     block_primary: AtomicBool,
+    block_primary_until_woken: AtomicBool,
     record_cycles: Arc<AtomicBool>,
     roles: Mutex<Vec<(thread::ThreadId, DriverRole)>>,
     owner_wakers: Mutex<Vec<Waker>>,
     cycle_log: Arc<Mutex<Vec<&'static str>>>,
     driver_wakes: AtomicUsize,
+    driver_interrupts: Mutex<Vec<Waker>>,
     block_driver_at: AtomicUsize,
     block_waker_at: AtomicUsize,
     driver_gate: Mutex<DriverGate>,
@@ -246,17 +250,21 @@ impl Scenario {
             driver_attempts: AtomicUsize::new(0),
             initialized: AtomicUsize::new(0),
             normal_cycles: AtomicUsize::new(0),
+            primary_wait_entries: AtomicUsize::new(0),
+            primary_wait_timeouts: AtomicUsize::new(0),
             shutdowns: AtomicUsize::new(0),
             fail_driver_at: AtomicUsize::new(0),
             driver_failure_message: Mutex::new("driver construction failed"),
             fail_normal_cycle: AtomicBool::new(false),
             fail_shutdown: AtomicBool::new(false),
             block_primary: AtomicBool::new(false),
+            block_primary_until_woken: AtomicBool::new(false),
             record_cycles,
             roles: Mutex::new(Vec::new()),
             owner_wakers: Mutex::new(Vec::new()),
             cycle_log,
             driver_wakes: AtomicUsize::new(0),
+            driver_interrupts: Mutex::new(Vec::new()),
             block_driver_at: AtomicUsize::new(0),
             block_waker_at: AtomicUsize::new(0),
             driver_gate: Mutex::new(DriverGate::default()),
@@ -275,6 +283,12 @@ impl Scenario {
 
     fn wake_owners(&self) {
         for waker in self.owner_wakers.lock().unwrap().iter() {
+            waker.wake_by_ref();
+        }
+    }
+
+    fn wake_driver_interrupts(&self) {
+        for waker in self.driver_interrupts.lock().unwrap().iter() {
             waker.wake_by_ref();
         }
     }
@@ -440,13 +454,15 @@ impl DriverWake {
         }
     }
 
-    fn wait(&self, duration: Duration) {
+    fn wait(&self, duration: Duration) -> bool {
         let notified = self.notified.lock().unwrap();
         let (mut notified, _) = self
             .notification
             .wait_timeout_while(notified, duration, |notified| !*notified)
             .unwrap();
+        let was_notified = *notified;
         *notified = false;
+        was_notified
     }
 }
 
@@ -473,7 +489,9 @@ struct TestDriver<M: Marker> {
 impl<M: Marker> Driver for TestDriver<M> {
     fn waker(&self) -> Waker {
         self.scenario.block_waker_if_configured(self.attempt);
-        Waker::from(Arc::clone(&self.wake))
+        let waker = Waker::from(Arc::clone(&self.wake));
+        self.scenario.driver_interrupts.lock().unwrap().push(waker.clone());
+        waker
     }
 
     fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
@@ -488,7 +506,15 @@ impl<M: Marker> Driver for TestDriver<M> {
             return Err(DriverError::from_message("normal driver cycle failed"));
         }
         if self.role == DriverRole::Primary && self.scenario.block_primary.load(Ordering::SeqCst) && !cycle.max_wait().is_zero() {
-            self.wake.wait(cycle.max_wait());
+            self.scenario.primary_wait_entries.fetch_add(1, Ordering::SeqCst);
+            let wait = if self.scenario.block_primary_until_woken.load(Ordering::SeqCst) {
+                testing_aids::TEST_TIMEOUT
+            } else {
+                cycle.max_wait()
+            };
+            if !self.wake.wait(wait) {
+                self.scenario.primary_wait_timeouts.fetch_add(1, Ordering::SeqCst);
+            }
         }
         Ok(())
     }
