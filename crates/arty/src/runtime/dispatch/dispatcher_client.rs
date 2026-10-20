@@ -25,6 +25,33 @@ impl DispatcherClient {
         Self { core }
     }
 
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
+        use std::task::Waker;
+
+        use nonempty::NonEmpty;
+        use performables::sync::channel;
+
+        use crate::runtime::blocking_worker::BlockingPool;
+        use crate::runtime::dispatch::WorkerEndpoint;
+        use crate::runtime::thread::waiter::ThreadWaiter;
+
+        let (command_tx, _command_rx) = channel::unbounded();
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: thread.clone(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
+        };
+        Self::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            observed::Sink::noop(),
+        )))
+    }
+
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.core.worker_index(thread_id)
     }

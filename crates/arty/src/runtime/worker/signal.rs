@@ -153,6 +153,7 @@ impl WorkerSignal {
         *self.notified.lock()
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing all worker and driver wake effects strands runtime tests; each effect is tested directly.
     fn notify(&self) {
         *self.notified.lock() = true;
         if let Some(driver_waker) = self.driver_waker.lock().as_ref() {
@@ -218,7 +219,7 @@ mod tests {
             Err(mpsc::RecvTimeoutError::Timeout)
         );
         WorkerSignal::waker(&signal).wake_by_ref();
-        done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         worker.join().unwrap();
     }
 
