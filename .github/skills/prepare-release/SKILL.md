@@ -28,8 +28,9 @@ reviewable version PR only. It does not merge, tag, publish, configure publishin
 or authorize any of those actions. Existing Microsoft automation remains
 responsible for publication after an authorized merge.
 
-On Windows, use a very short external evidence root such as `C:\rp\<run>` and
-new short child directories for every repeated stage. Deep session artifact
+On Windows, use a very short, session-unique external evidence root such as
+`C:\rp\<session-id>` and new short child directories for every repeated stage.
+Never share an evidence directory between concurrent runs. Deep session artifact
 paths can exceed Git's path limit when preview materializes long snapshot names.
 If Git still reports a long-path failure, retry the unchanged stage with
 process-scoped `core.longpaths=true`; do not change persistent Git configuration.
@@ -53,25 +54,33 @@ process-scoped `core.longpaths=true`; do not change persistent Git configuration
    actions; this coordinator owns the remaining handoff and never delegates
    merge.
 4. Run `release-changelogs` against that exact resolved plan and release date.
-5. Because changelog edits changed the assessed checkout, return to
+5. Run repository generators and formatters that can change tracked or packaged
+   release inputs, including `just anvil-fmt --fix` and
+   `just anvil-readme --fix`. These changes belong to the release PR when
+   generated from its version and changelog state.
+6. Because changelog and generated-file edits changed the assessed checkout,
+   return to
    `increment-versions` and rerun its evidence and verification stages end to end
    in new evidence directories. Re-resolve the original refs first. If either
    moved, follow the component skill's recovery procedure and restart; preserve
    changelog edits and unrelated work.
-6. Compare the fresh decisions and resolved plan to the decision ledger. Any
+7. Compare the fresh decisions and resolved plan to the decision ledger. Compare
+   semantic decisions to the original pre-application compatibility evidence;
+   fresh compatibility must complete, but its minimum impacts can disappear once
+   sufficient versions are already applied. Any
    changed semantic impact without changed source or compatibility evidence is a
    reproducibility failure: stop and report both evidence-backed alternatives.
    Do not silently accept whichever assessment ran last.
-7. If the fresh resolved package/version set differs for an evidence-backed
+8. If the fresh resolved package/version set differs for an evidence-backed
    reason, apply again only after verifying that the pending delta is exactly the
-   new plan. Then rerun `release-changelogs` and repeat steps 5-6. Stop only when
+   new plan. Then rerun `release-changelogs` and repeat steps 5-7. Stop only when
    the decision ledger, resolved plan, applied manifests and lockfile, and
    changelog entries agree.
-8. Stop uncommitted on any changelog blocker, partial application, failed check,
+9. Stop uncommitted on any changelog blocker, partial application, failed check,
    or evidence mismatch. Otherwise run the smallest relevant documentation and
-   repository checks, commit only the intended version, requirement, lockfile,
-   and changelog changes, and create or update the ready-for-review PR when
-   requested. Never commit generated evidence or unrelated edits.
+   repository checks. Commit only the intended version, requirement, lockfile,
+   changelog, and directly generated release changes, then create or update the
+   requested PR state. Never commit generated evidence or unrelated edits.
 
 ## Handoff
 

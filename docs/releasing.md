@@ -18,8 +18,9 @@ For a stacked PR, name the actual parent target.
 Follow the tool and schema prerequisites owned by
 [`increment-versions`](../.github/skills/increment-versions/SKILL.md). Keep its
 generated evidence outside the repository or in an ignored directory. On
-Windows, choose a short evidence root such as `C:\rp\<run>` to avoid Git path
-length failures during preview.
+Windows, choose a short, session-unique evidence root such as
+`C:\rp\<session-id>` to avoid Git path length failures and concurrent-run
+collisions during preview.
 
 ## Boundaries
 
