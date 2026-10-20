@@ -7,7 +7,7 @@
 
 testing_aids::init_tracing!();
 
-use std::future::{pending, poll_fn};
+use std::pin::Pin;
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
@@ -85,6 +85,39 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
         }
     }
 
+    struct TimerWakeHarness {
+        setup_delay: Pin<Box<tick::Delay>>,
+        callback_delay: Pin<Box<tick::Delay>>,
+        callback_waker: Waker,
+        registration: Option<mpsc::Sender<thread::ThreadId>>,
+        control: ClockControl,
+        setup_wake_drained: bool,
+    }
+
+    impl Future for TimerWakeHarness {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.get_mut();
+            if let Some(registration) = this.registration.take() {
+                assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Pending);
+                assert_eq!(
+                    this.callback_delay.as_mut().poll(&mut Context::from_waker(&this.callback_waker)),
+                    Poll::Pending
+                );
+                registration.send(thread::current().id()).unwrap();
+                let _configured = this.control.clone().auto_advance(CONTROLLED_TIMER_STEP);
+                return Poll::Pending;
+            }
+
+            if !this.setup_wake_drained {
+                assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Ready(()));
+                this.setup_wake_drained = true;
+            }
+            Poll::Pending
+        }
+    }
+
     let control = ClockControl::new();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
@@ -94,36 +127,20 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (timer_registered, registration) = mpsc::channel();
     let (task_ran, completion) = mpsc::channel();
-    let _timer_task = scheduler.spawn(move |cx| async move {
+    let _timer_task = scheduler.spawn(move |cx| {
         // The first expiry wakes this setup task so the worker consumes every setup notification.
         // The second then depends exclusively on the direct submission notifying the worker.
-        let mut setup_notification_drain = Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP));
-        let mut submission_timer = Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP * 2));
-        let timer_waker = Waker::from(Arc::new(SpawnOnWake {
-            scheduler: cx.scheduler().clone(),
-            task_ran,
-        }));
-        let mut timers_registered = false;
-        poll_fn(|context| {
-            if timers_registered {
-                return Poll::Ready(());
-            }
-
-            assert_eq!(setup_notification_drain.as_mut().poll(context), Poll::Pending);
-            assert_eq!(
-                submission_timer.as_mut().poll(&mut Context::from_waker(&timer_waker)),
-                Poll::Pending
-            );
-            timers_registered = true;
-            timer_registered.send(thread::current().id()).unwrap();
-            let _ = control.clone().auto_advance(CONTROLLED_TIMER_STEP);
-            Poll::Pending
-        })
-        .await;
-
-        drop(setup_notification_drain);
-        pending::<()>().await;
-        drop(submission_timer);
+        TimerWakeHarness {
+            setup_delay: Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP)),
+            callback_delay: Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP * 2)),
+            callback_waker: Waker::from(Arc::new(SpawnOnWake {
+                scheduler: cx.scheduler().clone(),
+                task_ran,
+            })),
+            registration: Some(timer_registered),
+            control,
+            setup_wake_drained: false,
+        }
     });
     let worker_thread = registration.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
 
