@@ -16,6 +16,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_header
 keywords = ["http", "headers", "simd", "parsing"]
 categories = ["web-programming"]
 
+[package.metadata.release-plan]
+private-api = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = []
 

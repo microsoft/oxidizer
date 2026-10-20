@@ -16,6 +16,9 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_macros_impl"
 
+[package.metadata.release-plan]
+private-api = true
+
 [package.metadata.anvil.miri]
 exclude = true
 

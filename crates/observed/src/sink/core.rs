@@ -70,7 +70,7 @@ impl std::fmt::Debug for Sink {
                 .field("variant", &"Composite")
                 .field("children", &children.len())
                 .finish(),
-            SinkInner::Noop { .. } => f.debug_struct(type_name::<Self>()).field("variant", &"Noop").finish(),
+            SinkInner::Noop => f.debug_struct(type_name::<Self>()).field("variant", &"Noop").finish(),
         }
     }
 }
@@ -181,7 +181,7 @@ impl Sink {
                         push(&mut states, child.clone());
                     }
                 }
-                SinkInner::Noop { .. } => {}
+                SinkInner::Noop => {}
             }
         }
         assert_within_processor_limit(states.iter().map(|state| state.processors.len()).sum());
@@ -195,14 +195,12 @@ impl Sink {
 
     /// Creates a no-op sink that silently drops all events.
     ///
-    /// A dedicated `noop()` sink carrying only an enrichment slot - useful as
-    /// a test fixture for `.enrich()` semantics - it just doesn't dispatch
-    /// anywhere when `emit!` fires.
-    // TODO: consider dropping enrichment slot for no-op sinks
+    /// Enrichment and context transfer are also no-ops because this sink can
+    /// never dispatch an event that observes them.
     #[must_use]
     pub fn noop() -> Self {
         Self {
-            inner: PerformableArc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
+            inner: PerformableArc::from_unaware(SinkInner::Noop),
         }
     }
 
@@ -215,7 +213,7 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.id,
             SinkInner::Composite { .. } => COMPOSITE_ID,
-            SinkInner::Noop { .. } => NOOP_ID,
+            SinkInner::Noop => NOOP_ID,
         }
     }
 
@@ -228,8 +226,12 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.processors.is_empty(),
             SinkInner::Composite { children } => children.iter().all(|c| c.processors.is_empty()),
-            SinkInner::Noop { .. } => true,
+            SinkInner::Noop => true,
         }
+    }
+
+    pub(crate) fn supports_enrichment(&self) -> bool {
+        !matches!(&*self.inner, SinkInner::Noop)
     }
 
     /// Returns whether any processor currently wants the described event.
@@ -280,7 +282,7 @@ impl Sink {
         let failures = match &*self.inner {
             SinkInner::Single(state) => flush_failures(state.processors.iter()),
             SinkInner::Composite { children } => flush_failures(children.iter().flat_map(|c| c.processors.iter())),
-            SinkInner::Noop { .. } => Vec::new(),
+            SinkInner::Noop => Vec::new(),
         };
 
         if failures.is_empty() {
@@ -292,6 +294,8 @@ impl Sink {
 
     /// Captures the current enrichment context for transfer to another thread.
     ///
+    /// For a [`noop`](Self::noop) sink, this returns an empty transfer.
+    ///
     /// For a [`composite`](Self::composite), every child's enrichment is
     /// captured independently, so each child's context round-trips with its
     /// own chain - including enrichments pushed directly on a child rather
@@ -300,7 +304,7 @@ impl Sink {
         let mut transfer = EnrichmentTransfer::default();
         match &*self.inner {
             SinkInner::Single(state) => transfer.add_slot(&state.enrichment),
-            SinkInner::Noop { enrichment } => transfer.add_slot(enrichment),
+            SinkInner::Noop => {}
             SinkInner::Composite { children } => {
                 for child in children {
                     transfer.add_slot(&child.enrichment);
@@ -332,7 +336,7 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.enrichment.push(entries),
             SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(PerformableArc::clone(&entries)))),
-            SinkInner::Noop { enrichment } => enrichment.push(entries),
+            SinkInner::Noop => Guard::empty(),
         }
     }
 
@@ -381,7 +385,7 @@ impl Sink {
         let sinks = match &*self.inner {
             SinkInner::Single(state) => slice::from_ref(state),
             SinkInner::Composite { children } => children.as_slice(),
-            SinkInner::Noop { .. } => &[],
+            SinkInner::Noop => &[],
         };
         sinks.iter().filter(|sink| !sink.processors.is_empty()).scan(0, |next_shift, sink| {
             let shift = *next_shift;
@@ -402,10 +406,9 @@ impl Sink {
         let slot = match &*self.inner {
             SinkInner::Single(state) => &state.enrichment,
             // For a composite, return an empty vector since it has no enrichment of its own.
-            SinkInner::Composite { .. } => {
+            SinkInner::Composite { .. } | SinkInner::Noop => {
                 return Vec::new();
             }
-            SinkInner::Noop { enrichment } => enrichment,
         };
 
         let head = slot.current();
@@ -427,12 +430,11 @@ impl Sink {
 
 /// Inner state held behind a [`performables::arc::Arc`]. Each variant carries
 /// only the fields that variant needs - Single carries one leaf's full
-/// state; Composite carries a flattened list of leaf states (built at
-/// construction time); Noop carries only an enrichment slot.
+/// state and Composite carries a flattened list of leaf states (built at
+/// construction time).
 ///
-/// `Sink::noop()` is the dedicated `Noop` variant: it owns no processors
-/// and never dispatches, but keeps a working enrichment slot so noop sinks
-/// remain useful as enrichment-API test fixtures.
+/// `Sink::noop()` is the dedicated data-free `Noop` variant: it owns no
+/// processors or enrichment slot and never dispatches.
 #[derive(Clone)]
 enum SinkInner {
     /// A leaf sink with its own processors, id, and enrichment slot.
@@ -445,9 +447,8 @@ enum SinkInner {
     /// each sharing its enrichment slot (`Arc`-backed) with the originating
     /// sink.
     Composite { children: Vec<SingleSinkState> },
-    /// A sink that drops every event. Carries only an enrichment slot so it
-    /// can still be used as an `.enrich()` test fixture.
-    Noop { enrichment: Slot },
+    /// A sink that drops every event and ignores enrichment.
+    Noop,
 }
 
 /// Flushes every processor, collecting all failures rather than stopping at the
@@ -520,6 +521,7 @@ mod tests {
     use ohno::assert_error_message;
 
     use super::*;
+    use crate::enrichment::Enrichment;
     use crate::typestates::Set;
 
     // These atomics are observation counters only. Assertions read them after the
@@ -527,7 +529,21 @@ mod tests {
 
     #[test]
     fn noop_sink_is_noop() {
-        assert!(Sink::noop().is_noop());
+        struct UnreachableEnrichment;
+
+        impl Enrichment for UnreachableEnrichment {
+            fn into_entries(self) -> Vec<EnrichmentEntry> {
+                panic!("a no-op sink transfer must not materialize enrichment entries")
+            }
+        }
+
+        let sink = Sink::noop();
+        let _guard = sink.push_enrichment(PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]));
+        let transfer = sink.transfer_context().with_enrichment(UnreachableEnrichment);
+
+        assert!(sink.is_noop());
+        assert!(sink.current_enrichments().is_empty());
+        drop(transfer.apply_current_thread());
     }
 
     struct DummyDyn;
@@ -993,7 +1009,7 @@ mod tests {
 
     #[test]
     fn current_enrichments_reports_the_pushed_entries() {
-        let sink = Sink::noop();
+        let sink = Sink::builder("test").clock(SimpleClock::new_frozen()).build();
         let _guard = sink.push_enrichment(PerformableArc::from(vec![
             EnrichmentEntry::unclassified("outer", 1_i64),
             EnrichmentEntry::unclassified("inner", 2_i64),

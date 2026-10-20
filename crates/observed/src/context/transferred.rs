@@ -131,7 +131,7 @@ impl<F: Future> Future for Transferred<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.context_transfer.apply_current_thread();
+        let _guard = this.context_transfer.apply_current_thread_borrowed();
         this.inner.poll(cx)
     }
 }

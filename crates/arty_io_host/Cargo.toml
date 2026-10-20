@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_io_host"
+description = "Unstable I/O driver hosting utilities for the Arty runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_host"
+
+[package.metadata.release-plan]
+private-api = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty_io_core::*",
+    "observed::sink::core::Sink",
+    "thread_aware_core::thread::NumaNode",
+    "thread_aware_core::thread::Owner",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
+[features]
+default = []
+
+[dependencies]
+arty_io_core = { workspace = true }
+data_privacy = { workspace = true }
+foldhash = { workspace = true, features = ["std"] }
+observed = { workspace = true }
+thread_aware_core = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+static_assertions = { workspace = true }
+thread_aware = { path = "../thread_aware", features = ["std", "test-utils"] }
+tick = { path = "../tick", features = ["test-util"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
