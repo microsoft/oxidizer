@@ -231,22 +231,16 @@ impl DriverHost {
         let Resolution {
             mut context,
             role,
-            registration,
+            initialization: _initialization,
         } = self.runtime.resolve_context::<C>(options)?;
         context.relocate(None, &self.thread);
         let local = match self.create_local_driver::<C>(context, role) {
             Ok(local) => local,
             Err(error) => {
-                registration.fail(&error);
-                self.shutdown_drivers();
+                self.runtime.fail(&error);
                 return Err(error);
             }
         };
-        if let Err(error) = registration.commit() {
-            self.shutdown_local(local);
-            self.shutdown_drivers();
-            return Err(error);
-        }
         let context = local.clone_context::<C>();
         let mut drivers = self
             .drivers

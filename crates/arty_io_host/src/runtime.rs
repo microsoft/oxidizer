@@ -3,8 +3,7 @@
 
 use std::any::{Any, TypeId};
 use std::fmt;
-use std::marker::PhantomData;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::task::Waker;
 
 use arty_io_core::{DriverError, DriverRole, IoContext};
@@ -20,34 +19,7 @@ where
 {
     pub(crate) context: C,
     pub(crate) role: DriverRole,
-    pub(crate) registration: Registration<C>,
-}
-
-pub(crate) enum Registration<C>
-where
-    C: IoContext,
-{
-    Existing(IoRuntime),
-    Pending(PendingRegistration<C>),
-}
-
-impl<C> Registration<C>
-where
-    C: IoContext,
-{
-    pub(crate) fn commit(self) -> Result<(), DriverError> {
-        match self {
-            Self::Existing(runtime) => runtime.check_failed(),
-            Self::Pending(pending) => pending.commit(),
-        }
-    }
-
-    pub(crate) fn fail(self, error: &DriverError) {
-        match self {
-            Self::Existing(runtime) => runtime.fail(error),
-            Self::Pending(pending) => pending.fail(error),
-        }
-    }
+    pub(crate) initialization: DriverInitializationGuard,
 }
 
 trait ErasedContext: Send {
@@ -84,84 +56,74 @@ impl RegisteredContext {
     }
 }
 
-enum ContextState {
-    Initializing(std::thread::ThreadId),
-    Ready(Arc<RegisteredContext>),
-    Failed(Arc<str>),
-}
-
 struct ContextSlot {
-    state: Mutex<ContextState>,
-    changed: Condvar,
+    context: OnceLock<RegisteredContext>,
+    initializing_threads: Mutex<Vec<std::thread::ThreadId>>,
     role: DriverRole,
 }
 
 impl ContextSlot {
     fn new(role: DriverRole) -> Self {
         Self {
-            state: Mutex::new(ContextState::Initializing(std::thread::current().id())),
-            changed: Condvar::new(),
+            context: OnceLock::new(),
+            initializing_threads: Mutex::new(Vec::new()),
             role,
         }
     }
 
-    fn context<C>(&self) -> Result<C, DriverError>
+    fn begin_initialization(self: &Arc<Self>) -> Result<DriverInitializationGuard, DriverError> {
+        let thread = std::thread::current().id();
+        let mut initializing_threads = self
+            .initializing_threads
+            .lock()
+            .expect("a poisoned I/O context initializer indicates a runtime invariant failure");
+        if initializing_threads.contains(&thread) {
+            return Err(DriverError::from_message(
+                "I/O context retrieval cannot reenter initialization of the same context type on one thread",
+            ));
+        }
+        initializing_threads.push(thread);
+        drop(initializing_threads);
+        Ok(DriverInitializationGuard {
+            slot: Arc::clone(self),
+            thread,
+        })
+    }
+
+    fn resolve<C>(&self, options: C::ContextOptions) -> C
     where
         C: IoContext,
     {
-        let registered = {
-            let mut state = self.state();
-            loop {
-                match &*state {
-                    ContextState::Initializing(thread) if *thread == std::thread::current().id() => {
-                        return Err(DriverError::from_message(
-                            "I/O context retrieval cannot reenter initialization of the same context type on one thread",
-                        ));
-                    }
-                    ContextState::Initializing(_) => {
-                        state = self
-                            .changed
-                            .wait(state)
-                            .expect("a poisoned I/O context slot indicates a runtime invariant failure");
-                    }
-                    ContextState::Ready(context) => break Arc::clone(context),
-                    ContextState::Failed(message) => return Err(DriverError::from_message(message.as_ref())),
-                }
-            }
-        };
-        Ok(registered.clone_context::<C>())
+        let registered = self.context.get_or_init(|| RegisteredContext {
+            context: Mutex::new(Box::new(NeutralContext(C::context(options)))),
+        });
+        registered.clone_context::<C>()
     }
+}
 
-    fn publish(&self, context: RegisteredContext) {
-        let mut state = self.state();
-        assert!(
-            matches!(*state, ContextState::Initializing(_)),
-            "only an initializing I/O context can be published"
-        );
-        *state = ContextState::Ready(Arc::new(context));
-        drop(state);
-        self.changed.notify_all();
-    }
+pub(crate) struct DriverInitializationGuard {
+    slot: Arc<ContextSlot>,
+    thread: std::thread::ThreadId,
+}
 
-    fn fail(&self, message: Arc<str>) {
-        let mut state = self.state();
-        let previous = std::mem::replace(&mut *state, ContextState::Failed(message));
-        drop(state);
-        self.changed.notify_all();
-        drop(previous);
-    }
-
-    fn state(&self) -> MutexGuard<'_, ContextState> {
-        self.state
+impl Drop for DriverInitializationGuard {
+    fn drop(&mut self) {
+        let mut initializing_threads = self
+            .slot
+            .initializing_threads
             .lock()
-            .expect("a poisoned I/O context slot indicates a runtime invariant failure")
+            .expect("a poisoned I/O context initializer indicates a runtime invariant failure");
+        let index = initializing_threads
+            .iter()
+            .position(|thread| *thread == self.thread)
+            .expect("an I/O initialization guard removes its registered thread");
+        initializing_threads.swap_remove(index);
     }
 }
 
 #[derive(Default)]
 struct Registry {
     contexts: HashMap<TypeId, Arc<ContextSlot>>,
-    primary_context: Option<TypeId>,
     failure: Option<Arc<str>>,
 }
 
@@ -171,54 +133,6 @@ impl Registry {
             Some(message) => Err(DriverError::from_message(message.as_ref())),
             None => Ok(()),
         }
-    }
-}
-
-pub(crate) struct PendingRegistration<C> {
-    runtime: IoRuntime,
-    context_type: TypeId,
-    slot: Arc<ContextSlot>,
-    context: Option<C>,
-    completed: bool,
-    _context: PhantomData<fn() -> C>,
-}
-
-impl<C> PendingRegistration<C>
-where
-    C: IoContext,
-{
-    fn commit(mut self) -> Result<(), DriverError> {
-        let context = self
-            .context
-            .take()
-            .expect("a pending I/O registration retains its neutral context until commit");
-        self.runtime.commit_registration(
-            self.context_type,
-            &self.slot,
-            RegisteredContext {
-                context: Mutex::new(Box::new(NeutralContext(context))),
-            },
-        )?;
-        self.completed = true;
-        Ok(())
-    }
-
-    fn fail(mut self, error: &DriverError) {
-        self.runtime.fail(error);
-        self.completed = true;
-    }
-}
-
-impl<C> Drop for PendingRegistration<C> {
-    fn drop(&mut self) {
-        if self.completed {
-            return;
-        }
-        self.runtime.cancel_registration(
-            self.context_type,
-            &self.slot,
-            Arc::from("I/O context initialization was interrupted before publication"),
-        );
     }
 }
 
@@ -289,50 +203,27 @@ impl IoRuntime {
         C: IoContext,
     {
         let context_type = TypeId::of::<C>();
-        let (slot, is_new) = {
+        let slot = {
             let mut registry = self.registry();
             registry.check()?;
-            if let Some(slot) = registry.contexts.get(&context_type) {
-                (Arc::clone(slot), false)
-            } else {
-                let role = if registry.primary_context.is_none() {
-                    registry.primary_context = Some(context_type);
+            let primary_available = registry.contexts.is_empty();
+            Arc::clone(registry.contexts.entry(context_type).or_insert_with(|| {
+                Arc::new(ContextSlot::new(if primary_available {
                     DriverRole::Primary
                 } else {
                     DriverRole::Secondary
-                };
-                let slot = Arc::new(ContextSlot::new(role));
-                registry.contexts.insert(context_type, Arc::clone(&slot));
-                (slot, true)
-            }
+                }))
+            }))
         };
         #[cfg(test)]
         if let Some(hook) = &self.resolution_hook {
             hook(context_type);
         }
-        if !is_new {
-            return Ok(Resolution {
-                context: slot.context::<C>()?,
-                role: slot.role,
-                registration: Registration::Existing(self.clone()),
-            });
-        }
-
-        let mut pending = PendingRegistration {
-            runtime: self.clone(),
-            context_type,
-            slot,
-            context: None,
-            completed: false,
-            _context: PhantomData,
-        };
-        let context = C::context(options);
-        let local_context = context.clone();
-        pending.context = Some(context);
+        let initialization = slot.begin_initialization()?;
         Ok(Resolution {
-            context: local_context,
-            role: pending.slot.role,
-            registration: Registration::Pending(pending),
+            context: slot.resolve::<C>(options),
+            role: slot.role,
+            initialization,
         })
     }
 
@@ -342,15 +233,7 @@ impl IoRuntime {
 
     pub(crate) fn fail(&self, error: &DriverError) {
         let message: Arc<str> = Arc::from(error.to_string());
-        let slots = {
-            let mut registry = self.registry();
-            registry.failure.get_or_insert_with(|| Arc::clone(&message));
-            registry.primary_context = None;
-            registry.contexts.drain().map(|(_, slot)| slot).collect::<Vec<_>>()
-        };
-        for slot in slots {
-            slot.fail(Arc::clone(&message));
-        }
+        self.registry().failure.get_or_insert(message);
     }
 
     pub(crate) const fn sink(&self) -> &Sink {
@@ -366,42 +249,6 @@ impl IoRuntime {
         self.registry
             .lock()
             .expect("a poisoned I/O context registry indicates a runtime invariant failure")
-    }
-
-    fn cancel_registration(&self, context_type: TypeId, slot: &Arc<ContextSlot>, message: Arc<str>) {
-        let removed = {
-            let mut registry = self.registry();
-            let matches = registry
-                .contexts
-                .get(&context_type)
-                .is_some_and(|registered| Arc::ptr_eq(registered, slot));
-            if matches {
-                registry.contexts.remove(&context_type);
-                if registry.primary_context == Some(context_type) {
-                    registry.primary_context = None;
-                }
-                true
-            } else {
-                false
-            }
-        };
-        if removed {
-            slot.fail(message);
-        }
-    }
-
-    fn commit_registration(&self, context_type: TypeId, slot: &Arc<ContextSlot>, context: RegisteredContext) -> Result<(), DriverError> {
-        let registry = self.registry();
-        registry.check()?;
-        assert!(
-            registry
-                .contexts
-                .get(&context_type)
-                .is_some_and(|registered| Arc::ptr_eq(registered, slot)),
-            "a pending I/O registration must remain reserved until commit"
-        );
-        slot.publish(context);
-        Ok(())
     }
 }
 
@@ -469,18 +316,12 @@ mod tests {
         }));
 
         let first_runtime = runtime.clone();
-        let first = std::thread::spawn(move || {
-            let resolution = first_runtime.resolve_context::<TestContext>(()).unwrap();
-            resolution.registration.commit().unwrap();
-        });
-        let second = std::thread::spawn(move || {
-            let resolution = runtime.resolve_context::<TestContext>(()).unwrap();
-            resolution.registration.commit().unwrap();
-        });
+        let first = std::thread::spawn(move || first_runtime.resolve_context::<TestContext>(()).unwrap());
+        let second = std::thread::spawn(move || runtime.resolve_context::<TestContext>(()).unwrap());
         barrier.wait();
 
-        first.join().unwrap();
-        second.join().unwrap();
+        let _ = first.join().unwrap();
+        let _ = second.join().unwrap();
 
         assert_eq!(CONTEXT_CALLS.load(Ordering::SeqCst), 1);
     }

@@ -671,7 +671,7 @@ fn driver_initialization_failures_are_returned_to_the_runtime() {
 }
 
 #[test]
-fn driver_initialization_failure_cleans_up_existing_local_drivers() {
+fn driver_initialization_failure_keeps_existing_drivers_until_host_drop() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
@@ -682,14 +682,14 @@ fn driver_initialization_failure_cleans_up_existing_local_drivers() {
     };
 
     assert_eq!(error.to_string(), "initialization failed");
-    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::First]);
-    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+    assert!(state.shutdown_order.lock().unwrap().is_empty());
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 0);
     drop(host);
     assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]
-fn panicking_driver_initialization_unpublishes_context_and_releases_primary_role() {
+fn panicking_driver_initialization_keeps_the_registered_context() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
     state.panic_initialization.store(true, Ordering::SeqCst);
@@ -702,7 +702,7 @@ fn panicking_driver_initialization_unpublishes_context_and_releases_primary_role
     state.panic_initialization.store(false, Ordering::SeqCst);
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
 
-    assert_eq!(state.context_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
         [DriverRole::Primary, DriverRole::Primary]
@@ -794,7 +794,7 @@ fn same_type_retrieval_through_another_host_rejects_reentrant_initialization() {
 }
 
 #[test]
-fn handled_inner_failure_rejects_outer_retrieval_and_cleans_up_its_driver() {
+fn handled_inner_failure_rejects_outer_retrieval_and_keeps_driver_until_drop() {
     let runtime = test_runtime();
     let host = host(&runtime);
     let state = Arc::new(State::default());
@@ -803,7 +803,7 @@ fn handled_inner_failure_rejects_outer_retrieval_and_cleans_up_its_driver() {
         panic!("the outer retrieval should observe the runtime failure");
     };
     assert_eq!(error.to_string(), "initialization failed");
-    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 0);
 
     drop(host);
 

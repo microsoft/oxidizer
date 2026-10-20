@@ -26,18 +26,21 @@ The runtime identifies a registration by the concrete `IoContext` type. The
 first retrieval performs these steps:
 
 1. Call `IoContext::context` once.
-2. Clone and relocate the context to every async worker.
-3. Call `IoContext::driver` on each async worker.
-4. Publish the context only after every worker has created its driver.
+2. Register the context and assign its driver role.
+3. Clone and relocate the context to the retrieving async worker.
+4. Call `IoContext::driver` on that worker before returning its context.
 
-Later retrievals return a clone of the existing context. The runtime does not
-register the same concrete context type twice. Libraries that need two
-independent registrations use two distinct context types.
+Later retrievals clone the registered context and lazily create that worker's
+driver before returning. The runtime does not register the same concrete
+context type twice. Libraries that need two independent registrations use two
+distinct context types.
 
-`IoContext::driver` completes driver setup before the context is published. A
-driver must not wait for another async worker to run during creation. If driver
-creation fails, the runtime treats the failure as fatal and starts runtime
-shutdown instead of retrying the registration.
+`IoContext::driver` completes local driver setup before the worker-local host
+returns its context. A driver must not wait for another async worker to run
+during creation. If driver creation fails, the runtime treats the failure as
+fatal and starts runtime shutdown instead of retrying the registration.
+Another worker may already hold the context; shutdown closes it to new
+operations and releases every driver that was created successfully.
 
 ## Driver roles
 

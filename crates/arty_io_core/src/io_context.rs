@@ -7,9 +7,9 @@ use crate::{Driver, DriverError, DriverOptions};
 
 /// A consumer-facing I/O handle that creates worker-local drivers.
 ///
-/// The runtime creates one registration for each concrete context type. The first context
-/// retrieval creates the context, clones and relocates it to every async worker, and creates one
-/// driver on each worker. Later retrievals return a clone of the existing context.
+/// The runtime creates one registration for each concrete context type. The
+/// first retrieval creates and registers the context. Each worker then creates
+/// its driver lazily before returning that context from the worker-local host.
 pub trait IoContext: Clone + ThreadAware + 'static {
     /// Configuration used to create the context.
     type ContextOptions;
@@ -35,9 +35,11 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     ///
     /// # Errors
     ///
-    /// Returns an error if driver creation fails. The implementation must clean up partial
-    /// construction before returning. The runtime treats the failure as fatal, does not publish
-    /// the context, and starts runtime shutdown on every async worker. It calls
+    /// Returns an error if driver creation fails. The implementation must clean
+    /// up partial construction before returning. The runtime treats the failure
+    /// as fatal and starts runtime shutdown on every async worker. Contexts may
+    /// already have been returned by other workers; they must reject new
+    /// operations after shutdown closes them. The runtime calls
     /// [`Driver::shutdown`] on every driver that was created successfully.
     fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError>;
 }
