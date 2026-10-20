@@ -100,8 +100,8 @@ The `add-crate` script does the following:
   `cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme)
   with a set of appropriate CI badges.
 
-- Creates an empty `CHANGELOG.md` file for the crate. Its first on-demand
-  version PR adds the first release entry.
+- Creates an empty `CHANGELOG.md` file for the crate, which will later be
+  populated as part of a version PR.
 
 - Creates placeholder `logo.png` and `favicon.ico` files for the crate, which you're expected to replace with legit
   crab-themed
@@ -109,33 +109,22 @@ The `add-crate` script does the following:
 
 ### Publishing Crates
 
-Version preparation runs on demand, when a maintainer requests a release, using Folo's
-[`increment-versions` agent skill](./.github/skills/increment-versions/SKILL.md)
-in **standalone mode**. Publication to [crates.io](https://crates.io) remains
-handled by the existing internal Microsoft automation. Ordinary code PRs do not
-need a version-planning run.
+Releasing new versions of crates to [crates.io](https://crates.io) is handled by
+an internal Microsoft automation process. To release a new version of any crate,
+follow this simple process:
 
-1. Work on a feature branch with the changes to assess. Newly created release
-   inputs must be tracked; existing tracked changes need not be committed first.
+1. Make sure the changes you want to release have all been committed to the repo.
 
-2. Ask the agent to run `increment-versions` in standalone mode, explicitly naming
-   this workspace and the local release-history ref. For a stacked PR, also name
-   the actual parent target ref.
+2. Create a branch off of main.
 
-3. Review the complete **Version/release plan** together with the source changes,
-   including dependent packages and any existing version increments retained by
-   the skill.
+3. Run the [`increment-versions` agent skill](./.github/skills/increment-versions/SKILL.md)
+   in standalone mode to update versions and changelogs.
 
-4. Add release entries to the affected package changelogs using the resolved
-   versions, then rerun the skill's evidence and verification stages so those
-   source changes are covered.
+4. Create a PR like normal to push changes out.
 
-5. Submit the version-increment PR for normal review and authorized merge.
-
-See [Releasing Oxidizer Packages](./docs/releasing.md) for prerequisites and an
-example request. The skill does not publish or grant merge permission. Merging
-the PR still starts the existing automation that tags and publishes crates;
-standalone planning does not disable that behavior.
+See [Releasing Oxidizer Packages](./docs/releasing.md) for detailed instructions.
+Once your PR is merged, automation will kick in. It will tag the commit and push
+the crate to crates.io.
 
 ### Documenting Crates
 
@@ -148,9 +137,8 @@ automation processes:
   generates the `README.md` file using a shared template. A pull request gate ensures the `README.md` file
   always reflects the latest crate documentation.
 
-- Ordinary code PRs leave `CHANGELOG.md` files alone. On-demand version PRs
-  prepend entries for every package in the resolved release plan while preserving
-  historical entries.
+- The `CHANGELOG.md` file in each crate's directory is updated as part of the
+  on-demand version PR.
 
 To generate documentation locally with all features enabled (including feature-gated items), run:
 
