@@ -1,50 +1,35 @@
 # I/O
 
-Arty hosts external I/O drivers that implement the `arty_io_core` contracts.
-It does not provide a built-in network or file I/O implementation.
+Arty can run I/O drivers supplied by other crates. It does not include a
+built-in network or file I/O implementation.
 
-Access the worker-bound `arty::io::Io` handle through `Builtins::io()`. The
-first `Io::context` call for a concrete `IoContext` creates and registers one
-thread-neutral context for the runtime. The first context type registered is
-assigned the primary driver role; later context types are assigned the
-secondary role.
+Use `Builtins::io()` to obtain the worker's `arty::io::Io` handle, then call
+`Io::context` with the context type provided by the I/O library.
 
-Each worker initializes contexts and drivers independently when it first
-accesses a registered context type. Arty clones and relocates the registered
-context to that worker, creates its worker-local driver, and returns the local
-context only after initialization succeeds. Other workers remain
-uninitialized until they access that context type. Concurrent first accesses
-create the registered context once while allowing each worker to initialize
-its own driver.
+Arty creates each context type once per runtime. Each worker creates its own
+driver lazily, the first time that worker requests the context. Requesting a
+context on one worker does not initialize it on every worker.
 
-A cloned `Builtins` or `Io` remains associated with its runtime worker and can
-be used from an ordinary thread or a thread owned by a non-Arty runtime such as
-Tokio. I/O access is synchronously dispatched to the associated Arty worker,
-preserving correctness at higher cost than worker-local access. Context options
-are created before the call and passed by reference. Arty clones them when an
-external-thread request must cross the worker boundary. Calls from a different
-Arty worker are rejected because synchronously cross-calling workers can
-deadlock.
+The first context type registered with the runtime is the primary driver.
+Later context types are secondary drivers. A worker runs its secondary drivers
+before its primary driver.
 
-`Io::context` panics when its worker-local driver initialization fails. Any
-driver initialization failure, including one discovered later by another
-worker, marks the runtime's I/O state failed and requests runtime shutdown. A
-normal `Driver::execute_cycle` failure does the same.
+A cloned `Builtins` or `Io` remains associated with its original worker. It can
+be used from an ordinary thread or from another runtime such as Tokio; Arty
+dispatches the request back to the associated worker. Calls from a different
+Arty worker are rejected to avoid deadlocks.
 
-The primary context type keeps that role on every worker that initializes it.
-Other context types are secondary. Secondary drivers execute before the primary
-in each worker cycle.
+Failure to initialize or run a driver stops the runtime. `Io::context` reports
+an initialization failure by panicking.
 
 The [primary driver example](../examples/arty_io.rs) uses
 `Scheduler::spawn_everywhere` to access one context type on every worker and
-execute work through each worker-local primary driver.
+perform work through each worker-local driver.
 
-During shutdown Arty cancels and drops worker tasks before dropping the worker's
-driver host. It then attempts every initialized driver, reports each shutdown
-error through runtime telemetry, and continues shutting down the remaining
-drivers. Driver shutdown is best effort and does not add a shutdown result to
-the public runtime API.
+During shutdown Arty cancels worker tasks before shutting down their drivers.
+It attempts every initialized driver even if one shutdown fails. Driver
+shutdown errors are reported through telemetry and are not returned from
+`Runtime::stop`.
 
-Use `Scheduler::spawn_blocking` for synchronous I/O that has no Arty driver. It
-runs the callback in a blocking pool and returns a join that can be awaited
-without blocking an async worker.
+For synchronous I/O without an Arty driver, use `Scheduler::spawn_blocking`.
+The callback runs in a blocking pool without blocking an async worker.

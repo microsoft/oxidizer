@@ -520,6 +520,7 @@ impl<M: Marker> Driver for TestDriver<M> {
     }
 
     fn shutdown(self) -> Result<(), DriverError> {
+        self.scenario.driver_interrupts.lock().unwrap().clear();
         self.scenario.shutdowns.fetch_add(1, Ordering::SeqCst);
         if self.scenario.fail_shutdown.load(Ordering::SeqCst) {
             Err(DriverError::from_message("driver shutdown failed"))

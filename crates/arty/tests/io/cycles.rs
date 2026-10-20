@@ -212,6 +212,8 @@ fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
     runtime.stop().unwrap();
     assert_eq!(primary.shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
+    assert!(primary.driver_interrupts.lock().unwrap().is_empty());
+    assert!(secondary.driver_interrupts.lock().unwrap().is_empty());
     assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 2);
 }
 
