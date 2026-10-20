@@ -96,6 +96,7 @@ pub(crate) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
 
 fn fail_runtime(dispatcher: &DispatcherClient, error: DriverError) -> Error {
     let error = Arc::new(error);
+    Scheduler::begin_current_executor_shutdown(dispatcher);
     dispatcher.stop_with_error(Error::io_failure(Arc::clone(&error)));
     Error::io_failure(error)
 }

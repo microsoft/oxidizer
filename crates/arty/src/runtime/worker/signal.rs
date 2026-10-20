@@ -87,6 +87,8 @@ impl WorkerSignal {
 
     pub(crate) fn wait_for_notification(&self) {
         let mut notified = self.notified.lock();
+        #[cfg(test)]
+        self.test_hooks.notify_wait_started();
         loop {
             if *notified {
                 *notified = false;
@@ -94,8 +96,6 @@ impl WorkerSignal {
                 self.test_hooks.notify_notification_release();
                 return;
             }
-            #[cfg(test)]
-            self.test_hooks.notify_wait_started();
             notified = self.ready.wait(notified);
         }
     }

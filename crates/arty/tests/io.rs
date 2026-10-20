@@ -297,8 +297,10 @@ impl Scenario {
             .driver_gate_changed
             .wait_timeout_while(gate, testing_aids::TEST_TIMEOUT, |gate| !gate.entered)
             .unwrap();
+        let entered = gate.entered;
+        drop(gate);
         assert!(!timeout.timed_out(), "driver initialization did not reach its gate");
-        assert!(gate.entered);
+        assert!(entered);
     }
 
     fn release_driver(&self) {
@@ -317,9 +319,14 @@ impl Scenario {
         let mut gate = self.driver_gate.lock().unwrap();
         gate.entered = true;
         self.driver_gate_changed.notify_all();
-        while !gate.released {
-            gate = self.driver_gate_changed.wait(gate).unwrap();
-        }
+        let (gate, timeout) = self
+            .driver_gate_changed
+            .wait_timeout_while(gate, testing_aids::TEST_TIMEOUT, |gate| !gate.released)
+            .unwrap();
+        let released = gate.released;
+        drop(gate);
+        assert!(!timeout.timed_out(), "driver initialization gate was not released");
+        assert!(released);
     }
 
     fn block_waker_if_configured(&self, attempt: usize) {
