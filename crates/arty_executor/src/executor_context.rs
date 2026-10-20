@@ -139,4 +139,28 @@ mod tests {
         .join()
         .unwrap();
     }
+
+    #[test]
+    fn cycle_state_and_queued_wakes_follow_owner_transitions() {
+        std::thread::spawn(|| {
+            let owner = std::thread::current().id();
+            register(owner);
+            assert!(!is_executing(owner));
+
+            {
+                let _cycle = enter_cycle(owner);
+                assert!(is_executing(owner));
+            }
+            assert!(!is_executing(owner));
+
+            enqueue(owner, crate::testing::new_test_task_handle()).unwrap();
+            assert!(has_wakes(owner));
+            clear_wakes(owner);
+            assert!(!has_wakes(owner));
+
+            unregister(owner);
+        })
+        .join()
+        .unwrap();
+    }
 }

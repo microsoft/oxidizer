@@ -254,7 +254,7 @@ impl AsyncWorker {
             match command_rx.try_recv() {
                 Ok(command) => match command {
                     AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                        future_factory.into_inner().register(builtins.clone(), &self.tasks);
+                        let _registered = future_factory.into_inner().register(builtins.clone(), &self.tasks);
                     }
                     AsyncWorkerCommand::AccessIo { access } => {
                         access.into_inner()(builtins);

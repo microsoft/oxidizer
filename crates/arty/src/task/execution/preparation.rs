@@ -121,6 +121,9 @@ pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
 }
 
+#[must_use]
+pub(crate) struct RegisteredRemoteTask;
+
 impl RemoteFutureFactory {
     pub(crate) fn new(factory: impl FnOnce(Builtins, &TaskSet) + Send + 'static) -> Self {
         let factory = Cell::new(Some(factory));
@@ -134,8 +137,9 @@ impl RemoteFutureFactory {
         }
     }
 
-    pub(crate) fn register(self, builtins: Builtins, tasks: &TaskSet) {
+    pub(crate) fn register(self, builtins: Builtins, tasks: &TaskSet) -> RegisteredRemoteTask {
         (self.inner)(builtins, tasks);
+        RegisteredRemoteTask
     }
 }
 
@@ -269,7 +273,7 @@ mod tests {
 
         let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
-        factory.register(builtins, &executor.tasks());
+        let _registered = factory.register(builtins, &executor.tasks());
         let before_poll = invoked.load(Ordering::Relaxed);
         run_to_completion(&mut executor);
         let result = block_on(handle).unwrap();
@@ -344,7 +348,7 @@ mod tests {
         );
         let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
         let (_runtime, builtins) = test_builtins();
-        factory.register(builtins, &executor.tasks());
+        let _registered = factory.register(builtins, &executor.tasks());
         run_to_completion(&mut executor);
         assert!(block_on(handle).unwrap_err().is_panic());
     }

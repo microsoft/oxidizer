@@ -487,6 +487,7 @@ impl<F: Future> Future for FutureStorage<F> {
 #[pinned_drop]
 impl<F> PinnedDrop for FutureStorage<F> {
     #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
+    #[cfg_attr(test, mutants::skip)] // A no-op differs only in the process-terminating panicking-destructor fallback.
     fn drop(self: Pin<&mut Self>) {
         if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
@@ -649,6 +650,18 @@ mod tests {
 
         assert!(task.wake_signal.get().is_some());
         task.abort();
+    }
+
+    #[test]
+    fn task_rejects_remote_promotion_without_a_remote_notification() {
+        let wake_owner = fake_wake_owner();
+        let event_pool = LocalEventPool::<u64>::new();
+        let (tx, _rx) = event_pool.rent();
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        task.initialize(fake_wake_signal(&wake_owner));
+
+        assert!(!task.promote_remote_notification());
     }
 
     #[test]

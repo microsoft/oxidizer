@@ -11,7 +11,7 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
-    pub(crate) fn insert(&mut self, task_handle: TaskHandle) {
+    pub(crate) fn insert(&mut self, task_handle: TaskHandle) -> TaskPtr {
         let pointer = task_handle.as_ptr();
         // SAFETY: `task_handle` keeps the pinned allocation alive on its owner thread.
         let links = unsafe { pointer.as_task() }.get_ref().links();
@@ -29,6 +29,7 @@ impl TaskList {
 
         let owned = task_handle.into_raw();
         debug_assert_eq!(owned, pointer);
+        pointer
     }
 
     pub(crate) fn remove(&mut self, pointer: TaskPtr) -> Option<TaskHandle> {
@@ -103,8 +104,8 @@ mod tests {
         let second_pointer = second.as_ptr();
         let mut list = TaskList::default();
 
-        list.insert(first);
-        list.insert(second);
+        assert_eq!(list.insert(first), first_pointer);
+        assert_eq!(list.insert(second), second_pointer);
         assert!(!list.is_empty());
         assert_eq!(format!("{list:?}"), "TaskList { .. }");
 
@@ -116,6 +117,18 @@ mod tests {
         assert_eq!(remaining.as_ptr(), second_pointer);
         drop(remaining);
         assert!(list.is_empty());
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn dropping_the_list_releases_its_owned_tasks() {
+        let pool = MultiPool::new();
+        {
+            let mut list = TaskList::default();
+            _ = list.insert(task(&pool));
+            _ = list.insert(task(&pool));
+        }
+
         assert!(pool.is_empty());
     }
 }

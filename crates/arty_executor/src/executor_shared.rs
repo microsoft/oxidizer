@@ -171,3 +171,17 @@ impl ExecutorShared {
         self.inner.task_count.get() != 0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_completion_requires_a_shutdown_request() {
+        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), std::thread::current().id());
+
+        assert!(!shared.shutdown_complete());
+        shared.request_shutdown();
+        assert!(shared.shutdown_complete());
+    }
+}

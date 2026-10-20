@@ -91,4 +91,18 @@ mod tests {
     fn default_builder() {
         _ = ExecutorBuilder::default();
     }
+
+    #[test]
+    fn configured_thread_must_identify_the_current_thread() {
+        let foreign_id = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
+        let thread = thread_aware_core::__private::v1::new_thread(
+            thread_aware_core::__private::v1::new_owner(),
+            foreign_id,
+            thread_aware_core::__private::v1::new_numa_node(0),
+        );
+
+        let result = std::panic::catch_unwind(|| ExecutorBuilder::new().thread(thread).build());
+
+        result.unwrap_err();
+    }
 }

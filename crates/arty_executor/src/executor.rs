@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
+use std::num::NonZeroUsize;
 use std::task;
 use std::thread::ThreadId;
 use std::time::Instant;
@@ -184,8 +185,8 @@ impl Executor {
 
     fn accept_new_tasks(&mut self) {
         let accepted = self.shared.accept_new_tasks(&mut self.active);
-        if accepted != 0 {
-            TASKS_ACCEPTED.with(|event| event.observe(accepted));
+        if let Some(accepted) = NonZeroUsize::new(accepted) {
+            TASKS_ACCEPTED.with(|event| event.observe(accepted.get()));
         }
     }
 
@@ -254,7 +255,9 @@ impl Executor {
                 }
                 task::Poll::Pending => {
                     pending_count = pending_count.saturating_add(1);
-                    if !linked {
+                    if linked {
+                        drop(task_handle);
+                    } else {
                         self.pending.insert(task_handle);
                     }
                 }
@@ -298,8 +301,8 @@ impl Executor {
             // SAFETY: The cancellation batch owns each pinned task on its owner thread.
             unsafe { task_handle.as_task() }.abort();
         }
-        if record_drop_metric && aborted_count != 0 {
-            TASKS_DROPPED.with(|event| event.observe(aborted_count));
+        if record_drop_metric && let Some(aborted_count) = NonZeroUsize::new(aborted_count) {
+            TASKS_DROPPED.with(|event| event.observe(aborted_count.get()));
         }
     }
 
@@ -816,6 +819,50 @@ mod tests {
         executor.begin_shutdown();
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+    }
+
+    #[test]
+    fn task_set_shutdown_is_applied_by_the_next_cycle() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let dropped = Rc::new(Cell::new(false));
+        let mut handle = tasks.add_test(DropSignalFuture(Rc::clone(&dropped)));
+
+        tasks.begin_shutdown();
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(dropped.get());
+        assert!(matches!(
+            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Err(error)) if error.is_shutdown()
+        ));
+    }
+
+    #[test]
+    fn shutdown_requested_during_poll_cancels_the_pending_task() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let shutdown = tasks.clone();
+        let mut handle = tasks.add_test(poll_fn(move |_| {
+            shutdown.begin_shutdown();
+            Poll::Pending::<()>
+        }));
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(matches!(
+            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Err(error)) if error.is_shutdown()
+        ));
+    }
+
+    #[test]
+    fn finishing_a_cycle_records_its_end() {
+        let mut executor = Executor::builder().build();
+        let started = executor.start_cycle();
+
+        executor.finish_cycle(started);
+
+        assert!(executor.last_cycle_ended.is_some());
     }
 
     #[test]

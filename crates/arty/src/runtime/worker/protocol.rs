@@ -128,7 +128,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        QueuedTaskFactory::new(factory).into_inner().register(builtins, &executor.tasks());
+        let _registered = QueuedTaskFactory::new(factory).into_inner().register(builtins, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();

@@ -26,8 +26,13 @@ pub(crate) fn new_guarded_executor(owner_waker: Waker) -> ScopeGuard<Executor, f
     scopeguard::guard(Executor::builder().owner_waker(owner_waker).build(), |mut executor: Executor| {
         executor.begin_shutdown();
 
-        while executor.execute_cycle() != CycleOutcome::Shutdown {
+        for _ in 0..16 {
+            if executor.execute_cycle() == CycleOutcome::Shutdown {
+                return;
+            }
             thread::yield_now();
         }
+
+        panic!("executor did not finish shutdown within the bounded cleanup cycles");
     })
 }
