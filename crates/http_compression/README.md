@@ -122,24 +122,24 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRTuyOUnubrsbZ7dRIlt5B_kbOluzi0YM-7QbBhIflEyby5JhZIKCa2NvbXByZXNzb3JzZTAuMi4wgnBodHRwX2NvbXByZXNzaW9uZTAuMi4w
- [__link0]: https://crates.io/crates/compressors/0.2.0
- [__link1]: https://docs.rs/http_compression/0.2.0/http_compression/?search=Compression
- [__link10]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::on_unsupported
- [__link11]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::compressible_types
- [__link12]: https://docs.rs/compressors/0.2.0/compressors/?search=Level::FAST
- [__link13]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::level
- [__link14]: https://docs.rs/http_compression/0.2.0/http_compression/?search=OriginalBody
- [__link15]: https://docs.rs/compressors/0.2.0/compressors/?search=format::Format
- [__link16]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::limits
- [__link17]: https://docs.rs/compressors/0.2.0/compressors/?search=DecompressorLimits::unbounded_output_len
- [__link18]: https://docs.rs/compressors/0.2.0/compressors/?search=DecompressorLimits::unbounded_streams
- [__link19]: https://docs.rs/http_compression/0.2.0/http_compression/?search=UnsupportedCompression::Fail
- [__link2]: https://docs.rs/http_compression/0.2.0/http_compression/?search=Client
- [__link3]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::decompress_responses
- [__link4]: https://docs.rs/http_compression/0.2.0/http_compression/?search=Server
- [__link5]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::decompress_requests
- [__link6]: https://docs.rs/http_compression/0.2.0/http_compression/?search=Server
- [__link7]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::compress_responses
- [__link8]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::limits
- [__link9]: https://docs.rs/http_compression/0.2.0/http_compression/?search=CompressionLayer::resources
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRTuyOUnubrsbZ7dRIlt5B_kbOluzi0YM-7QbBhIflEyby5JhZIKCa2NvbXByZXNzb3JzZTAuMy4wgnBodHRwX2NvbXByZXNzaW9uZTAuMy4w
+ [__link0]: https://crates.io/crates/compressors/0.3.0
+ [__link1]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Compression
+ [__link10]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::on_unsupported
+ [__link11]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::compressible_types
+ [__link12]: https://docs.rs/compressors/0.3.0/compressors/?search=Level::FAST
+ [__link13]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::level
+ [__link14]: https://docs.rs/http_compression/0.3.0/http_compression/?search=OriginalBody
+ [__link15]: https://docs.rs/compressors/0.3.0/compressors/?search=format::Format
+ [__link16]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::limits
+ [__link17]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::unbounded_output_len
+ [__link18]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::unbounded_streams
+ [__link19]: https://docs.rs/http_compression/0.3.0/http_compression/?search=UnsupportedCompression::Fail
+ [__link2]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Client
+ [__link3]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::decompress_responses
+ [__link4]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Server
+ [__link5]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::decompress_requests
+ [__link6]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Server
+ [__link7]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::compress_responses
+ [__link8]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::limits
+ [__link9]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::resources

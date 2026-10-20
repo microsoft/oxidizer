@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+- Public origin recoverable releases a breaking version; exposed type identity/API propagates.
+- Update local dependency requirements: ohno ^0.5.2 -> 0.5.3; recoverable ^0.2.0 -> 0.3.0.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance

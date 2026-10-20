@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.16.0] - 2026-10-20
+
+- Update exposed Bytesbuf, Recoverable, Seismograph, and Tick identities to their breaking releases.
+- Update local dependency requirements: anyspawn ^0.9.1 -> 0.9.2; bytesbuf ^0.11.0 -> 0.12.0; cachet_memory ^0.8.1 -> 0.9.0; cachet_service ^0.5.1 -> 0.6.0; cachet_tier ^0.5.1 -> 0.6.0; layered ^0.3.7 -> 0.3.8; seismograph ^0.2.0 -> 0.3.0; tick ^0.7.1 -> 0.8.0; uniflight ^0.7.0 -> 0.8.0.
+
 ## [0.15.0] - 2026-10-05
 
 - ⚠️ Breaking

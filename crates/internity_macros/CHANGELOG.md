@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Align derive macros with Internity 0.3 and preserve generated deserializer field matching.
+- Update local dependency requirements: internity_macros_impl =0.2.1 -> 0.3.0.
+
 ## [0.2.1] - 2026-09-10
 
 ### Maintenance

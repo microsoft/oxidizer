@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Consolidate diagnostics into `performables::Error`, flatten synchronization modes, return opaque acquisition futures, and support unsized `Arc::from_std` values.
+- Update local dependency requirements: seismograph ^0.2.0 -> 0.3.0; thread_aware_core ^0.1.1 -> 0.1.2; metabench ^0.2.0 -> 0.2.1.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

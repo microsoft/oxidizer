@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.0] - 2026-10-20
+
+- Public origin bytesbuf releases a breaking version; exposed type identity/API propagates.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; fetch ^0.18.0 -> 0.19.0; layered ^0.3.7 -> 0.3.8.
+
 ## [0.8.0] - 2026-10-05
 
 - ⚠️ Breaking

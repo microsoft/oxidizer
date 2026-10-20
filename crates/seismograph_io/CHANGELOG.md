@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Public origin seismograph releases a breaking version; exposed type identity/API propagates.
+- Update local dependency requirements: seismograph ^0.2.0 -> 0.3.0.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

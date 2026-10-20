@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-10-20
+
+- Public origin observed releases a breaking version; exposed type identity/API propagates.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed ^0.28.0 -> 0.29.0.
+
 ## [0.4.0] - 2026-10-05
 
 - ⚠️ Breaking

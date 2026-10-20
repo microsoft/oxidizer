@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.2] - 2026-10-20
+
+- Published local dependency requirement(s) will move: fakeable_impl.
+- Update local dependency requirements: fakeable_impl =0.2.1 -> 0.2.2.
+
 ## [0.2.1] - 2026-10-15
 
 - Features

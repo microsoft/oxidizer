@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-10-20
+
+- Classify the procedural macro as private API and align it with Metabench 0.2.1.
+- Update local dependency requirements: metabench_macros_impl =0.2.0 -> 0.2.1.
+
 ## [0.2.0] - 2026-10-13
 
 - 🔧 Maintenance

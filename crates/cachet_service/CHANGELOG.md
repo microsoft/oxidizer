@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+- Public origin recoverable releases a breaking version; exposed type identity/API propagates.
+- Update local dependency requirements: cachet_tier ^0.5.1 -> 0.6.0; layered ^0.3.7 -> 0.3.8.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance

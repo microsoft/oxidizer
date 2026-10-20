@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.12.1] - 2026-10-20
+
+- Refresh published implementation documentation and test-support dependency metadata.
+
 ## [0.12.0] - 2026-09-10
 
 ### Breaking
