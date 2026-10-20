@@ -148,9 +148,10 @@ impl Runtime {
     /// consumed without waiting.
     ///
     /// Also returns an error if a worker panicked or an I/O driver failed during
-    /// initialization, execution, or shutdown. All workers are joined before
-    /// reporting a failure; task failures must be observed through their own
-    /// join handles.
+    /// initialization or cycle execution. Driver shutdown errors are reported
+    /// through telemetry while shutdown continues. All workers are joined
+    /// before reporting a failure; task failures must be observed through their
+    /// own join handles.
     ///
     /// # Examples
     ///

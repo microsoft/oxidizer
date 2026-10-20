@@ -95,7 +95,6 @@ fn waiting_registration_observes_another_workers_failure() {
     scenario.block_driver_at.store(1, Ordering::SeqCst);
     scenario.fail_driver_at.store(1, Ordering::SeqCst);
     let (first_outcome_tx, first_outcome_rx) = mpsc::channel();
-    let (second_started_tx, second_started_rx) = mpsc::channel();
     let (second_outcome_tx, second_outcome_rx) = mpsc::channel();
 
     let first = workers[0].spawn({
@@ -113,7 +112,6 @@ fn waiting_registration_observes_another_workers_failure() {
     let second = workers[1].spawn({
         let scenario = scenario.clone();
         async move |builtins| {
-            second_started_tx.send(()).unwrap();
             let outcome = builtins
                 .io()
                 .try_context::<TestContext<ConcurrentFirstFailure>>(&scenario)
@@ -121,15 +119,14 @@ fn waiting_registration_observes_another_workers_failure() {
             second_outcome_tx.send(outcome).unwrap();
         }
     });
-    second_started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
-    thread::sleep(Duration::from_millis(20));
+    let second_outcome = second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT);
     scenario.release_driver();
 
     assert_eq!(
         first_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(),
         "driver construction failed"
     );
-    assert_eq!(second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(), "ok");
+    assert_eq!(second_outcome.unwrap(), "ok");
     let _ = first.join();
     let _ = second.join();
     assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
@@ -142,7 +139,7 @@ fn concurrent_same_context_registration_constructs_options_once() {
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
-    let (second_started_tx, second_started_rx) = mpsc::channel();
+    let (second_done_tx, second_done_rx) = mpsc::channel();
 
     let first = workers[0].spawn({
         let scenario = scenario.clone();
@@ -153,14 +150,14 @@ fn concurrent_same_context_registration_constructs_options_once() {
     scenario.wait_until_driver_blocked();
 
     let second = workers[1].spawn(async move |builtins| {
-        second_started_tx.send(()).unwrap();
         let _ = builtins
             .io()
             .context::<TestContext<ConcurrentSameContext>>(&Scenario::options(RolePlan::PreferPrimary));
+        second_done_tx.send(()).unwrap();
     });
-    second_started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
-    thread::sleep(Duration::from_millis(20));
+    let second_done = second_done_rx.recv_timeout(testing_aids::TEST_TIMEOUT);
     scenario.release_driver();
+    second_done.unwrap();
 
     first.join().unwrap();
     second.join().unwrap();

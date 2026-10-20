@@ -61,8 +61,9 @@
 //! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
-//! - [`Io`](crate::io::Io) registers external `arty_io_core` contexts and
-//!   initializes one driver instance on every worker before returning.
+//! - [`Io`](crate::io::Io) registers external `arty_io_core` contexts and lazily
+//!   initializes a driver on each worker when that worker first requests the
+//!   context.
 //! - [`Scheduler`](crate::task::Scheduler) keeps child work on its worker.
 //! - [`Clock`](crate::time::Clock) provides timers and timeouts;
 //!   [`ClockControl`](crate::time::ClockControl) controls time in tests.

@@ -1063,6 +1063,44 @@ mod tests {
     }
 
     #[test]
+    fn published_shutdown_discards_queued_io_access_without_invoking_it() {
+        struct DropSignal(mpsc::Sender<()>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                _ = self.0.send(());
+            }
+        }
+
+        let (command_tx, command_rx) = channel::unbounded();
+        let worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+        );
+        let invoked = Arc::new(AtomicBool::new(false));
+        let access_invoked = Arc::clone(&invoked);
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let drop_signal = DropSignal(dropped_tx);
+        command_tx
+            .send(AsyncWorkerCommand::AccessIo {
+                access: crate::runtime::worker::protocol::QueuedIoAccess::new(Box::new(move |_| {
+                    let _ = &drop_signal;
+                    access_invoked.store(true, Ordering::Release);
+                })),
+            })
+            .unwrap();
+        worker.shutdown_signal.store(true, Ordering::Release);
+
+        worker.run();
+
+        dropped_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert!(!invoked.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn shutdown_published_during_final_batch_registration_cancels_before_polling() {
         let (command_tx, command_rx) = channel::unbounded();
         let invoked = Arc::new(AtomicUsize::new(0));

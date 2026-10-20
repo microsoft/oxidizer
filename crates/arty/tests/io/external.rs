@@ -138,7 +138,7 @@ fn shutdown_during_external_initialization_unblocks_without_io_failure() {
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
 #[test]
-fn queued_external_access_is_destroyed_when_shutdown_discards_it() {
+fn external_access_racing_shutdown_returns_shutdown() {
     let runtime = runtime(1);
     let operations = RuntimeOperations::from(&runtime);
     let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
@@ -163,14 +163,12 @@ fn queued_external_access_is_destroyed_when_shutdown_discards_it() {
                 .to_string()
         })
     };
-    thread::sleep(Duration::from_millis(20));
     operations.request_stop();
     release_blocker_tx.send(()).unwrap();
 
     assert_eq!(external.join().unwrap(), "the runtime is shutting down");
     let _ = blocker.join();
     runtime.stop().unwrap();
-    assert_eq!(scenario.context_constructions.load(Ordering::SeqCst), 0);
 }
 #[test]
 fn relocation_to_a_foreign_runtime_preserves_the_original_worker_binding() {

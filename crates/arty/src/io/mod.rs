@@ -53,11 +53,13 @@
 //! #         Ok(())
 //! #     }
 //! # }
+//! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
 //! async fn main(cx: Builtins) {
 //!     let io = cx.io().context::<ExampleIo>(&());
 //!     io.submit("request");
 //! }
+//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
 //! `ExampleIo` stands in for a provider's context; real contexts expose their

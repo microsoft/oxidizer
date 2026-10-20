@@ -287,7 +287,6 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
     let (first_outcome_tx, first_outcome_rx) = mpsc::channel();
-    let (second_started_tx, second_started_rx) = mpsc::channel();
     let (second_outcome_tx, second_outcome_rx) = mpsc::channel();
 
     let first = workers[0].spawn({
@@ -305,7 +304,6 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
     let second = workers[1].spawn({
         let scenario = scenario.clone();
         async move |builtins| {
-            second_started_tx.send(()).unwrap();
             let outcome = builtins
                 .io()
                 .try_context::<TestContext<ShutdownWhileWaiting>>(&scenario)
@@ -313,8 +311,7 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
             second_outcome_tx.send(outcome).unwrap();
         }
     });
-    second_started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
-    thread::sleep(Duration::from_millis(20));
+    let second_outcome = second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT);
     operations.request_stop();
     scenario.release_driver();
 
@@ -322,7 +319,7 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
         first_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(),
         "the runtime is shutting down"
     );
-    assert_eq!(second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(), "ok");
+    assert_eq!(second_outcome.unwrap(), "ok");
     let _ = first.join();
     let _ = second.join();
     runtime.stop().unwrap();

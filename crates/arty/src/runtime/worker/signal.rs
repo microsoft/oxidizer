@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{Arc as StdArc, OnceLock};
 #[cfg(test)]
 use std::sync::mpsc;
+use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::time::Duration;
 
