@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(test)]
-use std::sync::mpsc;
 use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::time::Duration;
@@ -17,38 +15,6 @@ pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
     driver_waker: OnceLock<Waker>,
-    #[cfg(test)]
-    test_hooks: WorkerSignalTestHooks,
-}
-
-#[cfg(test)]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct WorkerSignalTestHooks {
-    idle_wait_notifier: Option<mpsc::Sender<()>>,
-    notification_wait_released: Option<mpsc::Sender<()>>,
-}
-
-#[cfg(test)]
-impl WorkerSignalTestHooks {
-    pub(crate) fn with_wait_observers(idle_wait_notifier: mpsc::Sender<()>, notification_wait_released: mpsc::Sender<()>) -> Self {
-        Self {
-            idle_wait_notifier: Some(idle_wait_notifier),
-            notification_wait_released: Some(notification_wait_released),
-        }
-    }
-
-    #[cfg(test)]
-    fn notify_wait_started(&self) {
-        if let Some(notifier) = &self.idle_wait_notifier {
-            _ = notifier.send(());
-        }
-    }
-
-    fn notify_notification_release(&self) {
-        if let Some(notifier) = &self.notification_wait_released {
-            _ = notifier.send(());
-        }
-    }
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -75,25 +41,11 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
-    #[cfg(test)]
-    pub(crate) fn new(test_hooks: WorkerSignalTestHooks) -> Self {
-        Self {
-            notified: Mutex::new(false),
-            ready: Condvar::new(),
-            driver_waker: OnceLock::new(),
-            test_hooks,
-        }
-    }
-
     pub(crate) fn wait_for_notification(&self) {
         let mut notified = self.notified.lock();
-        #[cfg(test)]
-        self.test_hooks.notify_wait_started();
         loop {
             if *notified {
                 *notified = false;
-                #[cfg(test)]
-                self.test_hooks.notify_notification_release();
                 return;
             }
             notified = self.ready.wait(notified);
@@ -113,18 +65,12 @@ impl WorkerSignal {
             },
             |_| start.elapsed(),
             |notified, remaining| {
-                #[cfg(test)]
-                self.test_hooks.notify_wait_started();
                 let (guard, elapsed) = self.ready.wait_timeout(
                     notified
                         .take()
                         .expect("the previous timed wait always replaced its notification guard"),
                     remaining,
                 );
-                #[cfg(test)]
-                if *guard {
-                    self.test_hooks.notify_notification_release();
-                }
                 *notified = Some(guard);
                 elapsed.timed_out()
             },
@@ -181,6 +127,7 @@ impl Wake for WorkerSignal {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::mpsc;
     use std::thread;
 
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
