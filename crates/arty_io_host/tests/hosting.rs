@@ -568,7 +568,7 @@ fn telemetry_reports_successful_driver_lifecycle_in_order() {
 }
 
 #[test]
-fn telemetry_reports_failures_with_standard_exception_dimensions() {
+fn telemetry_reports_failures_with_error_dimensions() {
     let (runtime, processor) = telemetry_runtime();
     let host = host(&runtime);
     let state = Arc::new(State::default());
@@ -591,8 +591,8 @@ fn telemetry_reports_failures_with_standard_exception_dimensions() {
     assert_eq!(failed.severity(), Some(Severity::Error));
     assert_eq!(dimension(failed, "io.context"), Some(type_name::<Context<false>>().into()));
     assert_eq!(dimension(failed, "io.driver.role"), Some("primary".into()));
-    assert_eq!(dimension(failed, "exception.message"), Some("cycle failed".into()));
-    assert_eq!(dimension(failed, "error.message"), None);
+    assert_eq!(dimension(failed, "error.message"), Some("cycle failed".into()));
+    assert_eq!(dimension(failed, "exception.message"), None);
 }
 
 #[test]
@@ -613,7 +613,7 @@ fn telemetry_reports_initialization_and_shutdown_failures() {
     );
     assert_eq!(initialization_events[0].severity(), Some(Severity::Error));
     assert_eq!(
-        dimension(&initialization_events[0], "exception.message"),
+        dimension(&initialization_events[0], "error.message"),
         Some("initialization failed".into())
     );
 
@@ -631,7 +631,7 @@ fn telemetry_reports_initialization_and_shutdown_failures() {
         ["arty.rt.io.driver.initialized", "arty.rt.io.driver.shutdown_failed"]
     );
     assert_eq!(shutdown_events[1].severity(), Some(Severity::Error));
-    assert_eq!(dimension(&shutdown_events[1], "exception.message"), Some("shutdown failed".into()));
+    assert_eq!(dimension(&shutdown_events[1], "error.message"), Some("shutdown failed".into()));
 }
 
 #[test]

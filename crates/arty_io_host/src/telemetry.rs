@@ -50,7 +50,7 @@ pub(crate) struct IoDriverInitializationFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "exception.message")]
+    #[dimension(log = "error.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
 
@@ -62,7 +62,7 @@ pub(crate) struct IoDriverCycleFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "exception.message")]
+    #[dimension(log = "error.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
 
@@ -84,7 +84,7 @@ pub(crate) struct IoDriverShutdownFailed {
     pub(crate) context: IoContextName,
     #[dimension(log = "io.driver.role", metric = "io.driver.role")]
     pub(crate) role: IoDriverRoleLabel,
-    #[dimension(log = "exception.message")]
+    #[dimension(log = "error.message")]
     pub(crate) error: IoDriverErrorMessage,
 }
 
