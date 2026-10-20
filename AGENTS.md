@@ -25,36 +25,15 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-Ordinary code PRs do not update changelogs. An on-demand version-increment PR
-must prepend a release entry to every package `CHANGELOG.md` whose version is in
-the final resolved plan. Use the planned version and release date, summarize the
-complete consumer-visible change since the package anchor, and include
-dependency-only movements. Keep historical entries unchanged.
+Ordinary code PRs do not update changelogs. Changelog entries are prepared as
+part of an on-demand version PR; see [docs/releasing.md](docs/releasing.md).
 
 ## Releasing Packages
 
-Use the [increment-versions skill](.github/skills/increment-versions/SKILL.md)
-in **standalone mode** when explicitly asked to prepare package versions.
-Version preparation is on demand, not required for every code PR.
-The complete upstream skill is vendored at a recorded Folo revision; follow it
-without replacing it with repository-specific command sequences.
-See [docs/releasing.md](docs/releasing.md) for the maintainer's release workflow.
-
-Require an explicitly selected local release-history ref and, for stacked PRs,
-the actual parent target ref. Do not infer these from the publication setup.
-Keep release evidence outside the repository or in an already ignored location.
-Include the complete **Version/release plan** in the PR, including dependent
-packages, version alignment, and retained pending increments.
-
-After the resolved version plan is applied, update the affected package
-changelogs as repository-specific post-version work. Because those edits change
-the assessed checkout, rerun the skill's preparation and verification stages so
-the final evidence covers the completed PR.
-
-This process replaces the legacy version-preparation scripts. It does not
-authorize merging, tagging, publication, or changes to the existing internal
-Microsoft publishing automation or GitHub release workflow. Existing merge-triggered
-publication still applies to version PRs; standalone mode does not disable it.
+See [docs/releasing.md](docs/releasing.md) for the on-demand version-planning
+workflow based on the vendored `increment-versions` skill. Version preparation
+is not required for ordinary code PRs and does not authorize merging or
+publication.
 
 ## Packaging
 
