@@ -170,7 +170,7 @@ exclude_re = [
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Waiter::register with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Waiter::take_waker -> Option<Waker> with None$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: delete ! in EagerWaitQueue::enqueue_if_needed_marked$',
-    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace EagerWaitQueue::wake_one_marked with \(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace EagerWaitQueue::wake_(one|all)_marked with \(\)$',
     'crates/performables/src/sync/lock/native.rs:\d+:\d+: replace RwLockReadGuard.*::release_native with \(\)$',
     'crates/performables/src/sync/mutex/hal/mod.rs:\d+:\d+: replace <impl Drop for Unlock.*>::drop with \(\)$',
     'crates/performables/src/sync/mutex/native.rs:\d+:\d+: replace Mutex<T, Sync>::release_panicking_native with \(\)$',
@@ -180,13 +180,13 @@ exclude_re = [
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace == with != in Mutex::unlock$',
     # Reversing contended acquisition also stalls native ARM tests.
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace != with == in Mutex::lock_contended$',
-    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace wake_condition_one with \(\)$',
+    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace (wake|wake_condition_one) with \(\)$',
     # Windows wake-call deletion also strands native sleepers.
     'crates/performables/src/sync/mutex/hal/windows.rs:\d+:\d+: replace (wake_lock|wake_condition_one) with \(\)$',
     # FUTEX operation codes and PRIVATE_FLAG have disjoint bits; XOR is identical.
     'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace \| with \^$',
-    # AND changes the wake opcode into a blocking wait (native x64/ARM64 timeout).
-    'crates/performables/src/sync/mutex/hal/linux.rs:12:\d+: replace \| with &$',
+    # AND mismatches private wait/wake queues or turns wake into a blocking wait.
+    'crates/performables/src/sync/mutex/hal/linux.rs:(11|12):\d+: replace \| with &$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
     # Exact ownership/progress mutations strand native RwLock tests, as confirmed

@@ -151,12 +151,18 @@ mod tests {
         let other_mutex = Arc::clone(&mutex);
         let other_condition = Arc::clone(&condition);
         let worker = std::thread::spawn(move || {
-            let guard = other_mutex.lock();
+            let mut guard = other_mutex.lock();
             started_tx.send(()).unwrap();
-            let (guard, timed_out) = other_condition.wait(&other_mutex, guard, None);
-            let poisoned = other_mutex.is_poisoned();
+            let result = loop {
+                let (next_guard, timed_out) = other_condition.wait(&other_mutex, guard, None);
+                guard = next_guard;
+                let poisoned = other_mutex.is_poisoned();
+                if poisoned {
+                    break (timed_out, poisoned);
+                }
+            };
             other_mutex.unlock(guard);
-            finished_tx.send((timed_out, poisoned)).unwrap();
+            finished_tx.send(result).unwrap();
         });
         started_rx.recv().unwrap();
         catch_unwind(AssertUnwindSafe(|| {
