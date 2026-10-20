@@ -3684,7 +3684,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "multitude"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
@@ -3712,7 +3712,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.10.0"
+version = "0.11.1"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3721,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.10.0"
+version = "0.11.1"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "observed"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "criterion",
  "data_privacy",
@@ -3927,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros"
-version = "0.26.0"
+version = "0.28.0"
 dependencies = [
  "mutants",
  "observed_macros_impl",
@@ -3935,7 +3935,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros_impl"
-version = "0.26.0"
+version = "0.28.0"
 dependencies = [
  "insta",
  "proc-macro2",
