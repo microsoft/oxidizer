@@ -26,14 +26,16 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 ## Changelogs
 
 Ordinary code PRs do not update changelogs. Changelog entries are prepared as
-part of an on-demand version PR; see [docs/releasing.md](docs/releasing.md).
+part of an on-demand version PR through the `prepare-release` skill; see
+[docs/releasing.md](docs/releasing.md).
 
 ## Releasing Packages
 
 See [docs/releasing.md](docs/releasing.md) for the on-demand version-planning
-workflow based on the vendored `increment-versions` skill. Version preparation
-is not required for ordinary code PRs and does not authorize merging or
-publication.
+workflow. Use the repository's `prepare-release` skill as the human entry point;
+it coordinates `increment-versions` and release changelogs. Version preparation
+is not required for ordinary code PRs and does not authorize merging,
+tagging, or publication.
 
 ## Packaging
 

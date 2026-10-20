@@ -112,7 +112,7 @@ The `add-crate` script does the following:
 Releasing new versions of crates to [crates.io](https://crates.io) is handled by
 an internal Microsoft automation process. See
 [Releasing Oxidizer Packages](./docs/releasing.md) for the version preparation
-and release workflow.
+workflow and its recommended `prepare-release` entry point.
 
 ### Documenting Crates
 
