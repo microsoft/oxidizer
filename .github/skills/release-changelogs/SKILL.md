@@ -43,6 +43,9 @@ movement from nearby manifests or historical changelog entries.
   group-only releases even when the package has no direct source change.
 - Preserve the changelog preamble, local section style, links, and every
   historical release entry. Never rewrite released history.
+- A missing package `CHANGELOG.md` is not a missing release-plan input. Create
+  it with `# Changelog`, a blank line, and the planned release entry. Do not copy
+  boilerplate or history from another package.
 - Keep statements evidence-based and package-specific. Do not copy commit titles
   that do not describe a consumer-visible effect.
 
@@ -59,10 +62,11 @@ movement from nearby manifests or historical changelog entries.
    established organization where practical. If there is no direct
    consumer-visible change, add a maintenance entry naming the dependency or
    alignment reason instead of inventing a feature or fix.
-4. Draft and validate the complete package set before writing. Insert each entry
-   after the changelog title and preamble, before the newest historical release.
-   If a planned version already exists in released history, stop and report the
-   conflict.
+4. Draft and validate the complete package set before writing. For an existing
+   changelog, insert each entry after its title and preamble, before the newest
+   historical release. For a missing changelog, create the minimal file described
+   above. If a planned version already exists in released history, stop and
+   report the conflict.
 5. During the coordinator's convergence loop, replace or remove only uncommitted
    entries created by this release run from its immediately preceding plan. Never
    prepend a second entry for the same run or alter older release history.
@@ -71,10 +75,11 @@ movement from nearby manifests or historical changelog entries.
 
 ## Failure and handoff
 
-Report missing changelogs, ambiguous anchor state, stale evidence, duplicate
-versions, unverifiable claims, or plan/checkout mismatches as blockers. Do not
-write a partial package set. If a write fails, undo only this run's changelog
-insertions and preserve unrelated or historical content.
+Report an unwritable package path, ambiguous anchor state, stale evidence,
+duplicate versions, unverifiable claims, or plan/checkout mismatches as blockers.
+Do not write a partial package set. If a write fails, undo only this run's
+created files and changelog insertions, preserving unrelated or historical
+content.
 
 Return the package-to-changelog coverage, the evidence used for each entry, and
 all blockers. Changelog edits invalidate the earlier final evidence; the caller
