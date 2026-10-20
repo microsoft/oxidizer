@@ -110,21 +110,9 @@ The `add-crate` script does the following:
 ### Publishing Crates
 
 Releasing new versions of crates to [crates.io](https://crates.io) is handled by
-an internal Microsoft automation process. To release a new version of any crate,
-follow this simple process:
-
-1. Make sure the changes you want to release have all been committed to the repo.
-
-2. Create a branch off of main.
-
-3. Run the [`increment-versions` agent skill](./.github/skills/increment-versions/SKILL.md)
-   in standalone mode to update versions and changelogs.
-
-4. Create a PR like normal to push changes out.
-
-See [Releasing Oxidizer Packages](./docs/releasing.md) for detailed instructions.
-Once your PR is merged, automation will kick in. It will tag the commit and push
-the crate to crates.io.
+an internal Microsoft automation process. See
+[Releasing Oxidizer Packages](./docs/releasing.md) for the version preparation
+and release workflow.
 
 ### Documenting Crates
 
