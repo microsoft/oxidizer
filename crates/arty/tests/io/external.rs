@@ -153,16 +153,13 @@ fn external_access_racing_shutdown_returns_shutdown() {
     blocker_started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
 
     let scenario = Scenario::options(RolePlan::PreferPrimary);
-    let external = {
-        let scenario = scenario.clone();
-        thread::spawn(move || {
-            builtins
-                .io()
-                .try_context::<TestContext<QueuedExternalShutdown>>(&scenario)
-                .unwrap_err()
-                .to_string()
-        })
-    };
+    let external = thread::spawn(move || {
+        builtins
+            .io()
+            .try_context::<TestContext<QueuedExternalShutdown>>(&scenario)
+            .unwrap_err()
+            .to_string()
+    });
     operations.request_stop();
     release_blocker_tx.send(()).unwrap();
 

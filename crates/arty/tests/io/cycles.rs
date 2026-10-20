@@ -62,11 +62,8 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
     let secondary = Scenario::options(RolePlan::Secondary);
 
     workers[0]
-        .spawn({
-            let primary = primary.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
-            }
+        .spawn(async move |builtins| {
+            let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
         })
         .join()
         .unwrap();
@@ -182,14 +179,10 @@ fn timers_fire_while_a_primary_driver_is_initialized() {
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_primary.store(true, Ordering::SeqCst);
     let (completed, completion) = mpsc::channel();
-
-    worker.spawn({
-        let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
-            builtins.clock().delay(Duration::from_millis(20)).await;
-            completed.send(()).unwrap();
-        }
+    worker.spawn(async move |builtins| {
+        let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+        builtins.clock().delay(Duration::from_millis(20)).await;
+        completed.send(()).unwrap();
     });
 
     completion.recv_timeout(Duration::from_millis(500)).unwrap();

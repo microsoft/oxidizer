@@ -173,6 +173,18 @@ mod tests {
     }
 
     #[test]
+    fn primary_driver_state_changes_after_context_initialization() {
+        let (runtime, thread, host) = host();
+        let before_initialization = host.has_primary();
+
+        RuntimeDriverHost::try_context_current::<TestContext>(&runtime, &thread, &false)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!((before_initialization, host.has_primary()), (false, true));
+    }
+
+    #[test]
     fn driver_cycle_failures_are_returned() {
         let (runtime, thread, host) = host();
         RuntimeDriverHost::try_context_current::<TestContext>(&runtime, &thread, &true)

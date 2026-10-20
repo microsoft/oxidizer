@@ -305,6 +305,7 @@ mod tests {
     use std::thread;
 
     use arty_executor::{JoinHandle as ExecutorJoinHandle, TaskOptions};
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     #[cfg(not(miri))]
     use events_once::BoxedSender;
     use events_once::{Event, IntoValueError};
@@ -470,6 +471,43 @@ mod tests {
     fn enqueue(factory: BoxedRemoteFutureFactory) -> AsyncWorkerCommand {
         AsyncWorkerCommand::EnqueueTask {
             future_factory: crate::runtime::worker::protocol::QueuedTaskFactory::new(factory),
+        }
+    }
+
+    #[derive(Clone)]
+    struct WaitRecordingContext(Arc<std::sync::Mutex<Vec<Duration>>>);
+
+    impl ThreadAware for WaitRecordingContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for WaitRecordingContext {
+        type ContextOptions = Arc<std::sync::Mutex<Vec<Duration>>>;
+        type Driver = WaitRecordingDriver;
+
+        fn context(options: Self::ContextOptions) -> Self {
+            Self(options)
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(WaitRecordingDriver(Arc::clone(&self.0)))
+        }
+    }
+
+    struct WaitRecordingDriver(Arc<std::sync::Mutex<Vec<Duration>>>);
+
+    impl Driver for WaitRecordingDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, cycle: &mut Cycle) -> Result<(), DriverError> {
+            self.0.lock().unwrap().push(cycle.max_wait());
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
         }
     }
 
@@ -797,6 +835,36 @@ mod tests {
         assert!(signal.is_notified());
         assert!(worker.execute_step().is_continue());
         assert!(signal.is_notified());
+
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker.run();
+    }
+
+    #[test]
+    fn a_full_command_batch_gives_the_primary_driver_no_wait_budget() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::clone(&signal),
+        );
+        let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let _context = worker
+            .builtins
+            .as_ref()
+            .unwrap()
+            .io()
+            .context::<WaitRecordingContext>(&Arc::clone(&waits));
+        for _ in 0..COMMANDS_PER_CYCLE {
+            command_tx.send(enqueue(Box::new(|_, _| {}))).unwrap();
+        }
+        WorkerSignal::waker(&signal).wake_by_ref();
+
+        assert!(worker.execute_step().is_continue());
+        assert_eq!(*waits.lock().unwrap(), vec![Duration::ZERO]);
 
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
         worker.run();
