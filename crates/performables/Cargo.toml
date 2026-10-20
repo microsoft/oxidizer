@@ -20,6 +20,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/performable
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
+[package.metadata.coverage-gate]
+# Atomic retry bookkeeping is scheduling-dependent. Keep the loops measured
+# without synthetic contention hooks solely to satisfy line coverage.
+min-lines-percent = 99.8
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::Deserialize",

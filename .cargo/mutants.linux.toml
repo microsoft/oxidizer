@@ -46,6 +46,8 @@ profile = "mutants"
 # Retain fatal-path tests needed to detect mutations in termination guards;
 # skip the remaining intentional-abort tests only during mutation runs.
 # Exact metabench deadlines use FakeClock/FakeProcess; keep real-time stress outside mutation runs.
+# Type/trait UI contracts stay in native/careful suites. Runtime-body mutations
+# do not change trait bounds, so rebuilding UI diagnostics adds no runtime coverage.
 additional_cargo_test_args = [
     "--locked", "--tests", "--",
     "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
@@ -57,6 +59,7 @@ additional_cargo_test_args = [
     "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
     "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
     "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
+    "--skip", "type_system_contracts",
 ]
 
 exclude_re = [
@@ -183,11 +186,15 @@ exclude_re = [
     'crates/performables/src/sync/lock/hal/portable.rs:\d+:\d+: replace RwLock::read_unlock with \(\)$',
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace Mutex::unlock with \(\)$',
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace == with != in Mutex::unlock$',
+    # Reversing contended acquisition also stalls native ARM tests.
+    'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace != with == in Mutex::lock_contended$',
     'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace wake_condition_one with \(\)$',
     # Windows wake-call deletion also strands native sleepers.
     'crates/performables/src/sync/mutex/hal/windows.rs:\d+:\d+: replace (wake_lock|wake_condition_one) with \(\)$',
     # FUTEX operation codes and PRIVATE_FLAG have disjoint bits; XOR is identical.
     'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace \| with \^$',
+    # AND changes the wake opcode into a blocking wait (native x64/ARM64 timeout).
+    'crates/performables/src/sync/mutex/hal/linux.rs:12:\d+: replace \| with &$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
     # Exact ownership/progress mutations strand native RwLock tests, as confirmed
