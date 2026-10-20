@@ -85,7 +85,6 @@ impl WorkerSignal {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn wait_for_notification(&self) {
         let mut notified = self.notified.lock();
         loop {

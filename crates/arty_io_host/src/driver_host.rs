@@ -187,6 +187,21 @@ impl DriverHost {
         Waker::from(Arc::clone(&self.interrupt))
     }
 
+    /// Returns whether this worker has initialized its primary driver.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called reentrantly while this host is executing a driver
+    /// cycle or modifying its driver set.
+    #[must_use]
+    pub fn has_primary(&self) -> bool {
+        self.drivers
+            .try_borrow()
+            .expect("primary-driver state cannot be inspected during driver execution or initialization")
+            .primary
+            .is_some()
+    }
+
     /// Returns this worker's context of type `C`, creating its local driver on
     /// first access.
     ///

@@ -473,6 +473,27 @@ fn worker_local_drivers_are_created_lazily() {
 }
 
 #[test]
+fn primary_presence_tracks_worker_local_initialization() {
+    let runtime = test_runtime();
+    let first = host(&runtime);
+    let second = host(&runtime);
+    let state = Arc::new(State::default());
+
+    assert!(!first.has_primary());
+    assert!(!second.has_primary());
+
+    let _ = first.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    assert!(first.has_primary());
+    assert!(!second.has_primary());
+
+    let _ = second.context::<Context<true>>(Arc::clone(&state)).unwrap();
+    assert!(!second.has_primary());
+
+    let _ = second.context::<Context<false>>(Arc::clone(&state)).unwrap();
+    assert!(second.has_primary());
+}
+
+#[test]
 fn context_accepts_move_only_options() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());

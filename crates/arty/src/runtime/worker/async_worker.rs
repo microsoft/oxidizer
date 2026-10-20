@@ -186,7 +186,8 @@ impl AsyncWorker {
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
-        let max_wait = if should_suspend {
+        let has_primary = self.driver_host.as_ref().is_some_and(|driver_host| driver_host.has_primary());
+        let max_wait = if should_suspend && has_primary {
             next_timer
                 .map_or(IO_IDLE_WAIT, |deadline| suspend_wait(deadline, self.time.instant()))
                 .min(IO_IDLE_WAIT)
@@ -204,9 +205,14 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
 
-        if should_suspend {
+        if should_suspend && has_primary {
             // A notification arriving before this wait is retained by WorkerSignal.
             self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed()));
+        } else if should_suspend {
+            match next_timer {
+                Some(deadline) => self.signal.wait(suspend_wait(deadline, self.time.instant())),
+                None => self.signal.wait_for_notification(),
+            }
         }
 
         ControlFlow::Continue(())
@@ -368,6 +374,41 @@ mod tests {
         drop(clock);
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
         worker.run();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn worker_without_io_or_timers_stays_in_one_notification_wait() {
+        let (idle_wait_started, idle_wait) = mpsc::channel();
+        let (wait_released, _released_wait) = mpsc::channel();
+        let (command_tx, command_rx) = channel::unbounded();
+        let worker_command_tx = command_tx.clone();
+        let (worker_ready, worker_setup) = mpsc::channel();
+        let worker_thread = thread::spawn(move || {
+            let signal = Arc::new(WorkerSignal::new(
+                crate::runtime::worker::signal::WorkerSignalTestHooks::with_wait_observers(idle_wait_started, wait_released),
+            ));
+            let worker = test_worker(
+                worker_command_tx,
+                command_rx,
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::clone(&signal),
+            );
+            worker_ready.send(WorkerSignal::waker(&signal)).unwrap();
+            worker.run();
+        });
+        let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+        idle_wait.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        assert_eq!(
+            idle_wait.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
+
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker_waker.wake_by_ref();
+        worker_thread.join().unwrap();
     }
 
     #[cfg(not(miri))]

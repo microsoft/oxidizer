@@ -49,6 +49,10 @@ impl RuntimeDriverHost {
         self.host.waker()
     }
 
+    pub(crate) fn has_primary(&self) -> bool {
+        self.host.has_primary()
+    }
+
     pub(crate) fn try_context_current<C>(runtime: &IoRuntime, thread: &Thread, options: &C::ContextOptions) -> Option<Result<C, Error>>
     where
         C: IoContext,
