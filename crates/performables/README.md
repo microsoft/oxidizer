@@ -29,6 +29,14 @@ payload storage and enabled telemetry may allocate independently. Final
 arrivals at an async-capable barrier do not allocate their own waiter storage;
 releasing other participants can still execute their wakers.
 
+With recording disabled, watch registration and cancellation reuse their
+reserved waiter slots after warm-up, up to the retained capacity. A
+single-participant barrier wait and condition-variable notifications with no
+waiters also allocate no primitive-owned storage on the owned Windows/Linux
+backends. These properties exclude construction, payload allocation and
+user-provided waker behavior; they do not promise stable object sizes or a
+particular memory layout.
+
 ## Why use this instead of `std` or `tokio`?
 
 The crate offers:
@@ -54,7 +62,7 @@ See [`arc`][__link5] and [`sync`][__link6] for the available types and their ful
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbgJ0_wVvIQX4bBpor4zQG5ZIbDJtpfJ3_pwIbxtuOpJyiB2phZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKiv3039gS7sbD-ElQZXbo9kbiVJuKUgJodIb56ozbxN0FxlhZIKCbHBlcmZvcm1hYmxlc2UwLjIuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjE
  [__link0]: https://docs.rs/performables/0.2.0/performables/?search=arc::Arc
  [__link1]: https://docs.rs/performables/0.2.0/performables/?search=sync::notify::Notify
  [__link2]: https://docs.rs/performables/0.2.0/performables/?search=arc::PerThread

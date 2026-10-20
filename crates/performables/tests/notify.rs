@@ -125,6 +125,19 @@ fn extra_notifications_after_queued_delivery_leave_one_stored_permit() {
 }
 
 #[test]
+fn cancelling_one_of_two_unselected_waiters_keeps_the_other_notifiable() {
+    let notify = Notify::<Async>::new();
+    let mut cancelled = notify.wait_async();
+    let mut remaining = pin!(notify.wait_async());
+    assert!(!cancelled.enable());
+    assert!(!remaining.enable());
+    drop(cancelled);
+    notify.notify_one();
+    assert!(remaining.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_ready());
+    assert!(!notify.try_wait());
+}
+
+#[test]
 fn blocking_and_async_waiters_share_one_notification_state() {
     let notify = Arc::new(Notify::<Async>::new());
     let mut asynchronous = pin!(notify.wait_async());

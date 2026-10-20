@@ -322,6 +322,7 @@ impl WaitTimeoutOutcome {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;

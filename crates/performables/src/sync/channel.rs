@@ -10,13 +10,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::broadcast::{Broadcast, Registration as BroadcastRegistration};
 // Channel state is already heap-shared; another lazy sidecar would not shrink
 // the endpoint handles and would add work to their notification path.
 use super::raw_mutex::{RawMutex as StateMutex, RawMutexGuard as StateGuard};
-use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_until};
+use super::wait_queue::{EagerWaitQueue as WaitQueue, Timeout, Waiter, block_on, block_on_until};
 use crate::Error;
 use crate::error::ErrorKind;
 use crate::telemetry::{self, EventKind};
@@ -388,7 +388,7 @@ impl<T> Receiver<T> {
     /// Returns an error if the deadline expires or the channel closes while
     /// drained.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, Error> {
-        let deadline = Instant::now().checked_add(timeout);
+        let deadline = Timeout::new(timeout);
         match self.try_recv() {
             Err(error) if error.is_empty() => {}
             result => return result,
@@ -698,7 +698,7 @@ impl<T> OneshotReceiver<T> {
     /// Returns an error if the deadline expires or the sender drops without
     /// sending.
     pub fn recv_timeout(mut self, timeout: Duration) -> Result<T, Error> {
-        let deadline = Instant::now().checked_add(timeout);
+        let deadline = Timeout::new(timeout);
         if let Some(result) = self.take_result() {
             return result;
         }

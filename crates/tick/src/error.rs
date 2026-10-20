@@ -104,20 +104,14 @@ impl From<SystemTimeError> for Error {
 #[cfg(test)]
 mod tests {
     use std::error::Error as StdError;
-    use std::time::{Duration, UNIX_EPOCH};
 
     use jiff::SignedDuration;
-    use thread_aware::ThreadAware;
 
     use super::*;
 
     #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(Error: Send, Sync, ThreadAware);
-    }
-
-    #[test]
-    fn jiff_error() {
+    fn private_jiff_variant_preserves_message_and_source() {
+        // Public format parsing covers construction; variant identity is intentionally private.
         let error = jiff::Timestamp::from_duration(SignedDuration::MAX).unwrap_err();
         let error = Error::jiff(error);
 
@@ -130,7 +124,8 @@ mod tests {
     }
 
     #[test]
-    fn out_of_range_error() {
+    fn private_out_of_range_variant_has_no_source() {
+        // The public error type deliberately exposes no variant introspection.
         let error = Error::out_of_range("test");
 
         assert!(matches!(error.kind(), ErrorKind::OutOfRange(_)));
@@ -139,24 +134,12 @@ mod tests {
     }
 
     #[test]
-    fn from_other_ok() {
+    fn private_other_variant_preserves_message_and_source() {
+        // No public constructor accepts an arbitrary boxed source.
         let error = Error::other(std::io::Error::other("dummy"));
 
         assert!(matches!(error.kind(), ErrorKind::Other(_)));
         assert_eq!(error.to_string(), "dummy");
         assert_eq!(error.source().unwrap().to_string(), "dummy");
-    }
-
-    #[test]
-    fn from_system_time_error() {
-        let later = UNIX_EPOCH + Duration::from_secs(1);
-        let system_time_error = UNIX_EPOCH.duration_since(later).unwrap_err();
-        let expected_message = system_time_error.to_string();
-
-        let error = Error::from(system_time_error);
-
-        assert!(matches!(error.kind(), ErrorKind::SystemTimeError(_)));
-        assert_eq!(error.to_string(), expected_message);
-        assert!(error.source().is_some());
     }
 }

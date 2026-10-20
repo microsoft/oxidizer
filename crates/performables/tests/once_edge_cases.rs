@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 //! Initialization contention, unwinding and exact resource ownership.
+//!
+//! These std-backed once-cell cases verify public outcomes, not native parking
+//! registration. The owned lock and notification backends test registration with
+//! private deterministic seams.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};

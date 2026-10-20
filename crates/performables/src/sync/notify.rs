@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::Thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::raw_mutex::RawMutex as Mutex;
 use super::slot_list::SlotList;
+use super::wait_queue::Timeout;
 use super::{Async, Mode, Sync};
 use crate::telemetry::{self, EventKind};
 
@@ -29,8 +30,10 @@ const WAITING: u32 = 2;
 /// Unlike [`super::condition::Condvar`], notification before waiting is retained;
 /// no mutex guard is required. Use a channel or semaphore to count every event.
 ///
-/// Ready waits and notifications do not allocate; contended waits allocate
-/// registration storage.
+/// Ready waits and notifications allocate no primitive-owned waiter storage;
+/// contended waits allocate registration storage. Async delivery invokes the
+/// registered task waker, whose code may allocate, re-enter or panic. Telemetry
+/// recording has its own allocation behavior.
 ///
 /// ```
 /// use performables::sync::notify::Notify;
@@ -221,8 +224,8 @@ impl<M: Mode> Notify<M> {
     /// are selected in registration order; task scheduling can change return order.
     #[inline]
     pub fn notify_one(&self) {
-        self.state().notify_one();
         self.record(EventKind::NotifySignal);
+        self.state().notify_one();
     }
 
     /// Attempts to consume a stored permit without blocking.
@@ -263,8 +266,8 @@ impl<M: Mode> Notify<M> {
     ///
     /// Returns `true` on notification and `false` on timeout. A ready permit wins
     /// even with a zero timeout. Timeout does not discard an assigned notification;
-    /// it is passed to another waiter or retained. An overflowing deadline waits
-    /// without a deadline.
+    /// it is passed to another waiter or retained. The timeout remains finite
+    /// even when its duration cannot be added to an [`std::time::Instant`].
     #[must_use]
     pub fn wait_timeout(&self, timeout: Duration) -> bool {
         if self.try_wait() {
@@ -273,12 +276,24 @@ impl<M: Mode> Notify<M> {
             self.record(EventKind::NotifyContention);
             false
         } else {
-            self.wait_contended(Instant::now().checked_add(timeout))
+            self.wait_contended(Some(Timeout::new(timeout)))
         }
     }
 
     #[cold]
-    fn wait_contended(&self, deadline: Option<Instant>) -> bool {
+    fn wait_contended(&self, deadline: Option<Timeout>) -> bool {
+        self.wait_contended_with(deadline, Timeout::elapsed, |remaining| match remaining {
+            Some(remaining) => std::thread::park_timeout(remaining),
+            None => std::thread::park(),
+        })
+    }
+
+    fn wait_contended_with(
+        &self,
+        deadline: Option<Timeout>,
+        mut elapsed: impl FnMut(&Timeout) -> Duration,
+        mut park: impl FnMut(Option<Duration>),
+    ) -> bool {
         let waiter = Arc::new(Waiter {
             notified: AtomicBool::new(false),
             position: AtomicUsize::new(usize::MAX),
@@ -299,12 +314,12 @@ impl<M: Mode> Notify<M> {
                 return true;
             }
             if let Some(deadline) = deadline {
-                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                let Some(remaining) = deadline.remaining_after(elapsed(&deadline)) else {
                     return false;
                 };
-                std::thread::park_timeout(remaining);
+                park(Some(remaining));
             } else {
-                std::thread::park();
+                park(None);
             }
         }
     }
@@ -440,7 +455,51 @@ impl Drop for NotifyWait<'_> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::cell::Cell;
+    use std::time::Instant;
+
     use super::*;
+
+    #[test]
+    fn forced_expiry_removes_a_registered_wait_without_losing_later_notifications() {
+        for duration in [Duration::from_millis(1), Duration::MAX] {
+            let notify = Notify::<Sync>::new();
+            let elapsed = Cell::new(Duration::ZERO);
+            let parks = Cell::new(0);
+            assert!(!notify.wait_contended_with(
+                Some(Timeout::new(duration)),
+                |_| elapsed.get(),
+                |remaining| {
+                    assert_eq!(notify.state().queue.get().unwrap().lock().len(), 1);
+                    assert!(remaining.is_some_and(|wait| !wait.is_zero() && wait <= duration));
+                    parks.set(parks.get() + 1);
+                    elapsed.set(duration);
+                },
+            ));
+            assert_eq!(parks.get(), 1);
+            assert!(notify.state().queue.get().unwrap().lock().is_empty());
+            notify.notify_one();
+            assert!(notify.try_wait());
+            assert!(!notify.try_wait());
+        }
+    }
+
+    #[test]
+    fn spurious_wakes_do_not_restart_the_registered_wait_budget() {
+        let notify = Notify::<Sync>::new();
+        let mut elapsed = [Duration::from_millis(4), Duration::from_millis(7), Duration::from_millis(10)].into_iter();
+        let mut waits = Vec::new();
+        assert!(!notify.wait_contended_with(
+            Some(Timeout::new(Duration::from_millis(10))),
+            |_| elapsed.next().unwrap(),
+            |remaining| {
+                assert_eq!(notify.state().queue.get().unwrap().lock().len(), 1);
+                waits.push(remaining.unwrap());
+            },
+        ));
+        assert_eq!(waits, [Duration::from_millis(6), Duration::from_millis(3)]);
+        assert!(notify.state().queue.get().unwrap().lock().is_empty());
+    }
 
     #[test]
     fn registration_rechecks_a_permit_and_stale_waiter_hints_retry() {

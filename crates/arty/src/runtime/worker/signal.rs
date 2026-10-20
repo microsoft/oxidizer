@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 use std::sync::Arc as StdArc;
+#[cfg(test)]
+use std::sync::mpsc;
 use std::task::{Wake, Waker};
 use std::time::Duration;
 
@@ -12,48 +14,61 @@ use performables::sync::notify::Notify;
 #[derive(Debug, Default)]
 pub(crate) struct WorkerSignal {
     ready: Notify,
+    #[cfg(test)]
+    test_hooks: WorkerSignalTestHooks,
 }
 
-fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
-    timed_out && elapsed >= timeout
+#[cfg(test)]
+#[derive(Debug, Default, Clone)]
+pub(crate) struct WorkerSignalTestHooks {
+    idle_wait_notifier: Option<mpsc::Sender<()>>,
+    notification_wait_released: Option<mpsc::Sender<()>>,
 }
 
-fn wait_until_deadline<S>(
-    state: &mut S,
-    timeout: Duration,
-    mut waiting: impl FnMut(&S) -> bool,
-    mut elapsed: impl FnMut(&S) -> Duration,
-    mut timed_wait: impl FnMut(&mut S, Duration) -> bool,
-) {
-    while waiting(state) {
-        let remaining = timeout.saturating_sub(elapsed(state));
-        if remaining.is_zero() {
-            break;
+#[cfg(test)]
+impl WorkerSignalTestHooks {
+    pub(crate) fn with_wait_observers(idle_wait_notifier: mpsc::Sender<()>, notification_wait_released: mpsc::Sender<()>) -> Self {
+        Self {
+            idle_wait_notifier: Some(idle_wait_notifier),
+            notification_wait_released: Some(notification_wait_released),
         }
-        let timed_out = timed_wait(state, remaining);
-        if should_finish_wait(timed_out, elapsed(state), timeout) {
-            break;
+    }
+
+    #[cfg(test)]
+    fn notify_idle_wait(&self) {
+        if let Some(notifier) = &self.idle_wait_notifier {
+            _ = notifier.send(());
+        }
+    }
+
+    fn notify_notification_release(&self) {
+        if let Some(notifier) = &self.notification_wait_released {
+            _ = notifier.send(());
         }
     }
 }
 
 impl WorkerSignal {
-    pub(crate) fn wait(&self, timeout: Duration) {
-        if self.ready.try_wait() {
-            return;
+    #[cfg(test)]
+    pub(crate) fn new(test_hooks: WorkerSignalTestHooks) -> Self {
+        Self {
+            ready: Notify::new(),
+            test_hooks,
         }
-        let start = std::time::Instant::now();
-        let mut notified = false;
-        wait_until_deadline(
-            &mut notified,
-            timeout,
-            |notified| !*notified,
-            |_| start.elapsed(),
-            |notified, remaining| {
-                *notified = self.ready.wait_timeout(remaining);
-                !*notified
-            },
-        );
+    }
+
+    pub(crate) fn wait_for_notification(&self) {
+        if !self.ready.try_wait() {
+            #[cfg(test)]
+            self.test_hooks.notify_idle_wait();
+            self.ready.wait();
+        }
+        #[cfg(test)]
+        self.test_hooks.notify_notification_release();
+    }
+
+    pub(crate) fn wait(&self, timeout: Duration) {
+        _ = self.ready.wait_timeout(timeout);
     }
 
     pub(crate) fn waker(signal: &Arc<Self>) -> Waker {
@@ -86,8 +101,6 @@ impl Wake for WorkerSignal {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::mpsc;
     use std::thread;
 
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
@@ -109,23 +122,34 @@ mod tests {
     }
 
     #[test]
-    fn remote_wake_releases_a_waiter() {
-        if is_mutation_testing() {
-            return;
-        }
+    fn remote_wake_releases_an_indefinite_waiter() {
         let signal = Arc::new(WorkerSignal::default());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&signal);
         let worker = thread::spawn(move || {
             ready_tx.send(()).unwrap();
-            waiter.wait(TEST_TIMEOUT.saturating_mul(2));
+            waiter.wait_for_notification();
             done_tx.send(()).unwrap();
         });
         ready_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
         WorkerSignal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn notification_before_indefinite_wait_is_retained_and_consumed() {
+        let signal = Arc::new(WorkerSignal::default());
+        WorkerSignal::waker(&signal).wake_by_ref();
+
+        signal.wait_for_notification();
+
+        assert!(!signal.is_notified());
     }
 
     #[test]
@@ -139,42 +163,5 @@ mod tests {
         signal.wait(timeout);
         assert!(start.elapsed() >= timeout);
         assert!(!signal.is_notified());
-    }
-
-    #[test]
-    fn wait_timeout_decision_requires_both_expiration_and_deadline() {
-        let timeout = Duration::from_millis(20);
-        assert!(!should_finish_wait(false, timeout, timeout));
-        assert!(!should_finish_wait(true, timeout.saturating_sub(Duration::from_millis(1)), timeout));
-        assert!(should_finish_wait(true, timeout, timeout));
-    }
-
-    #[test]
-    fn spurious_wakes_reduce_the_remaining_wait_budget() {
-        struct Script {
-            elapsed: Duration,
-            elapsed_after_wait: VecDeque<Duration>,
-            wait_budgets: Vec<Duration>,
-        }
-        let timeout = Duration::from_millis(10);
-        let mut script = Script {
-            elapsed: Duration::from_millis(4),
-            elapsed_after_wait: VecDeque::from([Duration::from_millis(7), Duration::from_millis(11)]),
-            wait_budgets: Vec::new(),
-        };
-        wait_until_deadline(
-            &mut script,
-            timeout,
-            |_| true,
-            |script| script.elapsed,
-            |script, budget| {
-                script.wait_budgets.push(budget);
-                script.elapsed = script.elapsed_after_wait.pop_front().unwrap();
-                false
-            },
-        );
-        assert_eq!(script.wait_budgets, [Duration::from_millis(6), Duration::from_millis(3)]);
-        assert_eq!(script.elapsed, Duration::from_millis(11));
-        assert!(script.elapsed_after_wait.is_empty());
     }
 }

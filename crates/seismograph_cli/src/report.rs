@@ -794,7 +794,7 @@ fn runtime_object_detail(id_prefix: &str, events: &[&seismograph::recorder::even
             format_count(count(RuntimeEventKind::CondvarNotify)),
         ),
         "notify" => format!(
-            "{} waits · {} blocked · {} notifications · {threads}",
+            "{} waits · {} permit misses · {} notifications · {threads}",
             format_count(count(RuntimeEventKind::NotifyAccess)),
             format_count(count(RuntimeEventKind::NotifyContention)),
             format_count(count(RuntimeEventKind::NotifySignal)),
@@ -2950,21 +2950,24 @@ mod tests {
             runtime_event(1, 25, RuntimeEventKind::ChannelReceiveContention, 1, &[]),
             runtime_event(1, 26, RuntimeEventKind::ChannelHighWatermark, 1, &[]),
             runtime_event(1, 27, RuntimeEventKind::ChannelClose, 1, &[]),
+            runtime_event(1, 28, RuntimeEventKind::NotifyAccess, 1, &[]),
+            runtime_event(1, 29, RuntimeEventKind::NotifyContention, 1, &[]),
+            runtime_event(1, 30, RuntimeEventKind::NotifySignal, 1, &[]),
         ];
         let event_refs = events.iter().collect::<Vec<_>>();
 
         assert_eq!(
-            ["arc", "mutex", "rwlock", "barrier", "condvar", "once", "channel", "unknown",].map(|prefix| runtime_object_detail(
-                prefix,
-                &event_refs,
-                2
-            )),
+            [
+                "arc", "mutex", "rwlock", "barrier", "condvar", "notify", "once", "channel", "unknown",
+            ]
+            .map(|prefix| runtime_object_detail(prefix, &event_refs, 2)),
             [
                 "1 derefs · 1 clones · 1 relocations · 2 threads",
                 "1 locks · 1 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
                 "1 reads · 1 writes · 2 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
                 "1 waits · 1 blocked · 1 releases · 2 threads",
                 "1 waits · 1 blocked · 1 notifications · 2 threads",
+                "1 waits · 1 permit misses · 1 notifications · 2 threads",
                 "1 accesses · 1 initializations · 1 contentions · 2 threads",
                 "1 sends · 1 receives · 1 send contentions · 1 receive waits (empty) · high watermark 0 · 1 closes · 2 threads",
                 "2 threads",

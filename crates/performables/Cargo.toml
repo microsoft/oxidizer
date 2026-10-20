@@ -17,6 +17,9 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/performables"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::Deserialize",
@@ -38,9 +41,6 @@ serde = ["dep:serde"]
 seismograph = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }

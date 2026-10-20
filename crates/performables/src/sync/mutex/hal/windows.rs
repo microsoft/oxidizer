@@ -31,6 +31,8 @@ pub(super) fn wake_lock(state: &AtomicLockWord) {
 }
 
 pub(super) fn wait_condition(state: &AtomicU32, expected: u32, timeout: Option<Duration>) -> bool {
+    #[cfg(test)]
+    super::tests::on_address_wait();
     let milliseconds = milliseconds(timeout);
     // SAFETY: both aligned four-byte values remain alive during the wait.
     let result = unsafe {

@@ -528,6 +528,7 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for MutexGuard<'_, T, M> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;

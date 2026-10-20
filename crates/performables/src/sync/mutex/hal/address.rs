@@ -9,7 +9,7 @@ use super::Unlock;
 #[cfg(target_os = "linux")]
 use super::linux as platform;
 #[cfg(target_os = "windows")]
-use super::win64 as platform;
+use super::windows as platform;
 
 const UNLOCKED: platform::LockWord = 0;
 const LOCKED: platform::LockWord = 1;

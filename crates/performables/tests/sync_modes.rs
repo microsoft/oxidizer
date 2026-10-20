@@ -23,14 +23,6 @@ const DEADLINE: Duration = Duration::from_secs(120);
 const DEADLINE: Duration = Duration::from_secs(5);
 
 #[test]
-fn synchronous_objects_have_compact_storage() {
-    assert_eq!(size_of::<Mutex<u64>>(), size_of::<std::sync::Mutex<u64>>());
-    assert!(size_of::<Condvar>() <= size_of::<std::sync::Condvar>() + size_of::<u32>());
-    assert!(size_of::<RwLock<u64>>() <= size_of::<std::sync::RwLock<u64>>());
-    assert!(size_of::<Barrier>() <= size_of::<std::sync::Barrier>());
-}
-
-#[test]
 fn synchronous_locks_support_const_construction_and_owned_access() {
     let mut mutex = const { Mutex::<u64>::const_new(3) };
     let mut lock = const { RwLock::<u64>::new(5) };

@@ -374,12 +374,6 @@ fn performable_lazy() -> LazyLock<u64> {
     value
 }
 
-fn tokio_notify() -> tokio::sync::Notify {
-    let value = tokio::sync::Notify::new();
-    value.notify_one();
-    value
-}
-
 fn performable_oneshot() -> OneshotReceiver<u64> {
     let (sender, receiver) = channel::oneshot();
     sender.send(7).expect("the receiver remains alive during setup");
@@ -481,12 +475,6 @@ fn notify_sync(value: &Condvar) {
 #[metabench::benchmark(NOTIFY_ASYNC, NOTIFY, "performables_async")]
 #[bench::value(&Condvar::<Async>::new())]
 fn notify_async(value: &Condvar<Async>) {
-    black_box(value).notify_one();
-}
-
-#[metabench::benchmark(NOTIFY_TOKIO, NOTIFY, "tokio_coalesced")]
-#[bench::value(&tokio_notify())]
-fn notify_tokio(value: &tokio::sync::Notify) {
     black_box(value).notify_one();
 }
 
@@ -664,11 +652,9 @@ fn barriers_and_notifications(criterion: &mut Criterion) {
     let standard = std::sync::Condvar::new();
     let synchronous = Condvar::new();
     let asynchronous = Condvar::<Async>::new();
-    let tokio = tokio_notify();
     group.bench_function(NOTIFY_STD.benchmark_name(), |b| b.iter(|| notify_std(&standard)));
     group.bench_function(NOTIFY_SYNC.benchmark_name(), |b| b.iter(|| notify_sync(&synchronous)));
     group.bench_function(NOTIFY_ASYNC.benchmark_name(), |b| b.iter(|| notify_async(&asynchronous)));
-    group.bench_function(NOTIFY_TOKIO.benchmark_name(), |b| b.iter(|| notify_tokio(&tokio)));
     group.finish();
 }
 
@@ -808,7 +794,6 @@ metabench::main!(
         NOTIFY_STD,
         NOTIFY_SYNC,
         NOTIFY_ASYNC,
-        NOTIFY_TOKIO,
         QUEUE_TRY_STD,
         QUEUE_TRY_PERFORMABLES,
         QUEUE_TRY_TOKIO,

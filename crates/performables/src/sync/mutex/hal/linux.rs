@@ -7,9 +7,9 @@ use std::time::Duration;
 pub(super) type AtomicLockWord = AtomicU32;
 pub(super) type LockWord = u32;
 
-// These wait queues never cross process boundaries.
-const WAIT_PRIVATE: libc::c_int = libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG;
-const WAKE_PRIVATE: libc::c_int = libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG;
+// FUTEX_WAIT is opcode zero. These wait queues never cross process boundaries.
+const WAIT_PRIVATE: libc::c_int = libc::FUTEX_PRIVATE_FLAG;
+const WAKE_PRIVATE: libc::c_int = libc::FUTEX_PRIVATE_FLAG + libc::FUTEX_WAKE;
 
 #[cfg_attr(test, mutants::skip)] // OS waits may wake spuriously; deleting one changes parking cost, not state-loop behavior.
 pub(super) fn wait_lock(state: &AtomicLockWord, expected: LockWord) {
@@ -21,6 +21,8 @@ pub(super) fn wake_lock(state: &AtomicLockWord) {
 }
 
 pub(super) fn wait_condition(state: &AtomicU32, expected: u32, timeout: Option<Duration>) -> bool {
+    #[cfg(test)]
+    super::tests::on_address_wait();
     let timeout = timeout.map(|duration| libc::timespec {
         tv_sec: duration.as_secs().try_into().unwrap_or(libc::time_t::MAX),
         // Duration's subsecond value fits a signed 32-bit integer.

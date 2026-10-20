@@ -792,6 +792,7 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for RwLockWriteGuard<'_, T,
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc as StdArc;
     use std::task::{Wake, Waker};

@@ -44,17 +44,46 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {
-    block_on_until(future, Instant::now().checked_add(timeout))
+    block_on_until(future, Timeout::new(timeout))
 }
 
-/// Keeps readiness probes inside the original timeout budget.
-///
-/// `None` means unbounded waiting, including `Instant::checked_add` overflow.
-/// Readiness is polled before expiry so a ready result wins at the deadline.
-pub(super) fn block_on_until<F: Future>(future: F, deadline: Option<Instant>) -> Option<F::Output> {
-    let Some(deadline) = deadline else {
-        return Some(block_on(future));
-    };
+/// An elapsed-time budget that does not overflow when the duration exceeds Instant's range.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Timeout {
+    started: Instant,
+    duration: Duration,
+}
+
+impl Timeout {
+    pub(super) fn new(duration: Duration) -> Self {
+        Self {
+            started: Instant::now(),
+            duration,
+        }
+    }
+
+    pub(super) fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    pub(super) fn remaining_after(&self, elapsed: Duration) -> Option<Duration> {
+        let remaining = self.duration.saturating_sub(elapsed);
+        // Windows reserves u32::MAX milliseconds for infinity; keep every park finite.
+        let maximum_park = Duration::from_millis(u64::from(u32::MAX - 1));
+        (!remaining.is_zero()).then_some(remaining.min(maximum_park))
+    }
+
+    fn remaining(&self) -> Option<Duration> {
+        self.remaining_after(self.elapsed())
+    }
+}
+
+/// Keeps readiness probes inside the original finite budget; readiness wins at expiry.
+pub(super) fn block_on_until<F: Future>(future: F, timeout: Timeout) -> Option<F::Output> {
+    block_on_until_with(future, || timeout.remaining())
+}
+
+fn block_on_until_with<F: Future>(future: F, mut remaining: impl FnMut() -> Option<Duration>) -> Option<F::Output> {
     let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
@@ -62,8 +91,7 @@ pub(super) fn block_on_until<F: Future>(future: F, deadline: Option<Instant>) ->
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return Some(output),
             Poll::Pending => {
-                let remaining = deadline.checked_duration_since(Instant::now())?;
-                std::thread::park_timeout(remaining);
+                std::thread::park_timeout(remaining()?);
             }
         }
     }
@@ -357,7 +385,7 @@ mod tests {
     use std::task::{Context, Poll, Wake, Waker};
     use std::time::{Duration, Instant};
 
-    use super::{WaitQueue, Waiter, block_on, block_on_timeout, block_on_until};
+    use super::{Timeout, WaitQueue, Waiter, block_on, block_on_timeout, block_on_until, block_on_until_with};
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -391,10 +419,30 @@ mod tests {
 
     #[test]
     fn an_expired_deadline_still_checks_readiness_without_restarting_the_budget() {
-        let deadline = Some(Instant::now());
+        let deadline = Timeout::new(Duration::ZERO);
         assert_eq!(block_on_until(std::future::ready(7), deadline), Some(7));
         assert_eq!(block_on_until(std::future::pending::<usize>(), deadline), None);
-        assert_eq!(block_on_until(std::future::ready(11), None), Some(11));
+        assert_eq!(
+            block_on_until_with(std::future::ready(11), || panic!("readiness must precede expiry")),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn overflowing_budgets_stay_finite_and_expire_using_elapsed_time() {
+        let timeout = Timeout::new(Duration::MAX);
+        assert!(
+            timeout
+                .remaining_after(Duration::ZERO)
+                .is_some_and(|wait| !wait.is_zero() && wait.as_millis() < u128::from(u32::MAX))
+        );
+        assert_eq!(timeout.remaining_after(Duration::MAX), None);
+        let mut probes = 0;
+        let result = block_on_until_with(std::future::pending::<()>(), || {
+            probes += 1;
+            (probes == 1).then_some(Duration::ZERO)
+        });
+        assert_eq!((result, probes), (None, 2));
     }
 
     #[test]

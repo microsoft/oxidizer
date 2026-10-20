@@ -8,6 +8,8 @@
 //! Read/clone measures the shutdown-check path; broadcast measures publication
 //! and completion of already-registered waits. The std control is a minimal
 //! mutex-backed watch reference, not a primitive provided by the standard library.
+//! Broadcast compares registration on one thread with registration across eight
+//! threads. Registration and thread creation finish before timing publication.
 //!
 //! A persistent local `bench_on_threadpool` harness is used because no shared
 //! threadpool helper exists in this workspace. Thread creation, backlog setup
@@ -33,7 +35,7 @@ use performables::sync::channel;
 const WORKERS: [usize; 7] = [1, 2, 4, 8, 32, 172, 176];
 const BACKLOG: [usize; 3] = [0, 64, 256];
 const FANOUT: [usize; 3] = [8, 512, 2_048];
-type Pending = Vec<Pin<Box<dyn Future<Output = ()>>>>;
+type Pending = Vec<Pin<Box<dyn Future<Output = ()> + Send>>>;
 
 fn worker_counts() -> impl Iterator<Item = usize> {
     let available = thread::available_parallelism()
@@ -244,7 +246,7 @@ fn pending_performables(sender: &channel::WatchSender<bool>, count: usize) -> Pe
     (0..count)
         .map(|_| {
             let receiver = sender.subscribe();
-            let mut wait: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
+            let mut wait: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
                 let _value = receiver
                     .wait_for_async(|value| *value)
                     .await
@@ -261,7 +263,7 @@ fn pending_tokio(sender: &tokio::sync::watch::Sender<bool>, count: usize) -> Pen
     (0..count)
         .map(|_| {
             let mut receiver = sender.subscribe();
-            let mut wait: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
+            let mut wait: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
                 let _value = receiver.wait_for(|value| *value).await.expect("the benchmark retains its sender");
             });
             assert!(wait.as_mut().poll(&mut context).is_pending());
@@ -275,7 +277,7 @@ fn pending_standard(sender: &StandardSender, count: usize) -> Pending {
     (0..count)
         .map(|_| {
             let receiver = sender.subscribe();
-            let mut wait: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
+            let mut wait: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
                 receiver.wait().await;
             });
             assert!(wait.as_mut().poll(&mut context).is_pending());
@@ -391,14 +393,35 @@ fn complete(waits: &mut Pending) {
 }
 
 fn broadcast(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("performables_watch/broadcast");
+    broadcast_registered(criterion, "performables_watch/broadcast", 1);
+    broadcast_registered(criterion, "performables_watch/broadcast_spread", 8);
+}
+
+fn pending_on_threads<S: Sync>(sender: &S, count: usize, threads: usize, prepare: fn(&S, usize) -> Pending) -> Pending {
+    if threads == 1 {
+        return prepare(sender, count);
+    }
+    thread::scope(|scope| {
+        let mut workers = Vec::with_capacity(threads);
+        for worker in 0..threads {
+            workers.push(scope.spawn(move || prepare(sender, count / threads + usize::from(worker < count % threads))));
+        }
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("watch registration completes before publication"))
+            .collect()
+    })
+}
+
+fn broadcast_registered(criterion: &mut Criterion, group: &str, registration_threads: usize) {
+    let mut group = criterion.benchmark_group(group);
     for count in FANOUT {
         group.throughput(Throughput::Elements(u64::try_from(count).expect("the waiter count fits in u64")));
         group.bench_function(BenchmarkId::new("performables", count), |bencher| {
             bencher.iter_batched_ref(
                 || {
                     let (sender, _receiver) = channel::watch(false);
-                    let waits = pending_performables(&sender, count);
+                    let waits = pending_on_threads(&sender, count, registration_threads, pending_performables);
                     (sender, waits)
                 },
                 |(sender, waits)| {
@@ -412,7 +435,7 @@ fn broadcast(criterion: &mut Criterion) {
             bencher.iter_batched_ref(
                 || {
                     let (sender, _receiver) = tokio::sync::watch::channel(false);
-                    let waits = pending_tokio(&sender, count);
+                    let waits = pending_on_threads(&sender, count, registration_threads, pending_tokio);
                     (sender, waits)
                 },
                 |(sender, waits)| {
@@ -426,7 +449,7 @@ fn broadcast(criterion: &mut Criterion) {
             bencher.iter_batched_ref(
                 || {
                     let sender = StandardSender::new();
-                    let waits = pending_standard(&sender, count);
+                    let waits = pending_on_threads(&sender, count, registration_threads, pending_standard);
                     (sender, waits)
                 },
                 |(sender, waits)| {

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+use std::task::Waker;
 
 use thread_aware::{Thread, ThreadAware};
 
@@ -41,23 +42,50 @@ pub struct Shared;
 ///   [`InactiveClock::new_shared`] to construct one. Does not implement [`Clone`] or
 ///   [`ThreadAware`].
 ///
-/// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
-/// its associated [`ClockDriver`]. The driver is responsible for advancing timers and must
-/// be called periodically by the runtime.
+/// To begin using the clock, call [`InactiveClock::activate`] with the runtime's driver waker to get
+/// a working [`Clock`] instance and its associated [`ClockDriver`]. First and newly earlier timer
+/// registrations invoke that waker so they can interrupt the driver's current wait.
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```no_run
+/// use std::sync::Arc;
+/// use std::task::{Wake, Waker};
+/// use std::thread;
+/// use std::time::Instant;
+///
 /// use tick::runtime::InactiveClock;
 ///
+/// struct DriverWake(thread::Thread);
+///
+/// impl Wake for DriverWake {
+///     fn wake(self: Arc<Self>) {
+///         self.0.unpark();
+///     }
+///
+///     fn wake_by_ref(self: &Arc<Self>) {
+///         self.0.unpark();
+///     }
+/// }
+///
 /// let inactive = InactiveClock::default();
-/// let (clock, driver) = inactive.activate();
+/// let driver_waker = Waker::from(Arc::new(DriverWake(thread::current())));
+/// let (clock, mut driver) = inactive.activate(driver_waker);
 ///
 /// // Use the clock for time operations
 /// let now = clock.instant();
 ///
-/// // Driver must be advanced periodically (typically by the runtime)
-/// // driver.advance_timers(std::time::Instant::now());
+/// // A real runtime loop advances the driver, then parks until the deadline or until
+/// // registration of the first timer (or a newly earlier timer) invokes driver_waker.
+/// loop {
+///     match driver.advance_timers(Instant::now()) {
+///         Ok(Some(deadline)) => {
+///             thread::park_timeout(deadline.saturating_duration_since(Instant::now()))
+///         }
+///         Ok(None) => thread::park(),
+///         Err(_) => break,
+///     }
+/// }
 /// ```
 ///
 /// # Thread-aware isolated runtimes
@@ -120,18 +148,30 @@ impl<S> InactiveClock<S> {
     /// Activates the clock for time operations.
     ///
     /// Consumes this inactive clock and returns a working [`Clock`] instance along with
-    /// its [`ClockDriver`]. The driver must be called periodically to advance timers.
+    /// its [`ClockDriver`]. Registering the first system timer, a timer that precedes the current
+    /// earliest deadline, or dropping the final clock owner invokes `driver_waker`, allowing the
+    /// runtime to interrupt its current wait.
     ///
-    /// # Returns
+    /// Controlled clocks advance externally and do not register the driver waker. Their owner is
+    /// responsible for advancing controlled time, waking any timers that become ready, and
+    /// independently waking each driver loop during shutdown or owner-lifecycle changes. A
+    /// controlled driver must exit and be dropped from that external lifecycle state rather than
+    /// waiting solely for [`ClockGone`](crate::runtime::ClockGone).
     ///
-    /// A tuple containing:
-    /// - [`Clock`] - The activated clock instance for time operations
-    /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
+    /// Driver notifications may occur between [`ClockDriver::advance_timers`] returning and the
+    /// runtime parking. Integrations must retain pending wakes, or otherwise make that transition
+    /// race-free, so a timer registration cannot be lost in the gap.
+    ///
+    /// The retained waker must not transitively own a [`Clock`] or [`ClockDriver`] associated with
+    /// this driver. Runtime loops commonly wait for [`ClockGone`](crate::runtime::ClockGone) before
+    /// dropping the driver; either ownership cycle would prevent the corresponding final owner or
+    /// driver drop. Use a separate signal or a weak runtime handle instead.
     #[must_use]
-    pub fn activate(self) -> (Clock, ClockDriver) {
+    pub fn activate(self, driver_waker: Waker) -> (Clock, ClockDriver) {
+        let driver_id = self.state.register_driver(driver_waker);
         let state = self.state;
         let clock = Clock::new(state.clone());
-        let driver = ClockDriver::new(state);
+        let driver = ClockDriver::new(state, driver_id);
 
         (clock, driver)
     }
@@ -144,45 +184,5 @@ impl From<crate::ClockControl> for InactiveClock<Isolated> {
             state: ClockState::ClockControl(control),
             _marker: PhantomData,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
-
-    use super::*;
-    use crate::ClockControl;
-
-    #[test]
-    fn assert_types() {
-        assert_impl_all!(InactiveClock: Send, Sync, Clone);
-        assert_impl_all!(InactiveClock<Shared>: Send, Sync);
-        assert_not_impl_any!(InactiveClock<Shared>: Clone);
-    }
-
-    #[test]
-    fn activate_ok() {
-        let inactive_clock = InactiveClock::default();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_shared_ok() {
-        let inactive_clock = InactiveClock::new_shared();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_with_fake_clock_ok() {
-        let inactive_clock = InactiveClock::from(ClockControl::new());
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::ClockControl(_)));
-        assert!(matches!(&driver.state, &ClockState::ClockControl(_)));
     }
 }

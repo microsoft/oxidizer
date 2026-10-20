@@ -20,6 +20,14 @@
 //! arrivals at an async-capable barrier do not allocate their own waiter storage;
 //! releasing other participants can still execute their wakers.
 //!
+//! With recording disabled, watch registration and cancellation reuse their
+//! reserved waiter slots after warm-up, up to the retained capacity. A
+//! single-participant barrier wait and condition-variable notifications with no
+//! waiters also allocate no primitive-owned storage on the owned Windows/Linux
+//! backends. These properties exclude construction, payload allocation and
+//! user-provided waker behavior; they do not promise stable object sizes or a
+//! particular memory layout.
+//!
 //! # Why use this instead of `std` or `tokio`?
 //!
 //! The crate offers:
