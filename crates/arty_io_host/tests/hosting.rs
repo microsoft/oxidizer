@@ -33,6 +33,7 @@ struct State {
     driver_threads: Mutex<Vec<(Kind, Thread)>>,
     cycles: Mutex<Vec<(Kind, Duration)>>,
     shutdown_order: Mutex<Vec<Kind>>,
+    nested_context_errors: Mutex<Vec<String>>,
     nested_cycle_errors: Mutex<Vec<String>>,
     driver_waker: Mutex<Option<Waker>>,
     panic_shutdown: Mutex<Option<Kind>>,
@@ -85,6 +86,41 @@ impl IoContext for ReentrantContext {
 
     fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
         self.state.roles.lock().unwrap().push((Kind::First, options.role()));
+        Ok(TestDriver {
+            kind: Kind::First,
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct SameTypeReentrantContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for SameTypeReentrantContext {
+    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+        assert!(source.is_none());
+    }
+}
+
+impl IoContext for SameTypeReentrantContext {
+    type ContextOptions = Arc<State>;
+    type Driver = TestDriver;
+
+    fn context(options: Self::ContextOptions) -> Self {
+        Self { state: options }
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.state.roles.lock().unwrap().push((Kind::First, options.role()));
+        let error = SAME_TYPE_RUNTIME.with_borrow(|runtime| {
+            host(runtime.as_ref().unwrap())
+                .context::<Self>(Arc::clone(&self.state))
+                .err()
+                .unwrap()
+        });
+        self.state.nested_context_errors.lock().unwrap().push(error.to_string());
         Ok(TestDriver {
             kind: Kind::First,
             state: Arc::clone(&self.state),
@@ -191,6 +227,7 @@ impl error::Error for ReentrantFormatError {}
 
 thread_local! {
     static FORMAT_RUNTIME: RefCell<Option<IoRuntime>> = const { RefCell::new(None) };
+    static SAME_TYPE_RUNTIME: RefCell<Option<IoRuntime>> = const { RefCell::new(None) };
 }
 
 impl<const SECOND: bool> IoContext for Context<SECOND> {
@@ -737,6 +774,22 @@ fn context_construction_can_reenter_the_runtime_registry() {
     assert_eq!(
         state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
         [DriverRole::Secondary, DriverRole::Primary]
+    );
+}
+
+#[test]
+fn same_type_retrieval_through_another_host_rejects_reentrant_initialization() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    SAME_TYPE_RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
+
+    let _ = host.context::<SameTypeReentrantContext>(Arc::clone(&state)).unwrap();
+    SAME_TYPE_RUNTIME.with_borrow_mut(Option::take);
+
+    assert_eq!(
+        state.nested_context_errors.lock().unwrap().as_slice(),
+        ["I/O context retrieval cannot reenter initialization of the same context type on one thread"]
     );
 }
 

@@ -85,7 +85,7 @@ impl RegisteredContext {
 }
 
 enum ContextState {
-    Initializing,
+    Initializing(std::thread::ThreadId),
     Ready(Arc<RegisteredContext>),
     Failed(Arc<str>),
 }
@@ -99,7 +99,7 @@ struct ContextSlot {
 impl ContextSlot {
     fn new(role: DriverRole) -> Self {
         Self {
-            state: Mutex::new(ContextState::Initializing),
+            state: Mutex::new(ContextState::Initializing(std::thread::current().id())),
             changed: Condvar::new(),
             role,
         }
@@ -113,7 +113,12 @@ impl ContextSlot {
             let mut state = self.state();
             loop {
                 match &*state {
-                    ContextState::Initializing => {
+                    ContextState::Initializing(thread) if *thread == std::thread::current().id() => {
+                        return Err(DriverError::from_message(
+                            "I/O context retrieval cannot reenter initialization of the same context type on one thread",
+                        ));
+                    }
+                    ContextState::Initializing(_) => {
                         state = self
                             .changed
                             .wait(state)
@@ -130,7 +135,7 @@ impl ContextSlot {
     fn publish(&self, context: RegisteredContext) {
         let mut state = self.state();
         assert!(
-            matches!(*state, ContextState::Initializing),
+            matches!(*state, ContextState::Initializing(_)),
             "only an initializing I/O context can be published"
         );
         *state = ContextState::Ready(Arc::new(context));
