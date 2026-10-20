@@ -260,6 +260,8 @@ impl DriverHost {
         Ok(context)
     }
 
+    /// Consumes one driver already detached from the host and reports its
+    /// provider-controlled shutdown result.
     fn shutdown_local(&self, local: LocalContext) {
         let context = IoContextName(local.context_name);
         let role = IoDriverRoleLabel::from(local.role);
@@ -278,6 +280,8 @@ impl DriverHost {
         }
     }
 
+    /// Detaches all host-owned drivers and releases the `RefCell` borrow before
+    /// invoking provider shutdown callbacks.
     fn shutdown_drivers(&self) {
         self.interrupt.clear();
         let mut drivers = self.drivers.borrow_mut();

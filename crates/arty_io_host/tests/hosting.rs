@@ -37,6 +37,8 @@ struct State {
     nested_cycle_errors: Mutex<Vec<String>>,
     driver_waker: Mutex<Option<Waker>>,
     panic_shutdown: Mutex<Option<Kind>>,
+    // These test-only flags and counters use SeqCst for straightforward
+    // observations; channels and joins provide explicit cross-thread phasing.
     context_calls: AtomicUsize,
     format_calls: AtomicUsize,
     shutdowns: AtomicUsize,
@@ -93,6 +95,8 @@ impl IoContext for ReentrantContext {
     }
 }
 
+/// Retrieves its own type through a second host so the runtime-wide reentry
+/// guard, rather than the caller host's local guard, owns the rejection.
 #[derive(Clone)]
 struct SameTypeReentrantContext {
     state: Arc<State>,
@@ -258,6 +262,7 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     }
 }
 
+/// Intentionally lacks `Clone` to verify that context options are moved.
 struct MoveOnlyOptions(Arc<State>);
 
 #[derive(Clone)]
@@ -481,17 +486,19 @@ fn context_accepts_move_only_options() {
 fn worker_thread_identity_is_used_for_relocation_and_driver_creation() {
     let runtime = test_runtime();
     let state = Arc::new(State::default());
-    let worker_state = Arc::clone(&state);
     let (ready_tx, ready_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 
-    let worker = std::thread::spawn(move || {
-        let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let host = runtime.driver_host(thread.clone(), Waker::noop().clone()).unwrap();
-        let _ = host.context::<Context<false>>(Arc::clone(&worker_state)).unwrap();
-        ready_tx.send((host.waker(), thread)).unwrap();
-        release_rx.recv().unwrap();
-        drop(host);
+    let worker = std::thread::spawn({
+        let state = Arc::clone(&state);
+        move || {
+            let thread = ThreadBuilder::default().build(std::thread::current().id());
+            let host = runtime.driver_host(thread.clone(), Waker::noop().clone()).unwrap();
+            let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
+            ready_tx.send((host.waker(), thread)).unwrap();
+            release_rx.recv().unwrap();
+            drop(host);
+        }
     });
     let (interrupt, thread) = ready_rx.recv().unwrap();
 
