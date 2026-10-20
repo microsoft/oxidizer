@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc as StdArc;
+use std::sync::{Arc as StdArc, OnceLock};
 #[cfg(test)]
 use std::sync::mpsc;
 use std::task::{Wake, Waker};
@@ -16,7 +16,7 @@ use performables::sync::mutex::Mutex;
 pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
-    driver_waker: Mutex<Option<Waker>>,
+    driver_waker: OnceLock<Waker>,
     #[cfg(test)]
     test_hooks: WorkerSignalTestHooks,
 }
@@ -80,7 +80,7 @@ impl WorkerSignal {
         Self {
             notified: Mutex::new(false),
             ready: Condvar::new(),
-            driver_waker: Mutex::new(None),
+            driver_waker: OnceLock::new(),
             test_hooks,
         }
     }
@@ -141,7 +141,7 @@ impl WorkerSignal {
 
     pub(crate) fn set_driver_waker(&self, waker: Waker) {
         assert!(
-            self.driver_waker.lock().replace(waker).is_none(),
+            self.driver_waker.set(waker).is_ok(),
             "a worker installs its I/O driver interrupt waker once"
         );
     }
@@ -156,7 +156,7 @@ impl WorkerSignal {
     #[cfg_attr(test, mutants::skip)] // Removing all worker and driver wake effects strands runtime tests; each effect is tested directly.
     fn notify(&self) {
         *self.notified.lock() = true;
-        if let Some(driver_waker) = self.driver_waker.lock().as_ref() {
+        if let Some(driver_waker) = self.driver_waker.get() {
             driver_waker.wake_by_ref();
         }
         self.wake_waiter();
