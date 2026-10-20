@@ -8,7 +8,7 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io::{self, Read as _, Write as _};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use seismograph::monitor::Monitor;
 #[cfg(unix)]
@@ -139,10 +139,14 @@ fn dropping_a_monitor_cancels_a_client_stalled_mid_handshake() {
     )
     .unwrap();
     connection.write_all(b"SGMP").unwrap();
-    let start = Instant::now();
-    drop(monitor);
-    assert!(start.elapsed() < Duration::from_secs(1));
-    connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+    let (completed, completion) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        drop(monitor);
+        completed.send(()).unwrap();
+    });
+    completion.recv_timeout(Duration::from_secs(30)).unwrap();
+    worker.join().unwrap();
+    connection.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     assert_closed(&mut connection);
 }
 

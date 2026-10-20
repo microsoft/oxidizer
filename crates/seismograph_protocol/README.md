@@ -43,12 +43,18 @@ retain that capability.
   create real temporary files and OS endpoints without using the installed
   user registries.
 
+Use [`read_control_response`][__link2] for automatic metadata probes: its 64 KiB
+payload limit is checked before reading or allocating the advertised body.
+Explicit snapshot capture can use [`read_response`][__link3] for larger payloads.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_protocol">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGM2JhyQTxREbAqQLjm1wkmYb0mVr1UrJwjgb6YJn06NaBMNhZIGCdHNlaXNtb2dyYXBoX3Byb3RvY29sZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbOJ4oiN3nM64b3ISAxo-UECIbBdLgt_Kts7gbpeFUyLyBBRFhZIGCdHNlaXNtb2dyYXBoX3Byb3RvY29sZTAuMi4w
  [__link0]: https://docs.rs/seismograph_protocol/0.2.0/seismograph_protocol/?search=discovery::Directory::current
  [__link1]: https://docs.rs/seismograph_protocol/0.2.0/seismograph_protocol/?search=io::MonitorIo
+ [__link2]: https://docs.rs/seismograph_protocol/0.2.0/seismograph_protocol/fn.read_control_response.html
+ [__link3]: https://docs.rs/seismograph_protocol/0.2.0/seismograph_protocol/fn.read_response.html

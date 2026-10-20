@@ -412,10 +412,14 @@ fn native_access(file: &File) -> io::Result<NativeAccess> {
         {
             return Err(denied("monitor registry ACL contains an unexpected entry"));
         }
-        // SAFETY: an access-allowed ACE contains the mask followed by a SID.
-        let entry = unsafe { entry.cast::<ACCESS_ALLOWED_ACE>().as_ref() };
-        let sid = sid_string(ptr::from_ref(&entry.SidStart).cast_mut().cast())?;
-        grants.push((sid, entry.Mask));
+        let entry = entry.cast::<ACCESS_ALLOWED_ACE>().as_ptr();
+        // SAFETY: the validated access-allowed ACE contains a variable-length
+        // SID. Project from the original allocation, not a reference to SidStart.
+        let sid = unsafe { &raw mut (*entry).SidStart };
+        let sid = sid_string(sid.cast())?;
+        // SAFETY: the validated ACE's fixed header includes this mask.
+        let mask = unsafe { (*entry).Mask };
+        grants.push((sid, mask));
     }
     Ok(NativeAccess { owner: actual, grants })
 }

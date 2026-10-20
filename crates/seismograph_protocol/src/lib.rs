@@ -33,6 +33,10 @@
 //!   The same feature enables `testing` for isolated native IPC tests, which
 //!   create real temporary files and OS endpoints without using the installed
 //!   user registries.
+//!
+//! Use [`read_control_response`] for automatic metadata probes: its 64 KiB
+//! payload limit is checked before reading or allocating the advertised body.
+//! Explicit snapshot capture can use [`read_response`] for larger payloads.
 
 mod codec;
 pub mod discovery;
@@ -145,6 +149,9 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 
 /// Reads one response frame.
 ///
+/// Permits large snapshot payloads. Use [`read_control_response`] for bounded
+/// automatic metadata probes.
+///
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
@@ -152,6 +159,21 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// discarded rather than reused for another frame.
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;
+    message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
+}
+
+/// Reads one response with a 64 KiB control-payload limit.
+///
+/// Checks the advertised length before reading or allocating the body, even
+/// when the peer advertises an unexpected snapshot response. Use
+/// [`read_response`] for explicit snapshot capture.
+///
+/// # Errors
+///
+/// Returns [`Error::MessageTooLarge`] for a larger payload, or an error when
+/// reading or decoding fails. Discard the reader after an error.
+pub fn read_control_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
+    let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
@@ -213,6 +235,31 @@ mod tests {
     use std::io;
 
     use super::*;
+
+    #[test]
+    fn control_responses_reject_large_advertisements_after_the_header() {
+        let mut header = Vec::new();
+        write_response(&mut header, 1, &Response::Snapshot(Vec::new())).unwrap();
+        for length in [u32::try_from(MAX_CONTROL_BYTES + 1).unwrap(), u32::MAX] {
+            header[16..20].copy_from_slice(&length.to_le_bytes());
+            let mut reader = io::Cursor::new(&header);
+            assert!(matches!(read_control_response(&mut reader), Err(Error::MessageTooLarge)));
+            assert_eq!(reader.position(), 20);
+        }
+    }
+
+    #[test]
+    fn control_response_boundary_does_not_restrict_explicit_snapshots() {
+        let response = Response::Snapshot(vec![7; MAX_CONTROL_BYTES]);
+        let mut frame = Vec::new();
+        write_response(&mut frame, 2, &response).unwrap();
+        assert_eq!(read_control_response(&mut frame.as_slice()).unwrap(), (2, response));
+        let response = Response::Snapshot(vec![9; MAX_CONTROL_BYTES + 1]);
+        frame.clear();
+        write_response(&mut frame, 2, &response).unwrap();
+        assert_eq!(read_response(&mut frame.as_slice()).unwrap(), (2, response));
+        assert!(matches!(read_control_response(&mut frame.as_slice()), Err(Error::MessageTooLarge)));
+    }
 
     #[test]
     fn errors_expose_descriptive_messages_and_io_sources() {

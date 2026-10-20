@@ -4,13 +4,12 @@
 use std::io::Write as _;
 use std::path::Path;
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
 
 use seismograph_protocol::discovery::Directory;
 use seismograph_protocol::io::IoOperation;
 use seismograph_protocol::monitor::MonitorEndpoint;
 use seismograph_protocol::transport::Listener;
-use seismograph_protocol::{read_request, write_response};
+use seismograph_protocol::write_response;
 
 use super::*;
 
@@ -37,29 +36,62 @@ fn hello(descriptor: &MonitorDescriptor) -> Response {
     }
 }
 
+fn accept(listener: &Listener) -> Connection {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match listener.accept() {
+            Ok(stream) => return stream,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "client did not connect for the scripted conversation");
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("scripted accept failed: {error}"),
+        }
+    }
+}
+
+fn read_request(stream: &Connection) -> Result<(u64, Request), seismograph_protocol::Error> {
+    let mut reader = stream.try_clone().unwrap();
+    let (completed, completion) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || completed.send(seismograph_protocol::read_request(&mut reader)).unwrap());
+    let result = completion.recv_timeout(Duration::from_secs(5));
+    if result.is_err() {
+        stream.close().unwrap();
+    }
+    worker.join().unwrap();
+    result.unwrap()
+}
+
 fn serve(io: &MonitorIo, descriptor: &MonitorDescriptor, conversations: Vec<Vec<(Request, Response)>>) -> JoinHandle<()> {
     let listener = Listener::bind(io, descriptor).unwrap();
     listener.set_nonblocking(true).unwrap();
     thread::spawn(move || {
         for conversation in conversations {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok(stream) => break stream,
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline, "client did not connect for the scripted conversation");
-                        thread::sleep(Duration::from_millis(1));
-                    }
-                    Err(error) => panic!("scripted accept failed: {error}"),
-                }
-            };
+            let mut stream = accept(&listener);
             for (request, response) in conversation {
-                let (id, actual) = read_request(&mut stream).unwrap();
+                let (id, actual) = read_request(&stream).unwrap();
                 assert_eq!(actual, request);
                 write_response(&mut stream, id, &response).unwrap();
             }
         }
     })
+}
+
+fn serve_discoverable(io: &MonitorIo, descriptor: &MonitorDescriptor) -> JoinHandle<()> {
+    serve(
+        io,
+        descriptor,
+        vec![
+            vec![
+                (Request::Hello, hello(descriptor)),
+                (Request::ReadCacheRecording, Response::CacheRecording(RecordingPolicy::default())),
+            ],
+            vec![
+                (Request::Hello, hello(descriptor)),
+                (Request::ReadServerVersion, Response::ServerVersion("healthy".into())),
+            ],
+        ],
+    )
 }
 
 #[test]
@@ -109,14 +141,7 @@ fn complete_client_commands_use_the_selected_io_instance() {
 
 #[test]
 fn connection_setup_and_frame_failures_do_not_fall_back_to_native_io() {
-    for operation in [
-        IoOperation::Connect,
-        IoOperation::ReadTimeout,
-        IoOperation::WriteTimeout,
-        IoOperation::Write,
-        IoOperation::Read,
-        IoOperation::Flush,
-    ] {
+    for operation in [IoOperation::Connect, IoOperation::ReadTimeout, IoOperation::WriteTimeout] {
         let (io, control) = MonitorIo::new_mocked();
         let (_, descriptor) = descriptor(&io);
         let _listener = Listener::bind(&io, &descriptor).unwrap();
@@ -124,7 +149,22 @@ fn connection_setup_and_frame_failures_do_not_fall_back_to_native_io() {
             operation,
             io::Error::new(io::ErrorKind::PermissionDenied, "injected client failure"),
         );
-        let error = handshake(&io, &descriptor).unwrap_err();
+        let error = connect(&io, &descriptor).err().unwrap();
+        assert!(error.to_string().contains("injected client failure"), "{operation:?}: {error}");
+    }
+    for operation in [IoOperation::Write, IoOperation::Read, IoOperation::Flush] {
+        let (io, control) = MonitorIo::new_mocked();
+        let (_peer, connection) = control.connected_pair();
+        let mut connection = ClientConnection::new(&io, connection).unwrap();
+        control.fail_next(
+            operation,
+            io::Error::new(io::ErrorKind::PermissionDenied, "injected client failure"),
+        );
+        let error = if operation == IoOperation::Read {
+            read_control_response(&mut connection).unwrap_err()
+        } else {
+            write_request(&mut connection, 1, &Request::Hello).unwrap_err()
+        };
         assert!(error.to_string().contains("injected client failure"), "{operation:?}: {error}");
     }
 }
@@ -186,6 +226,139 @@ fn discovery_suppresses_only_missing_or_refused_connections() {
             assert!(warning.contains("probe failed"));
         }
     }
+}
+
+#[test]
+fn oversized_probe_responses_do_not_hide_healthy_monitors() {
+    for probe in [Request::Hello, Request::ReadCacheRecording, Request::ReadServerVersion] {
+        let (io, _) = MonitorIo::new_mocked();
+        let (directory, malicious) = descriptor(&io);
+        io.publish_descriptor(&directory, &malicious).unwrap();
+        let (_, healthy) = descriptor(&io);
+        io.publish_descriptor(&directory, &healthy).unwrap();
+        let healthy_worker = serve_discoverable(&io, &healthy);
+        let listener = Listener::bind(&io, &malicious).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let malicious_worker = thread::spawn(move || {
+            let mut stream = accept(&listener);
+            assert_eq!(read_request(&stream).unwrap(), (1, Request::Hello));
+            let request_id = if probe == Request::Hello {
+                1
+            } else {
+                write_response(&mut stream, 1, &hello(&malicious)).unwrap();
+                assert_eq!(read_request(&stream).unwrap(), (2, Request::ReadCacheRecording));
+                if probe == Request::ReadServerVersion {
+                    write_response(&mut stream, 2, &Response::CacheRecording(RecordingPolicy::default())).unwrap();
+                    drop(stream);
+                    stream = accept(&listener);
+                    assert_eq!(read_request(&stream).unwrap(), (1, Request::Hello));
+                    write_response(&mut stream, 1, &hello(&malicious)).unwrap();
+                    assert_eq!(read_request(&stream).unwrap(), (2, Request::ReadServerVersion));
+                }
+                2
+            };
+            let mut header = Vec::new();
+            write_response(&mut header, request_id, &Response::Snapshot(Vec::new())).unwrap();
+            header[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+            stream.write_all(&header).unwrap();
+        });
+        let discovery = discover(&io).unwrap();
+        assert_eq!(discovery.instances.len(), 1);
+        assert_eq!(discovery.instances[0].descriptor, healthy);
+        assert_eq!(discovery.warnings.len(), 1);
+        assert!(discovery.warnings[0].contains("exceeds its size limit"));
+        malicious_worker.join().unwrap();
+        healthy_worker.join().unwrap();
+    }
+}
+
+#[test]
+fn partial_progress_does_not_restart_a_probe_deadline() {
+    let (io, control) = MonitorIo::new_mocked();
+    let (mut peer, connection) = control.connected_pair();
+    let mut connection = ClientConnection::new(&io, connection).unwrap();
+    peer.write_all(b"abcdef").unwrap();
+    control.advance_time(Duration::from_secs(9));
+    let mut bytes = [0; 2];
+    assert_eq!(connection.read(&mut bytes).unwrap(), 2);
+    assert_eq!(&bytes, b"ab");
+    control.advance_time(Duration::from_secs(1));
+    assert_eq!(connection.read(&mut bytes).unwrap_err().kind(), io::ErrorKind::TimedOut);
+    assert_eq!(connection.peek(&mut bytes).unwrap_err().kind(), io::ErrorKind::TimedOut);
+    assert_eq!(connection.write(b"request").unwrap_err().kind(), io::ErrorKind::TimedOut);
+    connection.set_read_timeout(None).unwrap();
+    assert_eq!(connection.read(&mut bytes).unwrap(), 2);
+    assert_eq!(&bytes, b"cd");
+    assert_eq!(
+        connection.set_read_timeout(Some(Duration::MAX)).unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
+}
+
+#[test]
+fn trickling_probe_times_out_and_discovery_continues() {
+    let (io, control) = MonitorIo::new_mocked();
+    let (directory, malicious) = descriptor(&io);
+    io.publish_descriptor(&directory, &malicious).unwrap();
+    let (_, healthy) = descriptor(&io);
+    io.publish_descriptor(&directory, &healthy).unwrap();
+    let healthy_worker = serve_discoverable(&io, &healthy);
+    let listener = Listener::bind(&io, &malicious).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let (completed, completion) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || completed.send(discover(&io)).unwrap());
+    let mut peer = accept(&listener);
+    assert_eq!(read_request(&peer).unwrap(), (1, Request::Hello));
+    let waits = || {
+        control
+            .operations()
+            .iter()
+            .filter(|operation| **operation == IoOperation::Wait)
+            .count()
+    };
+    let wait_for_block = |before| {
+        let watchdog = Instant::now() + Duration::from_secs(5);
+        while waits() <= before {
+            assert!(Instant::now() < watchdog, "probe did not reach its next read wait");
+            thread::yield_now();
+        }
+    };
+    let before = waits();
+    control.advance_time(Duration::ZERO);
+    wait_for_block(before);
+    let before = waits();
+    control.advance_time(Duration::from_secs(9));
+    wait_for_block(before);
+    let before = waits();
+    peer.write_all(b"SGMP").unwrap();
+    wait_for_block(before);
+    control.advance_time(Duration::from_secs(1));
+    let result = completion.recv_timeout(Duration::from_secs(5));
+    peer.close().unwrap();
+    let discovery = result.unwrap().unwrap();
+    assert_eq!(discovery.instances.len(), 1);
+    assert_eq!(discovery.instances[0].descriptor, healthy);
+    assert_eq!(discovery.warnings.len(), 1);
+    assert!(discovery.warnings[0].contains("timed out"));
+    worker.join().unwrap();
+    healthy_worker.join().unwrap();
+}
+
+#[test]
+fn explicit_snapshot_commands_still_accept_payloads_larger_than_control_responses() {
+    let (io, _) = MonitorIo::new_mocked();
+    let (_, descriptor) = descriptor(&io);
+    let bytes = vec![7; 65_537];
+    let worker = serve(
+        &io,
+        &descriptor,
+        vec![vec![
+            (Request::Hello, hello(&descriptor)),
+            (Request::CaptureSnapshotAndStop, Response::Snapshot(bytes.clone())),
+        ]],
+    );
+    assert_eq!(capture_snapshot_and_stop(&io, &descriptor).unwrap(), bytes);
+    worker.join().unwrap();
 }
 
 #[test]
@@ -264,17 +437,21 @@ fn snapshot_saving_uses_mocked_wall_time_and_preserves_write_errors() {
 
 #[test]
 fn capability_probe_distinguishes_eof_truncation_and_io_failures() {
-    let (_, control) = MonitorIo::new_mocked();
-    let (mut peer, mut connection) = control.connected_pair();
+    let (io, control) = MonitorIo::new_mocked();
+    let (mut peer, connection) = control.connected_pair();
+    let mut connection = ClientConnection::new(&io, connection).unwrap();
+    write_response(&mut peer, 2, &Response::CacheRecording(RecordingPolicy::default())).unwrap();
     control.fail_next(IoOperation::Peek, io::ErrorKind::TimedOut.into());
     assert!(matches!(read_cache_recording(&mut connection), Err(Error::Io(error)) if error.kind() == io::ErrorKind::TimedOut));
+    assert_eq!(read_cache_recording(&mut connection).unwrap(), Some(RecordingPolicy::default()));
     peer.write_all(b"SGMP").unwrap();
     drop(peer);
     assert!(matches!(
         read_cache_recording(&mut connection),
         Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof
     ));
-    let (peer, mut connection) = control.connected_pair();
+    let (peer, connection) = control.connected_pair();
+    let mut connection = ClientConnection::new(&io, connection).unwrap();
     drop(peer);
     assert_eq!(read_cache_recording(&mut connection).unwrap(), None);
     assert_eq!(read_server_version(&mut connection).unwrap(), None);

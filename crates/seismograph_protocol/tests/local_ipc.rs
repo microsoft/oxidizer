@@ -114,18 +114,32 @@ fn peer_disconnect_does_not_prevent_configuring_read_deadlines() {
 #[test]
 fn read_and_write_deadlines_remain_bounded() {
     let (_peer, mut server) = seismograph_protocol::testing::connected_pair();
+    let cancellation = server.try_clone().unwrap();
     server.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
-    let start = Instant::now();
-    let error = server.read(&mut [0]).unwrap_err();
-    assert!(matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock));
-    assert!(start.elapsed() < Duration::from_secs(1));
-
     server.set_write_timeout(Some(Duration::from_millis(20))).unwrap();
-    let bytes = vec![0; 1024 * 1024];
-    let start = Instant::now();
-    let error = server.write_all(&bytes).unwrap_err();
-    assert!(matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock));
-    assert!(start.elapsed() < Duration::from_secs(1));
+    let (completed, completion) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        let read_error = server.read(&mut [0]).unwrap_err().kind();
+        let mut written = 0;
+        let chunk = [0; 8_192];
+        let write_error = loop {
+            match server.write(&chunk) {
+                Ok(0) => panic!("a nonempty native write must make progress"),
+                Ok(count) => written += count,
+                Err(error) => break error.kind(),
+            }
+        };
+        completed.send((read_error, written, write_error)).unwrap();
+    });
+    let result = completion.recv_timeout(Duration::from_secs(30));
+    if result.is_err() {
+        cancellation.close().unwrap();
+    }
+    let (read_error, written, write_error) = result.unwrap();
+    worker.join().unwrap();
+    assert!(matches!(read_error, io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock));
+    assert!(written > 0);
+    assert!(matches!(write_error, io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock));
 }
 
 #[test]

@@ -96,7 +96,7 @@ impl Pipe {
 }
 
 struct Operation {
-    overlapped: Box<OVERLAPPED>,
+    overlapped: super::NativeAllocation<OVERLAPPED>,
     event: OwnedHandle,
 }
 
@@ -108,18 +108,19 @@ impl std::fmt::Debug for Operation {
 
 #[expect(
     clippy::non_send_fields_in_send_ty,
-    reason = "OVERLAPPED has a stable owned address and is exclusively accessed; pending kernel operations are drained before moving or freeing it"
+    reason = "the raw-owned OVERLAPPED and event outlive native I/O; no pointee references are created while an operation is pending"
 )]
-// SAFETY: OVERLAPPED points only to its owned event and has a stable Box address.
-// Access is exclusive or protected by the listener mutex; pending operations
-// are cancelled and drained before either field is freed.
+// SAFETY: the raw allocation preserves the kernel pointer across owner moves.
+// Rust never borrows its pointee while pending; API access is exclusive or
+// listener-mutex protected. Completion or cancellation drains all kernel access
+// before the allocation and its event are freed, including after a thread move.
 unsafe impl Send for Operation {}
 
 impl Operation {
     fn new() -> io::Result<Self> {
         // SAFETY: an unnamed non-inheritable event needs no external pointers.
         let event = security::owned_handle(unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) })?;
-        let overlapped = Box::new(OVERLAPPED {
+        let overlapped = super::NativeAllocation::new(OVERLAPPED {
             hEvent: event.as_raw_handle(),
             ..OVERLAPPED::default()
         });
@@ -127,8 +128,8 @@ impl Operation {
     }
 
     #[cfg_attr(test, mutants::skip)] // This accessor returns owned storage; a null replacement violates the native OVERLAPPED precondition.
-    fn pointer(&mut self) -> *mut OVERLAPPED {
-        ptr::from_mut(self.overlapped.as_mut())
+    fn pointer(&self) -> *mut OVERLAPPED {
+        self.overlapped.as_ptr()
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // Kernel cancellation may race completion; draining cannot be observed without live overlapped I/O.
@@ -207,7 +208,7 @@ impl Accept {
         };
         let pipe = Arc::new(Pipe::new(security::owned_handle(handle)?, true));
         let handle = pipe.handle()?;
-        let mut operation = Operation::new()?;
+        let operation = Operation::new()?;
         // SAFETY: OVERLAPPED has a stable address and outlives any pending accept.
         let connected = unsafe { ConnectNamedPipe(handle.as_raw_handle(), operation.pointer()) };
         let pending = if connected != 0 {

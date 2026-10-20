@@ -3,11 +3,9 @@
 
 #[cfg(test)]
 use std::fs;
-use std::io;
-#[cfg(test)]
-use std::io::Write as _;
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use seismograph_protocol::io::MonitorIo;
 use seismograph_protocol::message::{
@@ -15,7 +13,7 @@ use seismograph_protocol::message::{
 };
 use seismograph_protocol::monitor::MonitorDescriptor;
 use seismograph_protocol::transport::Connection;
-use seismograph_protocol::{read_response, write_request};
+use seismograph_protocol::{read_control_response, read_response, write_request};
 
 use super::Error;
 use super::app::Instance;
@@ -195,7 +193,7 @@ pub(super) fn recorder_activity(io: &MonitorIo, descriptor: &MonitorDescriptor) 
     Ok(RecorderUpdate::Detailed(activity))
 }
 
-fn read_recorder_activity(stream: &mut Connection) -> Result<Option<RecorderActivity>, Error> {
+fn read_recorder_activity(stream: &mut ClientConnection) -> Result<Option<RecorderActivity>, Error> {
     // Only a clean close before response bytes is the established legacy capability signal.
     if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
         return Ok(None);
@@ -231,7 +229,7 @@ pub(super) fn handshake(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Resul
 fn recording_configuration(io: &MonitorIo, descriptor: &MonitorDescriptor, cache_required: bool) -> Result<RecordingConfiguration, Error> {
     let mut stream = connect(io, descriptor)?;
     write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
-    match read_response(&mut stream).map_err(Error::Protocol)? {
+    match read_control_response(&mut stream).map_err(Error::Protocol)? {
         (
             1,
             Response::Hello {
@@ -258,7 +256,7 @@ fn cache_recording(
 ) -> Result<Option<seismograph_protocol::message::RecordingPolicy>, Error> {
     let mut stream = connect(io, descriptor)?;
     write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
-    match read_response(&mut stream).map_err(Error::Protocol)? {
+    match read_control_response(&mut stream).map_err(Error::Protocol)? {
         (1, Response::Hello { instance_id, .. }) if instance_id == descriptor.instance_id => {}
         (_, Response::Error(message)) => return Err(Error::Remote(message)),
         _ => return Err(Error::UnexpectedResponse),
@@ -267,13 +265,13 @@ fn cache_recording(
     read_cache_recording(&mut stream)
 }
 
-fn read_cache_recording(stream: &mut Connection) -> Result<Option<RecordingPolicy>, Error> {
+fn read_cache_recording(stream: &mut ClientConnection) -> Result<Option<RecordingPolicy>, Error> {
     // Legacy monitors close on an unknown request without sending a response. Once any
     // response bytes arrive, a truncated frame is an error, not a missing capability.
     if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
         return Ok(None);
     }
-    match read_response(stream) {
+    match read_control_response(stream) {
         Ok((2, Response::CacheRecording(policy))) => Ok(Some(policy)),
         Ok((2, Response::Error(message))) => Err(Error::Remote(message)),
         Ok(_) => Err(Error::UnexpectedResponse),
@@ -287,30 +285,29 @@ fn server_version(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<Opti
     read_server_version(&mut stream)
 }
 
-fn read_server_version(stream: &mut Connection) -> Result<Option<String>, Error> {
+fn read_server_version(stream: &mut ClientConnection) -> Result<Option<String>, Error> {
     // Only a clean close before any response bytes means a legacy server. Timeouts,
     // resets, malformed frames and partial responses must remain visible errors.
     if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
         return Ok(None);
     }
-    match read_response(stream).map_err(Error::Protocol)? {
+    match read_control_response(stream).map_err(Error::Protocol)? {
         (2, Response::ServerVersion(version)) => Ok(Some(version)),
         (2, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
     }
 }
 
-fn connect(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<Connection, Error> {
+fn connect(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<ClientConnection, Error> {
     let stream = Connection::connect(io, descriptor, CONNECT_TIMEOUT).map_err(Error::Io)?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).map_err(Error::Io)?;
-    stream.set_write_timeout(Some(IO_TIMEOUT)).map_err(Error::Io)?;
-    Ok(stream)
+    ClientConnection::new(io, stream).map_err(Error::Io)
 }
 
 fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) -> Result<Response, Error> {
     let mut stream = connected_stream(io, descriptor)?;
     write_request(&mut stream, 2, request).map_err(Error::Protocol)?;
-    if matches!(request, Request::CaptureSnapshot(_) | Request::CaptureSnapshotAndStop) {
+    let snapshot = matches!(request, Request::CaptureSnapshot(_) | Request::CaptureSnapshotAndStop);
+    if snapshot {
         stream.set_read_timeout(None).map_err(Error::Io)?;
     }
     if matches!(request, Request::CaptureSnapshotAndStop | Request::ClearEventBuffers) && stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
@@ -319,7 +316,12 @@ fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) ->
                 .into(),
         ));
     }
-    let (request_id, response) = read_response(&mut stream).map_err(Error::Protocol)?;
+    let (request_id, response) = if snapshot {
+        read_response(&mut stream)
+    } else {
+        read_control_response(&mut stream)
+    }
+    .map_err(Error::Protocol)?;
     if request_id != 2 {
         return Err(Error::UnexpectedResponse);
     }
@@ -329,15 +331,82 @@ fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) ->
     }
 }
 
-fn connected_stream(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<Connection, Error> {
+fn connected_stream(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<ClientConnection, Error> {
     let mut stream = connect(io, descriptor)?;
     write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
-    match read_response(&mut stream).map_err(Error::Protocol)? {
+    match read_control_response(&mut stream).map_err(Error::Protocol)? {
         (1, Response::Hello { instance_id, .. }) if instance_id == descriptor.instance_id => {}
         (_, Response::Error(message)) => return Err(Error::Remote(message)),
         _ => return Err(Error::UnexpectedResponse),
     }
     Ok(stream)
+}
+
+struct ClientConnection {
+    io: MonitorIo,
+    stream: Connection,
+    deadline: Option<Instant>,
+}
+
+impl ClientConnection {
+    fn new(io: &MonitorIo, stream: Connection) -> io::Result<Self> {
+        let mut connection = Self {
+            io: io.clone(),
+            stream,
+            deadline: None,
+        };
+        connection.set_read_timeout(Some(IO_TIMEOUT))?;
+        connection.stream.set_write_timeout(Some(IO_TIMEOUT))?;
+        Ok(connection)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        let deadline = timeout
+            .map(|timeout| {
+                self.io
+                    .instant()
+                    .checked_add(timeout)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "monitor response deadline is too large"))
+            })
+            .transpose()?;
+        self.stream.set_read_timeout(timeout)?;
+        self.deadline = deadline;
+        Ok(())
+    }
+
+    fn remaining(&self) -> io::Result<Option<Duration>> {
+        self.deadline
+            .map(|deadline| {
+                deadline
+                    .checked_duration_since(self.io.instant())
+                    .filter(|remaining| !remaining.is_zero())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "monitor response timed out"))
+            })
+            .transpose()
+    }
+
+    fn peek(&self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(self.remaining()?)?;
+        self.stream.peek(bytes)
+    }
+}
+
+impl Read for ClientConnection {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(self.remaining()?)?;
+        self.stream.read(bytes)
+    }
+}
+
+impl Write for ClientConnection {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.stream.set_write_timeout(self.remaining()?)?;
+        self.stream.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
 }
 
 fn sanitize(value: &str) -> String {
@@ -360,11 +429,9 @@ mod io_tests;
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Instant;
 
     use seismograph_protocol::message::EventBufferDisposition;
     use seismograph_protocol::monitor::InstanceId;
@@ -374,6 +441,16 @@ mod tests {
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     type ScriptedServer = (MonitorDescriptor, mpsc::Receiver<Vec<(u64, Request)>>, thread::JoinHandle<()>);
+
+    fn connected_pair() -> (ClientConnection, Connection) {
+        let (client, server) = seismograph_protocol::testing::connected_pair();
+        let client = ClientConnection::new(&MonitorIo::new_native(), client).unwrap();
+        assert!(
+            client.remaining().unwrap().is_some(),
+            "native client fixtures require a finite response deadline"
+        );
+        (client, server)
+    }
 
     fn test_descriptor() -> MonitorDescriptor {
         MonitorDescriptor {
@@ -621,7 +698,7 @@ mod tests {
             bytes[20] = 0xff;
             bytes
         }] {
-            let (mut client, server) = seismograph_protocol::testing::connected_pair();
+            let (mut client, server) = connected_pair();
 
             client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             let mut server = server;
@@ -629,7 +706,7 @@ mod tests {
             drop(server);
             assert!(matches!(read_server_version(&mut client), Err(Error::Protocol(_))));
         }
-        let (mut client, _server) = seismograph_protocol::testing::connected_pair();
+        let (mut client, _server) = connected_pair();
         client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
 
         assert!(matches!(
@@ -735,7 +812,7 @@ mod tests {
             bytes.pop();
             bytes
         }] {
-            let (mut client, server) = seismograph_protocol::testing::connected_pair();
+            let (mut client, server) = connected_pair();
 
             client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             let mut server = server;
@@ -743,15 +820,14 @@ mod tests {
             drop(server);
             assert!(matches!(read_recorder_activity(&mut client), Err(Error::Protocol(_))));
         }
-        let (mut client, server) = seismograph_protocol::testing::connected_pair();
-
+        let (mut client, _server) = connected_pair();
         client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
-        let mut server = server;
         assert!(matches!(read_recorder_activity(&mut client), Err(Error::Io(_))));
+        let (mut client, mut server) = connected_pair();
         write_response(&mut server, 2, &Response::Error("busy".into())).unwrap();
         assert!(matches!(read_recorder_activity(&mut client), Err(Error::Remote(message)) if message == "busy"));
 
-        let (mut client, server) = seismograph_protocol::testing::connected_pair();
+        let (mut client, server) = connected_pair();
 
         let mut server = server;
         write_response(&mut server, 3, &Response::Acknowledged).unwrap();

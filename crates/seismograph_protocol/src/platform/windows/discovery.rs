@@ -56,12 +56,12 @@ fn local_app_data() -> io::Result<PathBuf> {
     let mut path = ptr::null_mut();
     // SAFETY: the folder ID is valid and path is a writable output pointer.
     let result = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, ptr::null_mut(), &raw mut path) };
+    let path = KnownFolder(path);
     if result < 0 {
         return Err(io::Error::other(format!(
             "cannot locate local application data: HRESULT {result:#x}"
         )));
     }
-    let path = KnownFolder(path);
     let mut length = 0;
     // SAFETY: the successful API call supplied an owned, terminated UTF-16 string.
     while unsafe { *path.0.wrapping_add(length) } != 0 {
