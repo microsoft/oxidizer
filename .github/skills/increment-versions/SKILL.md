@@ -1,7 +1,6 @@
 ---
 name: increment-versions
-description: Prepare version changes for a release pull request with cargo-release-plan. Use when explicitly asked to assess package changes, update versions and dependencies, verify compatibility, and prepare the release plan without publishing.
-license: MIT
+description: Assess released changes, choose semantic version impacts, preview dependency effects, and apply the resulting cargo-release-plan version plan for a pull request. Use in configured repositories or for an explicitly requested standalone version-increment PR; does not authorize merge or publication.
 ---
 
 # Scope

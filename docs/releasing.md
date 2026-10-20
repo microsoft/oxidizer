@@ -7,11 +7,9 @@ The resulting PR contains the version, dependency, lockfile, and changelog
 changes. Merging it leaves publication to the existing Microsoft automation.
 
 The vendored skill comes from `folo-rs/folo` commit
-`fcc52639a902c8d8ad8000a58e0dfc39637bb6ac` and uses
+`38a7939056380e999e36db2d2aca16ca188f7fad` and uses
 `cargo-release-plan` 0.8.4. Update the complete skill directory, tool version,
-and schema details together when adopting a newer revision. Its files match the
-upstream directory except for the YAML frontmatter added to `SKILL.md` so
-Copilot can register it as a repository skill.
+and schema details together when adopting a newer revision.
 
 ## Prerequisites
 
