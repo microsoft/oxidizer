@@ -180,7 +180,7 @@ exclude_re = [
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace == with != in Mutex::unlock$',
     # Reversing contended acquisition also stalls native ARM tests.
     'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace != with == in Mutex::lock_contended$',
-    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace (wake|wake_condition_one) with \(\)$',
+    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace (wake|wake_lock|wake_condition_one) with \(\)$',
     # Windows wake-call deletion also strands native sleepers.
     'crates/performables/src/sync/mutex/hal/windows.rs:\d+:\d+: replace (wake_lock|wake_condition_one) with \(\)$',
     # FUTEX operation codes and PRIVATE_FLAG have disjoint bits; XOR is identical.
