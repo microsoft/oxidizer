@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::mpsc;
 use std::sync::{Arc as StdArc, OnceLock};
@@ -18,7 +17,6 @@ pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
     driver_waker: OnceLock<Waker>,
-    forwarding_driver_wake: AtomicBool,
     #[cfg(test)]
     test_hooks: WorkerSignalTestHooks,
 }
@@ -83,7 +81,6 @@ impl WorkerSignal {
             notified: Mutex::new(false),
             ready: Condvar::new(),
             driver_waker: OnceLock::new(),
-            forwarding_driver_wake: AtomicBool::new(false),
             test_hooks,
         }
     }
@@ -158,23 +155,8 @@ impl WorkerSignal {
     #[cfg_attr(test, mutants::skip)] // Removing all worker and driver wake effects strands runtime tests; each effect is tested directly.
     fn notify(&self) {
         *self.notified.lock() = true;
-        if self
-            .forwarding_driver_wake
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            struct ForwardingGuard<'a>(&'a AtomicBool);
-
-            impl Drop for ForwardingGuard<'_> {
-                fn drop(&mut self) {
-                    self.0.store(false, Ordering::Release);
-                }
-            }
-
-            let _guard = ForwardingGuard(&self.forwarding_driver_wake);
-            if let Some(driver_waker) = self.driver_waker.get() {
-                driver_waker.wake_by_ref();
-            }
+        if let Some(driver_waker) = self.driver_waker.get() {
+            driver_waker.wake_by_ref();
         }
         self.wake_waiter();
     }
@@ -199,30 +181,11 @@ impl Wake for WorkerSignal {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::collections::VecDeque;
-    use std::sync::atomic::AtomicUsize;
     use std::thread;
 
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
     use super::*;
-
-    #[derive(Default)]
-    struct ReenterOwnerOnce {
-        owner: std::sync::Mutex<Option<Waker>>,
-        calls: AtomicUsize,
-    }
-
-    impl Wake for ReenterOwnerOnce {
-        fn wake(self: std::sync::Arc<Self>) {
-            self.wake_by_ref();
-        }
-
-        fn wake_by_ref(self: &std::sync::Arc<Self>) {
-            if self.calls.fetch_add(1, Ordering::Relaxed) == 0 {
-                self.owner.lock().unwrap().as_ref().unwrap().wake_by_ref();
-            }
-        }
-    }
 
     #[test]
     fn notification_before_wait_is_retained_and_consumed() {
@@ -236,19 +199,6 @@ mod tests {
         assert!(*signal.notified.lock());
         signal.wait(Duration::ZERO);
         assert!(!*signal.notified.lock());
-    }
-
-    #[test]
-    fn recursive_driver_wake_is_forwarded_once() {
-        let signal = Arc::new(WorkerSignal::default());
-        let driver_wake = std::sync::Arc::new(ReenterOwnerOnce::default());
-        *driver_wake.owner.lock().unwrap() = Some(WorkerSignal::waker(&signal));
-        signal.set_driver_waker(Waker::from(std::sync::Arc::clone(&driver_wake)));
-
-        WorkerSignal::waker(&signal).wake_by_ref();
-
-        assert_eq!(driver_wake.calls.load(Ordering::Relaxed), 1);
-        assert!(signal.is_notified());
     }
 
     #[test]
