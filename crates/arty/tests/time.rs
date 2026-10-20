@@ -111,8 +111,10 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
             }
 
             if !this.setup_wake_drained {
+                let _disabled = this.control.clone().auto_advance(Duration::ZERO);
                 assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Ready(()));
                 this.setup_wake_drained = true;
+                let _restored = this.control.clone().auto_advance(CONTROLLED_TIMER_STEP);
             }
             Poll::Pending
         }
