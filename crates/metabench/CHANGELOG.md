@@ -1,11 +1,5 @@
 # Changelog
 
-## [0.2.1] - 2026-10-20
-
-- 🔧 Maintenance
-
-  - remove an unused symlink fixture so release history can be assessed reproducibly
-
 ## [0.2.0] - 2026-10-13
 
 - 🔧 Maintenance

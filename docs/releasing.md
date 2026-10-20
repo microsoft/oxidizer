@@ -18,15 +18,6 @@ schema-compatible with this skill revision. Do not install that action, a
 publication configuration, or replacement publishing workflows for the
 standalone flow.
 
-### Adoption baseline
-
-The historical `metabench` 0.2.0 package anchor contains a tracked symlink.
-`cargo-release-plan` intentionally rejects symlinks selected at either the
-anchor or the worktree, and it has no anchor override. The adoption PR therefore
-removes that unused fixture and makes a one-time reviewed `metabench` 0.2.1
-migration bump. This establishes a symlink-free anchor after merge; it is not a
-general exception to using the skill for future version changes.
-
 ## Install and inspect
 
 Use PowerShell 7.6 or newer and install the selected published release with its
