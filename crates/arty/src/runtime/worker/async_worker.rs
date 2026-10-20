@@ -185,6 +185,10 @@ impl AsyncWorker {
 
         let advance_now = self.time.instant();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
+        if self.shutdown_signal.load(Ordering::Acquire) {
+            self.begin_shutdown();
+            return ControlFlow::Break(());
+        }
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
         let has_primary = self.driver_host.as_ref().is_some_and(|driver_host| driver_host.has_primary());
         let max_wait = if should_suspend && has_primary {

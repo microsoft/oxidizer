@@ -52,6 +52,41 @@ fn primary_cycle_failure_stops_runtime() {
 fn secondary_cycle_failure_stops_runtime() {
     cycle_failure::<SecondaryCycleFailure>(RolePlan::Secondary, "secondary");
 }
+
+#[test]
+fn secondary_only_worker_is_woken_for_another_cycle() {
+    let _serial = serialize_invariant_test();
+    let (runtime, processor) = runtime_with_telemetry(2);
+    let workers = worker_schedulers(&runtime, 2);
+    let primary = Scenario::options(RolePlan::PreferPrimary);
+    let secondary = Scenario::options(RolePlan::Secondary);
+
+    workers[0]
+        .spawn({
+            let primary = primary.clone();
+            async move |builtins| {
+                let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
+            }
+        })
+        .join()
+        .unwrap();
+    workers[1]
+        .spawn({
+            let secondary = secondary.clone();
+            async move |builtins| {
+                let _ = builtins.io().context::<TestContext<SecondaryCycleFailure>>(&secondary);
+            }
+        })
+        .join()
+        .unwrap();
+
+    secondary.fail_normal_cycle.store(true, Ordering::SeqCst);
+    secondary.wake_owners();
+    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
+
+    assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
+    assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
+}
 #[test]
 fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     let _serial = serialize_invariant_test();
@@ -131,6 +166,27 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker.spawn(async move |_| completed.send(()).unwrap());
     completion.recv_timeout(Duration::from_millis(500)).unwrap();
     assert!(scenario.driver_wakes.load(Ordering::SeqCst) > 0);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn timers_fire_while_a_primary_driver_is_initialized() {
+    let runtime = runtime(1);
+    let worker = worker_schedulers(&runtime, 1).pop().unwrap();
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.block_primary.store(true, Ordering::SeqCst);
+    let (completed, completion) = mpsc::channel();
+
+    worker.spawn({
+        let scenario = scenario.clone();
+        async move |builtins| {
+            let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+            builtins.clock().delay(Duration::from_millis(20)).await;
+            completed.send(()).unwrap();
+        }
+    });
+
+    completion.recv_timeout(Duration::from_millis(500)).unwrap();
     runtime.stop().unwrap();
 }
 #[test]

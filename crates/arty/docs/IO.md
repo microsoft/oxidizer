@@ -39,8 +39,9 @@ The [primary driver example](../examples/arty_io.rs) uses
 `Scheduler::spawn_everywhere` to access one context type on every worker and
 execute work through each worker-local primary driver.
 
-During shutdown Arty attempts every initialized driver. It reports each shutdown
-error through runtime telemetry and continues shutting down the remaining
+During shutdown Arty cancels and drops worker tasks before dropping the worker's
+driver host. It then attempts every initialized driver, reports each shutdown
+error through runtime telemetry, and continues shutting down the remaining
 drivers. Driver shutdown is best effort and does not add a shutdown result to
 the public runtime API.
 
