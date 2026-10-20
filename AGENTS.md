@@ -25,15 +25,19 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-Existing changelogs are retained as historical records. The version-planning
-skill does not generate changelogs; do not update them unless explicitly instructed.
+Ordinary code PRs do not update changelogs. An on-demand version-increment PR
+must prepend a release entry to every package `CHANGELOG.md` whose version is in
+the final resolved plan. Use the planned version and release date, summarize the
+complete consumer-visible change since the package anchor, and include
+dependency-only movements. Keep historical entries unchanged.
 
 ## Releasing Packages
 
 Use the [increment-versions skill](.github/skills/increment-versions/SKILL.md)
 in **standalone mode** when explicitly asked to prepare package versions.
 Version preparation is on demand, not required for every code PR.
-The skill owns prerequisites, planning inputs, and loading the latest upstream skill.
+The complete upstream skill is vendored at a recorded Folo revision; follow it
+without replacing it with repository-specific command sequences.
 See [docs/releasing.md](docs/releasing.md) for the maintainer's release workflow.
 
 Require an explicitly selected local release-history ref and, for stacked PRs,
@@ -41,6 +45,11 @@ the actual parent target ref. Do not infer these from the publication setup.
 Keep release evidence outside the repository or in an already ignored location.
 Include the complete **Version/release plan** in the PR, including dependent
 packages, version alignment, and retained pending increments.
+
+After the resolved version plan is applied, update the affected package
+changelogs as repository-specific post-version work. Because those edits change
+the assessed checkout, rerun the skill's preparation and verification stages so
+the final evidence covers the completed PR.
 
 This process replaces the legacy version-preparation scripts. It does not
 authorize merging, tagging, publication, or changes to the existing internal

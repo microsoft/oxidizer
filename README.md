@@ -100,7 +100,8 @@ The `add-crate` script does the following:
   `cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme)
   with a set of appropriate CI badges.
 
-- Creates an empty `CHANGELOG.md` file for the crate. Version preparation does not populate it.
+- Creates an empty `CHANGELOG.md` file for the crate. Its first on-demand
+  version PR adds the first release entry.
 
 - Creates placeholder `logo.png` and `favicon.ico` files for the crate, which you're expected to replace with legit
   crab-themed
@@ -108,7 +109,7 @@ The `add-crate` script does the following:
 
 ### Publishing Crates
 
-Version preparation runs on demand, when a maintainer requests a release, using the
+Version preparation runs on demand, when a maintainer requests a release, using Folo's
 [`increment-versions` agent skill](./.github/skills/increment-versions/SKILL.md)
 in **standalone mode**. Publication to [crates.io](https://crates.io) remains
 handled by the existing internal Microsoft automation. Ordinary code PRs do not
@@ -125,7 +126,11 @@ need a version-planning run.
    including dependent packages and any existing version increments retained by
    the skill.
 
-4. Submit the version-increment PR for normal review and authorized merge.
+4. Add release entries to the affected package changelogs using the resolved
+   versions, then rerun the skill's evidence and verification stages so those
+   source changes are covered.
+
+5. Submit the version-increment PR for normal review and authorized merge.
 
 See [Releasing Oxidizer Packages](./docs/releasing.md) for prerequisites and an
 example request. The skill does not publish or grant merge permission. Merging
@@ -143,8 +148,9 @@ automation processes:
   generates the `README.md` file using a shared template. A pull request gate ensures the `README.md` file
   always reflects the latest crate documentation.
 
-- Existing `CHANGELOG.md` files are retained as historical records. The
-  version-planning skill does not generate changelogs.
+- Ordinary code PRs leave `CHANGELOG.md` files alone. On-demand version PRs
+  prepend entries for every package in the resolved release plan while preserving
+  historical entries.
 
 To generate documentation locally with all features enabled (including feature-gated items), run:
 

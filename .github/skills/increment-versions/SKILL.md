@@ -1,171 +1,257 @@
----
-name: increment-versions
-description: Prepare an on-demand version-increment PR using cargo-release-plan. Use only when explicitly asked to prepare package versions or a release plan; Oxidizer uses standalone mode and keeps publication separate.
-license: MIT
----
+# Scope
 
-# On-demand version preparation
+Prepare the version changes for one pull request. Use configured mode in a
+repository adopting the cargo-release-plan publishing toolkit, or standalone mode
+when the user explicitly requests a one-off version-increment PR. Do not treat a
+missing configuration as permission to run in an unrelated repository.
+Do not switch modes to bypass a failed configured check. In a repository that
+publishes on merge, an explicit standalone request does not disable that behavior
+or waive its required CI gates; make the existing merge behavior clear to the user.
 
-Use the upstream `increment-versions` skill in **standalone mode**, only when
-explicitly asked to prepare package versions. Do not run it for ordinary code
-PRs. Read [repository release policy](../../../docs/releasing.md) and follow
-[AGENTS.md](../../../AGENTS.md).
+The skill assesses released changes, chooses semantic impacts, previews their
+dependency effects and applies the resulting version plan. Review of the complete
+pull request approves the result; do not introduce a separate approval pause for
+version choices. This skill does not authorize merging, publication, tag creation
+or Trusted Publisher administration.
 
-## Prerequisite gate
+Standalone mode ends with the version-increment PR merged under the repository's
+review and merge policy; publishing after that is outside its scope. Completing
+the skill does not itself grant merge permission. The shared workflow remains the
+canonical supported publishing path.
 
-Run this read-only preflight first, before loading upstream resources, asking for
-planning inputs, fetching Git refs, or changing release inputs:
+The CLI, this skill and the reusable GitHub workflows form one toolkit. The
+[public guide](https://folo-rs.github.io/folo/cargo-release-plan/) explains adoption.
+Repository-specific action pairing and communication rules belong to the caller's
+instructions.
 
-```powershell
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-$PSNativeCommandUseErrorActionPreference = $true
-$missing = @()
-if ($PSVersionTable.PSVersion -lt [version]'7.6') {
-    $missing += 'PowerShell 7.6 or newer'
-}
-foreach ($command in @('git', 'cargo', 'rustc', 'cargo-release-plan', 'cargo-semver-checks')) {
-    if (-not (Get-Command $command -CommandType Application -ErrorAction SilentlyContinue)) {
-        $missing += $command
-    }
-}
-if ($missing.Count -gt 0) {
-    throw "Release preparation blocked. Missing prerequisites: $($missing -join ', '). See the installation commands in this skill."
-}
-git --version
-cargo --version
-rustc --version
-cargo release-plan version
-cargo semver-checks --version
-```
+# Prerequisites
 
-Missing prerequisites or failed version probes **reject this invocation**.
-Report the missing or broken tools and the relevant installation commands below,
-then stop. Do not install automatically, continue planning, or treat a failed
-probe as a compatibility pass.
+Git, the selected Cargo/Rust toolchain, `cargo-release-plan`, and
+`cargo-semver-checks` must be available. Do not install or upgrade tools without
+the caller's applicable permission. Fetching a private configured repository also
+requires GitHub CLI authentication.
 
-### Installation commands
+Check the schema revisions reported by `cargo release-plan version` before
+modifying source. This skill consumes plan/report/prepared schema `8`,
+semantic-decision schema `2` and compatibility schema `3`. Configured mode also
+consumes release-context schema `2`. Matching package version numbers are not a prerequisite.
 
-For `cargo-release-plan`, install or upgrade to the latest published stable
-release, using that release's dependency lockfile:
+If schemas differ, update the installed skill from the complete
+[canonical skill directory](https://github.com/folo-rs/folo/tree/main/.github/skills/increment-versions),
+including its command reference, decision guide and license, and restart with its
+instructions. If already working in the canonical repository, report the mismatch
+to the caller instead of overwriting the skill under development. If unexpected
+CLI errors suggest that tool and skill have diverged despite matching schemas,
+consider upgrading both to their latest compatible revisions. Inspect any partial
+changes before restarting; an upgrade is not permission to repeat a failed write blindly.
+If the updated skill still does not support the tool's schemas, stop and report
+the mismatch rather than repeatedly copying the same revision.
 
-```powershell
-cargo install --locked cargo-release-plan
-```
+In configured mode, use the selected workspace's working-tree
+`.cargo/release_plan.toml`, or an explicit configuration override. In standalone
+mode, obtain the selected workspace, local release-history ref and optional
+parent target ref from the user or explicit task context. Ask for missing inputs;
+do not guess them from a publishing setup the repository does not have. No
+configuration file, publishing workflow or GitHub remote is required.
 
-For `cargo-semver-checks`, use Anvil's installer so its version remains selected
-by the repository catalog rather than a second tool-version list:
+Existing tracked files may have staged or unstaged edits; a clean checkout or prior
+commit is not required. Newly created release inputs must be tracked before assessment. Stage
+those specific paths without disturbing unrelated changes, then collect fresh
+evidence. Version planning reads the working tree, not just the staged diff.
 
-```powershell
-just anvil-tool-cargo-semver-checks-install
-```
+# Assessment model
 
-If Git, PowerShell, or Cargo/Rust itself is missing, follow
-[development environment setup](../../../DEVELOPMENT.md). Source installation
-requires the tool's supported compiler and native build prerequisites; the
-upstream installation guide below also describes prebuilt installation.
+The **release history** is the actual release branch up to one selected commit.
+A package's **anchor** supplies the preceding package version and source.
+In actual release history it is the newest first-parent commit where that
+package's version changed. The **anchor version** is the package version declared
+in that commit. Changes after an anchor remain relevant, allowing a repository to
+catch up after migration or manual changes without matching version increments.
 
-These commands are instructions for the caller, not installation authorization.
-After installation, rerun the skill from this gate. A successful installation
-still needs the freshness and schema checks below; a package version alone does
-not prove compatibility.
+The **merge target** is the commit the current pull request intends to merge into.
+For a stacked PR it can be the tip of an unmerged parent. Supply that target
+separately from release history. A parent's pending version and final content are
+assessed together as its anticipated squash release and form the child's anchor;
+its intermediate commits do not define separate releases. Additional child changes need their own version
+movement. Packages still at their release-history version retain their historical
+anchors and catch-up obligations.
 
-## Load the latest upstream skill
+The managed workflow uses squash merges so each merged PR records its final
+content and versions together. Assessment does not depend on whether a merge queue
+groups PRs. After a parent merges, refresh the history and target rather than
+continuing to use stale evidence.
 
-Before planning or changing release inputs, fetch and read all four complete
-resources from `folo-rs/folo`'s current `main` branch on every invocation.
-Do not use a fixed revision or reuse a previous invocation's downloaded skill:
+A **version group** connects tracked workspace members through exact local
+requirements such as `=1.2.3`; their versions align. A compatible requirement such
+as `1.2.3` permits later compatible releases and does not create a version group.
 
-- [SKILL.md](https://raw.githubusercontent.com/folo-rs/folo/main/.github/skills/increment-versions/SKILL.md)
-- [commands.md](https://raw.githubusercontent.com/folo-rs/folo/main/.github/skills/increment-versions/commands.md)
-- [determining-level.md](https://raw.githubusercontent.com/folo-rs/folo/main/.github/skills/increment-versions/determining-level.md)
-- [LICENSE](https://raw.githubusercontent.com/folo-rs/folo/main/.github/skills/increment-versions/LICENSE)
+A **semantic impact** is `breaking`, `nonbreaking` or `patch`, selected by this
+skill from the package's changes and consumer promises. A **version plan** translates
+those impacts into package versions and required group/dependency changes.
 
-Follow the upstream procedure, command reference, and decision guide together.
-Resolve their relative links against that upstream directory, not this local
-wrapper. Retrieve any truncated content before proceeding. If retaining local
-copies, keep the complete directory, including its license, outside the
-repository or in an already ignored location.
+A package has a **pending increment** when its working-tree version is above its
+anchor version. Assess every change assigned to that increment. Keep it when
+it is sufficient; raise it when a stronger decision requires more movement. Do
+not erase or increment it again merely because the skill was rerun.
 
-Network access is required. If a resource is unavailable, incomplete, or
-restricted, stop and report the blocker. Do not substitute remembered
-instructions, an abbreviated procedure, another revision, or a link without
-reading its content.
+A **non-publishable package** has `publish = false`. It can participate in
+group alignment but receives no publication request or semantic impact. A
+publishable private-API package is different: it still has released content.
 
-## Prerequisites and inputs
+# Evidence and commands
 
-Use PowerShell **7.6** or newer for the upstream command examples. Require Git,
-the selected Cargo/Rust toolchain, `cargo-release-plan`, and
-`cargo-semver-checks` on `PATH`. Install or upgrade tools only with the applicable
-permission. Anvil manages Rust verification tools, but its setup does not install
-`cargo-release-plan`.
+Read [commands.md](commands.md) for the command examples, placeholder table,
+PowerShell error handling and expected outputs. Read the matching command section
+before executing each numbered stage below.
 
-Require the latest published stable `cargo-release-plan` release. After the
-prerequisite gate passes, query crates.io for that version and compare it with
-the installed application version reported by `cargo release-plan version`.
-If the installed tool is outdated, reject this invocation and provide the
-unversioned install/upgrade command above. If release discovery fails, report
-the blocker rather than assuming the installed version is current.
+Choose new absolute evidence directories outside the repository or under an
+already ignored location. The tool writes reports, patches, plans and supporting
+files there. Do not edit these generated files manually. The semantic
+`decisions.json` is the agent-authored input. Standalone mode also records the
+user-selected refs and their resolved commit IDs as a small handoff note, not as
+tool-generated publication context. Keep all working evidence out of commits.
 
-Follow the upstream
-[installation guide](https://folo-rs.github.io/folo/cargo-release-plan/integration/installation.html).
-Do not assume the latest action release, online book, and skill all use the same
-interface. Before assessment, compare `cargo release-plan version` with the
-schema requirements and any additional prerequisites in the freshly fetched
-upstream skill. Do not hard-code schema revisions in this wrapper. Tool and
-skill package versions need not match.
+Every compatibility output directory must be new. When repeating a stage, choose
+new destinations and retain earlier evidence. Record diagnostics as they occur;
+missing or malformed output is never an empty successful plan.
 
-Require the explicitly selected workspace and local release-history ref, plus
-the actual parent target ref for a stacked PR, or confirmation that there is no
-unmerged parent. Ask for missing inputs rather than inferring them from publishing
-configuration. Refresh remote refs only when requested. Work on a named feature
-branch, not its merge destination.
+# Stage 1: Check prerequisites and select history
 
-Existing tracked edits need not be committed first. Track newly created intended
-release inputs before assessment, staging only those paths and preserving
-unrelated changes.
+Follow [initialization](commands.md#stage-1-check-prerequisites-and-select-history).
+Require matching schemas and a named feature branch. For a stacked PR, obtain
+its actual target branch/ref from the PR or established session context; do not
+silently substitute the repository's release branch.
+In standalone mode, confirm that the named branch is the work branch for the
+version-increment PR, not the branch it will merge into. Ask when that role is
+unclear; a commit ID alone does not identify the intended merge branch.
 
-## Repository boundaries
+In configured mode, read `release_history` and optional `merge_target` from the
+generated context. In standalone mode, resolve the user-selected refs locally
+with Git and supply the resulting commits through the existing planning options.
+Keep the original refs for refresh before application. Do not create a dummy
+publishing configuration or call `release-context` in standalone mode.
 
-Use only the upstream standalone path. Do not add publication configuration,
-registry/publication gates, Trusted Publisher setup, or publishing workflows.
-Preserve existing publication automation: merging a version PR can still trigger
-it. This skill grants neither merge nor publication authority.
+Configured mode runs advisory workspace registry discovery and later requires
+the plan-scoped publication gate. Standalone mode skips both: registry readiness
+and Trusted Publisher setup are not prerequisites for a version-increment PR.
+API comparisons remain separate evidence and can still read published crates.
 
-API comparisons may access published crates; standalone mode is not an offline
-guarantee. Missing comparisons are not compatibility passes.
+# Stage 2: Prepare complete evidence
 
-Preserve package include allowlists and exact dependency requirements. Keep
-Anvil's external-type checks: the planner reads `allowed_external_types` but
-does not verify those declarations against compiled APIs. Published implementation
-packages are not automatically private APIs; do not add `private-api = true`
-merely to bypass a compatibility finding.
+Follow [preparation](commands.md#stage-2-prepare-complete-evidence).
+The outcome is a consistent workspace lockfile and a report bound to the source
+being assessed. Preparation may update `Cargo.lock`; inspect and retain that
+change as part of the contribution.
 
-Packages marked `[package.metadata.release-plan] private-api = true` are
-implementation-only, not independently supported consumer APIs. Keep published
-workspace dependency requirements on these packages exact; path-only
-dev-dependencies remain versionless. Assess exposed APIs and behavior through
-the public facade rather than treating the flag as a blanket patch exemption.
-`seismograph_protocol` is a supported public API and must remain unmarked.
+Read every publishable package in `report.json.packages`, not only file patches.
+Include inherited manifest changes and binary dependency changes listed in
+`changed`. Read `diff_path` relative to the report directory when present.
+Record excluded untracked package paths and their rationale; track intended
+release inputs and restart instead of silently omitting them.
 
-When preparing versions, resolve group alignment as part of the complete plan,
-including any differently versioned members joined by exact dependencies.
-Do not skip alignment or change exact requirements to evade it.
+Non-publishable packages appear separately for alignment. Do not assign them
+semantic impacts or query their registry publication status.
 
-Retain required `Cargo.lock` changes and run applicable Anvil checks after
-upstream verification. Keep generated README files generated, and do not update
-historical changelogs unless explicitly requested.
+# Stage 3: Assess in dependency order
 
-Include the upstream procedure's complete **Version/release plan** in the PR,
-including dependent movements, alignment-only packages, retained increments,
-and incomplete comparisons. State when nothing needs releasing. Keep all
-assessment evidence out of commits, outside the repository or in an already
-ignored location. Do not claim readiness when tools or evidence are incomplete.
+Follow [assessment ordering](commands.md#stage-3-assess-in-dependency-order).
+Read the ordered package batches. Each publishable package appears once,
+dependency-first. Assess a cyclic batch until its mutually dependent decisions
+settle. Version grouping alone does not create a semantic-assessment cycle.
 
-## Upstream evolution
+# Stage 4: Choose semantic impacts
 
-Follow upstream `main` and the latest published stable CLI without repository
-version pins. If they are incompatible, stop and report the mismatch rather than
-falling back to an older skill or tool. Retain the upstream license with downloaded
-copies. Do not replace this local policy wrapper or switch modes to bypass a
-failed check.
+Use [determining-level.md](determining-level.md) for the complete released change
+in each package, including all changes covered by a pending increment.
+
+Require `completed: true` in compatibility evidence. A compared package's
+`required_impact` supplies a minimum semantic impact; a null value imposes no
+minimum, and `compared: false` is not proof of compatibility. The skill's wider
+assessment of behavior, CLI, data formats and feature contracts can raise that floor.
+
+Read `not_compared_reason` for unavailable comparisons. `unsupported-proc-macro`
+means the checker cannot compare that Cargo target directly; `no-baseline` means
+a supported target lacks a comparison version. Neither removes a package from
+assessment or justifies a `patch` default.
+
+Follow the decision guide's [re-export assessment](determining-level.md#re-exported-apis)
+and [procedural-macro assessment](determining-level.md#procedural-macros).
+Private implementations and unchanged facades remain in scope. Record the affected
+public package, exposed API or behavior, chosen impact and supporting source/test
+evidence; obtain missing evidence or report uncertainty rather than infer compatibility.
+
+Write `decisions.json` with semantic impacts, not numeric version bumps. Omit packages
+requiring no semantic increment. Record substantive reasons, including inherited
+changes, dependency effects and retained pending versions. Do not invent a Git
+anchor for a package absent from release history and the anticipated parent.
+
+# Stage 5: Review resolved effects
+
+Follow [proposal and preview](commands.md#stage-5-review-resolved-effects).
+Preview produces the complete package/version set and exact manifest/lockfile
+edits, including effects discovered through dependency resolution.
+
+Read its report, patches and compatibility results. Assess new effects and raise
+decisions where needed, then repeat proposal/preview from the original prepared
+evidence with new output directories. Source edits require new preparation.
+Never hand-edit generated plans or widen exact requirements to evade grouping.
+Include effects supplied through dependencies and re-exports even when the public
+package has no source patch. Apply the same re-export and macro assessment as in stage 4.
+
+Prepare the PR's **Version/release plan** from the union of resolved-plan targets
+and pending releases in the final report. Give one row per complete group or
+ungrouped package: anchor version, proposed version, semantic impact
+and substantive reason. Explain dependent/group movements and retained versions.
+Mark non-publishable packages **version alignment only, not published** without
+inventing a published predecessor. State explicitly when nothing is to release.
+
+## First-publication handoff
+
+This handoff applies to configured publication, not standalone version planning.
+For packages with no comparison anchor, record the known registry state, bootstrap
+version and higher first automated-release version. A maintainer bootstraps the
+registry identities before first merge and configures Trusted Publishing.
+Bootstrap occupies its version, so the automated release needs a higher one.
+Do not publish from this skill or infer registry absence from Git history.
+
+# Stage 6: Refresh and apply
+
+Follow [application](commands.md#stage-6-refresh-and-apply).
+Refresh the selected release history and target ref. If either changed, use the
+recovery procedure below. Configured mode requires the plan-scoped registry gate;
+standalone mode refreshes its user-selected refs without a publication gate.
+
+Preserve the pre-application file state and identify the versioning-only delta.
+Apply the resolved artifact unchanged, without another approval prompt. Inspect
+and report any partial I/O failure before further planning.
+
+# Stage 7: Verify and hand off
+
+Follow [verification](commands.md#stage-7-verify-and-hand-off).
+Require complete fresh compatibility evidence and a passing version-readiness check.
+Configured mode also checks publication inputs through `--config`; standalone
+mode omits that option.
+Verify every decision and resolved target against the fresh report. Preserve the
+original assessment and account for all intended tracked release inputs.
+
+Commit the intended source/version/requirement/lockfile changes and keep the PR's
+release plan current. Follow repository-specific post-version instructions.
+Summarize substantive decisions, incomplete comparisons, applicable first-publication work,
+excluded untracked paths and execution blockers. When posting on GitHub, put
+execution diagnostics in a collapsible section rather than the release table.
+
+Present the standalone result as a version-increment PR for normal review and
+merge. Await or perform that merge only under the caller's separate authorization.
+The standalone scenario ends there; do not add publishing setup or instructions
+for manually invoking publication commands.
+
+# Recovery
+
+When release history or the target advances, undo only the verified generated
+versioning delta from this run. Preserve independently authored changes, update
+the branch to the intended target and restart with new evidence directories.
+Do not reset the worktree or overwrite mixed manifest edits.
+
+Changed source, groups or configuration also require fresh preparation. Changed
+semantic impacts alone require proposal and preview again. Fix manifest defects
+directly, then regenerate evidence; a malformed requirement is not a semantic choice.
