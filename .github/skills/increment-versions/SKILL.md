@@ -1,3 +1,9 @@
+---
+name: increment-versions
+description: Prepare version changes for a release pull request with cargo-release-plan. Use when explicitly asked to assess package changes, update versions and dependencies, verify compatibility, and prepare the release plan without publishing.
+license: MIT
+---
+
 # Scope
 
 Prepare the version changes for one pull request. Use configured mode in a
