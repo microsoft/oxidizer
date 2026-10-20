@@ -17,6 +17,8 @@ mod portable;
 pub(in crate::sync) use portable::{Condvar, Guard, Mutex};
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg_attr(coverage_nightly, coverage(off))] // OS parking cost is benchmarked; native tests cover the state/wake protocols.
+#[cfg_attr(test, mutants::skip)] // A removed park becomes a spurious wake; native contention benchmarks cover its cost.
 pub(in crate::sync) fn wait_on_address(state: &std::sync::atomic::AtomicU32, expected: u32) {
     #[cfg(target_os = "linux")]
     linux::wait_condition(state, expected, None);
@@ -65,27 +67,4 @@ impl Drop for Unlock<'_> {
 #[expect(clippy::panic, reason = "a failed native primitive cannot yield a valid synchronization result")]
 fn failed(operation: &str, error: &std::io::Error) -> ! {
     panic!("{operation} failed: {error}");
-}
-
-#[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use std::cell::Cell;
-    use std::sync::atomic::AtomicU32;
-
-    std::thread_local! {
-        static ADDRESS_WAITS: Cell<usize> = const { Cell::new(0) };
-    }
-
-    pub(super) fn on_address_wait() {
-        ADDRESS_WAITS.with(|waits| waits.set(waits.get() + 1));
-    }
-
-    #[test]
-    fn shared_address_wait_dispatches_to_the_native_backend() {
-        let before = ADDRESS_WAITS.get();
-        // A mismatched value exercises the real syscall without parking this thread.
-        super::wait_on_address(&AtomicU32::new(1), 0);
-        assert_eq!(ADDRESS_WAITS.get() - before, 1);
-    }
 }

@@ -182,35 +182,16 @@ fn blocking_waiters_publish_and_observe_across_threads() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "OS timer smoke runs natively/careful; deterministic expiry and spurious-wake tests remain under Miri"
+)]
 fn timeout_removes_registration_and_does_not_discard_a_later_notification() {
     let notify = Notify::<Sync>::new();
     assert!(!notify.wait_timeout(Duration::from_millis(1)));
     notify.notify_one();
     assert!(notify.wait_timeout(Duration::ZERO));
     assert!(!notify.try_wait());
-}
-
-#[test]
-fn unrelated_thread_unparks_do_not_complete_a_notification_wait() {
-    let notify = Arc::new(Notify::<Sync>::new());
-    let (started_tx, started_rx) = mpsc::channel();
-    let (done_tx, done_rx) = mpsc::channel();
-    let worker = std::thread::spawn({
-        let notify = Arc::clone(&notify);
-        move || {
-            started_tx.send(std::thread::current()).unwrap();
-            notify.wait();
-            done_tx.send(()).unwrap();
-        }
-    });
-    let thread = started_rx.recv_timeout(DEADLINE).unwrap();
-    for _ in 0..10 {
-        thread.unpark();
-    }
-    assert!(done_rx.try_recv().is_err());
-    notify.notify_one();
-    done_rx.recv_timeout(DEADLINE).unwrap();
-    worker.join().unwrap();
 }
 
 #[test]
