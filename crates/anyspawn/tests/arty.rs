@@ -64,14 +64,12 @@ fn dropping_arty_join_handle_does_not_cancel_task() {
 }
 
 #[test]
-fn arty_spawn_anywhere_returns_send_output() {
-    struct SendOnly(u32);
-
+fn arty_spawn_anywhere_returns_thread_aware_output() {
     let (runtime, spawner) = runtime_and_spawner();
 
-    let result = futures::executor::block_on(spawner.spawn_anywhere(21_u32, |value| async move { SendOnly(value * 2) }));
+    let result = futures::executor::block_on(spawner.spawn_anywhere(21_u32, |value| async move { value * 2 }));
 
-    assert_eq!(result.0, 42);
+    assert_eq!(result, 42);
     runtime.stop().unwrap();
 }
 

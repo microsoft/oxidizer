@@ -185,6 +185,7 @@ dependencies = [
  "futures",
  "opentelemetry",
  "performables",
+ "pin-project",
  "smol",
  "static_assertions",
  "testing_aids",

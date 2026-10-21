@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use performables::sync::channel::OneshotReceiver;
+use pin_project::pin_project;
 
 /// A handle to a spawned task that can be awaited to retrieve its result.
 ///
@@ -18,26 +19,28 @@ use performables::sync::channel::OneshotReceiver;
 ///
 /// Awaiting a `JoinHandle` will panic if the spawned task panicked or its
 /// runtime stopped before delivering the result.
-pub struct JoinHandle<T: Send + 'static>(pub(crate) JoinHandleInner<T>);
+#[pin_project]
+pub struct JoinHandle<T: Send + 'static>(#[pin] pub(crate) JoinHandleInner<T>);
 
+#[pin_project(project = JoinHandleInnerProj)]
 pub(crate) enum JoinHandleInner<T: Send + 'static> {
     #[cfg(feature = "arty")]
-    Arty(Pin<Box<::arty::task::JoinHandle<T>>>),
+    Arty(#[pin] ::arty::task::JoinHandle<T>),
     #[cfg(feature = "tokio")]
-    Tokio(::tokio::task::JoinHandle<T>),
-    Custom(OneshotReceiver<T>),
+    Tokio(#[pin] ::tokio::task::JoinHandle<T>),
+    Custom(#[pin] OneshotReceiver<T>),
 }
 
 impl<T: Send + 'static> Future for JoinHandle<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut self.get_mut().0 {
+        match self.project().0.project() {
             #[cfg(feature = "arty")]
-            JoinHandleInner::Arty(jh) => jh.as_mut().poll(cx).map(unwrap_arty_result),
+            JoinHandleInnerProj::Arty(jh) => jh.poll(cx).map(unwrap_arty_result),
             #[cfg(feature = "tokio")]
-            JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(unwrap_tokio_result),
-            JoinHandleInner::Custom(rx) => Pin::new(rx)
+            JoinHandleInnerProj::Tokio(jh) => jh.poll(cx).map(unwrap_tokio_result),
+            JoinHandleInnerProj::Custom(rx) => rx
                 .poll(cx)
                 .map(|res| res.expect("spawned task did not produce a result because its channel closed")),
         }

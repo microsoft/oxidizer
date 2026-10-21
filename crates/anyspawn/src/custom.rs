@@ -61,7 +61,7 @@ struct SpawnAnywhereTask<T, D, F> {
     tx: OneshotSender<T>,
 }
 
-pub(crate) fn spawn_anywhere_channel<T, D, F>(data: D, f: fn(D) -> F) -> (Box<dyn ThreadAwareAsyncFnOnce<()>>, OneshotReceiver<T>)
+fn spawn_anywhere_channel<T, D, F>(data: D, f: fn(D) -> F) -> (Box<dyn ThreadAwareAsyncFnOnce<()>>, OneshotReceiver<T>)
 where
     T: Send + 'static,
     D: ThreadAware + 'static,

@@ -7,7 +7,7 @@ use std::fmt::{self, Debug};
 
 use thread_aware::ThreadAware;
 
-use crate::custom::{CustomSpawner, SpawnCustom, spawn_anywhere_channel};
+use crate::custom::{CustomSpawner, SpawnCustom};
 use crate::handle::{JoinHandle, JoinHandleInner};
 
 /// Runtime-agnostic task spawner.
@@ -246,7 +246,7 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(Box::pin(scheduler.spawn(move |_| work)))),
+            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn(move |_| work))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -264,7 +264,8 @@ impl Spawner {
     /// Unlike [`spawn`](Self::spawn), this does not guarantee execution on the current runtime thread.
     /// The `data` must implement [`ThreadAware`](thread_aware::ThreadAware) so
     /// the spawner can relocate it before execution. The function pointer `f`
-    /// receives ownership of `data` and returns a future.
+    /// receives ownership of `data` and returns a future. The result must also
+    /// implement `ThreadAware`.
     ///
     /// # Examples
     ///
@@ -283,17 +284,13 @@ impl Spawner {
     /// ```
     pub fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> JoinHandle<T>
     where
-        T: Send + 'static,
+        T: ThreadAware + 'static,
         D: ThreadAware + 'static,
         F: Future<Output = T> + Send + 'static,
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => {
-                let (task, rx) = spawn_anywhere_channel(data, f);
-                drop(scheduler.spawn_anywhere(task, |task| task.call_once()));
-                JoinHandle(JoinHandleInner::Custom(rx))
-            }
+            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn_anywhere(data, f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -347,7 +344,7 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(Box::pin(scheduler.spawn_blocking(f)))),
+            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn_blocking(f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
