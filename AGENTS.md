@@ -5,9 +5,23 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 ## Documentation language
 
 Before you write or edit crate documentation or other human-facing
-documentation, read and apply the
-[`simple-english` skill](https://github.com/AminBlg/SimpleEnglish/blob/a6fcb4fde098b33617cc1578d151ebf58774b883/skills/simple-english/SKILL.md).
-Read the pinned skill once for the documentation task.
+documentation, use the `simple-english` skill. If the skill is not available,
+install the reviewed version for the current user:
+
+```powershell
+gh skill install AminBlg/SimpleEnglish skills/simple-english `
+  --agent github-copilot `
+  --scope user `
+  --pin a6fcb4fde098b33617cc1578d151ebf58774b883
+```
+
+After you review upstream changes, update the user installation with:
+
+```powershell
+gh skill install AminBlg/SimpleEnglish skills/simple-english `
+  --agent github-copilot `
+  --scope user
+```
 
 ## README Files
 
