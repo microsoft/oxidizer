@@ -21,6 +21,11 @@ under `crates/<crate>/tests/`.
 Use test utilities to control collaborators and state. A public integration
 test does not need real network, process, filesystem, or clock I/O.
 
+When a test needs more control, expose test-only public APIs behind a
+non-default `test-util` feature. Enable this feature in the integration test
+and use these APIs to inject fakes, clocks, scripted I/O, or other controlled
+dependencies. Do not add test-only APIs to the default public surface.
+
 Use unit tests for implementation details that a supported public API cannot
 exercise. Keep these tests close to the implementation.
 
