@@ -4,7 +4,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -97,7 +96,6 @@ pub(crate) struct AsyncWorker {
 
     time: SimpleClock,
     signal: Arc<WorkerSignal>,
-    driver_host: Option<Rc<RuntimeDriverHost>>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -112,7 +110,6 @@ impl AsyncWorker {
         thread: Thread,
         sink: Sink,
         io: Io,
-        driver_host: Rc<RuntimeDriverHost>,
         blocking_worker: Arc<BlockingWorker>,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
@@ -141,7 +138,6 @@ impl AsyncWorker {
             time,
             blocking_worker,
             signal,
-            driver_host: Some(driver_host),
             _single_threaded: PhantomData,
         }
     }
@@ -190,7 +186,7 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
-        let has_primary = self.driver_host.as_ref().is_some_and(|driver_host| driver_host.has_primary());
+        let has_primary = RuntimeDriverHost::has_primary_current();
         let max_wait = if should_suspend && has_primary {
             next_timer
                 .map_or(IO_IDLE_WAIT, |deadline| suspend_wait(deadline, self.time.instant()))
@@ -199,11 +195,7 @@ impl AsyncWorker {
             Duration::ZERO
         };
         let cycle_started = Instant::now();
-        if self
-            .driver_host
-            .as_ref()
-            .is_some_and(|driver_host| driver_host.execute_cycle(max_wait).is_err())
-        {
+        if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             self.begin_shutdown();
             _ = self.clock_driver.advance_timers(self.time.instant());
             return ControlFlow::Break(());
@@ -279,7 +271,7 @@ impl AsyncWorker {
 
         // Safe executor drop synchronously cancels and releases all remaining task storage.
         self.executor = None;
-        self.driver_host = None;
+        RuntimeDriverHost::uninstall();
     }
 }
 
@@ -536,20 +528,10 @@ mod tests {
         let mut io_runtime = arty_io_host::IoRuntime::new(sink.clone());
         io_runtime.relocate(None, &thread);
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
-        let driver_host = crate::io::RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
-        signal.set_driver_waker(driver_host.waker());
+        let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
+        signal.set_driver_waker(driver_waker);
 
-        AsyncWorker::new(
-            command_rx,
-            dispatcher,
-            thread,
-            sink,
-            io,
-            driver_host,
-            blocking_worker,
-            clock,
-            signal,
-        )
+        AsyncWorker::new(command_rx, dispatcher, thread, sink, io, blocking_worker, clock, signal)
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {

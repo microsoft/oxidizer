@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
 use std::task::Waker;
 use std::time::Duration;
 
@@ -15,7 +14,7 @@ use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
 
 thread_local! {
-    static CURRENT: RefCell<Option<Weak<RuntimeDriverHost>>> = const { RefCell::new(None) };
+    static CURRENT: RefCell<Option<RuntimeDriverHost>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug)]
@@ -27,30 +26,35 @@ pub(crate) struct RuntimeDriverHost {
 }
 
 impl RuntimeDriverHost {
-    pub(crate) fn new(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Rc<Self> {
+    pub(crate) fn install(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Waker {
         let driver_host = runtime.clone().driver_host(owner_waker);
-        let host = Rc::new(Self {
+        let waker = driver_host.waker();
+        let host = Self {
             runtime: runtime.to_owned(),
             dispatcher,
             thread: thread.to_owned(),
             host: driver_host,
-        });
+        };
         CURRENT.with_borrow_mut(|current| {
-            assert!(
-                current.as_ref().and_then(Weak::upgrade).is_none(),
-                "an I/O driver host is already installed on this worker"
-            );
-            *current = Some(Rc::downgrade(&host));
+            assert!(current.is_none(), "an I/O driver host is already installed on this worker");
+            *current = Some(host);
         });
-        host
+        waker
     }
 
-    pub(crate) fn waker(&self) -> Waker {
-        self.host.waker()
+    pub(crate) fn uninstall() {
+        let host = CURRENT.with_borrow_mut(Option::take);
+        drop(host.expect("the worker must retain its I/O driver host until shutdown"));
     }
 
-    pub(crate) fn has_primary(&self) -> bool {
-        self.host.has_primary()
+    pub(crate) fn has_primary_current() -> bool {
+        CURRENT.with_borrow(|current| {
+            current
+                .as_ref()
+                .expect("the worker must install its I/O driver host before running")
+                .host
+                .has_primary()
+        })
     }
 
     pub(crate) fn try_context_current<C>(runtime: &IoRuntime, thread: &Thread, options: &C::ContextOptions) -> Option<Result<C, Error>>
@@ -58,7 +62,7 @@ impl RuntimeDriverHost {
         C: IoContext,
         C::ContextOptions: Clone,
     {
-        Self::current(runtime, thread).map(|host| {
+        Self::with_current(runtime, thread, |host| {
             let context = host
                 .host
                 .context::<C>(options)
@@ -67,19 +71,24 @@ impl RuntimeDriverHost {
         })
     }
 
-    fn current(runtime: &IoRuntime, thread: &Thread) -> Option<Rc<Self>> {
+    fn with_current<R>(runtime: &IoRuntime, thread: &Thread, f: impl FnOnce(&Self) -> R) -> Option<R> {
         CURRENT.with_borrow(|current| {
             current
                 .as_ref()
-                .and_then(Weak::upgrade)
                 .filter(|host| host.runtime == *runtime && host.thread == *thread)
+                .map(f)
         })
     }
 
-    pub(crate) fn execute_cycle(&self, max_wait: Duration) -> Result<(), Error> {
-        self.host
-            .execute_cycle(max_wait)
-            .map_err(|error| fail_runtime(&self.dispatcher, error))
+    pub(crate) fn execute_cycle_current(max_wait: Duration) -> Result<(), Error> {
+        CURRENT.with_borrow(|current| {
+            let host = current
+                .as_ref()
+                .expect("the worker must install its I/O driver host before running");
+            host.host
+                .execute_cycle(max_wait)
+                .map_err(|error| fail_runtime(&host.dispatcher, error))
+        })
     }
 }
 
@@ -138,27 +147,34 @@ mod tests {
         }
     }
 
-    fn host() -> (IoRuntime, Thread, Rc<RuntimeDriverHost>) {
+    struct InstalledHost;
+
+    impl Drop for InstalledHost {
+        fn drop(&mut self) {
+            RuntimeDriverHost::uninstall();
+        }
+    }
+
+    fn host() -> (IoRuntime, Thread, InstalledHost) {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let mut runtime = IoRuntime::new(observed::Sink::noop());
         runtime.relocate(None, &thread);
         let dispatcher = DispatcherClient::for_test(&thread);
-        let host = RuntimeDriverHost::new(&runtime, dispatcher, &thread, Waker::noop().clone());
-        (runtime, thread, host)
+        let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
+        (runtime, thread, InstalledHost)
     }
 
     #[test]
     fn current_host_requires_matching_runtime_and_thread() {
-        let (runtime, thread, host) = host();
+        let (runtime, thread, _host) = host();
 
-        let current = RuntimeDriverHost::current(&runtime, &thread).unwrap();
-        assert!(Rc::ptr_eq(&current, &host));
+        assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_some());
 
         let other_runtime = IoRuntime::new(observed::Sink::noop());
-        assert!(RuntimeDriverHost::current(&other_runtime, &thread).is_none());
+        assert!(RuntimeDriverHost::with_current(&other_runtime, &thread, |_| ()).is_none());
 
         let other_thread = ThreadBuilder::default().build(std::thread::current().id());
-        assert!(RuntimeDriverHost::current(&runtime, &other_thread).is_none());
+        assert!(RuntimeDriverHost::with_current(&runtime, &other_thread, |_| ()).is_none());
     }
 
     #[test]
@@ -174,24 +190,24 @@ mod tests {
 
     #[test]
     fn primary_driver_state_changes_after_context_initialization() {
-        let (runtime, thread, host) = host();
-        let before_initialization = host.has_primary();
+        let (runtime, thread, _host) = host();
+        let before_initialization = RuntimeDriverHost::has_primary_current();
 
         RuntimeDriverHost::try_context_current::<TestContext>(&runtime, &thread, &false)
             .unwrap()
             .unwrap();
 
-        assert_eq!((before_initialization, host.has_primary()), (false, true));
+        assert_eq!((before_initialization, RuntimeDriverHost::has_primary_current()), (false, true));
     }
 
     #[test]
     fn driver_cycle_failures_are_returned() {
-        let (runtime, thread, host) = host();
+        let (runtime, thread, _host) = host();
         RuntimeDriverHost::try_context_current::<TestContext>(&runtime, &thread, &true)
             .unwrap()
             .unwrap();
 
-        let error = host.execute_cycle(Duration::ZERO).unwrap_err();
+        let error = RuntimeDriverHost::execute_cycle_current(Duration::ZERO).unwrap_err();
 
         assert_eq!(error.source().unwrap().to_string(), "cycle failed");
     }
