@@ -95,8 +95,8 @@ impl IoContext for ReentrantContext {
     }
 }
 
-/// Retrieves its own type through a second host so the runtime-wide reentry
-/// guard, rather than the caller host's local guard, owns the rejection.
+/// Retrieves its own type through a second host during driver construction,
+/// after the shared context has been published.
 #[derive(Clone)]
 struct SameTypeReentrantContext {
     state: Arc<State>,
@@ -125,6 +125,38 @@ impl IoContext for SameTypeReentrantContext {
                 .unwrap()
         });
         self.state.nested_context_errors.lock().unwrap().push(error.to_string());
+        Ok(TestDriver {
+            kind: Kind::First,
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
+/// Retrieves its own type through a second host during context construction,
+/// before the shared context has been published.
+#[derive(Clone)]
+struct SameTypeContextReentrantContext {
+    state: Arc<State>,
+}
+
+impl ThreadAware for SameTypeContextReentrantContext {
+    fn relocate(&mut self, source: Option<&Thread>, _destination: &Thread) {
+        assert!(source.is_none());
+    }
+}
+
+impl IoContext for SameTypeContextReentrantContext {
+    type ContextOptions = (IoRuntime, Arc<State>);
+    type Driver = TestDriver;
+
+    fn context((runtime, state): Self::ContextOptions) -> Self {
+        let error = host(&runtime).context::<Self>((runtime.clone(), Arc::clone(&state))).err().unwrap();
+        state.nested_context_errors.lock().unwrap().push(error.to_string());
+        Self { state }
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.state.roles.lock().unwrap().push((Kind::First, options.role()));
         Ok(TestDriver {
             kind: Kind::First,
             state: Arc::clone(&self.state),
@@ -814,6 +846,22 @@ fn same_type_retrieval_through_another_host_rejects_reentrant_initialization() {
 
     let _ = host.context::<SameTypeReentrantContext>(Arc::clone(&state)).unwrap();
     SAME_TYPE_RUNTIME.with_borrow_mut(Option::take);
+
+    assert_eq!(
+        state.nested_context_errors.lock().unwrap().as_slice(),
+        ["I/O context retrieval cannot reenter initialization of the same context type on one thread"]
+    );
+}
+
+#[test]
+fn same_type_retrieval_during_context_construction_rejects_reentrant_initialization() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+
+    let _ = host
+        .context::<SameTypeContextReentrantContext>((runtime, Arc::clone(&state)))
+        .unwrap();
 
     assert_eq!(
         state.nested_context_errors.lock().unwrap().as_slice(),

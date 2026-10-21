@@ -26,6 +26,7 @@ use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
+use testing_aids::is_mutation_testing;
 use tick::SimpleClock;
 
 const WORKERS: usize = 2;
@@ -43,17 +44,7 @@ where
     type Output = R;
 
     fn join(self) -> Result<Self::Output, JoinError> {
-        let (result_tx, result_rx) = mpsc::channel();
-        thread::spawn(move || {
-            _ = result_tx.send(futures::executor::block_on(self));
-        });
-        match result_rx.recv_timeout(testing_aids::TEST_TIMEOUT) {
-            Ok(result) => result,
-            Err(error) => {
-                eprintln!("I/O task join did not complete before the test deadline: {error}");
-                std::process::abort();
-            }
-        }
+        testing_aids::execute_or_terminate_process(|| futures::executor::block_on(self))
     }
 }
 static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -279,7 +270,12 @@ impl Scenario {
     }
 
     fn wait_until_driver_blocked(&self) {
-        let gate = self.driver_gate.lock().unwrap();
+        let mut gate = self.driver_gate.lock().unwrap();
+        if is_mutation_testing() {
+            gate = self.driver_gate_changed.wait_while(gate, |gate| !gate.entered).unwrap();
+            assert!(gate.entered);
+            return;
+        }
         let (gate, timeout) = self
             .driver_gate_changed
             .wait_timeout_while(gate, testing_aids::TEST_TIMEOUT, |gate| !gate.entered)
@@ -306,6 +302,11 @@ impl Scenario {
         let mut gate = self.driver_gate.lock().unwrap();
         gate.entered = true;
         self.driver_gate_changed.notify_all();
+        if is_mutation_testing() {
+            gate = self.driver_gate_changed.wait_while(gate, |gate| !gate.released).unwrap();
+            assert!(gate.released);
+            return;
+        }
         let (gate, timeout) = self
             .driver_gate_changed
             .wait_timeout_while(gate, testing_aids::TEST_TIMEOUT, |gate| !gate.released)
@@ -477,6 +478,14 @@ impl DriverWake {
         *notified = false;
         was_notified
     }
+
+    fn wait_for_notification(&self) {
+        let mut notified = self.notified.lock().unwrap();
+        while !*notified {
+            notified = self.notification.wait(notified).unwrap();
+        }
+        *notified = false;
+    }
 }
 
 impl Wake for DriverWake {
@@ -521,12 +530,19 @@ impl<M: Marker> Driver for TestDriver<M> {
         }
         if self.role == DriverRole::Primary && self.scenario.block_primary.load(Ordering::SeqCst) && !cycle.max_wait().is_zero() {
             self.scenario.primary_wait_entries.fetch_add(1, Ordering::SeqCst);
-            let wait = if self.scenario.block_primary_until_woken.load(Ordering::SeqCst) {
-                testing_aids::TEST_TIMEOUT
+            let block_until_woken = self.scenario.block_primary_until_woken.load(Ordering::SeqCst);
+            let was_notified = if block_until_woken && is_mutation_testing() {
+                self.wake.wait_for_notification();
+                true
             } else {
-                cycle.max_wait()
+                let wait = if block_until_woken {
+                    testing_aids::TEST_TIMEOUT
+                } else {
+                    cycle.max_wait()
+                };
+                self.wake.wait(wait)
             };
-            if !self.wake.wait(wait) {
+            if !was_notified {
                 self.scenario.primary_wait_timeouts.fetch_add(1, Ordering::SeqCst);
             }
         }
@@ -583,6 +599,12 @@ fn event_count(processor: &MockProcessor, name: &str) -> usize {
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
+    if is_mutation_testing() {
+        while !condition() {
+            thread::yield_now();
+        }
+        return;
+    }
     let clock = SimpleClock::new_system();
     let deadline = clock.instant() + testing_aids::TEST_TIMEOUT;
     while !condition() {

@@ -56,15 +56,15 @@ impl Error {
     }
 
     pub(crate) fn io_outside_worker() -> Self {
-        Self::new(RuntimeValidation::IoOutsideWorker)
+        Self::new(IoOutsideWorkerError::new())
     }
 
     pub(crate) fn runtime_shutting_down() -> Self {
-        Self::new(RuntimeValidation::RuntimeShuttingDown)
+        Self::new(RuntimeShuttingDownError::new())
     }
 
     pub(crate) fn io_failure(error: Arc<DriverError>) -> Self {
-        Self::new(IoFailure(error))
+        Self::new(IoFailure::caused_by(SharedDriverError(error)))
     }
 
     #[cfg(any(test, feature = "macros"))]
@@ -110,8 +110,6 @@ pub(crate) enum RuntimeValidation {
     BlockOnFromWorker,
     ShutdownWaitFromWorker,
     ShutdownWaitFromBlockingCallback,
-    IoOutsideWorker,
-    RuntimeShuttingDown,
 }
 
 impl Display for RuntimeValidation {
@@ -122,24 +120,33 @@ impl Display for RuntimeValidation {
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
             Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
-            Self::IoOutsideWorker => "I/O context access requires an active associated worker",
-            Self::RuntimeShuttingDown => "the runtime is shutting down",
         })
     }
 }
 
 impl StdError for RuntimeValidation {}
 
-#[derive(Debug)]
-struct IoFailure(Arc<DriverError>);
+#[ohno::error]
+#[display("I/O context access requires an active associated worker")]
+struct IoOutsideWorkerError;
 
-impl Display for IoFailure {
+#[ohno::error]
+#[display("the runtime is shutting down")]
+struct RuntimeShuttingDownError;
+
+#[ohno::error]
+struct IoFailure;
+
+#[derive(Debug)]
+struct SharedDriverError(Arc<DriverError>);
+
+impl Display for SharedDriverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(self.0.as_ref(), f)
     }
 }
 
-impl StdError for IoFailure {
+impl StdError for SharedDriverError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         Some(self.0.as_ref())
     }
@@ -225,7 +232,25 @@ mod tests {
         let error = Error::io_failure(Arc::new(DriverError::from_message("driver failed")));
         let source = error.source().unwrap();
 
+        assert!(source.downcast_ref::<IoFailure>().is_some());
         assert_eq!(source.to_string(), "driver failed");
-        assert_eq!(source.source().unwrap().to_string(), "driver failed");
+        let shared = source.source().unwrap();
+        assert!(shared.downcast_ref::<SharedDriverError>().is_some());
+        assert_eq!(shared.to_string(), "driver failed");
+        assert!(shared.source().unwrap().downcast_ref::<DriverError>().is_some());
+    }
+
+    #[test]
+    fn io_validation_failures_preserve_private_leaf_identity_and_display_context() {
+        let outside_worker = Error::io_outside_worker();
+        let shutting_down = Error::runtime_shutting_down();
+
+        assert_eq!(
+            outside_worker.to_string(),
+            "I/O context access requires an active associated worker"
+        );
+        assert!(outside_worker.source().unwrap().downcast_ref::<IoOutsideWorkerError>().is_some());
+        assert_eq!(shutting_down.to_string(), "the runtime is shutting down");
+        assert!(shutting_down.source().unwrap().downcast_ref::<RuntimeShuttingDownError>().is_some());
     }
 }

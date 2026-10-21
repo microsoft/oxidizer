@@ -49,6 +49,7 @@ rt = [
     "dep:many_cpus",
     "dep:nonempty",
     "dep:observed",
+    "dep:ohno",
     "dep:performables",
     "dep:pin-project",
     "dep:thread_aware",
@@ -69,6 +70,7 @@ futures = { workspace = true, features = ["executor"], optional = true }
 many_cpus = { workspace = true, optional = true }
 nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
+ohno = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }

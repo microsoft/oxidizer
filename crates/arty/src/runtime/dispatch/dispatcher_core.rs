@@ -120,6 +120,7 @@ impl DispatcherCore {
     }
 
     /// Stops the runtime. Safe to call multiple times.
+    #[cfg_attr(test, mutants::skip)] // Removing the public stop boundary strands runtime workers before tests can assert.
     pub(crate) fn stop(&self) {
         self.stop_inner();
     }

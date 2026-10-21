@@ -98,6 +98,7 @@ pub(crate) struct AsyncWorker {
     clock_driver: ClockDriver,
 
     time: SimpleClock,
+    physical_time: SimpleClock,
     signal: Arc<WorkerSignal>,
     _single_threaded: PhantomData<*const ()>,
 }
@@ -139,6 +140,7 @@ impl AsyncWorker {
             tasks,
             clock_driver,
             time,
+            physical_time: SimpleClock::new_system(),
             blocking_worker,
             signal,
             _single_threaded: PhantomData,
@@ -197,7 +199,7 @@ impl AsyncWorker {
         } else {
             Duration::ZERO
         };
-        let cycle_started = Instant::now();
+        let cycle_started = self.physical_time.stopwatch();
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             self.begin_shutdown();
             _ = self.clock_driver.advance_timers(self.time.instant());

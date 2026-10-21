@@ -167,11 +167,15 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
 
     let (completed, completion) = mpsc::channel();
     worker.spawn(async move |_| completed.send(()).unwrap());
-    let result = completion.recv_timeout(Duration::from_millis(500));
-    if result.is_err() {
-        scenario.wake_driver_interrupts();
+    if is_mutation_testing() {
+        completion.recv().unwrap();
+    } else {
+        let result = completion.recv_timeout(Duration::from_millis(500));
+        if result.is_err() {
+            scenario.wake_driver_interrupts();
+        }
+        result.unwrap();
     }
-    result.unwrap();
     assert!(scenario.driver_wakes.load(Ordering::SeqCst) > 0);
     assert_eq!(scenario.primary_wait_timeouts.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
