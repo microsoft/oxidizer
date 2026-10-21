@@ -3,7 +3,7 @@
 
 //! I/O driver telemetry behavior.
 
-use super::*;
+use crate::*;
 
 #[test]
 fn successful_initialization_reports_context_and_role_telemetry() {

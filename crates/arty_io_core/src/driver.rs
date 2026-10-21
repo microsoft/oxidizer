@@ -26,8 +26,7 @@ pub trait Driver: 'static {
     /// The returned waker must not be the owner waker supplied through
     /// [`DriverOptions::owner_waker`](crate::DriverOptions::owner_waker):
     /// [`Waker::will_wake`] must return `false` for that pair. It also must not
-    /// synchronously wake the owner waker. Runtimes may invoke this waker while
-    /// processing an owner wake, so either behavior can recurse without bound.
+    /// synchronously wake the owner waker.
     #[must_use]
     fn waker(&self) -> Waker;
 

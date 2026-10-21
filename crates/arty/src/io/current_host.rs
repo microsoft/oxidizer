@@ -9,14 +9,20 @@ use arty_io_core::IoContext;
 use arty_io_host::{DriverHost, IoRuntime};
 use thread_aware::Thread;
 
-use crate::io::fail_runtime;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+
+use super::handle::{fail_runtime, runtime_error};
 
 thread_local! {
     static CURRENT: RefCell<Option<RuntimeDriverHost>> = const { RefCell::new(None) };
 }
 
+/// Worker-local adapter between Arty's lifecycle and `arty_io_host`.
+///
+/// The adapter owns the host in worker TLS so lookup does not extend its
+/// lifetime beyond worker shutdown. It also binds lookups to one runtime and
+/// worker and translates fatal host failures into Arty runtime shutdown.
 #[derive(Debug)]
 pub(crate) struct RuntimeDriverHost {
     runtime: IoRuntime,
@@ -67,7 +73,7 @@ impl RuntimeDriverHost {
                 .host
                 .context::<C>(options)
                 .map_err(|error| fail_runtime(&host.dispatcher, error))?;
-            crate::io::runtime_error(&host.dispatcher).map_or(Ok(context), Err)
+            runtime_error(&host.dispatcher).map_or(Ok(context), Err)
         })
     }
 

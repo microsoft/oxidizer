@@ -3,14 +3,26 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
+#[cfg(test)]
+use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::remote::Pool as RemotePool;
+#[cfg(test)]
+use nonempty::NonEmpty;
 use performables::arc::Arc;
+#[cfg(test)]
+use performables::sync::channel;
 
 use crate::runtime::Error;
+#[cfg(test)]
+use crate::runtime::blocking_worker::BlockingPool;
 use crate::runtime::blocking_worker::BlockingWorker;
+#[cfg(test)]
+use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
+#[cfg(test)]
+use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -29,15 +41,6 @@ impl DispatcherClient {
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
-        use std::task::Waker;
-
-        use nonempty::NonEmpty;
-        use performables::sync::channel;
-
-        use crate::runtime::blocking_worker::BlockingPool;
-        use crate::runtime::dispatch::WorkerEndpoint;
-        use crate::runtime::thread::waiter::ThreadWaiter;
-
         let (command_tx, _command_rx) = channel::unbounded();
         let endpoint = WorkerEndpoint {
             command_tx,
@@ -154,17 +157,12 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::task::Waker;
-
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
-    use performables::sync::channel;
     use thread_aware::{Thread, ThreadAware};
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
-    use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::runtime::thread::waiter::ThreadWaiter;
+    use crate::runtime::dispatch::test_threads;
     use crate::task::scheduler::Scheduler;
 
     #[test]

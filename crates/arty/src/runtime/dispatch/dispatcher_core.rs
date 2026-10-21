@@ -120,7 +120,6 @@ impl DispatcherCore {
     }
 
     /// Stops the runtime. Safe to call multiple times.
-    #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
     pub(crate) fn stop(&self) {
         self.stop_inner();
     }
@@ -132,6 +131,7 @@ impl DispatcherCore {
         self.stop_inner();
     }
 
+    #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
     fn stop_inner(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
@@ -466,11 +466,17 @@ mod tests {
         );
         dispatcher.stop();
         let invoked = Arc::new(AtomicBool::new(false));
-        let access_invoked = Arc::clone(&invoked);
 
-        assert!(!dispatcher.access_io(WorkerIndex(0), Box::new(move |_| access_invoked.store(true, Ordering::Release)),));
+        assert!(!dispatcher.access_io(
+            WorkerIndex(0),
+            Box::new({
+                let invoked = Arc::clone(&invoked);
+                move |_| invoked.store(true, Ordering::Relaxed)
+            }),
+        ));
 
-        assert!(!invoked.load(Ordering::Acquire));
+        // Rejection is synchronous and the callback publishes no other data.
+        assert!(!invoked.load(Ordering::Relaxed));
         assert!(matches!(drain_rx(&rx).as_slice(), [AsyncWorkerCommand::Shutdown]));
     }
 

@@ -3,7 +3,7 @@
 
 //! I/O access from ordinary threads and non-Arty runtimes.
 
-use super::*;
+use crate::*;
 
 #[test]
 fn builtins_clone_initializes_and_accesses_io_from_a_non_runtime_thread() {
@@ -94,6 +94,7 @@ fn concurrent_external_access_registers_one_context_and_driver() {
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn external_access_from_a_running_futures_executor_uses_the_bound_worker() {
     let runtime = runtime(1);
@@ -112,6 +113,7 @@ fn external_access_from_a_running_futures_executor_uses_the_bound_worker() {
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn shutdown_during_external_initialization_unblocks_without_io_failure() {
     let runtime = runtime(1);
@@ -137,6 +139,7 @@ fn shutdown_during_external_initialization_unblocks_without_io_failure() {
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn external_access_racing_shutdown_returns_shutdown() {
     let runtime = runtime(1);
@@ -167,6 +170,7 @@ fn external_access_racing_shutdown_returns_shutdown() {
     let _ = blocker.join();
     runtime.stop().unwrap();
 }
+
 #[test]
 fn relocation_to_a_foreign_runtime_preserves_the_original_worker_binding() {
     let original_runtime = runtime(1);
@@ -209,6 +213,7 @@ fn relocation_to_a_foreign_runtime_preserves_the_original_worker_binding() {
     original_runtime.stop().unwrap();
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn io_access_from_another_worker_is_rejected_without_registration() {
     let runtime = runtime(WORKERS);
@@ -232,6 +237,7 @@ fn io_access_from_another_worker_is_rejected_without_registration() {
     assert_eq!(rejected_options.context_constructions.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
 }
+
 #[test]
 fn builtins_clone_accesses_io_from_a_tokio_runtime_thread() {
     let runtime = runtime(1);

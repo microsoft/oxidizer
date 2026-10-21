@@ -3,7 +3,7 @@
 
 //! Initialization failures and shutdown races.
 
-use super::*;
+use crate::*;
 
 #[test]
 fn external_initialization_failure_is_returned_and_stops_runtime() {
@@ -30,6 +30,7 @@ fn external_initialization_failure_is_returned_and_stops_runtime() {
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 0);
 }
+
 #[test]
 fn try_context_reports_driver_construction_failure_and_stops_runtime() {
     let (runtime, processor) = runtime_with_telemetry(1);
@@ -55,6 +56,7 @@ fn try_context_reports_driver_construction_failure_and_stops_runtime() {
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 0);
     assert_eq!(event_count(&processor, "arty.rt.io.driver.initialization_failed"), 1);
 }
+
 #[test]
 fn context_panics_after_requesting_shutdown_on_initialization_failure() {
     let runtime = runtime(1);
@@ -111,6 +113,7 @@ fn worker_driver_construction_failure_stops_an_already_registered_context() {
     assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
     let runtime = runtime(1);
@@ -142,6 +145,7 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn shutdown_during_late_initialization_is_observed_by_the_request() {
     let runtime = runtime(WORKERS);
@@ -183,6 +187,7 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), WORKERS);
 }
+
 #[test]
 fn concurrent_worker_initialization_failure_is_reported_consistently() {
     const CONCURRENT_WORKERS: usize = 3;
@@ -207,7 +212,10 @@ fn concurrent_worker_initialization_failure_is_reported_consistently() {
     let blocked_initialization = workers[1].spawn({
         let scenario = scenario.clone();
         async move |builtins| {
-            let _ = builtins.io().try_context::<TestContext<ConcurrentLateFailure>>(&scenario);
+            builtins
+                .io()
+                .try_context::<TestContext<ConcurrentLateFailure>>(&scenario)
+                .map_or_else(|error| error.to_string(), |_| "ok".to_owned())
         }
     });
     scenario.wait_until_driver_blocked();
@@ -229,7 +237,7 @@ fn concurrent_worker_initialization_failure_is_reported_consistently() {
     );
     let _ = failed_initialization.join();
     scenario.release_driver();
-    let _ = blocked_initialization.join();
+    assert_eq!(blocked_initialization.join().unwrap(), "driver construction failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 2);
 }

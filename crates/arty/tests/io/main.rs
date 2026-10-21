@@ -12,11 +12,11 @@ use std::collections::HashSet;
 use std::error::Error as _;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, mpsc};
 use std::task::{Wake, Waker};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{fmt, thread};
 
 use arty::core::{Thread, ThreadAware};
@@ -25,7 +25,8 @@ use arty::runtime::{Runtime, RuntimeBuilder, RuntimeOperations, WorkersPolicy};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
-use static_assertions::assert_impl_all;
+use static_assertions::{assert_impl_all, assert_not_impl_any};
+use tick::SimpleClock;
 
 const WORKERS: usize = 2;
 
@@ -58,6 +59,7 @@ where
 static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 assert_impl_all!(Io: Clone, Send, ThreadAware);
+assert_not_impl_any!(Io: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(RuntimeBuilder: Send, Sync);
 
 #[derive(Debug)]
@@ -163,6 +165,12 @@ enum RolePlan {
     Inconsistent,
 }
 
+/// Shared controls and observations for one context type across runtime workers.
+///
+/// The atomics use one sequentially consistent ordering because some fields are
+/// progress gates observed before joins while others are counters read after
+/// completion. Keeping one ordering model avoids relying on field-specific
+/// synchronization when scenarios combine those roles.
 struct Scenario {
     role_plan: RolePlan,
     context_constructions: AtomicUsize,
@@ -193,41 +201,6 @@ struct Scenario {
     driver_gate: Mutex<DriverGate>,
     driver_gate_changed: Condvar,
     context_action: Mutex<Option<ContextAction>>,
-}
-
-struct ScenarioOptions(Arc<Scenario>);
-
-impl Clone for ScenarioOptions {
-    fn clone(&self) -> Self {
-        self.option_clones.fetch_add(1, Ordering::SeqCst);
-        Self(Arc::clone(&self.0))
-    }
-}
-
-impl Deref for ScenarioOptions {
-    type Target = Scenario;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref()
-    }
-}
-
-impl ThreadAware for ScenarioOptions {
-    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        self.option_relocations.fetch_add(1, Ordering::SeqCst);
-        self.option_workers.lock().unwrap().push(thread::current().id());
-        assert_eq!(thread::current().id(), destination.id());
-    }
-}
-
-#[derive(Default)]
-struct DriverGate {
-    entered: bool,
-    released: bool,
-}
-
-enum ContextAction {
-    RegisterSelf { io: Io },
 }
 
 impl Scenario {
@@ -358,6 +331,45 @@ impl Scenario {
     }
 }
 
+/// Cloneable context options that record cloning and worker relocation.
+struct ScenarioOptions(Arc<Scenario>);
+
+impl Clone for ScenarioOptions {
+    fn clone(&self) -> Self {
+        self.option_clones.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl Deref for ScenarioOptions {
+    type Target = Scenario;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+impl ThreadAware for ScenarioOptions {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.option_relocations.fetch_add(1, Ordering::SeqCst);
+        self.option_workers.lock().unwrap().push(thread::current().id());
+        assert_eq!(thread::current().id(), destination.id());
+    }
+}
+
+/// Rendezvous used to pause one driver construction attempt deterministically.
+#[derive(Default)]
+struct DriverGate {
+    entered: bool,
+    released: bool,
+}
+
+/// Action injected into context construction for nested-registration scenarios.
+enum ContextAction {
+    RegisterSelf { io: Io },
+}
+
+/// Context fixture whose marker selects a distinct runtime-wide registration.
 struct TestContext<M: Marker> {
     scenario: Arc<Scenario>,
     thread: Option<Thread>,
@@ -439,6 +451,7 @@ impl<M: Marker> IoContext for TestContext<M> {
     }
 }
 
+/// Latched interrupt waker used to observe and release primary-driver waits.
 struct DriverWake {
     scenario: Arc<Scenario>,
     notified: Mutex<bool>,
@@ -478,6 +491,7 @@ impl Wake for DriverWake {
     }
 }
 
+/// Worker-local driver fixture that applies the scenario's failures and gates.
 struct TestDriver<M: Marker> {
     scenario: Arc<Scenario>,
     role: DriverRole,
@@ -569,9 +583,10 @@ fn event_count(processor: &MockProcessor, name: &str) -> usize {
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + testing_aids::TEST_TIMEOUT;
+    let clock = SimpleClock::new_system();
+    let deadline = clock.instant() + testing_aids::TEST_TIMEOUT;
     while !condition() {
-        assert!(Instant::now() < deadline, "condition did not become true before the test timeout");
+        assert!(clock.instant() < deadline, "condition did not become true before the test timeout");
         thread::yield_now();
     }
 }
@@ -580,13 +595,8 @@ fn serialize_invariant_test() -> std::sync::MutexGuard<'static, ()> {
     INVARIANT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-#[path = "io/cycles.rs"]
 mod cycles;
-#[path = "io/external.rs"]
 mod external;
-#[path = "io/failures.rs"]
 mod failures;
-#[path = "io/registration.rs"]
 mod registration;
-#[path = "io/telemetry.rs"]
 mod telemetry;

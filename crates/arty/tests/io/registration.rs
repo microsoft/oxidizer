@@ -3,7 +3,7 @@
 
 //! Registration serialization, role consistency, and nested registration.
 
-use super::*;
+use crate::*;
 
 #[test]
 fn each_worker_initializes_its_driver_on_first_retrieval() {
@@ -54,6 +54,7 @@ fn each_worker_initializes_its_driver_on_first_retrieval() {
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), WORKERS);
 }
+
 #[test]
 fn runtime_registries_are_isolated() {
     let first_runtime = runtime(1);
@@ -87,6 +88,7 @@ fn runtime_registries_are_isolated() {
     first_runtime.stop().unwrap();
     second_runtime.stop().unwrap();
 }
+
 #[test]
 fn waiting_registration_observes_another_workers_failure() {
     let runtime = runtime(WORKERS);
@@ -133,6 +135,7 @@ fn waiting_registration_observes_another_workers_failure() {
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), WORKERS);
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn concurrent_same_context_registration_constructs_options_once() {
     let runtime = runtime(WORKERS);
@@ -241,12 +244,16 @@ fn inconsistent_primary_role_on_another_worker_is_rejected() {
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 1);
 }
+
 #[test]
 fn racing_registrations_select_one_consistent_primary() {
+    // Sixteen iterations sample both competing registration orders without
+    // turning this integration test into an open-ended stress workload.
     for _ in 0..16 {
         race_primary_registration_once();
     }
 }
+
 #[test]
 fn additional_drivers_are_secondary_on_every_worker() {
     let runtime = runtime(WORKERS);

@@ -3,7 +3,7 @@
 
 //! Driver cycles, ordering, wake-up, and shutdown behavior.
 
-use super::*;
+use crate::*;
 
 fn cycle_failure<M: Marker>(role_plan: RolePlan, expected_role: &'static str)
 where
@@ -44,10 +44,12 @@ where
         expected_role.into()
     );
 }
+
 #[test]
 fn primary_cycle_failure_stops_runtime() {
     cycle_failure::<PrimaryCycleFailure>(RolePlan::PreferPrimary, "primary");
 }
+
 #[test]
 fn secondary_cycle_failure_stops_runtime() {
     cycle_failure::<SecondaryCycleFailure>(RolePlan::Secondary, "secondary");
@@ -84,6 +86,7 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
 }
+
 #[test]
 fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     let _serial = serialize_invariant_test();
@@ -110,6 +113,7 @@ fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     assert_eq!(event_count(&processor, "arty.rt.io.driver.cycle_failed"), 1);
     assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 1);
 }
+
 #[test]
 fn secondaries_execute_before_the_primary() {
     let runtime = runtime(1);
@@ -141,6 +145,7 @@ fn secondaries_execute_before_the_primary() {
     assert_eq!(&log.lock().unwrap()[..2], &[OrderedSecondary::NAME, OrderedPrimary::NAME]);
     runtime.stop().unwrap();
 }
+
 #[test]
 fn primary_wait_is_interrupted_by_new_runtime_work() {
     let runtime = runtime(1);
@@ -188,6 +193,7 @@ fn timers_fire_while_a_primary_driver_is_initialized() {
     completion.recv_timeout(Duration::from_millis(500)).unwrap();
     runtime.stop().unwrap();
 }
+
 #[test]
 fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
     let (runtime, processor) = runtime_with_telemetry(1);

@@ -23,6 +23,9 @@ use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
 const COMMANDS_PER_CYCLE: usize = 256;
+// Recheck timers and non-blocking secondary drivers at least every millisecond.
+// If a primary returns early, WorkerSignal spends the remaining budget so an
+// idle driver cannot turn the worker loop into a busy poll.
 const IO_IDLE_WAIT: Duration = Duration::from_millis(1);
 
 fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
@@ -1085,14 +1088,16 @@ mod tests {
             Arc::new(WorkerSignal::default()),
         );
         let invoked = Arc::new(AtomicBool::new(false));
-        let access_invoked = Arc::clone(&invoked);
         let (dropped_tx, dropped_rx) = mpsc::channel();
         let drop_signal = DropSignal(dropped_tx);
         command_tx
             .send(AsyncWorkerCommand::AccessIo {
-                access: crate::runtime::worker::protocol::QueuedIoAccess::new(Box::new(move |_| {
-                    let _ = &drop_signal;
-                    access_invoked.store(true, Ordering::Release);
+                access: crate::runtime::worker::protocol::QueuedIoAccess::new(Box::new({
+                    let invoked = Arc::clone(&invoked);
+                    move |_| {
+                        let _ = &drop_signal;
+                        invoked.store(true, Ordering::Release);
+                    }
                 })),
             })
             .unwrap();

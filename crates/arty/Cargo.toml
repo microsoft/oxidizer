@@ -105,6 +105,10 @@ thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-ut
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
 
+[[test]]
+name = "io"
+path = "tests/io/main.rs"
+
 [[bench]]
 name = "arty_scheduling"
 harness = false
