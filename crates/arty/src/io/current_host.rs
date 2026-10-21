@@ -32,7 +32,10 @@ pub(crate) struct RuntimeDriverHost {
 
 impl RuntimeDriverHost {
     pub(crate) fn install(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Waker {
-        let driver_host = runtime.clone().driver_host(owner_waker);
+        let driver_host = runtime
+            .clone()
+            .driver_host(thread.clone(), owner_waker)
+            .expect("the worker creates its I/O host on the thread identified by its own coordinate");
         let waker = driver_host.waker();
         let host = Self {
             runtime: runtime.to_owned(),
@@ -69,7 +72,7 @@ impl RuntimeDriverHost {
         Self::with_current(runtime, thread, |host| {
             let context = host
                 .host
-                .context::<C>(options)
+                .context::<C>(options.clone())
                 .map_err(|error| fail_runtime(&host.dispatcher, error))?;
             runtime_error(&host.dispatcher).map_or(Ok(context), Err)
         })
@@ -161,8 +164,7 @@ mod tests {
 
     fn host() -> (IoRuntime, Thread, InstalledHost) {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let mut runtime = IoRuntime::new(observed::Sink::noop());
-        runtime.relocate(None, &thread);
+        let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);
         let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
         (runtime, thread, InstalledHost)

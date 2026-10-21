@@ -194,7 +194,7 @@ impl AsyncWorkerStartInfo {
             thread_builder,
             blocking_pools,
             shutdown_started,
-            mut io_runtime,
+            io_runtime,
             sink,
         } = self;
 
@@ -207,7 +207,6 @@ impl AsyncWorkerStartInfo {
         // The constructing thread is outside the runtime, so the relocation source is unknown.
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
-        io_runtime.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
         let blocking_worker =

@@ -528,8 +528,7 @@ mod tests {
             sink.clone(),
             Arc::clone(&shutdown_signal),
         )));
-        let mut io_runtime = arty_io_host::IoRuntime::new(sink.clone());
-        io_runtime.relocate(None, &thread);
+        let io_runtime = arty_io_host::IoRuntime::new(sink.clone());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_waker);
