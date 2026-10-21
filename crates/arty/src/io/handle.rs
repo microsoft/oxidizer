@@ -47,10 +47,9 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, registering it if necessary.
     ///
-    /// `options` must be initialized before this call. It is cloned and
-    /// consumed only when this call performs the runtime-wide registration for
-    /// `C`. External-thread access makes an additional clone to cross the
-    /// worker boundary.
+    /// `options` must be initialized before this call. Arty may clone it while
+    /// routing the request and accessing the worker-local host. Keep context
+    /// options inexpensive to clone.
     ///
     /// Each concrete context type is initialized once per runtime. The first
     /// successful call fixes the context created from `options`; later calls
@@ -76,10 +75,9 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, registering it if necessary.
     ///
-    /// `options` must be initialized before this call. It is cloned and
-    /// consumed only when this call performs the runtime-wide registration for
-    /// `C`. External-thread access makes an additional clone to cross the
-    /// worker boundary.
+    /// `options` must be initialized before this call. Arty may clone it while
+    /// routing the request and accessing the worker-local host. Keep context
+    /// options inexpensive to clone.
     ///
     /// Each concrete context type is initialized once per runtime. The first
     /// successful call fixes the context created from `options`; later calls

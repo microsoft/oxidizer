@@ -17,15 +17,8 @@ fn builtins_clone_initializes_and_accesses_io_from_a_non_runtime_thread() {
         thread::spawn(move || {
             let external = thread::current().id();
             let first = builtins.io().try_context::<TestContext<CacheContext>>(&scenario).unwrap();
-            let clones_before_cached_get = cached_options.option_clones.load(Ordering::SeqCst);
             let second = builtins.io().context::<TestContext<CacheContext>>(&cached_options);
-            (
-                external,
-                first.thread.unwrap().id(),
-                second.thread.unwrap().id(),
-                clones_before_cached_get,
-                cached_options.option_clones.load(Ordering::SeqCst),
-            )
+            (external, first.thread.unwrap().id(), second.thread.unwrap().id())
         })
         .join()
         .unwrap()
@@ -34,7 +27,6 @@ fn builtins_clone_initializes_and_accesses_io_from_a_non_runtime_thread() {
     assert_ne!(external.0, worker);
     assert_eq!(external.1, worker);
     assert_eq!(external.2, worker);
-    assert_eq!(external.3 + 1, external.4);
     assert_eq!(scenario.context_constructions.load(Ordering::SeqCst), 1);
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
     assert!(scenario.option_workers().is_empty());

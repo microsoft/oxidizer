@@ -167,7 +167,6 @@ struct Scenario {
     context_constructions: AtomicUsize,
     relocations: AtomicUsize,
     option_relocations: AtomicUsize,
-    option_clones: AtomicUsize,
     option_workers: Mutex<Vec<thread::ThreadId>>,
     driver_attempts: AtomicUsize,
     initialized: AtomicUsize,
@@ -209,7 +208,6 @@ impl Scenario {
             context_constructions: AtomicUsize::new(0),
             relocations: AtomicUsize::new(0),
             option_relocations: AtomicUsize::new(0),
-            option_clones: AtomicUsize::new(0),
             option_workers: Mutex::new(Vec::new()),
             driver_attempts: AtomicUsize::new(0),
             initialized: AtomicUsize::new(0),
@@ -337,7 +335,6 @@ struct ScenarioOptions(Arc<Scenario>);
 
 impl Clone for ScenarioOptions {
     fn clone(&self) -> Self {
-        self.option_clones.fetch_add(1, Ordering::SeqCst);
         Self(Arc::clone(&self.0))
     }
 }

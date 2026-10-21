@@ -3,6 +3,9 @@
 
 //! Driver cycles, ordering, wake-up, and shutdown behavior.
 
+use std::future::Future as _;
+use std::task::Poll;
+
 use crate::*;
 
 fn cycle_failure<M: Marker>(role_plan: RolePlan, expected_role: &'static str)
@@ -182,19 +185,41 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
 }
 
 #[test]
-fn timers_fire_while_a_primary_driver_is_initialized() {
-    let runtime = runtime(1);
+fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
+    // `AsyncWorker::injected_time_advances_worker_timers_without_elapsed_wall_time`
+    // separately covers worker-driven ClockDriver advancement.
+    let control = tick::ClockControl::new();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .clock(control.clone())
+        .build()
+        .unwrap();
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_primary.store(true, Ordering::SeqCst);
+    let (registered, registration) = mpsc::channel();
     let (completed, completion) = mpsc::channel();
-    worker.spawn(async move |builtins| {
+    let task = worker.spawn(async move |builtins| {
         let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
-        builtins.clock().delay(Duration::from_millis(20)).await;
+        let mut delay = Box::pin(builtins.clock().delay(Duration::from_secs(1)));
+        let mut registered = Some(registered);
+        std::future::poll_fn(move |cx| match delay.as_mut().poll(cx) {
+            Poll::Pending => {
+                if let Some(registered) = registered.take() {
+                    registered.send(()).unwrap();
+                }
+                Poll::Pending
+            }
+            Poll::Ready(()) => Poll::Ready(()),
+        })
+        .await;
         completed.send(()).unwrap();
     });
 
-    completion.recv_timeout(Duration::from_millis(500)).unwrap();
+    registration.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+    control.advance(Duration::from_secs(1));
+    completion.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+    task.join().unwrap();
     runtime.stop().unwrap();
 }
 
