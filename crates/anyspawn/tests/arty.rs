@@ -30,7 +30,7 @@ impl ThreadAware for RelocationProbe {
 }
 
 fn runtime_and_spawner() -> (Runtime, Spawner) {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let spawner = Spawner::new_arty(scheduler);
     (runtime, spawner)
