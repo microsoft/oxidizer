@@ -102,6 +102,7 @@ impl WorkerSignal {
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing driver interruption strands primary waits across unrelated runtime tests.
     pub(crate) fn set_driver_waker(&self, waker: Waker) {
         assert!(
             self.driver_waker.set(waker).is_ok(),

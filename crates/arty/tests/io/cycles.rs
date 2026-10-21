@@ -8,6 +8,8 @@ use std::task::Poll;
 
 use crate::*;
 
+const DRIVER_PROGRESS_TIMEOUT: Duration = Duration::from_millis(500);
+
 fn cycle_failure<M: Marker>(role_plan: RolePlan, expected_role: &'static str)
 where
     TestContext<M>: IoContext<ContextOptions = ScenarioOptions>,
@@ -170,14 +172,12 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
 
     let (completed, completion) = mpsc::channel();
     worker.spawn(async move |_| completed.send(()).unwrap());
-    if is_mutation_testing() {
-        completion.recv().unwrap();
-    } else {
-        let result = completion.recv_timeout(Duration::from_millis(500));
-        if result.is_err() {
-            scenario.wake_driver_interrupts();
-        }
-        result.unwrap();
+    let result = completion.recv_timeout(DRIVER_PROGRESS_TIMEOUT);
+    if let Err(error) = result {
+        RuntimeOperations::from(&runtime).request_stop();
+        scenario.wake_driver_interrupts();
+        runtime.stop().unwrap();
+        panic!("new runtime work did not interrupt the primary wait: {error}");
     }
     assert!(scenario.driver_wakes.load(Ordering::SeqCst) > 0);
     assert_eq!(scenario.primary_wait_timeouts.load(Ordering::SeqCst), 0);
@@ -204,7 +204,7 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
     let queued = worker.spawn(async move |_| completed.send(()).unwrap());
 
     scenario.release_driver();
-    let result = completion.recv_timeout(testing_aids::TEST_TIMEOUT);
+    let result = completion.recv_timeout(DRIVER_PROGRESS_TIMEOUT);
     if result.is_err() {
         scenario.wake_driver_interrupts();
     }
