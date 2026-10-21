@@ -8,17 +8,25 @@ testing_aids::init_tracing!();
 
 use std::future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::thread;
+use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use anyspawn::Spawner;
 use arty::runtime::{Runtime, WorkersPolicy};
 use futures::future::join_all;
-use thread_aware::ThreadAware;
+use thread_aware::{Thread, ThreadAware};
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync, ThreadAware);
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+struct RelocationProbe(Option<ThreadId>);
+
+impl ThreadAware for RelocationProbe {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.0 = Some(destination.id());
+    }
+}
 
 fn runtime_and_spawner() -> (Runtime, Spawner) {
     let runtime = Runtime::new().unwrap();
@@ -87,17 +95,33 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
             (Spawner::new_arty(scheduler), source, destination)
         })
         .unwrap();
+    let original = spawner.clone();
 
     let runtime_b = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let foreign = runtime_b.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
 
     spawner.relocate(Some(&source), &foreign);
     spawner.relocate(Some(&foreign), &destination);
-    let actual = futures::executor::block_on(spawner.spawn(async { thread::current().id() }));
+    let original_worker = futures::executor::block_on(original.spawn(async { thread::current().id() }));
+    let relocated_worker = futures::executor::block_on(spawner.spawn(async { thread::current().id() }));
 
-    assert_eq!(actual, destination.id());
+    assert_eq!((original_worker, relocated_worker), (source.id(), destination.id()));
     runtime_b.stop().unwrap();
     runtime_a.stop().unwrap();
+}
+
+#[test]
+fn arty_spawn_anywhere_relocates_payload_before_factory() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let spawner = Spawner::new_arty(scheduler);
+
+    let relocated = futures::executor::block_on(spawner.spawn_anywhere(RelocationProbe(None), |probe| async move {
+        probe.0 == Some(thread::current().id())
+    }));
+
+    assert!(relocated);
+    runtime.stop().unwrap();
 }
 
 #[test]

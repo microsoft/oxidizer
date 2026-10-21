@@ -38,7 +38,6 @@ tokio = ["dep:tokio"]
 [dependencies]
 arty = { workspace = true, features = ["rt"], optional = true }
 performables = { workspace = true }
-pin-project = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
 

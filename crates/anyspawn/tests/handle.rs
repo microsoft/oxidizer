@@ -12,6 +12,8 @@ use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
+static_assertions::assert_impl_all!(anyspawn::JoinHandle<()>: Send, Sync, Unpin);
+
 #[derive(Clone, ThreadAware)]
 struct DroppingSpawner;
 

@@ -246,7 +246,7 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn(move |_| work))),
+            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn(move |_| work)),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -290,7 +290,7 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn_anywhere(data, f))),
+            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn_anywhere(data, f)),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -344,7 +344,7 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(scheduler.spawn_blocking(f))),
+            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn_blocking(f)),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
