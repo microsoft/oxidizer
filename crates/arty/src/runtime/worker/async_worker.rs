@@ -380,6 +380,46 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    fn worker_without_primary_waits_for_timer_or_notification() {
+        let (worker_ready, worker_setup) = mpsc::channel();
+        let (step_done, step_completion) = mpsc::channel();
+        let worker_thread = thread::spawn(move || {
+            let (command_tx, command_rx) = channel::unbounded();
+            let signal = Arc::new(WorkerSignal::default());
+            let mut worker = test_worker(
+                command_tx.clone(),
+                command_rx,
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                Arc::clone(&signal),
+            );
+            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
+            assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())).is_pending());
+            signal.wait(Duration::ZERO);
+            worker_ready.send(WorkerSignal::waker(&signal)).unwrap();
+
+            assert!(worker.execute_step().is_continue());
+            step_done.send(()).unwrap();
+
+            drop(delay);
+            drop(clock);
+            command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+            worker.run();
+        });
+        let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        assert_eq!(
+            step_completion.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
+        worker_waker.wake_by_ref();
+        step_completion.recv_timeout(TEST_TIMEOUT).unwrap();
+        worker_thread.join().unwrap();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
     fn timer_callback_direct_submission_notifies_the_worker() {
         struct SpawnOnWake {
             scheduler: Scheduler,
