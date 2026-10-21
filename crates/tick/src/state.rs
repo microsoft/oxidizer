@@ -351,6 +351,16 @@ mod tests {
     }
 
     #[test]
+    fn private_driver_registration_preserves_option_debug_output() {
+        let actual = (
+            format!("{:?}", DriverRegistration::registered(7)),
+            format!("{:?}", DriverRegistration::not_required()),
+        );
+
+        assert_eq!(actual, (String::from("Some(7)"), String::from("None")));
+    }
+
+    #[test]
     fn private_driver_notifications_follow_fixed_absolute_deadline_ordering() {
         // Exact absolute registration instants are private; public delays derive their deadline
         // from fresh clock reads and therefore cannot deterministically exercise every ordering.
