@@ -5,9 +5,10 @@
 
 use std::fmt::{self, Debug};
 
+use performables::sync::channel::oneshot;
 use thread_aware::ThreadAware;
 
-use crate::custom::{CustomSpawner, SpawnCustom};
+use crate::custom::{CustomSpawner, SpawnCustom, spawn_anywhere_channel};
 use crate::handle::{JoinHandle, JoinHandleInner};
 
 /// Runtime-agnostic task spawner.
@@ -101,7 +102,7 @@ pub struct Spawner(SpawnerKind);
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
     #[cfg(feature = "arty")]
-    Arty(CustomSpawner),
+    Arty(::arty::task::Scheduler),
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
     Custom(CustomSpawner),
@@ -142,7 +143,7 @@ impl Spawner {
     /// ```
     #[cfg(feature = "arty")]
     pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
-        Self(SpawnerKind::Arty(CustomSpawner::new("arty", ArtySpawner(scheduler))))
+        Self(SpawnerKind::Arty(scheduler))
     }
 
     /// Creates a spawner that uses the Tokio runtime.
@@ -246,7 +247,13 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn(work))),
+            SpawnerKind::Arty(scheduler) => {
+                let (tx, rx) = oneshot();
+                drop(scheduler.spawn(move |_| async move {
+                    let _ = tx.send(work.await);
+                }));
+                JoinHandle(JoinHandleInner::Custom(rx))
+            }
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -289,7 +296,11 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
+            SpawnerKind::Arty(scheduler) => {
+                let (task, rx) = spawn_anywhere_channel(data, f);
+                drop(scheduler.spawn_anywhere(task, |task| task.call_once()));
+                JoinHandle(JoinHandleInner::Custom(rx))
+            }
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -343,7 +354,13 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_blocking(f))),
+            SpawnerKind::Arty(scheduler) => {
+                let (tx, rx) = oneshot();
+                drop(scheduler.spawn_blocking(move || {
+                    let _ = tx.send(f());
+                }));
+                JoinHandle(JoinHandleInner::Custom(rx))
+            }
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -361,31 +378,12 @@ impl Debug for Spawner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => f.debug_tuple("Spawner").field(c).finish(),
+            SpawnerKind::Arty(_) => f.debug_tuple("Spawner").field(&"arty").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(Some(_)) => f.debug_tuple("Spawner").field(&"tokio(handle)").finish(),
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
         }
-    }
-}
-
-#[cfg(feature = "arty")]
-#[derive(Clone, ThreadAware)]
-struct ArtySpawner(::arty::task::Scheduler);
-
-#[cfg(feature = "arty")]
-impl SpawnCustom for ArtySpawner {
-    fn spawn(&self, task: crate::BoxedFuture) {
-        drop(self.0.spawn(move |_| task));
-    }
-
-    fn spawn_anywhere(&self, task: Box<dyn crate::ThreadAwareAsyncFnOnce<()>>) {
-        drop(self.0.spawn_anywhere(task, |task| task.call_once()));
-    }
-
-    fn spawn_blocking(&self, task: crate::BoxedBlockingTask) {
-        drop(self.0.spawn_blocking(task));
     }
 }
