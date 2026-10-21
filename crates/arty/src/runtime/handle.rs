@@ -24,8 +24,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// callbacks already running are allowed to finish. A blocking callback that
 /// never returns can therefore prevent shutdown from completing.
 ///
-/// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
-/// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
+/// Implicit cleanup cannot return shutdown errors. Worker panic and I/O driver
+/// diagnostics are still emitted; use [`stop`](Self::stop) to receive the
+/// shutdown outcome.
 ///
 /// On any asynchronous Arty worker or one of this runtime's blocking worker
 /// threads, including callback teardown, dropping the owner only requests
@@ -146,8 +147,10 @@ impl Runtime {
     /// those contexts cannot wait for shutdown. In those cases the owner is
     /// consumed without waiting.
     ///
-    /// Also returns an error if a worker panicked. All workers are joined before
-    /// reporting a worker failure; task failures must be observed through their
+    /// Also returns an error if a worker panicked or an I/O driver failed during
+    /// initialization or cycle execution. Driver shutdown errors are reported
+    /// through telemetry while shutdown continues. All workers are joined
+    /// before reporting a failure; task failures must be observed through their
     /// own join handles.
     ///
     /// # Examples
@@ -180,7 +183,8 @@ impl Runtime {
         if self.scheduler.dispatcher.is_current_blocking_thread() {
             return Err(Error::shutdown_wait_from_blocking_callback());
         }
-        self.scheduler.dispatcher.wait()
+        self.scheduler.dispatcher.wait()?;
+        self.scheduler.dispatcher.take_shutdown_error().map_or(Ok(()), Err)
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {

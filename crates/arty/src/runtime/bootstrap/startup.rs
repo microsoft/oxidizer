@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::task::Waker;
 use std::thread;
 
+use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -14,6 +15,7 @@ use performables::sync::channel::{OneshotReceiver, Sender};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
+use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
@@ -64,6 +66,7 @@ pub(crate) fn build(
 
     let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
+    let io_runtime = IoRuntime::new(sink.clone());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
             &sink,
@@ -94,6 +97,7 @@ pub(crate) fn build(
                 thread_builder: thread_builder.clone(),
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
+                io_runtime: io_runtime.clone(),
                 sink: sink.clone(),
             }
             .start(),
@@ -162,6 +166,7 @@ struct AsyncWorkerStartInfo {
     thread_builder: ThreadBuilder,
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
+    io_runtime: IoRuntime,
     sink: Sink,
 }
 
@@ -189,6 +194,7 @@ impl AsyncWorkerStartInfo {
             thread_builder,
             blocking_pools,
             shutdown_started,
+            io_runtime,
             sink,
         } = self;
 
@@ -219,12 +225,17 @@ impl AsyncWorkerStartInfo {
         // will share to send commands to each other.
         let start_signal = futures::executor::block_on(start_rx)
             .expect("RuntimeBuilder failed between initializing and starting a worker - impossible to continue worker execution");
+        let dispatcher = start_signal.dispatcher;
+        let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
+        let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
+        signal.set_driver_waker(driver_waker);
 
         let worker = AsyncWorker::new(
             command_rx,
-            start_signal.dispatcher,
+            dispatcher,
             current,
             sink,
+            io,
             Arc::clone(&blocking_worker),
             clock,
             signal,

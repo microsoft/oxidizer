@@ -4,8 +4,8 @@
 //! Keep work on its worker, or move worker-aware values explicitly.
 //!
 //! A task stays on one worker while it runs. Its
-//! [`Builtins`](crate::task::Builtins) provides a scheduler, clock, and telemetry
-//! sink associated with that worker.
+//! [`Builtins`](crate::task::Builtins) provides a scheduler, clock, I/O handle,
+//! and telemetry sink associated with that worker.
 //!
 //! # Keep work on the same worker
 //!

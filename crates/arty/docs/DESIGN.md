@@ -1,8 +1,8 @@
 # Design
 
 Arty runs async tasks on dedicated workers, with separate pools for blocking
-work. Tasks receive `Builtins` with their worker's scheduler, clock, and
-telemetry sink.
+work. Tasks receive `Builtins` with their worker's scheduler, clock, I/O handle,
+and telemetry sink.
 
 This document describes the application-facing design. Maintainers should also
 read the [runtime implementation map](INTERNALS.md) for bootstrap, ownership,
@@ -60,8 +60,10 @@ and results must be `Send`. Workers share one blocking pool by default; the
 per-worker policy separates their blocking workloads into one pool per worker,
 potentially using more threads.
 
-Arty provides timers, but not async network or file I/O drivers. An async I/O
-library still needs its own runtime support. See [I/O](IO.md).
+Arty provides timers and hosts drivers supplied by I/O libraries built on
+`arty_io_core`, but it does not include a built-in network or file I/O
+implementation. Access compatible contexts through `Builtins::io()`; see
+[I/O](IO.md). Use `spawn_blocking` for synchronous I/O.
 
 ## Runtime lifetime and shutdown
 
@@ -101,6 +103,7 @@ the runtime's shutdown contract.
 Application errors remain task results. A caught panic becomes `JoinError`;
 that alone does not stop the runtime or repair shared state. Worker isolation
 does not make every panic recoverable: some failures must stop the process.
+Failure to initialize or execute an I/O driver stops the runtime.
 
 Runtime telemetry uses a no-op sink by default. Configured telemetry processors
 must not panic. See [panic handling](PANICS.md) for how task, shutdown, and
