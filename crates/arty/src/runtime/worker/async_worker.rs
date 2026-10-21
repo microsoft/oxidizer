@@ -195,9 +195,16 @@ impl AsyncWorker {
         }
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
         let has_primary = RuntimeDriverHost::has_primary_current();
-        let primary_should_wait = should_suspend && has_primary && !self.signal.take_notification();
-        let max_wait = if primary_should_wait {
-            next_timer.map_or(Duration::MAX, |deadline| suspend_wait(deadline, self.time.instant()))
+        let max_wait = if should_suspend {
+            if has_primary {
+                if self.signal.take_notification() {
+                    Duration::ZERO
+                } else {
+                    next_timer.map_or(Duration::MAX, |deadline| suspend_wait(deadline, self.time.instant()))
+                }
+            } else {
+                Duration::ZERO
+            }
         } else {
             Duration::ZERO
         };
