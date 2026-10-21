@@ -141,7 +141,6 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(feature = "arty")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "arty")))]
     pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
         Self(SpawnerKind::Arty(CustomSpawner::new("arty", ArtySpawner(scheduler))))
     }
@@ -168,7 +167,6 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio() -> Self {
         Self(SpawnerKind::Tokio(None))
     }
@@ -193,7 +191,6 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio_with_handle(handle: ::tokio::runtime::Handle) -> Self {
         Self(SpawnerKind::Tokio(Some(handle)))
     }
