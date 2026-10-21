@@ -412,44 +412,15 @@ fn emit_to_noop_sink(sink: &Sink) {
     observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
 }
 
-#[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_5_filtered_out_events")]
+#[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_filtered_out")]
 #[bench::not_interested_one_processor(&not_interested_sink(1))]
 #[bench::sampler_drops_one_processor(&sampler_drops_sink(1))]
 #[bench::not_interested_three_processors(&not_interested_sink(3))]
 #[bench::sampler_drops_three_processors(&sampler_drops_sink(3))]
-/// Emits the 5 info events that `EMIT_PIPELINE` delivers, here filtered out either by
-/// processors that decline them or by a sampler that drops them; none is built.
+/// Compares an info log that every processor declines with one that a sampler drops before
+/// any processor is asked; neither builds the event.
 fn emit_filtered_out(sink: &Sink) {
     observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
-    observed::emit!(
-        sink,
-        ManyFieldsEvent {
-            field_a: 1,
-            field_b: 2,
-            field_c: 3,
-            field_d: 4,
-            field_e: 5,
-            field_f: 6,
-            field_g: 7,
-            field_h: 8,
-        }
-    );
-    observed::emit!(sink, BodyEvent { code: 42 });
-    observed::emit!(
-        sink,
-        MetricEvent {
-            duration_ms: 42.5,
-            region: 1,
-            service: 2,
-        }
-    );
-    observed::emit!(
-        sink,
-        RedactedStringsEvent {
-            request_id: "6f1c2f10-6a5b-4f0a-9c1f-2f106a5b4f0a",
-            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        }
-    );
 }
 
 #[metabench::benchmark(ENRICHMENT_COLLECT, ALLOCATION, "enrichment_collect")]
