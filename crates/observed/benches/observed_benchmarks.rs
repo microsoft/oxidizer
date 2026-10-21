@@ -172,6 +172,14 @@ impl observed::EventSampler for DropAllSampler {
     }
 }
 
+struct KeepAllSampler;
+
+impl observed::EventSampler for KeepAllSampler {
+    fn sample(&self, _context: &observed::EventSamplingContext<'_>) -> observed::EventSamplingDecision {
+        observed::EventSamplingDecision::Continue
+    }
+}
+
 /// Discards exported records so pipeline benchmarks do not retain unbounded output.
 #[derive(Debug)]
 struct NoOpLogExporter;
@@ -243,6 +251,13 @@ fn sampler_drops_sink(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, true))
         .event_sampler(DropAllSampler)
+        .build()
+}
+
+fn sampler_keeps_sink(processor_count: usize) -> Sink {
+    Sink::builder("bench")
+        .processors(fixed_interest_processors(processor_count, false))
+        .event_sampler(KeepAllSampler)
         .build()
 }
 
@@ -414,11 +429,12 @@ fn emit_to_noop_sink(sink: &Sink) {
 
 #[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_filtered_out")]
 #[bench::not_interested_one_processor(&not_interested_sink(1))]
+#[bench::not_interested_sampler_keeps_one_processor(&sampler_keeps_sink(1))]
 #[bench::sampler_drops_one_processor(&sampler_drops_sink(1))]
 #[bench::not_interested_three_processors(&not_interested_sink(3))]
 #[bench::sampler_drops_three_processors(&sampler_drops_sink(3))]
-/// Compares an info log that every processor declines with one that a sampler drops before
-/// any processor is asked; neither builds the event.
+/// Emits an info log that every processor declines, with or without a sampler that keeps it, or
+/// that a sampler drops before any processor is asked; the event is never built.
 fn emit_filtered_out(sink: &Sink) {
     observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
 }
@@ -586,6 +602,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut emit_filtering = criterion.benchmark_group(EMIT_FILTERING);
     for (case, filtering_sink) in [
         ("not_interested_one_processor", not_interested_sink(1)),
+        ("not_interested_sampler_keeps_one_processor", sampler_keeps_sink(1)),
         ("sampler_drops_one_processor", sampler_drops_sink(1)),
         ("not_interested_three_processors", not_interested_sink(3)),
         ("sampler_drops_three_processors", sampler_drops_sink(3)),
