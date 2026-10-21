@@ -4267,12 +4267,15 @@ name = "performables"
 version = "0.3.0"
 dependencies = [
  "criterion",
+ "ctor",
  "loom",
  "metabench",
  "mutants",
  "seismograph",
+ "seismograph_protocol",
  "serde",
  "static_assertions",
+ "testing_aids",
  "thread_aware",
  "thread_aware_core",
  "trybuild",
@@ -5391,7 +5394,6 @@ dependencies = [
 name = "seismograph"
 version = "0.3.0"
 dependencies = [
- "getrandom 0.4.3",
  "libc",
  "mutants",
  "seismograph_protocol",
@@ -5426,8 +5428,11 @@ dependencies = [
 name = "seismograph_protocol"
 version = "0.2.0"
 dependencies = [
+ "getrandom 0.4.3",
  "libc",
  "mutants",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

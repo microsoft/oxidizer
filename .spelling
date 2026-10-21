@@ -10,6 +10,13 @@ PerfMon
 PDH
 PERFLIBREQUEST
 metacharacters
+ACL
+IPC
+UID
+XDG
+cancellable
+nonblocking
+pathname
 macOS
 Arty's
 quickstart

@@ -106,7 +106,7 @@ impl Filters {
         self.queued = false;
     }
 
-    fn start(&mut self, capture: &CapturedSnapshot, spec: FilterSpec) -> Result<(), String> {
+    fn start(&mut self, capture: &CapturedSnapshot, spec: FilterSpec, now: Instant) -> Result<(), String> {
         let index = capture
             .filter_index
             .as_ref()
@@ -144,7 +144,7 @@ impl Filters {
         self.generation = generation;
         self.pending = Some(spec);
         self.receiver = Some(receiver);
-        self.started_at = Some(Instant::now());
+        self.started_at = Some(now);
         Ok(())
     }
 
@@ -215,7 +215,7 @@ impl App {
             Screen::Browse => None,
         }
         .ok_or("No snapshot to filter; capture a snapshot or open a native file first.")?;
-        self.filters.start(capture, spec)?;
+        self.filters.start(capture, spec, self.io.instant())?;
         self.status = if self.filters.queued {
             "Latest filter queued; waiting for the current filter worker to finish.".into()
         } else {
@@ -301,7 +301,7 @@ impl App {
             let state = if self.filters.queued { "Latest filter queued" } else { "Filtering" };
             lines.push(Line::from(format!(
                 " {state}... {:.1}s - current view remains available",
-                start.elapsed().as_secs_f64()
+                self.io.instant().saturating_duration_since(start).as_secs_f64()
             )));
         } else if self.filter_capture().is_some_and(|capture| capture.filter_summary.active) {
             lines.push(Line::from(" Stack filters active (F to edit)"));
@@ -431,7 +431,7 @@ mod tests {
     use seismograph::recorder::thread::ThreadId;
     use seismograph::snapshot::DecodedSnapshot;
     use seismograph_protocol::message::RecordingConfiguration;
-    use seismograph_protocol::monitor::{AuthenticationToken, InstanceId, MonitorDescriptor};
+    use seismograph_protocol::monitor::{InstanceId, MonitorDescriptor};
     use seismograph_rallocator::callers::{AddressLookup, AddressLookupFields};
 
     use super::super::app::MonitorTab;
@@ -840,8 +840,15 @@ mod tests {
                 instance: None,
                 process_id: 1,
                 instance_id: InstanceId::from_bytes([1; 16]),
-                port: 0,
-                authentication: AuthenticationToken::from_bytes([1; 32]),
+
+                owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+                endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                    &std::env::temp_dir(),
+                    &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                    1,
+                    InstanceId::from_bytes([1; 16]),
+                ),
             },
             recording: RecordingConfiguration::default(),
             tab: MonitorTab::Threads,
@@ -1015,6 +1022,30 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("Latest filter queued"));
         assert!(rendered.contains("Waiting for an indexed snapshot."));
+    }
+
+    #[test]
+    fn filter_progress_uses_the_selected_clock() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (io, control) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut app = offline();
+        app.io = io.clone();
+        app.start_filter(include_app()).unwrap();
+        assert_eq!(app.filters.started_at, Some(io.instant()));
+        control.advance_time(std::time::Duration::from_secs(5));
+        let mut terminal = Terminal::new(TestBackend::new(120, 4)).unwrap();
+        terminal.draw(|frame| app.draw_filter_banner(frame, frame.area())).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("Filtering... 5.0s"));
+        wait_for_filter(&mut app);
     }
 
     #[test]

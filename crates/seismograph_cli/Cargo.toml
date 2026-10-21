@@ -45,6 +45,8 @@ seismograph_runtime.workspace = true
 
 [dev-dependencies]
 mutants.workspace = true
+seismograph = { path = "../seismograph", features = ["test-util"] }
+seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]
