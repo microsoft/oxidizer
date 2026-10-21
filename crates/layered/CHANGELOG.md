@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.8] - 2026-10-20
+
+- Refresh published documentation and inherited package metadata.
+- Update local dependency requirements: plurality ^0.2.2 -> 0.2.3.
+
 ## [0.3.7] - 2026-09-10
 
 ### Bug Fixes

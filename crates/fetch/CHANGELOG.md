@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.19.0] - 2026-10-20
+
+- Add native-TLS server-name overrides, apply bounded HTTP decompression defaults, and migrate exposed dependency identities to their breaking releases.
+- Update local dependency requirements: anyspawn ^0.9.1 -> 0.9.2; bytesbuf ^0.11.0 -> 0.12.0; compressors ^0.2.0 -> 0.3.0; data_privacy ^0.13.0 -> 0.13.1; fetch_hyper ^0.9.0 -> 0.10.0; fetch_options ^0.2.4 -> 0.2.5; fetch_tls ^0.4.1 -> 0.5.0; fundle ^0.4.0 -> 0.4.1; http_compression ^0.2.0 -> 0.3.0; http_extensions ^0.12.0 -> 0.13.0; layered ^0.3.7 -> 0.3.8; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; seatbelt ^0.10.0 -> 0.11.0; seatbelt_http ^0.10.0 -> 0.11.0; templated_uri ^0.6.0 -> 0.7.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
+
 ## [0.18.0] - 2026-10-05
 
 - ⚠️ Breaking

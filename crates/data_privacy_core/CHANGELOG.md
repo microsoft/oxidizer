@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.3] - 2026-10-20
+
+- Refresh published documentation and optional-dependency test metadata; runtime behavior is unchanged.
+
 ## [0.1.2] - 2026-06-26
 
 - 🐛 Bug Fixes

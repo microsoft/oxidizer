@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Replace the Heap view with the Native v4 allocator view and consume schema 3 allocator-state captures.
+- Update local dependency requirements: performables ^0.2.0 -> 0.3.0; seismograph ^0.2.0 -> 0.3.0; seismograph_rallocator ^0.2.0 -> 0.3.0; seismograph_runtime ^0.2.0 -> 0.3.0.
+
 ## [0.2.0] - 2026-10-05
 
 - 🔧 Maintenance

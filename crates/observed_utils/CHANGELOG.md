@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-10-20
+
+- The public API exposes types from `observed`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed ^0.28.0 -> 0.29.0.
+
 ## [0.4.0] - 2026-10-05
 
 - ⚠️ Breaking

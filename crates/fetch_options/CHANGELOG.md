@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.5] - 2026-10-20
+
+- Refresh published option documentation and inherited package metadata.
+
 ## [0.2.4] - 2026-08-28
 
 - ✨ Features

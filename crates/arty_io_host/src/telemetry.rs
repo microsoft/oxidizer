@@ -66,6 +66,16 @@ pub(crate) struct IoDriverCycleFailed {
     pub(crate) error: IoDriverErrorMessage,
 }
 
+#[event("arty.rt.io.driver.stopped")]
+#[debug("I/O driver stopped")]
+#[counter(name = "arty.rt.io.driver.stopped")]
+pub(crate) struct IoDriverStopped {
+    #[dimension(log = "io.context")]
+    pub(crate) context: IoContextName,
+    #[dimension(log = "io.driver.role", metric = "io.driver.role")]
+    pub(crate) role: IoDriverRoleLabel,
+}
+
 #[event("arty.rt.io.driver.shutdown_failed")]
 #[error("I/O driver shutdown failed")]
 #[counter(name = "arty.rt.io.driver.shutdown_failed")]

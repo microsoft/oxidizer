@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.2] - 2026-10-20
+
+- Published local dependency requirement(s) will move: performables, thread_aware.
+- Update local dependency requirements: performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
 ## [0.9.1] - 2026-10-05
 
 - 🔧 Maintenance

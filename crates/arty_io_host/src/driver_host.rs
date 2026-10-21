@@ -18,7 +18,7 @@ use crate::IoRuntime;
 use crate::runtime::Resolution;
 use crate::telemetry::{
     IoContextName, IoDriverCycleFailed, IoDriverErrorMessage, IoDriverInitializationFailed, IoDriverInitialized, IoDriverRoleLabel,
-    IoDriverShutdownFailed,
+    IoDriverShutdownFailed, IoDriverStopped,
 };
 
 trait ErasedDriver {
@@ -199,10 +199,9 @@ impl DriverHost {
     ///
     /// Propagates panics from context construction, cloning, relocation, driver
     /// construction, custom wakers, diagnostics, and violated host invariants.
-    pub fn context<C>(&self, options: &C::ContextOptions) -> Result<C, DriverError>
+    pub fn context<C>(&self, options: C::ContextOptions) -> Result<C, DriverError>
     where
         C: IoContext,
-        C::ContextOptions: Clone,
     {
         self.runtime.check_failed()?;
         let drivers = self
@@ -229,7 +228,11 @@ impl DriverHost {
             ));
         }
         let _initialization = InitializationGuard(&self.initializing);
-        let Resolution { mut context, role } = self.runtime.resolve_context::<C>(options)?;
+        let Resolution {
+            mut context,
+            role,
+            initialization: _initialization,
+        } = self.runtime.resolve_context::<C>(options)?;
         context.relocate(None, &self.thread);
         let local = match self.create_local_driver::<C>(context, role) {
             Ok(local) => local,
@@ -255,6 +258,39 @@ impl DriverHost {
         drop(drivers);
         self.runtime.check_failed()?;
         Ok(context)
+    }
+
+    /// Consumes one driver already detached from the host and reports its
+    /// provider-controlled shutdown result.
+    fn shutdown_local(&self, local: LocalContext) {
+        let context = IoContextName(local.context_name);
+        let role = IoDriverRoleLabel::from(local.role);
+        match local.driver.shutdown() {
+            Ok(()) => emit!(self.runtime.sink(), IoDriverStopped { context, role }),
+            Err(error) => {
+                emit!(
+                    self.runtime.sink(),
+                    IoDriverShutdownFailed {
+                        context,
+                        role,
+                        error: IoDriverErrorMessage::new(&error),
+                    }
+                );
+            }
+        }
+    }
+
+    /// Detaches all host-owned drivers and releases the `RefCell` borrow before
+    /// invoking provider shutdown callbacks.
+    fn shutdown_drivers(&self) {
+        self.interrupt.clear();
+        let mut drivers = self.drivers.borrow_mut();
+        let primary = drivers.primary.take();
+        let secondaries = std::mem::take(&mut drivers.secondaries);
+        drop(drivers);
+        for local in secondaries.into_iter().chain(primary) {
+            self.shutdown_local(local);
+        }
     }
 
     fn create_local_driver<C>(&self, mut context: C, role: DriverRole) -> Result<LocalContext, DriverError>
@@ -300,6 +336,9 @@ impl DriverHost {
     ///
     /// Propagates panics from drivers, diagnostics, and violated host
     /// invariants.
+    // The runtime calls this exported wrapper on every worker cycle, making it
+    // a cross-crate hot path under docs/performance.md's first inline rule.
+    #[inline]
     pub fn execute_cycle(&self, max_wait: Duration) -> Result<(), DriverError> {
         let mut drivers = self
             .drivers
@@ -317,23 +356,7 @@ impl DriverHost {
 
 impl Drop for DriverHost {
     fn drop(&mut self) {
-        self.interrupt.clear();
-
-        let drivers = self.drivers.get_mut();
-        let primary = drivers.primary.take();
-        let secondaries = std::mem::take(&mut drivers.secondaries);
-        for local in secondaries.into_iter().chain(primary) {
-            if let Err(error) = local.driver.shutdown() {
-                emit!(
-                    self.runtime.sink(),
-                    IoDriverShutdownFailed {
-                        context: IoContextName(local.context_name),
-                        role: IoDriverRoleLabel::from(local.role),
-                        error: IoDriverErrorMessage::new(&error),
-                    }
-                );
-            }
-        }
+        self.shutdown_drivers();
     }
 }
 
@@ -387,12 +410,11 @@ mod tests {
     #[test]
     fn nested_context_retrieval_is_rejected_during_initialization() {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let mut runtime = IoRuntime::new(Sink::noop());
-        runtime.relocate(None, &thread);
-        let host = runtime.driver_host(Waker::noop().clone());
+        let runtime = IoRuntime::new(Sink::noop());
+        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
         host.initializing.set(true);
 
-        let Err(error) = host.context::<TestContext>(&()) else {
+        let Err(error) = host.context::<TestContext>(()) else {
             panic!("nested context retrieval should fail");
         };
 

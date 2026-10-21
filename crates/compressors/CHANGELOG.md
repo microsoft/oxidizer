@@ -1,4 +1,10 @@
 # Changelog
+
+## [0.3.0] - 2026-10-20
+
+- Update exposed Bytesbuf identities for Bytesbuf 0.12; runtime codec behavior remains unchanged.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; performables ^0.2.0 -> 0.3.0; recoverable ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-10-20
+
+- Refresh published macro documentation and classify the macro crate as private API.
+- Update local dependency requirements: templated_uri_macros_impl =0.6.0 -> 0.7.0.
+
 ## [0.6.0] - 2026-09-10
 
 ### Maintenance

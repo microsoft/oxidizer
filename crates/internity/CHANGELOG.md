@@ -4,6 +4,11 @@ All notable changes to this crate are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-20
+
+- Harden interner growth and shared snapshots; persisted 32-bit raw `Sym` handles require remapping because shard hashing changed.
+- Update local dependency requirements: internity_macros =0.2.1 -> 0.3.0.
+
 ## [0.2.1] - 2026-09-10
 
 ### Maintenance

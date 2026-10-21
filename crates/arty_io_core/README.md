@@ -82,8 +82,9 @@ async worker when another cycle is needed.
 
 ## Runtime responsibilities
 
-The runtime clones and relocates contexts to its async workers and supplies the assigned role
-through [`DriverOptions`][__link7]. Driver creation completes all setup before the context is published.
+The runtime registers each context, then clones and relocates it to async workers as they first
+retrieve it. [`DriverOptions`][__link7] supplies the assigned role. Driver creation completes all local
+setup before the worker-local host returns its context.
 
 The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 for work itself. The owner waker in [`DriverOptions`][__link8] wakes the async worker, while
@@ -91,7 +92,8 @@ for work itself. The owner waker in [`DriverOptions`][__link8] wakes the async w
 
 A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker
 and calls `shutdown` on every driver that was created successfully, including the driver whose
-cycle failed.
+cycle failed. Contexts already returned by another worker become unusable as shutdown closes
+them to new operations.
 
 ## Shutdown
 
@@ -106,16 +108,16 @@ runtime from attempting to shut down the remaining drivers.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbcmCOGWy8l7obbHI5mYjvtKUbnbOxegfAVWEb_CS7Bj36ReZhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
- [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
- [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
- [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
- [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
- [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
- [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
- [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary
- [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTslxkpgl2T8b9lxk15Djk2cbq123E7xRv14bcY2fCcuA2wNhZIGCbGFydHlfaW9fY29yZWUwLjMuMA
+ [__link0]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=IoContext
+ [__link1]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver
+ [__link10]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::shutdown
+ [__link11]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverError
+ [__link2]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::execute_cycle
+ [__link3]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverRole::Primary
+ [__link4]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
+ [__link5]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Cycle::max_wait
+ [__link6]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverRole::Secondary
+ [__link7]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
+ [__link8]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
+ [__link9]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::waker
