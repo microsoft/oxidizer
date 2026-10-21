@@ -330,7 +330,7 @@ impl Scheduler {
             return JoinHandle::shutdown(self.dispatcher.remote_results());
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::failed(self.dispatcher.remote_results(), crate::task::JoinError::invalid_destination());
+            return JoinHandle::invalid_destination(self.dispatcher.remote_results());
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {
