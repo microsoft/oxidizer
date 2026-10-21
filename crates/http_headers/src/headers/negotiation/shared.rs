@@ -1306,6 +1306,10 @@ mod quoted_items_differential_tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the exhaustive quote/delimiter matrix; compact quoted-item cases still enter the accelerated scanner under Miri"
+    )]
     fn scalar_oracle_matches_quote_and_delimiter_placements() {
         const CASES: &[&[u8]] = &[
             b"",
@@ -2142,6 +2146,10 @@ mod token_list_tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the long-line mutation matrix; boundary and realistic negotiation tests still enter the SIMD token-list scanner under Miri"
+    )]
     fn fast_scan_agrees_on_lines_long_enough_to_vectorize() {
         let base: &[u8] = b"alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, mu";
         let alphabet: &[u8] = b"a,; \t\"\\!\x00\x80\x7f";

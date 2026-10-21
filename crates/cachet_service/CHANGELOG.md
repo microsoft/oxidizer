@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: cachet_tier ^0.5.1 -> 0.6.0; layered ^0.3.7 -> 0.3.8.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance

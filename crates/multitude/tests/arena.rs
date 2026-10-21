@@ -1255,8 +1255,12 @@ mod large_alloc {
     #[test]
     fn bytesbuf_reserve_above_chunk_boundary() {
         use bytesbuf::mem::Memory;
+        #[cfg(miri)]
+        let arena = Arena::builder().max_normal_alloc(4096).build();
+        #[cfg(not(miri))]
         let arena = Arena::new();
-        let _buf = arena.reserve(OVER_CHUNK);
+        let size = if cfg!(miri) { 4097 } else { OVER_CHUNK };
+        let _buf = arena.reserve(size);
         // Returning proves the oversized shared path terminates.
     }
 }
@@ -4590,9 +4594,13 @@ mod alloc_hot_path_behavior {
 
     #[test]
     fn chunk_143_max_bump_extent() {
+        #[cfg(miri)]
+        let arena = Arena::builder().max_normal_alloc(4096).build();
+        #[cfg(not(miri))]
         let arena = Arena::new();
         let mut keep = Vec::new();
-        for i in 0u64..1000 {
+        let count = if cfg!(miri) { 128 } else { 1000 };
+        for i in 0_u64..count {
             keep.push(arena.alloc_arc(i));
         }
         for (i, v) in keep.iter().enumerate() {
@@ -5906,10 +5914,15 @@ mod public_surface_behavior {
         // backed by `&Arena`: each old buffer's deallocate eventually
         // tears down its chunk (the chunk's only ref was the Vec's
         // buffer, and after retirement the arena no longer holds it).
-        let arena: Arena = Arena::builder().build();
+        let arena: Arena = if cfg!(miri) {
+            Arena::builder().max_normal_alloc(4096).build()
+        } else {
+            Arena::builder().build()
+        };
         {
             let mut v: allocator_api2::vec::Vec<u8, &Arena> = allocator_api2::vec::Vec::new_in(&arena);
-            for _ in 0..16_000_u32 {
+            let count = if cfg!(miri) { 2048 } else { 16_000 };
+            for _ in 0..count {
                 v.push(0);
             }
             drop(v);
@@ -7054,10 +7067,14 @@ mod public_surface_behavior_2 {
 
     #[test]
     fn vec_into_box_falls_back_when_drop_entry_install_misses() {
+        #[cfg(miri)]
+        let arena = Arena::builder().max_normal_alloc(4096).build();
+        #[cfg(not(miri))]
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<Droppy>();
         v.extend([Droppy("a"), Droppy("b")]);
-        let _decoy = arena.alloc_slice_fill_with(70_000, |i| i as u8);
+        let decoy_len = if cfg!(miri) { 4097 } else { 70_000 };
+        let _decoy = arena.alloc_slice_fill_with(decoy_len, |i| i as u8);
         let b = v.into_boxed_slice();
         assert_eq!(b.len(), 2);
     }

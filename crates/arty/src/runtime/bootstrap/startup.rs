@@ -207,9 +207,10 @@ impl AsyncWorkerStartInfo {
             BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
 
         let signal = Arc::new(WorkerSignal::default());
+        let worker_waker = WorkerSignal::waker(&signal);
 
         worker_endpoint_tx
-            .send((WorkerSignal::waker(&signal), current.clone(), Arc::clone(&blocking_worker)))
+            .send((worker_waker, current.clone(), Arc::clone(&blocking_worker)))
             .expect("failed to send the worker endpoint to the runtime builder");
 
         // The start command is sent to all threads by bootstrap when all the threads have

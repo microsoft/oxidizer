@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Replace allocator v1 with native v4, add native macOS support, and expose cooperative Seismograph allocator state.
+- Update local dependency requirements: seismograph ^0.2.0 -> 0.3.0; seismograph_rallocator ^0.2.0 -> 0.3.0.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

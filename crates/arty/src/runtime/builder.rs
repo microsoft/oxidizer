@@ -147,9 +147,11 @@ impl RuntimeBuilder {
 
     /// Sets the telemetry sink for runtime events and task enrichment.
     ///
-    /// The default is [`Sink::noop`]. Async tasks inherit enrichment
-    /// active on the configured sink at submission, including their completion
-    /// events. Retrieve the sink inside a task with
+    /// The default is [`Sink::noop`], which disables events and enrichment.
+    /// With a regular sink configured, async tasks inherit enrichment active
+    /// at submission, including their completion events. A regular sink with
+    /// no processors preserves enrichment without dispatching events.
+    /// Retrieve the sink inside a task with
     /// [`Builtins::sink`](crate::task::Builtins::sink).
     ///
     /// Configured event processors must not panic. Runtime events are emitted
@@ -226,7 +228,7 @@ mod tests {
         let clock_control = ClockControl::new();
         let builder = Runtime::builder().clock(clock_control.clone());
 
-        let (clock, _) = builder.clock.activate();
+        let (clock, _) = builder.clock.activate(std::task::Waker::noop().clone());
         let now = clock.system_time();
 
         clock_control.advance(Duration::from_secs(1));

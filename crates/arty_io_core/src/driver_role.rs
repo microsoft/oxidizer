@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use core::fmt;
+
 /// A driver's fixed role on its async worker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DriverRole {
@@ -15,4 +17,13 @@ pub enum DriverRole {
     /// `Cycle::max_wait() == Duration::ZERO`. The driver must arrange notification when another
     /// cycle is needed, unless it completes operations entirely on a background thread.
     Secondary,
+}
+
+impl fmt::Display for DriverRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+        })
+    }
 }

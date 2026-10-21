@@ -420,22 +420,24 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
+    use crate::test_support::lane_bytes;
 
-    /// Puts every byte value in every lane of a token-list block.
+    /// Puts every byte value in every lane natively; Miri separates the axes.
     #[test]
     fn token_list_lanes_match_scalar_for_every_byte() {
         if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
+        let mut block = [b'a'; 2 * WIDTH];
         for lane in 0..2 * WIDTH {
-            for byte in u8::MIN..=u8::MAX {
-                let mut block = [b'a'; 2 * WIDTH];
+            for byte in lane_bytes(block.len(), lane) {
                 block[lane] = byte;
                 for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {
                     // SAFETY: runtime detection above establishes NEON support.
                     let list = unsafe { scan_token_list(&block, empty) };
                     assert_eq!(list, crate::list::scan_token_list(&block, empty), "byte {byte:#04x} lane {lane}");
                 }
+                block[lane] = b'a';
             }
         }
     }
@@ -500,14 +502,15 @@ mod tests {
         if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
+        let mut window = [b'0'; WINDOW];
         for lane in 0..WINDOW {
-            for byte in u8::MIN..=u8::MAX {
-                let mut window = [b'0'; WINDOW];
+            for byte in lane_bytes(window.len(), lane) {
                 window[lane] = byte;
                 // SAFETY: runtime detection above establishes NEON support.
                 let masks = unsafe { range_masks(&window) };
                 assert_eq!(masks, RangeMasks::scalar(&window), "byte {byte:#04x} lane {lane}");
             }
+            window[lane] = b'0';
         }
     }
 
@@ -516,9 +519,10 @@ mod tests {
         if !arch::is_aarch64_feature_detected!("neon") {
             return;
         }
+        let mut base64_block = [b'A'; 2 * WIDTH];
+        let mut uri_block = [b'a'; 2 * WIDTH];
         for lane in 0..2 * WIDTH {
-            for byte in u8::MIN..=u8::MAX {
-                let mut base64_block = [b'A'; 2 * WIDTH];
+            for byte in lane_bytes(base64_block.len(), lane) {
                 base64_block[lane] = byte;
                 assert_eq!(
                     // SAFETY: runtime detection above establishes NEON support.
@@ -527,7 +531,6 @@ mod tests {
                     "base64 byte {byte:#04x} lane {lane}"
                 );
 
-                let mut uri_block = [b'a'; 2 * WIDTH];
                 uri_block[lane] = byte;
                 assert_eq!(
                     // SAFETY: runtime detection above establishes NEON support.
@@ -536,6 +539,8 @@ mod tests {
                     "URI byte {byte:#04x} lane {lane}"
                 );
             }
+            base64_block[lane] = b'A';
+            uri_block[lane] = b'a';
         }
     }
 }

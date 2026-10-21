@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; layered ^0.3.7 -> 0.3.8; ohno ^0.5.2 -> 0.5.3; recoverable ^0.2.0 -> 0.3.0; templated_uri ^0.6.0 -> 0.7.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
+
 ## [0.12.0] - 2026-10-05
 
 - ⚠️ Breaking

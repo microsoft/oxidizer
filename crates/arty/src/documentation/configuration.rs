@@ -79,9 +79,9 @@
 //! [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock) for a
 //! custom clock; see [time](super::time) for controlled-time tests.
 //!
-//! The default telemetry sink discards events. Configure
-//! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) to receive
-//! events; see [telemetry](super::telemetry).
+//! The default telemetry sink disables events and task enrichment. Configure
+//! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) to enable
+//! them; see [telemetry](super::telemetry).
 //!
 //! # Async I/O
 //!

@@ -21,9 +21,7 @@
 //! ```
 //! use std::task::Waker;
 //!
-//! use arty_io_core::{
-//!     Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverRole, IoContext,
-//! };
+//! use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 //! use thread_aware_core::{Thread, ThreadAware};
 //!
 //! #[derive(Clone)]
@@ -43,16 +41,9 @@
 //!         Self
 //!     }
 //!
-//!     fn driver(
-//!         &mut self,
-//!         options: DriverOptions,
-//!     ) -> Result<DriverInstance<Self::Driver>, DriverError> {
-//!         let role = options
-//!             .allowed_roles()
-//!             .first()
-//!             .copied()
-//!             .ok_or_else(|| DriverError::from_message("no supported driver role"))?;
-//!         Ok(DriverInstance::new(ExampleDriver, role))
+//!     fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+//!         let _role = options.role();
+//!         Ok(ExampleDriver)
 //!     }
 //! }
 //!
@@ -77,8 +68,8 @@
 //! ## Primary and secondary drivers
 //!
 //! An async worker has at most one [`Primary`](DriverRole::Primary) driver. [`DriverOptions`]
-//! lists the roles available during creation, and [`DriverInstance`] returns the selected role.
-//! A primary may wait for I/O for up to [`Cycle::max_wait`].
+//! provides the role assigned during creation. A primary may wait for I/O for up to
+//! [`Cycle::max_wait`].
 //!
 //! The runtime calls [`Secondary`](DriverRole::Secondary) drivers with
 //! `Cycle::max_wait() == Duration::ZERO`. A secondary processes completions that are already ready
@@ -87,9 +78,9 @@
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime clones and relocates contexts to its async workers and supplies the acceptable
-//! roles through [`DriverOptions`]. The context selects one role and returns it in a
-//! [`DriverInstance`]. Driver creation completes all setup before the context is published.
+//! The runtime registers each context, then clones and relocates it to async workers as they first
+//! retrieve it. [`DriverOptions`] supplies the assigned role. Driver creation completes all local
+//! setup before the worker-local host returns its context.
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 //! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
@@ -97,22 +88,18 @@
 //!
 //! A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker
 //! and calls `shutdown` on every driver that was created successfully, including the driver whose
-//! cycle failed.
+//! cycle failed. Contexts already returned by another worker become unusable as shutdown closes
+//! them to new operations.
 //!
 //! # Shutdown
 //!
 //! When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
 //! calls [`Driver::shutdown`] for every driver owned by that worker. Each driver rejects new
-//! operations and may cancel or disrupt operations still in flight. Cleanup uses a finite limit
-//! chosen by the driver. Shutdown is best effort: the runtime reports a returned [`DriverError`]
-//! and attempts the remaining drivers, but this contract does not convert panics from driver
-//! teardown, custom wakers, diagnostics, cleanup hooks, poisoned state, or failed invariants into
-//! errors or promise recovery from them. Contexts remain valid as closed handles after normal
-//! shutdown control flow.
+//! operations and uses a finite shutdown limit. A returned [`DriverError`] does not prevent the
+//! runtime from attempting to shut down the remaining drivers.
 pub use cycle::Cycle;
 pub use driver::Driver;
 pub use driver_error::DriverError;
-pub use driver_instance::DriverInstance;
 pub use driver_options::DriverOptions;
 pub use driver_role::DriverRole;
 pub use io_context::IoContext;
@@ -120,7 +107,6 @@ pub use io_context::IoContext;
 mod cycle;
 mod driver;
 mod driver_error;
-mod driver_instance;
 mod driver_options;
 mod driver_role;
 mod io_context;

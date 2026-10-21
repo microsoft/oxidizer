@@ -33,6 +33,10 @@ impl DispatcherClient {
         self.core.blocking_worker(worker_index)
     }
 
+    pub(crate) fn wake_worker(&self, worker_index: WorkerIndex) {
+        self.core.wake_worker(worker_index);
+    }
+
     pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
         self.core.next_blocking_worker()
     }
@@ -53,8 +57,9 @@ impl DispatcherClient {
         self.core.remote_results()
     }
 
-    pub(crate) fn is_current_blocking_task(&self) -> bool {
-        self.core.is_current_blocking_task()
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
+    pub(crate) fn is_current_blocking_thread(&self) -> bool {
+        self.core.is_current_blocking_thread()
     }
 
     /// Submits to a previously resolved worker without discarding destination affinity.

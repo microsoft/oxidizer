@@ -130,91 +130,12 @@ impl Drop for Delay {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
     use super::*;
     use crate::ClockControl;
 
     #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(Delay: Send, Sync);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn delay_ok() {
-        let clock = Clock::new_tokio();
-        let now = std::time::Instant::now();
-        Delay::new(&clock, Duration::from_millis(5)).await;
-        assert!(now.elapsed() >= Duration::from_millis(5));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn delay_with_fast_instant_completes() {
-        let clock = Clock::new_tokio().with_fast_instant(true);
-
-        tokio::time::timeout(Duration::from_secs(1), Delay::new(&clock, Duration::from_millis(5)))
-            .await
-            .expect("timer scheduling uses the driver's precise time source");
-    }
-
-    #[test]
-    fn delay_with_control() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let mut delay = Delay::new(&clock, Duration::from_millis(1));
-
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        thread::sleep(Duration::from_millis(1));
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-
-        let len = control.timers_len();
-        control.advance(Duration::from_millis(2));
-        assert_eq!(control.timers_len(), len - 1);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-    }
-
-    #[test]
-    fn delay_zero() {
-        let clock = Clock::new_system_frozen();
-        let mut delay = Delay::new(&clock, Duration::ZERO);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-    }
-
-    #[test]
-    fn delay_max() {
-        let clock = Clock::new_system_frozen();
-
-        let result = poll_delay(&mut Delay::new(&clock, Duration::MAX));
-
-        assert_eq!(result, Poll::Pending);
-    }
-
-    #[test]
-    fn delay_zero_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        assert!(Delay::new(&clock, Duration::ZERO).current_timer.is_none());
-    }
-
-    #[test]
-    fn delay_max_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        assert!(Delay::new(&clock, Duration::MAX).current_timer.is_none());
-    }
-
-    #[test]
-    fn delay_close_to_max_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
-
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        assert_eq!(delay.duration, Duration::MAX);
-        assert!(delay.current_timer.is_none());
-    }
-
-    #[test]
-    fn overflowing_reregistration_unregisters_existing_timer() {
+    fn private_overflowing_reregistration_clears_the_existing_timer_key() {
+        // Public callers cannot mutate a polled delay's duration to force this recovery branch.
         let clock = ClockControl::new().to_clock();
         let mut delay = Delay::new(&clock, Duration::from_millis(1));
         let waker = Waker::noop();
@@ -227,43 +148,5 @@ mod tests {
 
         assert_eq!(delay.current_timer, None);
         assert_eq!(clock.clock_state().timers_len(), 0);
-    }
-
-    #[test]
-    fn ready_without_advancing_timers_ensure_timer_unregistered() {
-        let clock = Clock::new_system_frozen();
-        let period = Duration::from_millis(1);
-        let mut delay = Delay::new(&clock, period);
-
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        assert_eq!(clock.clock_state().timers_len(), 1);
-        thread::sleep(period);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-        assert_eq!(delay.current_timer, None);
-        assert_eq!(clock.clock_state().timers_len(), 0);
-    }
-
-    #[test]
-    fn drop_delay_unregisters_timer() {
-        let clock = Clock::new_system_frozen();
-        let period = Duration::from_millis(1);
-
-        // Create and poll the delay to register a timer.
-        {
-            let mut delay = Delay::new(&clock, period);
-            assert_eq!(poll_delay(&mut delay), Poll::Pending);
-            assert_eq!(clock.clock_state().timers_len(), 1);
-            // Delay is dropped here, unregistering the timer.
-        }
-
-        // Timer should be unregistered after dropping the delay.
-        assert_eq!(clock.clock_state().timers_len(), 0);
-    }
-
-    fn poll_delay(delay: &mut Delay) -> Poll<()> {
-        let mut cx = Context::from_waker(Waker::noop());
-        let delay = std::pin::pin!(delay);
-
-        delay.poll(&mut cx)
     }
 }

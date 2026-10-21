@@ -400,6 +400,10 @@ impl<'de> Deserializer<'de> for HostileValuesDeserializer {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "hostile real-limit allocation breadth is covered natively and by cargo careful; compact serde diagnostics remain interpreted"
+)]
 fn hostile_collection_hints_cannot_drive_unbounded_deserialization_allocations() {
     let valid = EncodedValues::deserialize(HostileValuesDeserializer {
         remaining: 1,
@@ -485,6 +489,10 @@ fn hostile_collection_hints_cannot_drive_unbounded_deserialization_allocations()
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the real 64-KiB aggregate budget is covered natively and by cargo careful; source-limit parser paths remain covered by compact cases"
+)]
 fn typed_serde_accumulates_the_byte_budget_across_field_lines() {
     let boundary = SetCookieOwned::deserialize(HostileValuesDeserializer {
         remaining: 2,
@@ -508,6 +516,10 @@ fn typed_serde_accumulates_the_byte_budget_across_field_lines() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the real 1,024-item collection boundary is covered natively and by cargo careful; typed serde grammar paths remain interpreted"
+)]
 fn typed_serde_enforces_list_item_budgets_at_the_collection_boundary() {
     for (item_limit, extra_item) in [(1_024, 1_025), (MAX_CUSTOM_LIST_ITEMS, MAX_CUSTOM_LIST_ITEMS + 1)] {
         let boundary = std::iter::repeat_n("*/*", item_limit).collect::<Vec<_>>().join(",");

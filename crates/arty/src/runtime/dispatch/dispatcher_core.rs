@@ -182,10 +182,11 @@ impl DispatcherCore {
         &self.remote_results
     }
 
-    pub(crate) fn is_current_blocking_task(&self) -> bool {
+    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
+    pub(crate) fn is_current_blocking_thread(&self) -> bool {
         self.worker_endpoints
             .iter()
-            .any(|endpoint| endpoint.blocking_worker.is_current_task())
+            .any(|endpoint| endpoint.blocking_worker.owns_current_thread())
     }
 
     pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
@@ -200,6 +201,14 @@ impl DispatcherCore {
                 .expect("scheduler worker index must be registered")
                 .blocking_worker,
         )
+    }
+
+    pub(crate) fn wake_worker(&self, worker_index: WorkerIndex) {
+        self.worker_endpoints
+            .get(usize::from(worker_index))
+            .expect("worker index must identify a registered runtime worker")
+            .waker
+            .wake_by_ref();
     }
 
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>

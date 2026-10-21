@@ -4,7 +4,7 @@
 [package]
 name = "arty_macros"
 description = "Runtime entry-point macros for Arty."
-version = "0.4.0"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime", "proc-macro"]
 categories = ["asynchronous"]
@@ -15,6 +15,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_macros"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.docs.rs]
 all-features = true

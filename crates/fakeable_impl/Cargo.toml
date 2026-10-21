@@ -4,7 +4,7 @@
 [package]
 name = "fakeable_impl"
 description = "Implementation details for the fakeable procedural macros."
-version = "0.2.1"
+version = "0.2.2"
 autotests = false
 readme = "README.md"
 keywords = ["oxidizer", "fake", "mock", "testing"]
@@ -17,6 +17,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fakeable_impl"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.anvil.miri]
 exclude = true

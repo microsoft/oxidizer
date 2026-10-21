@@ -559,6 +559,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain every line substitution; compact structured WebSocket parsing still enters the token scanner under Miri"
+    )]
     fn version_line_substitutions_match_structured_parsing() {
         for literal in [
             b"13".as_slice(),

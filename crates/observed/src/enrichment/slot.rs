@@ -60,11 +60,7 @@ impl Slot {
 
     fn replace(&self, node: OptEnrichmentNode) -> OptEnrichmentNode {
         let cell = self.0.get_or(|| RefCell::new(None));
-        if let Some(node) = node {
-            cell.borrow_mut().replace(node)
-        } else {
-            cell.borrow_mut().take()
-        }
+        cell.replace(node)
     }
 
     /// Pushes entries onto the enrichment chain and returns a guard.
@@ -141,6 +137,29 @@ impl Drop for Guard {
     }
 }
 
+/// Restores slot heads installed by an [`EnrichmentTransfer`].
+///
+/// The transfer already owns every captured [`Slot`], so this guard borrows
+/// those handles instead of cloning their reference counts on every apply.
+#[must_use]
+pub(crate) struct AppliedGuard<'a> {
+    slots: SmallVec<[(&'a Slot, OptEnrichmentNode); INLINE_SLOT_CAPACITY]>,
+}
+
+impl std::fmt::Debug for AppliedGuard<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
+    }
+}
+
+impl Drop for AppliedGuard<'_> {
+    fn drop(&mut self) {
+        for (slot, prev) in self.slots.drain(..).rev() {
+            let _ = slot.replace(prev);
+        }
+    }
+}
+
 /// Captured enrichment state for cross-thread transfer.
 ///
 /// Created by [`Sink::transfer_context`](crate::Sink::transfer_context).
@@ -170,7 +189,17 @@ impl EnrichmentTransfer {
     ///
     /// Borrows `self` so the same transfer can be applied repeatedly (e.g.
     /// from a future's `poll` loop) without cloning the captured slots.
-    pub(crate) fn apply(&self) -> Guard {
+    pub(crate) fn apply(&self) -> AppliedGuard<'_> {
+        let mut slots = SmallVec::with_capacity(self.slots.len());
+        for (slot, head) in &self.slots {
+            let prev = slot.replace(head.clone());
+            slots.push((slot, prev));
+        }
+        AppliedGuard { slots }
+    }
+
+    /// Restores captured heads with an owned guard that can outlive this transfer.
+    pub(crate) fn apply_owned(&self) -> Guard {
         let mut slots = SmallVec::with_capacity(self.slots.len());
         for (slot, head) in &self.slots {
             let prev = slot.replace(head.clone());
@@ -188,6 +217,10 @@ impl EnrichmentTransfer {
     /// nodes. [`push_entries`](Self::push_entries) relies on this and on the
     /// same check in [`push_for`](Self::push_for) for its non-empty input.
     pub(crate) fn push(&mut self, additional_enrichment: impl Enrichment) {
+        if self.slots.is_empty() {
+            return;
+        }
+
         let entries = additional_enrichment.into_entries();
         if entries.is_empty() {
             return;
@@ -200,6 +233,10 @@ impl EnrichmentTransfer {
     /// `target`, so only that sink observes it. Mirrors the `with_target`
     /// mapping that `EnrichFutureExt::enrich_for` applies.
     pub(crate) fn push_for(&mut self, target: SinkId, additional_enrichment: impl Enrichment) {
+        if self.slots.is_empty() {
+            return;
+        }
+
         let entries = additional_enrichment.into_entries();
         if entries.is_empty() {
             return;
@@ -247,6 +284,14 @@ mod coverage_tests {
     impl Enrichment for EmptyEnrichment {
         fn into_entries(self) -> Vec<EnrichmentEntry> {
             Vec::new()
+        }
+    }
+
+    struct UnreachableEnrichment;
+
+    impl Enrichment for UnreachableEnrichment {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            panic!("an empty transfer must not materialize enrichment entries")
         }
     }
 
@@ -354,15 +399,85 @@ mod coverage_tests {
     }
 
     #[test]
+    fn applied_guard_restores_spilled_slot_storage() {
+        const SLOT_COUNT: usize = INLINE_SLOT_CAPACITY + 1;
+
+        let slots: [_; SLOT_COUNT] = std::array::from_fn(|_| Slot::new());
+        let captured_guards: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                slot.push(Arc::from(vec![EnrichmentEntry::unclassified(
+                    "captured",
+                    i64::try_from(index).unwrap(),
+                )]))
+            })
+            .collect();
+        let mut transfer = EnrichmentTransfer::default();
+        for slot in &slots {
+            transfer.add_slot(slot);
+        }
+        drop(captured_guards);
+
+        let previous_guards: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                slot.push(Arc::from(vec![EnrichmentEntry::unclassified(
+                    "previous",
+                    i64::try_from(index).unwrap(),
+                )]))
+            })
+            .collect();
+
+        {
+            let _guard = transfer.apply();
+            for slot in &slots {
+                assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "captured");
+            }
+        }
+
+        for slot in &slots {
+            assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "previous");
+        }
+        drop(previous_guards);
+        for slot in &slots {
+            assert!(slot.current().is_none());
+        }
+    }
+
+    #[test]
+    fn empty_transfer_does_not_materialize_enrichment() {
+        let mut transfer = EnrichmentTransfer::default();
+
+        transfer.push(UnreachableEnrichment);
+        transfer.push_for(SinkId::new("target"), UnreachableEnrichment);
+    }
+
+    #[test]
+    fn push_entries_ignores_an_empty_transfer() {
+        let mut transfer = EnrichmentTransfer::default();
+        let entries = Arc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]);
+
+        transfer.push_entries(&entries);
+
+        assert!(transfer.slots.is_empty());
+    }
+
+    #[test]
     fn debug_impls() {
         let slot = Slot::new();
         assert!(format!("{slot:?}").contains("Slot"));
+
+        let guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("k", 1_i64)]));
+        assert!(format!("{guard:?}").contains("Guard"));
+        drop(guard);
 
         let mut transfer = EnrichmentTransfer::default();
         transfer.add_slot(&slot);
         assert!(format!("{transfer:?}").contains("EnrichmentTransfer"));
 
-        let guard = transfer.apply();
-        assert!(format!("{guard:?}").contains("Guard"));
+        let applied_guard = transfer.apply();
+        assert!(format!("{applied_guard:?}").contains("AppliedGuard"));
     }
 }

@@ -94,6 +94,10 @@ fn check_limits<F: Field>(item: &[u8], members_at_limit: usize) {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the full WebSocket 64-KiB, 128-line, and 1,024-item matrix is covered natively and by cargo careful; fallback parsing remains interpreted"
+)]
 fn websocket_custom_source_limits_cover_bare_and_quoted_paths() {
     check_limits::<SecWebSocketVersion>(b"13", 1_024);
     check_limits::<SecWebSocketProtocol>(b"chat", 1_024);
@@ -103,6 +107,10 @@ fn websocket_custom_source_limits_cover_bare_and_quoted_paths() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the real 1,024-parameter boundary is runtime stress covered natively and by cargo careful; quoted fallback paths remain interpreted"
+)]
 fn websocket_extension_parameter_budget_covers_quoted_values() {
     let mut bytes = b"x".to_vec();
     for _ in 1..1_024 {

@@ -4,7 +4,7 @@
 [package]
 name = "observed"
 description = "Structured telemetry events with enrichment, redaction, and per-field routing."
-version = "0.27.0"
+version = "0.29.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
@@ -51,9 +51,9 @@ thread_local = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]
-all_the_time = { workspace = true }
-alloc_tracker = { workspace = true }
 criterion = { workspace = true }
+metabench = { path = "../metabench" }
+mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }

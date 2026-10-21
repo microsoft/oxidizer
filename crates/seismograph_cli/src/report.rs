@@ -2256,6 +2256,7 @@ mod tests {
     use seismograph_rallocator::callers::AddressLookupFields;
 
     use super::*;
+    use crate::allocator_topology::Segment;
     use crate::allocator_view::Version;
 
     #[test]
@@ -2503,6 +2504,9 @@ mod tests {
             "orphan free",
             "unmatched allocation evidence",
             "&lt;producer&gt;",
+            "Allocation sizes by thread",
+            "data-histogram=\"thread-log-7-allocation-sizes\"",
+            "title=\"Allocated: 2 · Retained unmatched: 0\"",
             "<path class=\"thread-flow-link local\" data-source=\"1\" data-destination=\"1\"",
             "<path class=\"thread-flow-link cross\" data-source=\"1\" data-destination=\"2\"",
             "320 B across 2 allocations",
@@ -2729,6 +2733,34 @@ mod tests {
 
         assert!(!html.contains("allocation policy samples"));
         assert!(html.contains("collection-start epoch and general collection availability are not encoded"));
+    }
+
+    #[test]
+    fn reporting_counts_tracked_and_untracked_segments_separately() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.topology.push(TopologyRegion {
+            region_bytes: 64,
+            slice_bytes: 64,
+            used_bitmap: vec![1],
+            slices: vec![Slice {
+                kind: SliceKind::Small,
+                // Unequal totals reveal swapped classifications as well as lost counts.
+                segments: [true, false, true]
+                    .into_iter()
+                    .map(|utilization_tracked| Segment {
+                        utilization_tracked,
+                        ..Segment::default()
+                    })
+                    .collect(),
+                ..Slice::default()
+            }],
+            ..TopologyRegion::default()
+        });
+        let mut html = String::new();
+
+        render_physical_topology(&mut html, &snapshot);
+
+        assert!(html.contains("Slab utilization: 2 tracked segments; 1 unavailable"));
     }
 
     #[test]
