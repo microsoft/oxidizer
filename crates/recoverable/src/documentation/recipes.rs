@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Recipes and patterns for flowing recovery information.
+//! Patterns for passing recovery information between error types.
 //!
-//! A cookbook of practical examples for implementing [`Recovery`] effectively.
-//! All examples use [`ohno`](https://docs.rs/ohno) for error definitions.
+//! These examples show how to implement [`Recovery`].
+//! They use [`ohno`](https://docs.rs/ohno) to define errors.
 //!
-//! # Flow from inner errors
+//! # Pass information from an inner error
 //!
-//! When your error wraps an inner error that already implements [`Recovery`],
-//! flow its recovery information through the `#[from]` attribute. This
-//! preserves the classification made by the layer closest to the root cause.
+//! An outer error can wrap an inner error that implements [`Recovery`].
+//! Use the `#[from]` attribute to copy its recovery information.
+//! This keeps the classification from the layer that found the root cause.
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -26,8 +26,8 @@
 //!     }
 //! }
 //!
-//! /// The `#[from]` attribute flows recovery info from `DatabaseError`
-//! /// automatically — `error.recovery()` is called during conversion.
+//! /// The `#[from]` attribute gets recovery information from `DatabaseError`.
+//! /// The conversion calls `error.recovery()`.
 //! #[ohno::error]
 //! #[from(DatabaseError(recovery: error.recovery()))]
 //! struct ServiceError {
@@ -48,8 +48,8 @@
 //! }
 //!
 //! fn service_operation() -> Result<(), ServiceError> {
-//!     // The ? operator converts DatabaseError into ServiceError,
-//!     // flowing recovery info automatically via #[from].
+//!     // The ? operator converts DatabaseError into ServiceError.
+//!     // The #[from] attribute copies the recovery information.
 //!     database_operation()?;
 //!     Ok(())
 //! }
@@ -58,19 +58,17 @@
 //! assert_eq!(err.recovery().kind(), RecoveryKind::Retry);
 //! ```
 //!
-//! Only override the inner classification when the outer context changes the
-//! recoverability. For example, a transient inner error might become
-//! non-recoverable if a retry budget is exhausted at the outer layer.
+//! Override the inner classification only when the outer context changes it.
+//! For example, an outer layer can exhaust its retry limit.
+//! It can then classify a transient inner error as non-recoverable.
 //!
 //! # Non-recoverable errors
 //!
-//! When an error has no inner cause and the condition is permanent, use
-//! [`RecoveryInfo::never()`] directly.
+//! If a permanent error has no inner cause, use [`RecoveryInfo::never()`].
 //!
-//! If **all** states of an error are permanently non-recoverable and this is
-//! unlikely to change, you do not need to implement [`Recovery`] at all.
-//! Only implement the trait when at least some states may be recoverable or
-//! when the recoverability classification may evolve in the future.
+//! If all variants are permanently non-recoverable, the error does not need [`Recovery`].
+//! Implement the trait when at least one variant can recover.
+//! You can also implement it when the classification can change in a future version.
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -95,22 +93,20 @@
 //!
 //! # Heuristic recovery
 //!
-//! Sometimes an inner error does not implement [`Recovery`] but the operation
-//! is potentially recoverable. In these cases, use heuristics to derive
-//! recovery information. A common pattern is detecting [`std::io::Error`] as
-//! the root cause and converting its [`ErrorKind`](std::io::ErrorKind) into
-//! [`RecoveryInfo`] via the built-in [`RecoveryInfo::from`]
-//! conversion.
+//! An inner error does not always implement [`Recovery`].
+//! You can use a known property of the error to classify it.
+//! For example, find a [`std::io::Error`] at the root of the error chain.
+//! Then use [`RecoveryInfo::from`] to convert its [`ErrorKind`](std::io::ErrorKind).
 //!
-//! The `#[from]` attribute lets you apply the heuristic at conversion time:
+//! Use the `#[from]` attribute to classify the error during conversion.
 //!
 //! ```rust
 //! use std::io;
 //!
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 //!
-//! /// `std::io::Error` does not implement `Recovery`, so we derive
-//! /// recoverability from its `ErrorKind` using the built-in conversion.
+//! /// `std::io::Error` does not implement `Recovery`.
+//! /// This conversion classifies its `ErrorKind`.
 //! #[ohno::error]
 //! #[from(io::Error(recovery: error.kind().into()))]
 //! struct StorageError {
@@ -123,17 +119,17 @@
 //!     }
 //! }
 //!
-//! // A connection-reset IO error is classified as transient.
+//! // A connection reset is transient.
 //! let err = StorageError::from(io::Error::from(io::ErrorKind::ConnectionReset));
 //! assert_eq!(err.recovery().kind(), RecoveryKind::Retry);
 //!
-//! // A "not found" IO error is classified as permanent.
+//! // A "not found" error is permanent.
 //! let err = StorageError::from(io::Error::from(io::ErrorKind::NotFound));
 //! assert_eq!(err.recovery().kind(), RecoveryKind::Never);
 //! ```
 //!
-//! When the IO error is buried deeper in the cause chain and you need to
-//! walk it manually, use [`Error::source`](std::error::Error::source):
+//! An I/O error can occur deeper in the cause chain.
+//! Use [`Error::source`](std::error::Error::source) to inspect each cause.
 //!
 //! ```rust
 //! use std::error::Error;
@@ -160,21 +156,20 @@
 //!     }
 //! }
 //!
-//! /// Walk the error chain looking for a `std::io::Error` and derive
-//! /// recovery info from its `ErrorKind`.
+//! /// Finds a `std::io::Error` in the error chain.
+//! /// It classifies the error from its `ErrorKind`.
 //! fn io_recovery_from_chain(err: &(dyn Error + 'static)) -> RecoveryInfo {
 //!     std::iter::successors(Some(err), |e| (*e).source())
 //!         .find_map(|e| e.downcast_ref::<io::Error>())
 //!         .map(|io_err| RecoveryInfo::from(io_err.kind()))
-//!         // No IO error found — assume non-recoverable.
+//!         // If there is no I/O error, classify the condition as non-recoverable.
 //!         .unwrap_or_else(RecoveryInfo::never)
 //! }
 //! ```
 //!
-//! The `From<ErrorKind> for RecoveryInfo` conversion provides opinionated
-//! defaults for common IO error kinds. See its documentation for the full
-//! classification table. If the defaults don't match your use case,
-//! implement your own mapping.
+//! The `From<ErrorKind> for RecoveryInfo` conversion provides defaults for common I/O errors.
+//! Its API documentation lists all classifications.
+//! If a default does not match your use case, implement your own mapping.
 
 #[expect(unused_imports, reason = "simplifies the docs")]
 use crate::*;
