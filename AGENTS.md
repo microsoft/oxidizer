@@ -4,14 +4,8 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 ## Documentation language
 
-Use the project `simple-english` skill for crate documentation and other
-human-facing documentation. Invoke the skill by its native name before you
-write or edit this text. The skill is in
-`.github/skills/simple-english/SKILL.md`.
-
-Keep code, identifiers, commands, flags, file paths, quoted errors, product
-names, and technical facts unchanged. The skill controls the surrounding
-prose.
+Use the [`simple-english` skill](https://github.com/AminBlg/SimpleEnglish/tree/main/skills/simple-english)
+for crate documentation and other human-facing documentation.
 
 ## README Files
 
@@ -19,17 +13,7 @@ Crate README files are auto-generated via `just anvil-readme --fix`. Do not manu
 
 ## Public behavior and integration tests
 
-- Use public integration tests under `crates/<crate>/tests/` for changes to
-  public runtime behavior, lifecycle, scheduling, joins, shutdown, telemetry,
-  panic handling, feature behavior, or public API contracts.
-- Use unit tests only for implementation details that a supported public API
-  cannot exercise. State this limit in the test name or a nearby explanation.
-- Do not weaken, delete, skip, or rewrite an integration test to match an
-  implementation change.
-- Get explicit human approval before you change a contract or test for a
-  breaking behavior change that an existing integration test covers.
-- If code changes public behavior, add or update a public integration test.
-  This rule does not apply when the public API cannot reach the scenario.
+Use the project `integration-test-policy` skill when you add or change tests.
 
 ## Executing `just` commands
 
