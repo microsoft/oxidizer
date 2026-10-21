@@ -1,60 +1,59 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! IO recovery information for [`RecoveryInfo`].
+//! Recovery information for I/O errors.
 
 use std::io::ErrorKind;
 
 use crate::RecoveryInfo;
 
 impl From<ErrorKind> for RecoveryInfo {
-    /// Creates recovery information from an IO error kind.
+    /// Creates recovery information from an I/O error kind.
     ///
-    /// This is an opinionated default classification based on common IO error kinds. The exact
-    /// classification of each variant may change in future versions as understanding of failure
-    /// modes evolves. If the default classification does not meet your requirements, implement
-    /// your own conversion logic instead of relying on this one.
+    /// This conversion provides default classifications for common I/O errors.
+    /// A future version can change the classification of a variant.
+    /// If a default does not meet your requirements, implement your own conversion.
     ///
     /// # Retry
     ///
-    /// The following are considered transient and will return [`RecoveryInfo::retry`]. These
-    /// errors typically resolve quickly (seconds to minutes) without external intervention:
+    /// These transient errors return [`RecoveryInfo::retry`].
+    /// They usually resolve within seconds or minutes without external action:
     ///
-    /// - [`ErrorKind::WouldBlock`]: resource temporarily unavailable
-    /// - [`ErrorKind::TimedOut`]: individual request timeout
-    /// - [`ErrorKind::ConnectionReset`]: connection dropped by remote
-    /// - [`ErrorKind::ConnectionAborted`]: connection terminated by remote
-    /// - [`ErrorKind::NotConnected`]: socket not yet connected
-    /// - [`ErrorKind::ConnectionRefused`]: server not listening (e.g. service restarting)
-    /// - [`ErrorKind::AddrInUse`]: address temporarily occupied
-    /// - [`ErrorKind::AddrNotAvailable`]: interface temporarily unavailable
-    /// - [`ErrorKind::BrokenPipe`]: reader closed, reconnect may help
-    /// - [`ErrorKind::Interrupted`]: signal interrupted syscall
-    /// - [`ErrorKind::StaleNetworkFileHandle`]: NFS handle invalidated, re-open may succeed
-    /// - [`ErrorKind::ResourceBusy`]: resource locked, may become available shortly
-    /// - [`ErrorKind::Deadlock`]: OS prevented deadlock, retry with different lock ordering may succeed
-    /// - [`ErrorKind::ExecutableFileBusy`]: file is being executed, will become available when process exits
-    /// - [`ErrorKind::QuotaExceeded`]: resource quota hit, may resolve with quota increase or usage decrease
+    /// - [`ErrorKind::WouldBlock`]: A resource is temporarily unavailable.
+    /// - [`ErrorKind::TimedOut`]: One request timed out.
+    /// - [`ErrorKind::ConnectionReset`]: The remote endpoint dropped the connection.
+    /// - [`ErrorKind::ConnectionAborted`]: The remote endpoint ended the connection.
+    /// - [`ErrorKind::NotConnected`]: The socket is not connected.
+    /// - [`ErrorKind::ConnectionRefused`]: The server is not listening.
+    /// - [`ErrorKind::AddrInUse`]: The address is temporarily in use.
+    /// - [`ErrorKind::AddrNotAvailable`]: The network interface is temporarily unavailable.
+    /// - [`ErrorKind::BrokenPipe`]: The reader closed the pipe. A new connection can help.
+    /// - [`ErrorKind::Interrupted`]: A signal interrupted the system call.
+    /// - [`ErrorKind::StaleNetworkFileHandle`]: An NFS handle is invalid. Opening it again can succeed.
+    /// - [`ErrorKind::ResourceBusy`]: A resource is locked. It can become available soon.
+    /// - [`ErrorKind::Deadlock`]: The OS prevented a deadlock. A different lock order can succeed.
+    /// - [`ErrorKind::ExecutableFileBusy`]: A process is running the file.
+    /// - [`ErrorKind::QuotaExceeded`]: Usage reached a resource quota.
     ///
     /// # Unavailable
     ///
-    /// The following indicate infrastructure-level problems and will return
-    /// [`RecoveryInfo::unavailable`]. These errors may take an extended period to resolve
-    /// (minutes to hours) and suggest circuit-breaker patterns or fallback strategies:
+    /// These infrastructure errors return [`RecoveryInfo::unavailable`].
+    /// They can take minutes or hours to resolve.
+    /// Callers can use a circuit breaker or a fallback:
     ///
-    /// - [`ErrorKind::HostUnreachable`]: routing or infrastructure problem
-    /// - [`ErrorKind::NetworkUnreachable`]: entire network segment unreachable
-    /// - [`ErrorKind::NetworkDown`]: network interface is down
-    /// - [`ErrorKind::StorageFull`]: disk or storage exhausted, may resolve with cleanup
-    /// - [`ErrorKind::OutOfMemory`]: system memory exhausted, may resolve as other processes release memory
+    /// - [`ErrorKind::HostUnreachable`]: A routing or infrastructure problem blocks the host.
+    /// - [`ErrorKind::NetworkUnreachable`]: The system cannot reach the network segment.
+    /// - [`ErrorKind::NetworkDown`]: The network interface is down.
+    /// - [`ErrorKind::StorageFull`]: The disk or storage is full.
+    /// - [`ErrorKind::OutOfMemory`]: The system has no available memory.
     ///
     /// # Never
     ///
-    /// All other error kinds will return [`RecoveryInfo::never`] by default. Many of these
-    /// represent permanent conditions that retrying cannot resolve (e.g. file not found, permission
-    /// denied, invalid data), but the catch-all also covers ambiguous variants like
-    /// [`ErrorKind::Other`] that may include transient errors. If your use case encounters
-    /// transient errors reported as uncategorized kinds, implement your own conversion logic.
+    /// All other error kinds return [`RecoveryInfo::never`] by default.
+    /// Many of these errors are permanent, such as missing files, denied permissions, or invalid data.
+    /// This group also includes ambiguous variants such as [`ErrorKind::Other`].
+    /// Such variants can contain transient errors.
+    /// If your application receives them, implement a conversion for its specific errors.
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::WouldBlock

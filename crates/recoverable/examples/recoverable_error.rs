@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating how to use the `Recovery` trait with error types.
+//! This example uses the `Recovery` trait with custom error types.
 //!
-//! This example shows how to implement the `Recovery` trait for custom error types
-//! and use `RecoveryInfo` to classify errors as transient or permanent.
+//! It uses `RecoveryInfo` to classify errors as transient or permanent.
 
 use std::error::Error;
 use std::fmt::Display;
@@ -18,14 +17,14 @@ fn main() {
     handle_network_error(&NetworkError::ServiceUnavailable { retry_after: None });
 }
 
-/// A network error type demonstrating different recovery scenarios.
+/// A network error with different recovery actions.
 #[derive(Debug)]
 enum NetworkError {
-    /// DNS resolution failed - might be transient
+    /// DNS resolution failed. The condition can be transient.
     DnsResolutionFailed,
-    /// Invalid URL format - permanent error
+    /// The URL format is invalid. This error is permanent.
     InvalidUrl,
-    /// Service is unavailable, for example circuit breaker is open
+    /// The service is unavailable. For example, a circuit breaker is open.
     ServiceUnavailable { retry_after: Option<Duration> },
 }
 
@@ -58,7 +57,7 @@ impl Display for NetworkError {
 
 impl Error for NetworkError {}
 
-/// Demonstrates handling network errors.
+/// Handles a network error according to its recovery information.
 fn handle_network_error(error: &NetworkError) {
     let recovery = error.recovery();
 
