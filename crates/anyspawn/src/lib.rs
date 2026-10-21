@@ -18,6 +18,28 @@
 //!
 //! # Quick Start
 //!
+//! ## Using Arty
+//!
+//! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "arty")] {
+//! # (|| {
+//! use anyspawn::Spawner;
+//! use arty::runtime::Runtime;
+//!
+//! let runtime = Runtime::new()?;
+//! let result = runtime.scheduler().block_on(async |cx| {
+//!     let spawner = Spawner::new_arty(cx.scheduler().clone());
+//!     spawner.spawn(async { 1 + 1 }).await
+//! })?;
+//! assert_eq!(result, 2);
+//! runtime.stop()?;
+//! # Ok::<(), arty::runtime::Error>(())
+//! # })().unwrap();
+//! # }
+//! # }
+//! ```
+//!
 //! ## Using Tokio
 //!
 //! ```rust
@@ -42,6 +64,7 @@
 //!
 //! # Features
 //!
+//! - `arty`: Enables the [`Spawner::new_arty`] constructor
 //! - `tokio`: Enables the [`Spawner::new_tokio`] and
 //!   [`Spawner::new_tokio_with_handle`] constructors
 

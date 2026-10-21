@@ -19,6 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "arty::task::scheduler::Scheduler",
     "tokio::runtime::handle::Handle",
     "thread_aware_core::thread_aware::ThreadAware",
     "thread_aware_core::thread::Thread",
@@ -30,15 +31,18 @@ all-features = true
 
 [features]
 default = []
+arty = ["dep:arty"]
 seismograph = ["performables/seismograph"]
 tokio = ["dep:tokio"]
 
 [dependencies]
+arty = { workspace = true, features = ["rt"], optional = true }
 performables = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
+arty = { path = "../arty", default-features = false, features = ["rt"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["futures"] }
@@ -50,6 +54,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 [[test]]
 name = "builder"
 required-features = ["tokio"]
+
+[[test]]
+name = "arty"
+required-features = ["arty"]
 
 [[test]]
 name = "spawner"
