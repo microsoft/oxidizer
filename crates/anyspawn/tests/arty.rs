@@ -6,6 +6,7 @@
 
 use std::future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::time::Duration;
 
 use anyspawn::Spawner;
 use arty::runtime::Runtime;
@@ -13,11 +14,21 @@ use thread_aware::ThreadAware;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync, ThreadAware);
 
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn runtime_and_spawner() -> (Runtime, Spawner) {
     let runtime = Runtime::new().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let spawner = Spawner::new_arty(scheduler);
     (runtime, spawner)
+}
+
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap()
 }
 
 #[test]
@@ -35,12 +46,16 @@ fn arty_spawn_and_clone_dispatch_tasks() {
 fn dropping_arty_join_handle_does_not_cancel_task() {
     let (runtime, spawner) = runtime_and_spawner();
     let (sender, receiver) = std::sync::mpsc::channel();
+    let (release, released) = futures::channel::oneshot::channel();
 
-    drop(spawner.spawn(async move {
+    let handle = spawner.spawn(async move {
+        released.await.unwrap();
         sender.send(42).unwrap();
-    }));
+    });
+    drop(handle);
+    release.send(()).unwrap();
 
-    assert_eq!(receiver.recv().unwrap(), 42);
+    assert_eq!(receiver.recv_timeout(TEST_TIMEOUT).unwrap(), 42);
     runtime.stop().unwrap();
 }
 
@@ -69,23 +84,33 @@ fn arty_spawn_blocking_returns_output() {
 #[test]
 fn arty_task_panic_panics_when_joined() {
     let (runtime, spawner) = runtime_and_spawner();
-    let handle = spawner.spawn(async { panic!("task failed") });
+    let (started, task_ran) = std::sync::mpsc::channel();
+    let handle = spawner.spawn(async move {
+        started.send(()).unwrap();
+        panic!("task failed");
+    });
 
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle)));
+    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
-    assert!(panic.is_err());
+    task_ran.recv_timeout(TEST_TIMEOUT).unwrap();
+    assert!(panic_message(&*panic).contains("channel closed"));
     runtime.stop().unwrap();
 }
 
 #[test]
 fn arty_shutdown_cancels_pending_task() {
     let (runtime, spawner) = runtime_and_spawner();
-    let handle = spawner.spawn(future::pending::<()>());
+    let (started, task_started) = std::sync::mpsc::channel();
+    let handle = spawner.spawn(async move {
+        started.send(()).unwrap();
+        future::pending::<()>().await;
+    });
+    task_started.recv_timeout(TEST_TIMEOUT).unwrap();
     runtime.stop().unwrap();
 
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle)));
+    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
-    assert!(panic.is_err());
+    assert!(panic_message(&*panic).contains("channel closed"));
 }
 
 #[test]
