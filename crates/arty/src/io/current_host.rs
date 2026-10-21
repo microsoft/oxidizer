@@ -158,7 +158,7 @@ mod tests {
 
     impl Drop for InstalledHost {
         fn drop(&mut self) {
-            RuntimeDriverHost::uninstall();
+            drop(CURRENT.with_borrow_mut(Option::take));
         }
     }
 
@@ -181,6 +181,15 @@ mod tests {
 
         let other_thread = ThreadBuilder::default().build(std::thread::current().id());
         assert!(RuntimeDriverHost::with_current(&runtime, &other_thread, |_| ()).is_none());
+    }
+
+    #[test]
+    fn uninstall_removes_current_host() {
+        let (runtime, thread, _host) = host();
+
+        RuntimeDriverHost::uninstall();
+
+        assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_none());
     }
 
     #[test]
