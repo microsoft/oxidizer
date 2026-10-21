@@ -1070,6 +1070,21 @@ mod tests {
     }
 
     #[test]
+    fn repeated_shutdown_cleanup_is_idempotent() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            command_tx,
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::new(WorkerSignal::default()),
+        );
+
+        worker.begin_shutdown();
+        worker.begin_shutdown();
+    }
+
+    #[test]
     fn published_shutdown_discards_queued_io_access_without_invoking_it() {
         struct DropSignal(mpsc::Sender<()>);
 

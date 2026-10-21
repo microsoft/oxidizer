@@ -9,10 +9,9 @@ use arty_io_core::IoContext;
 use arty_io_host::{DriverHost, IoRuntime};
 use thread_aware::Thread;
 
+use super::handle::{fail_runtime, runtime_error};
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
-
-use super::handle::{fail_runtime, runtime_error};
 
 thread_local! {
     static CURRENT: RefCell<Option<RuntimeDriverHost>> = const { RefCell::new(None) };
@@ -49,8 +48,7 @@ impl RuntimeDriverHost {
     }
 
     pub(crate) fn uninstall() {
-        let host = CURRENT.with_borrow_mut(Option::take);
-        drop(host.expect("the worker must retain its I/O driver host until shutdown"));
+        drop(CURRENT.with_borrow_mut(Option::take));
     }
 
     pub(crate) fn has_primary_current() -> bool {
