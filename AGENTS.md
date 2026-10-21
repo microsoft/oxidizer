@@ -2,9 +2,34 @@
 
 Code in this repository should follow the guidelines specified in the [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/agents/all.txt).
 
+## Documentation language
+
+Use the project `simple-english` skill for crate documentation and other
+human-facing documentation. Invoke the skill by its native name before you
+write or edit this text. The skill is in
+`.github/skills/simple-english/SKILL.md`.
+
+Keep code, identifiers, commands, flags, file paths, quoted errors, product
+names, and technical facts unchanged. The skill controls the surrounding
+prose.
+
 ## README Files
 
 Crate README files are auto-generated via `just anvil-readme --fix`. Do not manually update them. Because they are generated, do not edit them by hand and do not raise their formatting, wording, or casing (for example the title-cased crate name) as issues in code review - such content is not authored here and is regenerated from the crate's doc comments.
+
+## Public behavior and integration tests
+
+- Use public integration tests under `crates/<crate>/tests/` for changes to
+  public runtime behavior, lifecycle, scheduling, joins, shutdown, telemetry,
+  panic handling, feature behavior, or public API contracts.
+- Use unit tests only for implementation details that a supported public API
+  cannot exercise. State this limit in the test name or a nearby explanation.
+- Do not weaken, delete, skip, or rewrite an integration test to match an
+  implementation change.
+- Get explicit human approval before you change a contract or test for a
+  breaking behavior change that an existing integration test covers.
+- If code changes public behavior, add or update a public integration test.
+  This rule does not apply when the public API cannot reach the scenario.
 
 ## Executing `just` commands
 
