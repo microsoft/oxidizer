@@ -18,6 +18,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "arty_io_core::io_context::IoContext",
     "arty_macros::main",
     "arty_macros::test",
     "observed::sink::core::Sink",
@@ -39,6 +40,7 @@ macros = ["rt", "dep:arty_macros"]
 rt = [
     "time",
     "dep:arty_executor",
+    "dep:arty_io_host",
     "dep:data_privacy",
     "dep:derive_more",
     "dep:events_once",
@@ -47,6 +49,7 @@ rt = [
     "dep:many_cpus",
     "dep:nonempty",
     "dep:observed",
+    "dep:ohno",
     "dep:performables",
     "dep:pin-project",
     "dep:thread_aware",
@@ -57,6 +60,7 @@ test-util = ["tick?/test-util", "many_cpus?/test-util"]
 [dependencies]
 arty_executor = { workspace = true, optional = true }
 arty_io_core = { workspace = true }
+arty_io_host = { workspace = true, optional = true }
 arty_macros = { workspace = true, optional = true }
 data_privacy = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug"], optional = true }
@@ -66,6 +70,7 @@ futures = { workspace = true, features = ["executor"], optional = true }
 many_cpus = { workspace = true, optional = true }
 nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
+ohno = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
@@ -74,6 +79,7 @@ tick = { workspace = true, optional = true }
 
 [dev-dependencies]
 arty_executor = { path = "../arty_executor" }
+arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
@@ -101,6 +107,10 @@ thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-ut
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"] }
 
+[[test]]
+name = "io"
+path = "tests/io/main.rs"
+
 [[bench]]
 name = "arty_scheduling"
 harness = false
@@ -122,6 +132,10 @@ required-features = ["rt"]
 
 [[example]]
 name = "arty_basic"
+required-features = ["macros"]
+
+[[example]]
+name = "arty_io"
 required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints

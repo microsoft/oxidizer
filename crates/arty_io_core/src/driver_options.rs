@@ -29,6 +29,9 @@ impl DriverOptions {
     }
 
     /// Returns the waker that wakes the owning async worker.
+    ///
+    /// A driver must not return this waker from [`Driver::waker`](crate::Driver::waker)
+    /// or synchronously wake it from that waker.
     #[must_use]
     pub const fn owner_waker(&self) -> &Waker {
         &self.owner_waker
