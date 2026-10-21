@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_command_batch_gives_the_primary_driver_no_wait_budget() {
+    fn a_full_command_batch_gives_the_primary_driver_no_wait_budget_and_skips_signal_wait() {
         let (command_tx, command_rx) = channel::unbounded();
         let signal = Arc::new(WorkerSignal::default());
         let mut worker = test_worker(
@@ -848,9 +848,11 @@ mod tests {
             command_tx.send(enqueue(Box::new(|_, _| {}))).unwrap();
         }
         WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(signal.is_notified());
 
         assert!(worker.execute_step().is_continue());
         assert_eq!(*waits.lock().unwrap(), vec![Duration::ZERO]);
+        assert!(signal.is_notified());
 
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
         worker.run();
