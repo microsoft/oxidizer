@@ -191,8 +191,8 @@ impl DriverHost {
     ///
     /// # Panics
     ///
-    /// Panics if called reentrantly while this host is executing a driver
-    /// cycle or modifying its driver set.
+    /// Panics if called while the host is executing a driver cycle or modifying
+    /// its driver set.
     #[must_use]
     pub fn has_primary(&self) -> bool {
         self.drivers
@@ -212,8 +212,8 @@ impl DriverHost {
     ///
     /// # Panics
     ///
-    /// Propagates panics from context construction, cloning, relocation, driver
-    /// construction, custom wakers, diagnostics, and violated host invariants.
+    /// Panics from provider code, context cloning or relocation, diagnostics,
+    /// and violated host invariants propagate.
     pub fn context<C>(&self, options: C::ContextOptions) -> Result<C, DriverError>
     where
         C: IoContext,
@@ -349,8 +349,8 @@ impl DriverHost {
     ///
     /// # Panics
     ///
-    /// Propagates panics from drivers, diagnostics, and violated host
-    /// invariants.
+    /// Panics from drivers, diagnostics, and violated host invariants
+    /// propagate.
     // The runtime calls this exported wrapper on every worker cycle, making it
     // a cross-crate hot path under docs/performance.md's first inline rule.
     #[inline]

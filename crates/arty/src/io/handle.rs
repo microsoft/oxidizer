@@ -18,10 +18,9 @@ use crate::task::{Builtins, Scheduler};
 /// Access to I/O contexts hosted by an Arty runtime.
 ///
 /// Obtain this handle from [`Builtins::io`](crate::task::Builtins::io). Clones
-/// remain associated with the same worker for access from ordinary threads;
-/// such access synchronously dispatches to the associated worker and is slower
-/// than worker-local access. Access from another Arty worker is also
-/// synchronously dispatched to the associated worker.
+/// remain associated with the same worker until their runtime relocates them.
+/// They can be used from ordinary threads; such access synchronously dispatches
+/// to the associated worker and is slower than worker-local access.
 ///
 /// A context type is registered once per runtime. The first request creates,
 /// stores a thread-neutral context, then clones and relocates it to initialize
@@ -57,10 +56,9 @@ impl Io {
     ///
     /// # Panics
     ///
-    /// Panics if the driver cannot be initialized, the runtime is shutting
-    /// down, or the handle is no longer bound to an active worker. Also panics
-    /// if context retrieval is nested inside another context's initialization.
-    /// Driver initialization failure also requests runtime shutdown.
+    /// Panics if context access cannot complete, such as during shutdown, from
+    /// a non-associated Arty worker, or after driver initialization fails.
+    /// Panics from provider code, diagnostics, and runtime invariants propagate.
     #[must_use]
     pub fn context<C>(&self, options: &C::ContextOptions) -> C
     where
@@ -89,9 +87,10 @@ impl Io {
     ///
     /// Returns an [`Error`] if the worker-local driver cannot be initialized,
     /// the runtime is shutting down, the handle is no longer bound to an active
-    /// worker, or context retrieval is nested inside another context's
-    /// initialization. Driver initialization failure also requests runtime
-    /// shutdown.
+    /// worker, the caller is an Arty worker other than the handle's associated
+    /// worker (from the same runtime or a different runtime), or context
+    /// retrieval is nested inside another context's initialization. Driver
+    /// initialization failure also requests runtime shutdown.
     pub(crate) fn try_context<C>(&self, options: &C::ContextOptions) -> Result<C, Error>
     where
         C: IoContext,
@@ -103,6 +102,9 @@ impl Io {
 
         if let Some(result) = RuntimeDriverHost::try_context_current(&self.runtime, &self.thread, options) {
             return result;
+        }
+        if Scheduler::is_current_worker_thread() {
+            return Err(Error::io_outside_worker());
         }
         let Some(worker_index) = self.dispatcher.worker_index(self.thread.id()) else {
             return Err(Error::io_outside_worker());

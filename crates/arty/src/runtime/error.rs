@@ -127,7 +127,7 @@ impl Display for RuntimeValidation {
 impl StdError for RuntimeValidation {}
 
 #[ohno::error]
-#[display("I/O context access requires an active associated worker")]
+#[display("I/O context access cannot synchronously cross between Arty workers")]
 struct IoOutsideWorkerError;
 
 #[ohno::error]
@@ -247,7 +247,7 @@ mod tests {
 
         assert_eq!(
             outside_worker.to_string(),
-            "I/O context access requires an active associated worker"
+            "I/O context access cannot synchronously cross between Arty workers"
         );
         assert!(outside_worker.source().unwrap().downcast_ref::<IoOutsideWorkerError>().is_some());
         assert_eq!(shutting_down.to_string(), "the runtime is shutting down");
