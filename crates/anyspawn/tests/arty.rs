@@ -4,12 +4,16 @@
 #![allow(missing_docs, reason = "test code")]
 #![cfg(not(miri))]
 
+testing_aids::init_tracing!();
+
 use std::future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::thread;
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use arty::runtime::Runtime;
+use arty::runtime::{Runtime, WorkersPolicy};
+use futures::future::join_all;
 use thread_aware::ThreadAware;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync, ThreadAware);
@@ -69,6 +73,33 @@ fn arty_spawn_anywhere_returns_send_output() {
 
     assert_eq!(result.0, 42);
     runtime.stop().unwrap();
+}
+
+#[test]
+fn arty_relocation_round_trip_rebinds_to_destination_worker() {
+    let runtime_a = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (mut spawner, source, destination) = runtime_a
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().clone();
+            let scheduler = cx.scheduler().clone();
+            let threads =
+                join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker| async move { worker.thread().clone() }))).await;
+            let destination = threads.into_iter().map(Result::unwrap).find(|thread| thread != &source).unwrap();
+            (Spawner::new_arty(scheduler), source, destination)
+        })
+        .unwrap();
+
+    let runtime_b = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let foreign = runtime_b.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
+
+    spawner.relocate(Some(&source), &foreign);
+    spawner.relocate(Some(&foreign), &destination);
+    let actual = futures::executor::block_on(spawner.spawn(async { thread::current().id() }));
+
+    assert_eq!(actual, destination.id());
+    runtime_b.stop().unwrap();
+    runtime_a.stop().unwrap();
 }
 
 #[test]
