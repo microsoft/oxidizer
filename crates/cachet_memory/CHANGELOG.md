@@ -2,7 +2,7 @@
 
 ## [0.9.0] - 2026-10-20
 
-- Public origin recoverable releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: cachet_tier ^0.5.1 -> 0.6.0; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
 
 ## [0.8.1] - 2026-10-05

@@ -2,7 +2,7 @@
 
 ## [0.8.0] - 2026-10-20
 
-- Public origin performables releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `performables`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
 
 ## [0.7.0] - 2026-10-05

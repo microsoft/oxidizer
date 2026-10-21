@@ -2,7 +2,7 @@
 
 ## [0.11.0] - 2026-10-20
 
-- Public origin recoverable releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: layered ^0.3.7 -> 0.3.8; recoverable ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
 
 ## [0.10.0] - 2026-10-05

@@ -2,7 +2,7 @@
 
 ## [0.3.0] - 2026-10-20
 
-- Public origin seismograph releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `seismograph`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: seismograph ^0.2.0 -> 0.3.0.
 
 ## [0.2.0] - 2026-10-05
@@ -19,4 +19,3 @@
 - 🔄 Continuous Integration
 
   - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
-

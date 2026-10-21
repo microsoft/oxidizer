@@ -2,7 +2,7 @@
 
 ## [0.5.0] - 2026-10-20
 
-- Public origin tick releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: anyspawn ^0.9.1 -> 0.9.2; tick ^0.7.1 -> 0.8.0.
 
 ## [0.4.1] - 2026-10-05

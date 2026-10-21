@@ -2,7 +2,7 @@
 
 ## [0.4.0] - 2026-10-20
 
-- Public origin bytesbuf releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: fetch_winhttp_impl =0.3.0 -> 0.4.0.
 
 ## [0.3.0] - 2026-10-05

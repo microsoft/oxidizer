@@ -2,7 +2,7 @@
 
 ## [0.12.0] - 2026-10-20
 
-- Public origin bytesbuf releases a breaking version; exposed type identity/API propagates.
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
 - Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; multitude_macros =0.11.1 -> 0.12.0.
 
 ## [0.11.0] - 2026-10-05
