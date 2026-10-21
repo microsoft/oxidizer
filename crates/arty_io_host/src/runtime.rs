@@ -13,9 +13,13 @@ use thread_aware_core::{Thread, ThreadAware};
 
 use crate::DriverHost;
 
-pub(crate) struct Resolution<C> {
+pub(crate) struct Resolution<C>
+where
+    C: IoContext,
+{
     pub(crate) context: C,
     pub(crate) role: DriverRole,
+    pub(crate) initialization: DriverInitializationGuard,
 }
 
 trait ErasedContext: Send {
@@ -54,7 +58,67 @@ impl RegisteredContext {
 
 struct ContextSlot {
     context: OnceLock<RegisteredContext>,
+    initializing_threads: Mutex<Vec<std::thread::ThreadId>>,
     role: DriverRole,
+}
+
+impl ContextSlot {
+    fn new(role: DriverRole) -> Self {
+        Self {
+            context: OnceLock::new(),
+            initializing_threads: Mutex::new(Vec::new()),
+            role,
+        }
+    }
+
+    fn begin_initialization(self: &Arc<Self>) -> Result<DriverInitializationGuard, DriverError> {
+        let thread = std::thread::current().id();
+        let mut initializing_threads = self
+            .initializing_threads
+            .lock()
+            .expect("a poisoned I/O context initializer indicates a runtime invariant failure");
+        if initializing_threads.contains(&thread) {
+            return Err(DriverError::from_message(
+                "I/O context retrieval cannot reenter initialization of the same context type on one thread",
+            ));
+        }
+        initializing_threads.push(thread);
+        drop(initializing_threads);
+        Ok(DriverInitializationGuard {
+            slot: Arc::clone(self),
+            thread,
+        })
+    }
+
+    fn resolve<C>(&self, options: C::ContextOptions) -> C
+    where
+        C: IoContext,
+    {
+        let registered = self.context.get_or_init(|| RegisteredContext {
+            context: Mutex::new(Box::new(NeutralContext(C::context(options)))),
+        });
+        registered.clone_context::<C>()
+    }
+}
+
+pub(crate) struct DriverInitializationGuard {
+    slot: Arc<ContextSlot>,
+    thread: std::thread::ThreadId,
+}
+
+impl Drop for DriverInitializationGuard {
+    fn drop(&mut self) {
+        let mut initializing_threads = self
+            .slot
+            .initializing_threads
+            .lock()
+            .expect("a poisoned I/O context initializer indicates a runtime invariant failure");
+        let index = initializing_threads
+            .iter()
+            .position(|thread| *thread == self.thread)
+            .expect("an I/O initialization guard removes its registered thread");
+        initializing_threads.swap_remove(index);
+    }
 }
 
 #[derive(Default)]
@@ -85,7 +149,6 @@ impl Registry {
 pub struct IoRuntime {
     registry: Arc<Mutex<Registry>>,
     sink: Sink,
-    thread: Option<Thread>,
     #[cfg(test)]
     resolution_hook: Option<Arc<dyn Fn(TypeId) + Send + Sync>>,
 }
@@ -104,13 +167,6 @@ impl PartialEq for IoRuntime {
 
 impl Eq for IoRuntime {}
 
-impl ThreadAware for IoRuntime {
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.sink.relocate(source, destination);
-        self.thread = Some(destination.clone());
-    }
-}
-
 impl IoRuntime {
     /// Creates an empty runtime-wide I/O context registry.
     #[must_use]
@@ -118,7 +174,6 @@ impl IoRuntime {
         Self {
             registry: Arc::new(Mutex::new(Registry::default())),
             sink,
-            thread: None,
             #[cfg(test)]
             resolution_hook: None,
         }
@@ -126,28 +181,26 @@ impl IoRuntime {
 
     /// Creates a worker-local driver host for one Arty async worker.
     ///
-    /// # Panics
+    /// The supplied thread must identify the worker calling this method. The
+    /// runtime relocates its worker-local telemetry state to that thread before
+    /// constructing the host.
     ///
-    /// Panics if this runtime clone has not been relocated onto the current
-    /// worker thread.
-    #[must_use]
-    pub fn driver_host(self, owner_waker: Waker) -> DriverHost {
-        let thread = self
-            .thread
-            .clone()
-            .expect("IoRuntime must be relocated onto its worker before creating a driver host");
-        assert_eq!(
-            thread.id(),
-            std::thread::current().id(),
-            "IoRuntime must create its driver host on the thread it was relocated onto"
-        );
-        DriverHost::new(self, thread, owner_waker)
+    /// # Errors
+    ///
+    /// Returns an error if `thread` does not identify the current thread.
+    pub fn driver_host(mut self, thread: Thread, owner_waker: Waker) -> Result<DriverHost, DriverError> {
+        if thread.id() != std::thread::current().id() {
+            return Err(DriverError::from_message(
+                "I/O driver host must be created on the worker identified by its thread coordinate",
+            ));
+        }
+        self.sink.relocate(None, &thread);
+        Ok(DriverHost::new(self, thread, owner_waker))
     }
 
-    pub(crate) fn resolve_context<C>(&self, options: &C::ContextOptions) -> Result<Resolution<C>, DriverError>
+    pub(crate) fn resolve_context<C>(&self, options: C::ContextOptions) -> Result<Resolution<C>, DriverError>
     where
         C: IoContext,
-        C::ContextOptions: Clone,
     {
         let context_type = TypeId::of::<C>();
         let slot = {
@@ -155,26 +208,22 @@ impl IoRuntime {
             registry.check()?;
             let primary_available = registry.contexts.is_empty();
             Arc::clone(registry.contexts.entry(context_type).or_insert_with(|| {
-                Arc::new(ContextSlot {
-                    context: OnceLock::new(),
-                    role: if primary_available {
-                        DriverRole::Primary
-                    } else {
-                        DriverRole::Secondary
-                    },
-                })
+                Arc::new(ContextSlot::new(if primary_available {
+                    DriverRole::Primary
+                } else {
+                    DriverRole::Secondary
+                }))
             }))
         };
         #[cfg(test)]
         if let Some(hook) = &self.resolution_hook {
             hook(context_type);
         }
-        let registered = slot.context.get_or_init(|| RegisteredContext {
-            context: Mutex::new(Box::new(NeutralContext(C::context(options.clone())))),
-        });
+        let initialization = slot.begin_initialization()?;
         Ok(Resolution {
-            context: registered.clone_context::<C>(),
+            context: slot.resolve::<C>(options),
             role: slot.role,
+            initialization,
         })
     }
 
@@ -184,8 +233,7 @@ impl IoRuntime {
 
     pub(crate) fn fail(&self, error: &DriverError) {
         let message: Arc<str> = Arc::from(error.to_string());
-        let mut registry = self.registry();
-        registry.failure.get_or_insert(message);
+        self.registry().failure.get_or_insert(message);
     }
 
     pub(crate) const fn sink(&self) -> &Sink {
@@ -268,8 +316,8 @@ mod tests {
         }));
 
         let first_runtime = runtime.clone();
-        let first = std::thread::spawn(move || first_runtime.resolve_context::<TestContext>(&()).unwrap());
-        let second = std::thread::spawn(move || runtime.resolve_context::<TestContext>(&()).unwrap());
+        let first = std::thread::spawn(move || first_runtime.resolve_context::<TestContext>(()).unwrap());
+        let second = std::thread::spawn(move || runtime.resolve_context::<TestContext>(()).unwrap());
         barrier.wait();
 
         let _ = first.join().unwrap();
