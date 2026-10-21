@@ -24,19 +24,17 @@ They do not form a standalone stability or compatibility promise.
 
 ## Quick start
 
-Clone the runtime-wide registry for each worker, relocate the clone onto
-that worker, and then create its driver host:
+Clone the runtime-wide registry for each worker, then create its driver host
+with that worker’s thread coordinate:
 
 ```rust
 // One runtime-wide value owns the shared context registry and telemetry sink.
 let runtime = IoRuntime::new(Sink::noop());
 let worker = ThreadBuilder::default().build(std::thread::current().id());
 
-// Each worker receives a clone that must be relocated on the destination
-// thread before its worker-local host is created.
-let mut worker_runtime = runtime.clone();
-worker_runtime.relocate(None, &worker);
-let host = worker_runtime.driver_host(Waker::noop().clone());
+// Each worker receives a clone and constructs its host on the thread named
+// by the worker coordinate.
+let host = runtime.clone().driver_host(worker, Waker::noop().clone())?;
 
 // The runtime calls this from its worker loop with the available wait time.
 host.execute_cycle(Duration::ZERO)?;

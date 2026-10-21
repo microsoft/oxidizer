@@ -78,8 +78,9 @@
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime clones and relocates contexts to its async workers and supplies the assigned role
-//! through [`DriverOptions`]. Driver creation completes all setup before the context is published.
+//! The runtime registers each context, then clones and relocates it to async workers as they first
+//! retrieve it. [`DriverOptions`] supplies the assigned role. Driver creation completes all local
+//! setup before the worker-local host returns its context.
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 //! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
@@ -87,7 +88,8 @@
 //!
 //! A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker
 //! and calls `shutdown` on every driver that was created successfully, including the driver whose
-//! cycle failed.
+//! cycle failed. Contexts already returned by another worker become unusable as shutdown closes
+//! them to new operations.
 //!
 //! # Shutdown
 //!
