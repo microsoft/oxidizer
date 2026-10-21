@@ -122,7 +122,7 @@ impl Display for RuntimeValidation {
             Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
             Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
             Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
-            Self::IoOutsideWorker => "I/O context access cannot synchronously cross between Arty workers",
+            Self::IoOutsideWorker => "I/O context access requires an active associated worker",
             Self::RuntimeShuttingDown => "the runtime is shutting down",
         })
     }

@@ -175,30 +175,34 @@ fn external_access_racing_shutdown_returns_shutdown() {
 fn relocation_to_a_foreign_runtime_preserves_the_original_worker_binding() {
     let original_runtime = runtime(1);
     let foreign_runtime = runtime(1);
-    let (mut io, source, original_worker) = original_runtime
+    let (mut io, source, original_worker, associated_worker) = original_runtime
         .scheduler()
-        .block_on(async |builtins| (builtins.io().clone(), builtins.thread().clone(), builtins.scheduler().clone()))
+        .block_on(async |builtins| {
+            (
+                builtins.io().clone(),
+                builtins.thread().clone(),
+                builtins.scheduler().clone(),
+                builtins.thread().id(),
+            )
+        })
         .unwrap();
-    let rejected_options = Scenario::options(RolePlan::PreferPrimary);
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
 
-    let (io, error) = foreign_runtime
+    let (io, context_worker) = foreign_runtime
         .scheduler()
         .block_on({
-            let rejected_options = rejected_options.clone();
+            let scenario = scenario.clone();
             async move |builtins| {
                 io.relocate(Some(&source), builtins.thread());
-                let error = io
-                    .try_context::<TestContext<ForeignRelocationContext>>(&rejected_options)
-                    .unwrap_err()
-                    .to_string();
-                (io, error)
+                let context = io.try_context::<TestContext<ForeignRelocationContext>>(&scenario).unwrap();
+                (io, context.thread.unwrap().id())
             }
         })
         .unwrap();
-    assert!(error.contains("cross between Arty workers"));
-    assert_eq!(rejected_options.context_constructions.load(Ordering::SeqCst), 0);
+    assert_eq!(context_worker, associated_worker);
+    assert_eq!(scenario.context_constructions.load(Ordering::SeqCst), 1);
+    assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
 
-    let scenario = Scenario::options(RolePlan::PreferPrimary);
     original_worker
         .spawn({
             let scenario = scenario.clone();
@@ -212,30 +216,37 @@ fn relocation_to_a_foreign_runtime_preserves_the_original_worker_binding() {
     foreign_runtime.stop().unwrap();
     original_runtime.stop().unwrap();
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]
-fn io_access_from_another_worker_is_rejected_without_registration() {
+fn io_access_from_another_worker_uses_the_associated_worker() {
     let runtime = runtime(WORKERS);
     let workers = worker_schedulers(&runtime, WORKERS);
-    let io = workers[0].spawn(async |builtins| builtins.io().clone()).join().unwrap();
-    let rejected_options = Scenario::options(RolePlan::PreferPrimary);
+    let (io, associated_worker) = workers[0]
+        .spawn(async |builtins| (builtins.io().clone(), builtins.thread().id()))
+        .join()
+        .unwrap();
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
 
-    let error = workers[1]
+    let (calling_worker, context_worker) = workers[1]
         .spawn({
-            let rejected_options = rejected_options.clone();
-            async move |_| {
-                io.try_context::<TestContext<SameRuntimeCrossWorker>>(&rejected_options)
-                    .unwrap_err()
-                    .to_string()
+            let scenario = scenario.clone();
+            async move |builtins| {
+                let calling_worker = builtins.thread().id();
+                let context = io.try_context::<TestContext<SameRuntimeCrossWorker>>(&scenario).unwrap();
+                (calling_worker, context.thread.unwrap().id())
             }
         })
         .join()
         .unwrap();
 
-    assert!(error.contains("cross between Arty workers"));
-    assert_eq!(rejected_options.context_constructions.load(Ordering::SeqCst), 0);
+    assert_ne!(calling_worker, associated_worker);
+    assert_eq!(context_worker, associated_worker);
+    assert_eq!(scenario.context_constructions.load(Ordering::SeqCst), 1);
+    assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
+    assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[test]

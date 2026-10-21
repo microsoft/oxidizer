@@ -14,10 +14,12 @@ The first context type registered with the runtime is the primary driver.
 Later context types are secondary drivers. A worker runs its secondary drivers
 before its primary driver.
 
-A cloned `Builtins` or `Io` remains associated with its original worker. It can
-be used from an ordinary thread or from another runtime such as Tokio; Arty
-dispatches the request back to the associated worker. Calls from a different
-Arty worker are rejected to avoid deadlocks.
+A cloned `Builtins` or `Io` remains associated with its original worker for
+access from an ordinary thread or another runtime such as Tokio; Arty
+dispatches that request back to the associated worker. When an `Io` clone is
+used from another Arty worker, including a worker from another runtime, Arty
+treats it like external access and synchronously dispatches context retrieval
+to the associated worker.
 
 Failure to initialize or run a driver stops the runtime. `Io::context` reports
 an initialization failure by panicking.
