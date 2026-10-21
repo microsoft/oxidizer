@@ -7,8 +7,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use std::io::{self, Read as _, Write as _};
-use std::time::{Duration, Instant};
+use std::io::{self, Read as _};
+use std::time::Duration;
 
 use seismograph::monitor::Monitor;
 use seismograph_protocol::discovery::{self, Directory};
@@ -77,8 +77,12 @@ fn injected_monitor_publishes_captures_and_removes_its_own_descriptor() {
     assert_eq!(connection.read(&mut [0]).unwrap(), 0);
 }
 
+#[cfg(feature = "test-util")]
 #[test]
 fn dropping_an_injected_monitor_cancels_a_partial_frame_without_advancing_time() {
+    use std::io::Write as _;
+    use std::time::Instant;
+
     let (io, control) = MonitorIo::new_mocked();
     let initial = io.instant();
     let monitor = Monitor::builder().io(io.clone()).name("worker").start().unwrap();
