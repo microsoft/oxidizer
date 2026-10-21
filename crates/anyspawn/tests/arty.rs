@@ -3,6 +3,7 @@
 
 #![allow(missing_docs, reason = "test code")]
 #![cfg(not(miri))]
+#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 testing_aids::init_tracing!();
 
@@ -48,9 +49,10 @@ fn arty_spawn_and_clone_dispatch_tasks() {
     let (runtime, spawner) = runtime_and_spawner();
     let clone = spawner.clone();
 
-    let result = futures::executor::block_on(clone.spawn(async { String::from("Arty") }));
+    let original_result = futures::executor::block_on(spawner.spawn(async { String::from("original") }));
+    let clone_result = futures::executor::block_on(clone.spawn(async { String::from("clone") }));
 
-    assert_eq!(result, "Arty");
+    assert_eq!((original_result.as_str(), clone_result.as_str()), ("original", "clone"));
     runtime.stop().unwrap();
 }
 
@@ -177,7 +179,7 @@ fn arty_scheduler_does_not_keep_runtime_alive() {
     let handle = spawner.spawn(async { 42 });
     let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle)));
 
-    assert!(panic.is_err());
+    drop(panic.unwrap_err());
 }
 
 #[test]

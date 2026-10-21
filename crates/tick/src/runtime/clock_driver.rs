@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use crate::runtime::ClockGone;
-use crate::state::{ClockState, DriverId};
+use crate::state::{ClockState, DriverRegistration};
 
 /// Drives timer advancement for the clock.
 ///
@@ -25,11 +25,11 @@ use crate::state::{ClockState, DriverId};
 #[derive(Debug)]
 pub struct ClockDriver {
     pub(crate) state: ClockState,
-    driver_id: Option<DriverId>,
+    driver_id: DriverRegistration,
 }
 
 impl ClockDriver {
-    pub(super) const fn new(state: ClockState, driver_id: Option<DriverId>) -> Self {
+    pub(super) const fn new(state: ClockState, driver_id: DriverRegistration) -> Self {
         Self { state, driver_id }
     }
 
@@ -64,6 +64,6 @@ impl ClockDriver {
 
 impl Drop for ClockDriver {
     fn drop(&mut self) {
-        self.state.unregister_driver(self.driver_id.take());
+        self.state.unregister_driver(self.driver_id);
     }
 }

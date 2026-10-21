@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test code")]
+#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 //! Tests for `JoinHandle` implementations.
 

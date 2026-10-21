@@ -21,6 +21,30 @@ pub(crate) enum ClockState {
 
 pub(crate) type DriverId = usize;
 
+#[derive(Clone, Copy)]
+pub(crate) struct DriverRegistration(Option<DriverId>);
+
+impl DriverRegistration {
+    fn registered(driver_id: DriverId) -> Self {
+        Self(Some(driver_id))
+    }
+
+    #[cfg(any(feature = "test-util", test))]
+    const fn not_required() -> Self {
+        Self(None)
+    }
+
+    const fn driver_id(self) -> Option<DriverId> {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for DriverRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct SystemClockState {
     storage: SystemClockStorage,
@@ -134,26 +158,23 @@ impl ClockState {
         }
     }
 
-    pub(crate) fn register_driver(&self, waker: Waker) -> Option<DriverId> {
+    pub(crate) fn register_driver(&self, waker: Waker) -> DriverRegistration {
         match self {
-            Self::System(storage) => Some(storage.register_driver(waker)),
+            Self::System(storage) => DriverRegistration::registered(storage.register_driver(waker)),
             #[cfg(any(feature = "test-util", test))]
-            Self::ClockControl(_) => None,
+            Self::ClockControl(_) => DriverRegistration::not_required(),
         }
     }
 
-    #[expect(
-        clippy::panic,
-        reason = "a controlled clock never registers a driver ID; receiving one is an internal state invariant violation"
-    )]
-    pub(crate) fn unregister_driver(&self, driver_id: Option<DriverId>) {
-        match (self, driver_id) {
-            (Self::System(storage), Some(driver_id)) => storage.unregister_driver(driver_id),
-            #[cfg(any(feature = "test-util", test))]
-            (Self::ClockControl(_), Some(_)) => {
-                panic!("controlled clocks do not register driver wakers");
+    pub(crate) fn unregister_driver(&self, registration: DriverRegistration) {
+        match self {
+            Self::System(storage) => {
+                if let Some(driver_id) = registration.driver_id() {
+                    storage.unregister_driver(driver_id);
+                }
             }
-            (_, None) => {}
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(_) => unregister_controlled_driver(registration),
         }
     }
 
@@ -165,6 +186,14 @@ impl ClockState {
             Self::ClockControl(control) => control.is_unique(),
         }
     }
+}
+
+#[cfg(any(feature = "test-util", test))]
+fn unregister_controlled_driver(registration: DriverRegistration) {
+    assert!(
+        registration.driver_id().is_none(),
+        "controlled clocks do not register driver wakers"
+    );
 }
 
 // The mutex here is not accessed on a hot path. Timers are accessed only when:
@@ -353,6 +382,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "controlled clocks do not register driver wakers")]
     fn private_controlled_clock_rejects_driver_unregistration() {
-        ClockState::ClockControl(crate::ClockControl::new()).unregister_driver(Some(0));
+        ClockState::ClockControl(crate::ClockControl::new()).unregister_driver(DriverRegistration::registered(0));
     }
 }
