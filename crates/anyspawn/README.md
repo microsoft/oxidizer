@@ -34,11 +34,9 @@ use anyspawn::Spawner;
 use arty::runtime::Runtime;
 
 let runtime = Runtime::new()?;
-let result = runtime.scheduler().block_on(async |cx| {
     let spawner = Spawner::new_arty(cx.scheduler().clone());
-    spawner.spawn(async { 1 + 1 }).await
-})?;
-assert_eq!(result, 2);
+    let result = spawner.spawn(async { 1 + 1 }).await;
+    assert_eq!(result, 2);
 runtime.stop()?;
 ```
 
@@ -70,7 +68,7 @@ integrations to adapt task dispatch after relocation.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfY4edcdyeh0bwSu4rgNqNdQb90-boFMNOY4bDLnuLWkWehJhZIKCaGFueXNwYXduZTAuOS4ygmx0aHJlYWRfYXdhcmVmMC4xMi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbBp0xX1zphLMbCnfUkF63Sg4b0uHOw_q67Gkbo7UR9gHz03FhZIKCaGFueXNwYXduZTAuOS4ygmx0aHJlYWRfYXdhcmVmMC4xMi4x
  [__link0]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=SpawnCustom
  [__link2]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=CustomSpawnerBuilder

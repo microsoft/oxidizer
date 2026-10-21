@@ -28,11 +28,11 @@
 //! use arty::runtime::Runtime;
 //!
 //! let runtime = Runtime::new()?;
-//! let result = runtime.scheduler().block_on(async |cx| {
+//! # runtime.scheduler().block_on(async |cx| {
 //!     let spawner = Spawner::new_arty(cx.scheduler().clone());
-//!     spawner.spawn(async { 1 + 1 }).await
-//! })?;
-//! assert_eq!(result, 2);
+//!     let result = spawner.spawn(async { 1 + 1 }).await;
+//!     assert_eq!(result, 2);
+//! # })?;
 //! runtime.stop()?;
 //! # Ok::<(), arty::runtime::Error>(())
 //! # })().unwrap();

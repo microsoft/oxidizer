@@ -100,7 +100,7 @@ pub struct Spawner(SpawnerKind);
 
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
-    #[cfg(feature = "arty")]
+    #[cfg(any(test, feature = "arty"))]
     Arty(::arty::task::Scheduler),
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
@@ -129,18 +129,18 @@ impl Spawner {
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
-    /// let result = runtime.scheduler().block_on(async |cx| {
+    /// # runtime.scheduler().block_on(async |cx| {
     ///     let spawner = Spawner::new_arty(cx.scheduler().clone());
-    ///     spawner.spawn(async { 42 }).await
-    /// })?;
-    /// assert_eq!(result, 42);
+    ///     let result = spawner.spawn(async { 42 }).await;
+    ///     assert_eq!(result, 42);
+    /// # })?;
     /// runtime.stop()?;
     /// # Ok::<(), arty::runtime::Error>(())
     /// # })().unwrap();
     /// # }
     /// # }
     /// ```
-    #[cfg(feature = "arty")]
+    #[cfg(any(test, feature = "arty"))]
     pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
         Self(SpawnerKind::Arty(scheduler))
     }
@@ -245,7 +245,7 @@ impl Spawner {
     /// ```
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
-            #[cfg(feature = "arty")]
+            #[cfg(any(test, feature = "arty"))]
             SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn(move |_| work))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
@@ -289,7 +289,7 @@ impl Spawner {
         F: Future<Output = T> + Send + 'static,
     {
         match &self.0 {
-            #[cfg(feature = "arty")]
+            #[cfg(any(test, feature = "arty"))]
             SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_anywhere(data, f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
@@ -343,7 +343,7 @@ impl Spawner {
         F: FnOnce() -> T + Send + 'static,
     {
         match &self.0 {
-            #[cfg(feature = "arty")]
+            #[cfg(any(test, feature = "arty"))]
             SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_blocking(f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
@@ -361,7 +361,7 @@ impl Spawner {
 impl Debug for Spawner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            #[cfg(feature = "arty")]
+            #[cfg(any(test, feature = "arty"))]
             SpawnerKind::Arty(_) => f.debug_tuple("Spawner").field(&"arty").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),

@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test code")]
-#![cfg(not(miri))]
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 testing_aids::init_tracing!();
@@ -19,6 +18,7 @@ use thread_aware::{Thread, ThreadAware};
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync, ThreadAware);
 
+// This is a generous scheduling allowance for ordering checks, not an API completion-time guarantee.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct RelocationProbe(Option<ThreadId>);
@@ -151,7 +151,7 @@ fn arty_task_panic_panics_when_joined() {
     let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
     task_ran.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert!(panic_message(&*panic).contains("spawned task did not complete"));
+    assert_eq!(panic_message(&*panic), "spawned task did not complete: task panicked");
     runtime.stop().unwrap();
 }
 
@@ -168,7 +168,7 @@ fn arty_shutdown_cancels_pending_task() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
-    assert!(panic_message(&*panic).contains("spawned task did not complete"));
+    assert_eq!(panic_message(&*panic), "spawned task did not complete: runtime is shutting down");
 }
 
 #[test]
@@ -177,9 +177,9 @@ fn arty_scheduler_does_not_keep_runtime_alive() {
     runtime.stop().unwrap();
 
     let handle = spawner.spawn(async { 42 });
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle)));
+    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
-    drop(panic.unwrap_err());
+    assert_eq!(panic_message(&*panic), "spawned task did not complete: runtime is shutting down");
 }
 
 #[test]

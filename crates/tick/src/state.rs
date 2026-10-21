@@ -21,6 +21,7 @@ pub(crate) enum ClockState {
 
 pub(crate) type DriverId = usize;
 
+/// Carries a system-clock waker registration through driver ownership; controlled clocks carry no registration.
 #[derive(Clone, Copy)]
 pub(crate) struct DriverRegistration(Option<DriverId>);
 
