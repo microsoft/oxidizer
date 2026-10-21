@@ -30,6 +30,7 @@ const EMIT_ENRICHMENT: &str = "observed_benchmarks/emit_enrichment";
 const SINK_OPERATIONS: &str = "observed_benchmarks/sink_operations";
 const ALLOCATION: &str = "observed_benchmarks/allocation";
 const ENRICHMENT_TRANSFER: &str = "observed_benchmarks/enrichment_transfer";
+const EMIT_FILTERING: &str = "observed_benchmarks/emit_filtering";
 const BENCH_SINK_IDS: [&str; 3] = ["bench-0", "bench-1", "bench-2"];
 
 #[event("bench.simple_log")]
@@ -146,6 +147,31 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
     }
 }
 
+/// Gives the same interest answer for every event.
+struct FixedInterestProcessor {
+    interested: bool,
+}
+
+impl observed::processing::EventProcessor for FixedInterestProcessor {
+    fn is_interested(&self, _description: &observed::metadata::EventDescription) -> bool {
+        self.interested
+    }
+
+    fn process(&self, _event: &observed::processing::EventView<'_>) {}
+
+    fn flush(&self) -> Result<(), observed::FlushError> {
+        Ok(())
+    }
+}
+
+struct DropAllSampler;
+
+impl observed::EventSampler for DropAllSampler {
+    fn sample(&self, _context: &observed::EventSamplingContext<'_>) -> observed::EventSamplingDecision {
+        observed::EventSamplingDecision::Drop
+    }
+}
+
 /// Discards exported records so pipeline benchmarks do not retain unbounded output.
 #[derive(Debug)]
 struct NoOpLogExporter;
@@ -205,6 +231,25 @@ fn emit_state_with(redaction_engine: data_privacy::RedactionEngine) -> EmitState
 
 fn processor_free_sink() -> Sink {
     Sink::builder("bench").build()
+}
+
+fn not_interested_sink(processor_count: usize) -> Sink {
+    Sink::builder("bench")
+        .processors(fixed_interest_processors(processor_count, false))
+        .build()
+}
+
+fn sampler_drops_sink(processor_count: usize) -> Sink {
+    Sink::builder("bench")
+        .processors(fixed_interest_processors(processor_count, true))
+        .event_sampler(DropAllSampler)
+        .build()
+}
+
+fn fixed_interest_processors(count: usize, interested: bool) -> Vec<Arc<dyn observed::processing::EventProcessor>> {
+    (0..count)
+        .map(|_| Arc::new(FixedInterestProcessor { interested }) as Arc<dyn observed::processing::EventProcessor>)
+        .collect()
 }
 
 fn enriched_emit_state(depth: usize) -> EnrichedEmitState {
@@ -367,6 +412,17 @@ fn emit_to_noop_sink(sink: &Sink) {
     observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
 }
 
+#[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_filtered_out")]
+#[bench::not_interested_one_processor(&not_interested_sink(1))]
+#[bench::sampler_drops_one_processor(&sampler_drops_sink(1))]
+#[bench::not_interested_three_processors(&not_interested_sink(3))]
+#[bench::sampler_drops_three_processors(&sampler_drops_sink(3))]
+/// Compares an info log that every processor declines with one that a sampler drops before
+/// any processor is asked; neither builds the event.
+fn emit_filtered_out(sink: &Sink) {
+    observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
+}
+
 #[metabench::benchmark(ENRICHMENT_COLLECT, ALLOCATION, "enrichment_collect")]
 #[bench::three_entries(&enriched_sink_state(3))]
 #[bench::ten_nested(&enriched_sink_state(10))]
@@ -477,6 +533,7 @@ fn poll_attached(mut state: AttachedPollState) -> AttachedPollState {
     state
 }
 
+#[expect(clippy::too_many_lines, reason = "one registration function lists every benchmark group")]
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut emit_pipeline = criterion.benchmark_group(EMIT_PIPELINE);
     let emit = emit_state();
@@ -525,6 +582,19 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         bencher.iter(|| emit_to_noop_sink(black_box(&noop)));
     });
     sink_operations.finish();
+
+    let mut emit_filtering = criterion.benchmark_group(EMIT_FILTERING);
+    for (case, filtering_sink) in [
+        ("not_interested_one_processor", not_interested_sink(1)),
+        ("sampler_drops_one_processor", sampler_drops_sink(1)),
+        ("not_interested_three_processors", not_interested_sink(3)),
+        ("sampler_drops_three_processors", sampler_drops_sink(3)),
+    ] {
+        emit_filtering.bench_function(BenchmarkId::new(EMIT_FILTERED_OUT.benchmark_name(), case), |bencher| {
+            bencher.iter(|| emit_filtered_out(black_box(&filtering_sink)));
+        });
+    }
+    emit_filtering.finish();
 
     let mut allocation = criterion.benchmark_group(ALLOCATION);
     for (case, state) in [("three_entries", enriched_sink_state(3)), ("ten_nested", enriched_sink_state(10))] {
@@ -586,6 +656,7 @@ metabench::main!(
         ENRICH_PUSH_POP,
         CONSTRUCT_PROCESSOR_FREE_SINK,
         EMIT_TO_NOOP_SINK,
+        EMIT_FILTERED_OUT,
         ENRICHMENT_COLLECT,
         ENRICHMENT_ENTRY_CLONE,
         PENDING_ENRICHED_FUTURE,
