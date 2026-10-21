@@ -11,11 +11,17 @@ use std::time::Duration;
 
 use performables::sync::notify::Notify;
 use performables::sync::{Async, Sync};
-
-#[path = "support/waker.rs"]
-mod waker_support;
+use testing_aids::is_mutation_testing;
 
 const DEADLINE: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 5 });
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(DEADLINE)
+    }
+}
 
 #[test]
 fn construction_and_coalescing_work_in_both_modes() {
@@ -145,13 +151,16 @@ fn blocking_and_async_waiters_share_one_notification_state() {
     let (done_tx, done_rx) = mpsc::channel();
     let worker = std::thread::spawn({
         let notify = Arc::clone(&notify);
-        move || done_tx.send(notify.wait_timeout(DEADLINE)).unwrap()
+        move || {
+            notify.wait();
+            done_tx.send(()).unwrap();
+        }
     });
     notify.notify_one();
     let mut cx = Context::from_waker(Waker::noop());
     assert_eq!(asynchronous.as_mut().poll(&mut cx), Poll::Ready(()));
     notify.notify_one();
-    assert!(done_rx.recv_timeout(DEADLINE).unwrap());
+    receive(&done_rx).unwrap();
     worker.join().unwrap();
     assert!(!notify.try_wait());
 }
@@ -175,7 +184,7 @@ fn blocking_waiters_publish_and_observe_across_threads() {
         });
         published.store(true, Ordering::Relaxed);
         notify.notify_one();
-        done_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&done_rx).unwrap();
         worker.join().unwrap();
         published.store(false, Ordering::Relaxed);
     }
@@ -203,7 +212,7 @@ fn an_overflowing_deadline_can_receive_a_notification() {
         move || done_tx.send(notify.wait_timeout(Duration::MAX)).unwrap()
     });
     notify.notify_one();
-    assert!(done_rx.recv_timeout(DEADLINE).unwrap());
+    assert!(receive(&done_rx).unwrap());
     worker.join().unwrap();
 }
 
@@ -241,3 +250,5 @@ fn notification_types_and_future_are_send_and_sync() {
     send(notify.wait_async());
     assert!(format!("{notify:?}").contains("Notify"));
 }
+#[path = "support/waker.rs"]
+mod waker_support;

@@ -56,11 +56,14 @@ loom = { workspace = true }
 [dev-dependencies]
 alloc_tracker.workspace = true
 criterion.workspace = true
+many_cpus.workspace = true
 metabench.workspace = true
 mutants.workspace = true
 serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true
+testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
+tick = { path = "../tick", default-features = false }
 tokio = { workspace = true, features = ["sync"] }
 trybuild.workspace = true
 
@@ -94,6 +97,31 @@ required-features = ["loom"]
 name = "loom_sync_primitives"
 path = "tests/loom_sync_primitives.rs"
 required-features = ["loom"]
+
+[[test]]
+name = "mutex_telemetry"
+path = "tests/mutex_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "notify_telemetry"
+path = "tests/notify_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "once_telemetry"
+path = "tests/once_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "ready_blocking_telemetry"
+path = "tests/ready_blocking_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "rwlock_telemetry"
+path = "tests/rwlock_telemetry.rs"
+required-features = ["seismograph"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

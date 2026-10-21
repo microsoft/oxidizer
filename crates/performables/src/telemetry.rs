@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "seismograph")]
+use seismograph::recorder::event::{EventClass, EventKind as SeismographEventKind, ObjectId, Record};
+
 #[derive(Clone, Copy)]
 pub(crate) enum EventKind {
     ArcCreate,
@@ -42,8 +45,6 @@ pub(crate) enum EventKind {
 pub(crate) fn record(kind: EventKind, object: *const ()) {
     #[cfg(feature = "seismograph")]
     seismograph::record(kind.class(), move || {
-        use seismograph::recorder::event::{EventKind as SeismographEventKind, ObjectId, Record};
-
         let kind = match kind {
             EventKind::ArcCreate => SeismographEventKind::ArcCreate,
             EventKind::ArcDeref => SeismographEventKind::ArcDeref,
@@ -88,23 +89,20 @@ pub(crate) fn record(kind: EventKind, object: *const ()) {
 
 #[cfg(feature = "seismograph")]
 impl EventKind {
-    const fn class(self) -> seismograph::recorder::event::EventClass {
+    const fn class(self) -> EventClass {
         match self {
-            Self::ArcDeref => seismograph::recorder::event::EventClass::ArcDereference,
-            _ => seismograph::recorder::event::EventClass::General,
+            Self::ArcDeref => EventClass::ArcDereference,
+            _ => EventClass::General,
         }
     }
 }
 
-#[inline]
 pub(crate) fn record_arc_drop(object: impl FnOnce() -> Option<*const ()>) {
     // A fixed event kind keeps conditional drop captures small enough to pass
     // by value, without preparing an aggregate on the disabled path.
     #[cfg(feature = "seismograph")]
-    seismograph::record(seismograph::recorder::event::EventClass::General, move || {
-        use seismograph::recorder::event::{EventKind, ObjectId, Record};
-
-        Some(Record::object(EventKind::ArcDrop, ObjectId::from_ptr(object()?)))
+    seismograph::record(EventClass::General, move || {
+        Some(Record::object(SeismographEventKind::ArcDrop, ObjectId::from_ptr(object()?)))
     });
 
     #[cfg(not(feature = "seismograph"))]
@@ -114,11 +112,9 @@ pub(crate) fn record_arc_drop(object: impl FnOnce() -> Option<*const ()>) {
 #[inline]
 pub(crate) fn record_channel_high_watermark(object: *const (), high_watermark: usize) {
     #[cfg(feature = "seismograph")]
-    seismograph::record(seismograph::recorder::event::EventClass::General, || {
-        use seismograph::recorder::event::{EventKind, ObjectId, Record};
-
+    seismograph::record(EventClass::General, || {
         Some(Record::object_measurement(
-            EventKind::ChannelHighWatermark,
+            SeismographEventKind::ChannelHighWatermark,
             ObjectId::from_ptr(object),
             u64::try_from(high_watermark).unwrap_or(u64::MAX),
         ))

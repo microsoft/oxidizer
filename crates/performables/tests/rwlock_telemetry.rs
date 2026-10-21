@@ -4,7 +4,7 @@
 //! Recording enabled after acquisition preserves native lock events.
 //! One test owns the process-wide recorder configuration.
 
-#![cfg(all(feature = "seismograph", not(miri)))]
+#![cfg(not(miri))]
 #![expect(clippy::unwrap_used, reason = "test helpers use unwrap for failure backtraces")]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};

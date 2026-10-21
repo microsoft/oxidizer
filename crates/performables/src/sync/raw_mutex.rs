@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::type_name;
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 
-use super::mutex::hal;
+use crate::sync::mutex::hal;
 
 // Internal state needs the same exclusion as the public Sync mutex, without
 // recursively recording mutex events for each channel or waiter operation.
@@ -23,7 +24,8 @@ unsafe impl<T: ?Sized + Send> Send for RawMutex<T> {}
 unsafe impl<T: ?Sized + Send> Sync for RawMutex<T> {}
 
 // As with std::Mutex, unwinding does not invalidate the exclusion mechanism.
-// Internal channel state has always recovered the standard lock after poison.
+// Internal channel bookkeeping recovers after poison: the lock still excludes
+// concurrent access, and the channel's own state machine owns its invariants.
 impl<T: ?Sized> std::panic::RefUnwindSafe for RawMutex<T> {}
 impl<T: ?Sized> std::panic::UnwindSafe for RawMutex<T> {}
 
@@ -39,7 +41,7 @@ impl<T> RawMutex<T> {
 impl<T: ?Sized> RawMutex<T> {
     pub(super) fn lock(&self) -> RawMutexGuard<'_, T> {
         // Keep the uncontended CAS visible to downstream monomorphizations;
-        // calling the out-of-line HAL lock added a call to every value borrow.
+        // the explicit readiness probe avoids an out-of-line call on value borrows.
         let guard = if let Some(guard) = self.lock.try_lock() {
             guard
         } else {
@@ -64,7 +66,7 @@ impl<T: ?Sized> RawMutex<T> {
 
 impl<T: ?Sized> fmt::Debug for RawMutex<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RawMutex").finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -136,7 +138,7 @@ mod tests {
         }))
         .unwrap_err();
         assert_eq!(mutex.lock().get(), 13);
-        assert!(format!("{mutex:?}").contains("RawMutex"));
+        assert_eq!(format!("{mutex:?}"), format!("{} {{ .. }}", type_name::<RawMutex<Cell<i32>>>()));
         assert_eq!(format!("{:?}", mutex.lock()), "Cell { value: 13 }");
     }
 }

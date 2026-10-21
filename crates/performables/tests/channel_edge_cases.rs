@@ -6,18 +6,14 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
 use std::task::{Context, Poll, Wake, Waker};
+use std::thread::spawn;
 
 use performables::sync::channel::{bounded, oneshot, unbounded, watch};
-
-#[path = "support/edge_cases.rs"]
-mod support;
-#[path = "support/waker.rs"]
-mod waker_support;
-
 use support::{DEADLINE, Task, join};
+use testing_aids::is_mutation_testing;
 
 #[derive(Debug)]
 struct Payload(Arc<AtomicUsize>);
@@ -373,12 +369,12 @@ fn watch_wait_for_returns_the_exact_value_accepted_by_its_predicate() {
 fn concurrent_sender_drops_preserve_the_final_watch_publication() {
     let (sender, receiver) = watch(0);
     let workers = if cfg!(miri) { 2 } else { 4 };
-    let start = Arc::new(std::sync::Barrier::new(workers + 1));
+    let start = Arc::new(Barrier::new(workers + 1));
     let handles = (0..workers)
         .map(|worker| {
             let sender = sender.clone();
             let start = Arc::clone(&start);
-            std::thread::spawn(move || {
+            spawn(move || {
                 start.wait();
                 if worker == 0 {
                     sender.send(53).unwrap();
@@ -410,10 +406,15 @@ fn concurrent_mpmc_delivery_has_no_duplicate_or_missing_messages() {
     let consumers = (0..producers)
         .map(|_| {
             let receiver = receiver.clone();
-            std::thread::spawn(move || {
+            spawn(move || {
                 let mut messages = Vec::new();
                 loop {
-                    match receiver.recv_timeout(DEADLINE) {
+                    let result = if is_mutation_testing() {
+                        receiver.recv()
+                    } else {
+                        receiver.recv_timeout(DEADLINE)
+                    };
+                    match result {
                         Ok(value) => messages.push(value),
                         Err(error) => {
                             assert!(error.is_closed(), "a consumer must not lose progress");
@@ -428,7 +429,7 @@ fn concurrent_mpmc_delivery_has_no_duplicate_or_missing_messages() {
     let workers = (0..producers)
         .map(|producer| {
             let sender = sender.clone();
-            std::thread::spawn(move || {
+            spawn(move || {
                 for item in 0..items {
                     sender.send(producer * items + item).unwrap();
                 }
@@ -452,7 +453,7 @@ fn oneshot_send_racing_receiver_drop_destroys_each_value_exactly_once() {
     for _ in 0..if cfg!(miri) { 2 } else { 32 } {
         let (sender, receiver) = oneshot();
         let drops = Arc::new(AtomicUsize::new(0));
-        let worker = std::thread::spawn({
+        let worker = spawn({
             let drops = Arc::clone(&drops);
             move || drop(sender.send(Payload(drops)))
         });
@@ -461,3 +462,7 @@ fn oneshot_send_racing_receiver_drop_destroys_each_value_exactly_once() {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 }
+#[path = "support/edge_cases.rs"]
+mod support;
+#[path = "support/waker.rs"]
+mod waker_support;

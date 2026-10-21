@@ -4,16 +4,17 @@
 //! Coalescing notifications.
 
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::ptr::from_ref;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Waker};
-use std::thread::Thread;
+use std::thread::{Thread, current, park, park_timeout};
 use std::time::Duration;
 
-use super::raw_mutex::RawMutex as Mutex;
-use super::slot_list::SlotList;
-use super::wait_queue::Timeout;
-use super::{Async, Mode, Sync};
+use crate::sync::raw_mutex::RawMutex as Mutex;
+use crate::sync::slot_list::SlotList;
+use crate::sync::wait_queue::Timeout;
+use crate::sync::{Async, Mode, Sync};
 use crate::telemetry::{self, EventKind};
 
 const EMPTY: u32 = 0;
@@ -105,19 +106,16 @@ impl State {
         }
     }
 
-    #[inline]
     fn try_take(&self) -> bool {
         self.state
             .compare_exchange(PERMIT, EMPTY, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
     }
 
-    #[inline]
     fn notify_one(&self) {
         self.notify_from(self.state.load(Ordering::Relaxed));
     }
 
-    #[inline]
     fn notify_from(&self, mut state: u32) {
         loop {
             if state == WAITING {
@@ -142,7 +140,7 @@ impl State {
     fn notify_waiter(&self) -> bool {
         // The relaxed header read observed WAITING's release publication.
         // Acquire that publication before inspecting the initialized sidecar.
-        std::sync::atomic::fence(Ordering::Acquire);
+        fence(Ordering::Acquire);
         let queue = self.queue.get().expect("WAITING is published only after queue initialization");
         let mut queue = queue.lock();
         if let Some(waiter) = queue.pop_front() {
@@ -208,14 +206,12 @@ impl<M: Mode> Notify<M> {
         Self { raw: M::NOTIFY_INIT }
     }
 
-    #[inline]
     fn state(&self) -> &State {
         M::notify_state(&self.raw)
     }
 
-    #[inline]
     fn record(&self, kind: EventKind) {
-        telemetry::record(kind, std::ptr::from_ref(self).cast::<()>());
+        telemetry::record(kind, from_ref(self).cast::<()>());
     }
 
     /// Delivers to one registered waiter or retains one permit for a later wait.
@@ -231,7 +227,6 @@ impl<M: Mode> Notify<M> {
     /// Attempts to consume a stored permit without blocking.
     ///
     /// A notification already assigned to another waiter cannot be taken.
-    #[inline]
     #[must_use]
     pub fn try_wait(&self) -> bool {
         if self.state().try_take() {
@@ -283,8 +278,8 @@ impl<M: Mode> Notify<M> {
     #[cold]
     fn wait_contended(&self, deadline: Option<Timeout>) -> bool {
         self.wait_contended_with(deadline, Timeout::elapsed, |remaining| match remaining {
-            Some(remaining) => std::thread::park_timeout(remaining),
-            None => std::thread::park(),
+            Some(remaining) => park_timeout(remaining),
+            None => park(),
         })
     }
 
@@ -297,7 +292,7 @@ impl<M: Mode> Notify<M> {
         let waiter = Arc::new(Waiter {
             notified: AtomicBool::new(false),
             position: AtomicUsize::new(usize::MAX),
-            target: Target::Thread(std::thread::current()),
+            target: Target::Thread(current()),
         });
         self.state().enqueue(&waiter);
         let registration = Registration {
@@ -322,17 +317,6 @@ impl<M: Mode> Notify<M> {
                 park(None);
             }
         }
-    }
-}
-
-struct Registration<'a> {
-    state: &'a State,
-    waiter: Arc<Waiter>,
-}
-
-impl Drop for Registration<'_> {
-    fn drop(&mut self) {
-        self.state.cancel(&self.waiter);
     }
 }
 
@@ -452,6 +436,17 @@ impl Drop for NotifyWait<'_> {
     }
 }
 
+struct Registration<'a> {
+    state: &'a State,
+    waiter: Arc<Waiter>,
+}
+
+impl Drop for Registration<'_> {
+    fn drop(&mut self) {
+        self.state.cancel(&self.waiter);
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -532,9 +527,12 @@ mod tests {
                 true
             }
         });
-        let deadline = Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 5 });
+        let deadline =
+            (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 5 }));
         while notify.state().state.load(Ordering::Acquire) != WAITING {
-            assert!(Instant::now() < deadline, "the blocking waiter must register");
+            if let Some(deadline) = deadline {
+                assert!(Instant::now() < deadline, "the blocking waiter must register");
+            }
             std::thread::yield_now();
         }
         notify.notify_one();

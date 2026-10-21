@@ -3,7 +3,7 @@
 
 //! Recording changes do not alter native mutex ownership or poisoning.
 
-#![cfg(all(feature = "seismograph", not(miri)))]
+#![cfg(not(miri))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

@@ -16,11 +16,20 @@ use performables::sync::barrier::Barrier;
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
+use testing_aids::is_mutation_testing;
 
 #[cfg(miri)]
 const DEADLINE: Duration = Duration::from_secs(120);
 #[cfg(not(miri))]
 const DEADLINE: Duration = Duration::from_secs(5);
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(DEADLINE)
+    }
+}
 
 #[test]
 fn synchronous_locks_support_const_construction_and_owned_access() {
@@ -45,10 +54,10 @@ fn synchronous_mutex_blocks_until_release() {
         *contender.lock() = 7;
         finished_tx.send(()).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     finished_rx.try_recv().unwrap_err();
     drop(held);
-    finished_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert_eq!(*mutex.lock(), 7);
@@ -76,7 +85,7 @@ fn synchronous_mutex_preserves_all_updates_under_contention() {
         })
         .collect::<Vec<_>>();
     for _ in 0..WORKERS {
-        finished_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&finished_rx).unwrap();
     }
     for worker in workers {
         worker.join().unwrap();
@@ -179,10 +188,10 @@ fn synchronous_rwlock_writer_waits_for_readers() {
         *contender.write_result().unwrap() = 11;
         finished_tx.send(()).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     finished_rx.try_recv().unwrap_err();
     drop(reader);
-    finished_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert_eq!(*lock.read(), 11);
@@ -199,10 +208,10 @@ fn synchronous_rwlock_reader_waits_for_writer() {
         started_tx.send(()).unwrap();
         finished_tx.send(*contender.read_result().unwrap()).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     finished_rx.try_recv().unwrap_err();
     drop(writer);
-    let value = finished_rx.recv_timeout(DEADLINE).unwrap();
+    let value = receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert_eq!(value, 7);
@@ -267,7 +276,7 @@ fn synchronous_rwlock_publishes_complete_updates_under_mixed_contention() {
         })
         .collect::<Vec<_>>();
     for _ in 0..WORKERS {
-        finished_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&finished_rx).unwrap();
     }
     for worker in workers {
         worker.join().unwrap();
@@ -301,11 +310,11 @@ fn synchronous_rwlock_releases_every_waiting_reader_and_writer() {
         })
         .collect::<Vec<_>>();
     for _ in 0..READERS + WRITERS {
-        started_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&started_rx).unwrap();
     }
     drop(held);
     for _ in 0..READERS + WRITERS {
-        finished_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&finished_rx).unwrap();
     }
     for worker in workers {
         worker.join().unwrap();
@@ -344,10 +353,10 @@ fn synchronous_condition_wait_releases_and_reacquires_the_mutex() {
         let guard = other.1.wait_while(guard, |value| *value == 0);
         finished_tx.send(*guard).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     *pair.0.lock() = 7;
     pair.1.notify_one();
-    let value = finished_rx.recv_timeout(DEADLINE).unwrap();
+    let value = receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert_eq!(value, 7);
@@ -373,13 +382,11 @@ fn synchronous_condition_notify_all_releases_every_waiter() {
         })
         .collect::<Vec<_>>();
     for _ in 0..WAITERS {
-        started_rx.recv_timeout(DEADLINE).unwrap();
+        receive(&started_rx).unwrap();
     }
     *pair.0.lock() = 7;
     pair.1.notify_all();
-    let values = (0..WAITERS)
-        .map(|_| finished_rx.recv_timeout(DEADLINE).unwrap())
-        .collect::<Vec<_>>();
+    let values = (0..WAITERS).map(|_| receive(&finished_rx).unwrap()).collect::<Vec<_>>();
     for worker in workers {
         worker.join().unwrap();
     }
@@ -408,7 +415,7 @@ fn synchronous_condition_timeout_reports_notification() {
         started_tx.send(()).unwrap();
         other.1.wait_timeout(guard, DEADLINE).1.timed_out()
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     let guard = pair.0.lock();
     pair.1.notify_one();
     drop(guard);
@@ -430,7 +437,7 @@ fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
         }));
         finished_tx.send(result.is_err()).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     catch_unwind(AssertUnwindSafe(|| {
         let mut guard = pair.0.lock();
         *guard = 1;
@@ -438,7 +445,7 @@ fn synchronous_condition_wait_preserves_poisoning_on_reacquisition() {
     }))
     .unwrap_err();
     pair.1.notify_all();
-    let poisoned = finished_rx.recv_timeout(DEADLINE).unwrap();
+    let poisoned = receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert!(poisoned);
@@ -458,7 +465,7 @@ fn synchronous_condition_timeout_preserves_poisoning_after_notification() {
         }));
         finished_tx.send(result.is_err()).unwrap();
     });
-    started_rx.recv_timeout(DEADLINE).unwrap();
+    receive(&started_rx).unwrap();
     catch_unwind(AssertUnwindSafe(|| {
         let mut guard = pair.0.lock();
         *guard = 1;
@@ -466,7 +473,7 @@ fn synchronous_condition_timeout_preserves_poisoning_after_notification() {
     }))
     .unwrap_err();
     pair.1.notify_one();
-    let poisoned = finished_rx.recv_timeout(DEADLINE).unwrap();
+    let poisoned = receive(&finished_rx).unwrap();
     worker.join().unwrap();
 
     assert!(poisoned);
@@ -486,7 +493,7 @@ fn synchronous_barrier_reuses_generations_with_one_leader() {
             })
         })
         .collect::<Vec<_>>();
-    let results = (0..3).map(|_| finished_rx.recv_timeout(DEADLINE).unwrap()).collect::<Vec<_>>();
+    let results = (0..3).map(|_| receive(&finished_rx).unwrap()).collect::<Vec<_>>();
     for worker in workers {
         worker.join().unwrap();
     }

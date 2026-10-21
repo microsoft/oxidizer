@@ -5,13 +5,14 @@ use std::pin::pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{Thread, current, park, park_timeout};
 use std::time::{Duration, Instant};
 
-use super::raw_mutex::{RawMutex as Mutex, RawMutexGuard};
-use super::slot_list::SlotList;
+use crate::sync::raw_mutex::{RawMutex as Mutex, RawMutexGuard};
+use crate::sync::slot_list::SlotList;
 
 #[derive(Debug)]
-struct ThreadWaker(std::thread::Thread);
+struct ThreadWaker(Thread);
 
 impl Wake for ThreadWaker {
     fn wake(self: Arc<Self>) {
@@ -20,27 +21,37 @@ impl Wake for ThreadWaker {
 }
 
 pub(super) fn block_on<F: Future>(future: F) -> F::Output {
-    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let waker = Waker::from(Arc::new(ThreadWaker(current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     #[cfg(test)]
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = test_deadline();
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
             Poll::Pending => {
                 #[cfg(not(test))]
-                std::thread::park();
+                park();
                 #[cfg(test)]
                 {
-                    let remaining = deadline
-                        .checked_duration_since(Instant::now())
-                        .expect("test future must make progress before the deadline");
-                    std::thread::park_timeout(remaining);
+                    if let Some(deadline) = deadline {
+                        let remaining = deadline
+                            .checked_duration_since(Instant::now())
+                            .expect("test future must make progress before the deadline");
+                        park_timeout(remaining);
+                    } else {
+                        park();
+                    }
                 }
             }
         }
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn test_deadline() -> Option<Instant> {
+    (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(2))
 }
 
 pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {
@@ -84,14 +95,14 @@ pub(super) fn block_on_until<F: Future>(future: F, timeout: Timeout) -> Option<F
 }
 
 fn block_on_until_with<F: Future>(future: F, mut remaining: impl FnMut() -> Option<Duration>) -> Option<F::Output> {
-    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let waker = Waker::from(Arc::new(ThreadWaker(current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return Some(output),
             Poll::Pending => {
-                std::thread::park_timeout(remaining()?);
+                park_timeout(remaining()?);
             }
         }
     }

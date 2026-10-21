@@ -3,6 +3,8 @@
 
 //! Prints target-specific inline sizes and empty watch construction allocations.
 
+use std::hint::black_box;
+
 use alloc_tracker::{Allocator, Session};
 use performables::arc::{Arc, PerNuma, PerThread, Weak};
 use performables::sync;
@@ -64,7 +66,7 @@ fn construction<T>(name: &str, create: impl FnOnce() -> T) {
     let operation = session.operation("watch_construction");
     let value = {
         let _measurement = operation.measure_thread().iterations(1);
-        std::hint::black_box(create())
+        black_box(create())
     };
     let report = session.to_report();
     let statistics = report

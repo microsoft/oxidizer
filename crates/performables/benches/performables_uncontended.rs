@@ -27,6 +27,8 @@ use performables::arc::Arc;
 use performables::sync;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
+#[cfg(feature = "seismograph")]
+use seismograph::recorder::Configuration;
 
 const ARC_NEW_DROP: &str = "performables_uncontended/arc_new_drop";
 const ARC_DEREF: &str = "performables_uncontended/arc_deref";
@@ -244,7 +246,7 @@ fn rw_lock_write_tokio(input: &mut TokioRwLockInput) -> u64 {
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
     #[cfg(feature = "seismograph")]
-    seismograph::recorder(black_box(seismograph::recorder::Configuration::default()));
+    seismograph::recorder(black_box(Configuration::default()));
 
     let mut group = criterion.benchmark_group(ARC_NEW_DROP);
 

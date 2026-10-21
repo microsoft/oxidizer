@@ -5,8 +5,9 @@
 
 use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc as StdArc, Barrier};
+use std::thread::spawn;
 
 use performables::arc::{Arc, Weak};
 
@@ -118,8 +119,8 @@ fn concurrent_into_inner_calls_return_the_payload_to_exactly_one_owner() {
     let drops = StdArc::new(AtomicUsize::new(0));
     let first = Arc::new(Payload(StdArc::clone(&drops)));
     let second = first.clone();
-    let start = StdArc::new(std::sync::Barrier::new(2));
-    let worker = std::thread::spawn({
+    let start = StdArc::new(Barrier::new(2));
+    let worker = spawn({
         let start = StdArc::clone(&start);
         move || {
             start.wait();

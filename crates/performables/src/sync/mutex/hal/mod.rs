@@ -42,7 +42,6 @@ pub(in crate::sync) struct Unlock<'a> {
 }
 
 impl<'a> Unlock<'a> {
-    #[inline]
     pub(in crate::sync) fn new(mutex: &'a Mutex, guard: Guard<'a>) -> Self {
         Self { mutex, guard: Some(guard) }
     }
@@ -53,7 +52,6 @@ impl<'a> Unlock<'a> {
 }
 
 impl Drop for Unlock<'_> {
-    #[inline]
     fn drop(&mut self) {
         if let Some(guard) = self.guard.take() {
             self.mutex.unlock(guard);

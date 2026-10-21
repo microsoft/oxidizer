@@ -3259,6 +3259,9 @@ mod tests {
                 assert!(local.recorder.get().is_null());
                 // Recorder headers outlive their threads and stay linked until process exit.
                 let recorder: &'static ThreadRecorder = Box::leak(Box::new(ThreadRecorder::new()));
+                // Acquire reads/retries retain visibility of the existing chain.
+                // Release publishes this initialized header to acquiring traversals;
+                // next can be relaxed while the header is still unpublished.
                 RECORDERS
                     .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
                         recorder.next.store(head, Ordering::Relaxed);

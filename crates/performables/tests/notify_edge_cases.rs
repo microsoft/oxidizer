@@ -11,13 +11,8 @@ use std::time::Instant;
 
 use performables::sync::Async;
 use performables::sync::notify::Notify;
-
-#[path = "support/edge_cases.rs"]
-mod support;
-#[path = "support/waker.rs"]
-mod waker_support;
-
 use support::{DEADLINE, Task, join};
+use testing_aids::is_mutation_testing;
 
 #[test]
 fn notification_order_follows_registration_not_future_construction() {
@@ -192,11 +187,14 @@ fn separately_registered_executor_threads_each_receive_one_notification() {
                 let mut wait = Box::pin(notify.wait_async());
                 assert!(wait.as_mut().poll(&mut context).is_pending());
                 registered.send(()).unwrap();
-                let deadline = Instant::now() + DEADLINE;
+                let deadline = (!is_mutation_testing()).then(|| Instant::now() + DEADLINE);
                 loop {
                     match wait.as_mut().poll(&mut context) {
                         Poll::Ready(()) => return worker,
-                        Poll::Pending => thread::park_timeout(deadline.checked_duration_since(Instant::now()).unwrap()),
+                        Poll::Pending => match deadline {
+                            Some(deadline) => thread::park_timeout(deadline.checked_duration_since(Instant::now()).unwrap()),
+                            None => thread::park(),
+                        },
                     }
                 }
             })
@@ -204,7 +202,11 @@ fn separately_registered_executor_threads_each_receive_one_notification() {
         .collect::<Vec<_>>();
     drop(registered);
     for _ in 0..workers {
-        registrations.recv_timeout(DEADLINE).unwrap();
+        if is_mutation_testing() {
+            registrations.recv().unwrap();
+        } else {
+            registrations.recv_timeout(DEADLINE).unwrap();
+        }
     }
     for _ in 0..workers {
         notify.notify_one();
@@ -217,3 +219,7 @@ fn separately_registered_executor_threads_each_receive_one_notification() {
     assert_eq!(completed, (0..workers).collect::<Vec<_>>());
     assert!(!notify.try_wait());
 }
+#[path = "support/edge_cases.rs"]
+mod support;
+#[path = "support/waker.rs"]
+mod waker_support;

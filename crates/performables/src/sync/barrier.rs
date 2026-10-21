@@ -358,12 +358,15 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             move || barrier.wait()
         });
-        let deadline = std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
+        let deadline = (!testing_aids::is_mutation_testing())
+            .then(|| std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }));
         while Barrier::<Async>::count(barrier.raw.state.load(Ordering::Acquire)) == 0 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "blocking participant must arrive before the deadline"
-            );
+            if let Some(deadline) = deadline {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "blocking participant must arrive before the deadline"
+                );
+            }
             std::thread::yield_now();
         }
         assert!(block_on(barrier.wait_async()).is_leader());

@@ -23,24 +23,33 @@
 
 use std::collections::VecDeque;
 use std::hint::black_box;
+use std::mem::take;
 use std::pin::{Pin, pin};
 use std::sync::{Arc, Barrier, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, Bencher, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use many_cpus::SystemHardware;
 use performables::sync::channel;
+#[cfg(feature = "seismograph")]
+use seismograph::recorder::Configuration;
+use tick::{SimpleClock, Stopwatch};
 
+// Doubling through eight workers exposes early contention; 32 is a larger-host
+// point, 172 is the requested VM workload, and 176 uses that VM's full core count.
 const WORKERS: [usize; 7] = [1, 2, 4, 8, 32, 172, 176];
+// No retained queue, a representative intermediate queue, and the measured
+// 256-waiter cancellation workload distinguish fixed from backlog-dependent cost.
 const BACKLOG: [usize; 3] = [0, 64, 256];
+// Eight covers one waiter per spread-registration shard; 512 and 2,048 are
+// representative moderate and dense broadcasts, not implementation thresholds.
 const FANOUT: [usize; 3] = [8, 512, 2_048];
 type Pending = Vec<Pin<Box<dyn Future<Output = ()> + Send>>>;
 
 fn worker_counts() -> impl Iterator<Item = usize> {
-    let available = thread::available_parallelism()
-        .expect("watch contention benchmarks require an available CPU budget")
-        .get();
+    let available = SystemHardware::current().processors().len();
     WORKERS.into_iter().filter(move |workers| *workers <= available)
 }
 
@@ -48,6 +57,7 @@ struct Threadpool {
     commands: Vec<mpsc::Sender<Option<u64>>>,
     workers: Vec<thread::JoinHandle<()>>,
     boundary: Arc<Barrier>,
+    clock: SimpleClock,
 }
 
 impl Threadpool {
@@ -69,19 +79,21 @@ impl Threadpool {
         for _ in 0..workers {
             let (command, received) = mpsc::channel();
             commands.push(command);
-            let boundary = Arc::clone(&boundary);
-            let shared = Arc::clone(&shared);
-            let prepare = Arc::clone(&prepare);
-            let operation = Arc::clone(&operation);
-            handles.push(thread::spawn(move || {
-                let mut local = prepare(&shared);
-                boundary.wait();
-                while let Some(iterations) = received.recv().expect("the benchmark owns every command sender") {
+            handles.push(thread::spawn({
+                let boundary = Arc::clone(&boundary);
+                let shared = Arc::clone(&shared);
+                let prepare = Arc::clone(&prepare);
+                let operation = Arc::clone(&operation);
+                move || {
+                    let mut local = prepare(&shared);
                     boundary.wait();
-                    for _ in 0..iterations {
-                        operation(&shared, &mut local);
+                    while let Some(iterations) = received.recv().expect("the benchmark owns every command sender") {
+                        boundary.wait();
+                        for _ in 0..iterations {
+                            operation(&shared, &mut local);
+                        }
+                        boundary.wait();
                     }
-                    boundary.wait();
                 }
             }));
         }
@@ -90,6 +102,7 @@ impl Threadpool {
             commands,
             workers: handles,
             boundary,
+            clock: SimpleClock::new_system(),
         }
     }
 
@@ -100,7 +113,7 @@ impl Threadpool {
                 .expect("benchmark workers remain alive until teardown");
         }
         // Include dispatch barriers equally for every control, amortized over the sample.
-        let started = Instant::now();
+        let started = Stopwatch::new(&self.clock);
         self.boundary.wait();
         self.boundary.wait();
         started.elapsed()
@@ -119,7 +132,7 @@ impl Drop for Threadpool {
 }
 
 fn bench_on_threadpool<S, L>(
-    bencher: &mut criterion::Bencher<'_>,
+    bencher: &mut Bencher<'_>,
     workers: usize,
     shared: S,
     prepare: impl Fn(&S) -> L + Send + Sync + 'static,
@@ -144,7 +157,6 @@ struct StandardShared {
 }
 
 struct StandardSender(Arc<StandardShared>);
-struct StandardReceiver(Arc<StandardShared>);
 
 impl StandardSender {
     fn new() -> Self {
@@ -168,7 +180,7 @@ impl StandardSender {
 
     fn send(&self) {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner).value = true;
-        let waiters = std::mem::take(&mut *self.0.waiters.lock().unwrap_or_else(PoisonError::into_inner));
+        let waiters = take(&mut *self.0.waiters.lock().unwrap_or_else(PoisonError::into_inner));
         for waiter in waiters {
             waiter.wake_by_ref();
         }
@@ -188,6 +200,17 @@ impl Drop for StandardSender {
     }
 }
 
+struct StandardReceiver(Arc<StandardShared>);
+
+impl StandardReceiver {
+    fn wait(&self) -> StandardWait<'_> {
+        StandardWait {
+            receiver: self,
+            queued: None,
+        }
+    }
+}
+
 impl Drop for StandardReceiver {
     fn drop(&mut self) {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner).receivers -= 1;
@@ -197,15 +220,6 @@ impl Drop for StandardReceiver {
 struct StandardWait<'a> {
     receiver: &'a StandardReceiver,
     queued: Option<Arc<Waker>>,
-}
-
-impl StandardReceiver {
-    fn wait(&self) -> StandardWait<'_> {
-        StandardWait {
-            receiver: self,
-            queued: None,
-        }
-    }
 }
 
 impl Future for StandardWait<'_> {
@@ -465,7 +479,7 @@ fn broadcast_registered(criterion: &mut Criterion, group: &str, registration_thr
 
 fn benchmarks(criterion: &mut Criterion) {
     #[cfg(feature = "seismograph")]
-    seismograph::recorder(seismograph::recorder::Configuration::default());
+    seismograph::recorder(Configuration::default());
     read_clone(criterion);
     churn(criterion);
     broadcast(criterion);

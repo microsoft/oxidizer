@@ -4,20 +4,6 @@
 // A VecDeque cannot remove a known waiter without scanning and shifting.
 // Stable indices give O(1) unlinking in safe Rust; generations distinguish
 // registrations whose slots have been reused after notification.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct Key {
-    pub(super) index: usize,
-    generation: u64,
-}
-
-#[derive(Debug)]
-struct Slot<T> {
-    value: Option<T>,
-    previous: Option<usize>,
-    next: Option<usize>,
-    generation: u64,
-}
-
 #[derive(Debug)]
 pub(super) struct SlotList<T> {
     slots: Vec<Slot<T>>,
@@ -128,6 +114,20 @@ impl<T> SlotList<T> {
             generation: self.slots[index].generation,
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Key {
+    pub(super) index: usize,
+    generation: u64,
+}
+
+#[derive(Debug)]
+struct Slot<T> {
+    value: Option<T>,
+    previous: Option<usize>,
+    next: Option<usize>,
+    generation: u64,
 }
 
 #[cfg(test)]

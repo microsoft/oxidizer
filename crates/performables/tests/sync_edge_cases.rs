@@ -15,13 +15,8 @@ use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
 use performables::sync::{Async, Mode, Sync};
-
-#[path = "support/edge_cases.rs"]
-mod support;
-#[path = "support/waker.rs"]
-mod waker_support;
-
 use support::{DEADLINE, Task, join};
+use testing_aids::is_mutation_testing;
 
 #[derive(Debug)]
 struct Payload(Arc<AtomicUsize>);
@@ -353,7 +348,11 @@ fn native_condvar_large_duration_conversion_does_not_report_an_early_timeout() {
             }
         }
     });
-    started.recv_timeout(DEADLINE).unwrap();
+    if is_mutation_testing() {
+        started.recv().unwrap();
+    } else {
+        started.recv_timeout(DEADLINE).unwrap();
+    }
     *mutex.lock() = true;
     condition.notify_one();
     join(worker);
@@ -414,3 +413,7 @@ fn repolling_many_barrier_waiters_does_not_duplicate_arrivals_between_generation
         assert_eq!(task.wakes(), generation * (participants - 1));
     }
 }
+#[path = "support/edge_cases.rs"]
+mod support;
+#[path = "support/waker.rs"]
+mod waker_support;

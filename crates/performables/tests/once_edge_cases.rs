@@ -13,8 +13,17 @@ use std::sync::{Arc, Barrier, mpsc};
 use std::time::Duration;
 
 use performables::sync::once::{LazyLock, OnceLock};
+use testing_aids::is_mutation_testing;
 
 const DEADLINE: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 10 });
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(DEADLINE)
+    }
+}
 
 #[derive(Debug)]
 struct Payload(Arc<AtomicUsize>);
@@ -35,12 +44,12 @@ fn get_and_clone_do_not_wait_for_an_initialization_in_progress() {
         move || {
             *cell.get_or_init(|| {
                 entered.send(()).unwrap();
-                gate.recv_timeout(DEADLINE).unwrap();
+                receive(&gate).unwrap();
                 7
             })
         }
     });
-    initialization.recv_timeout(DEADLINE).unwrap();
+    receive(&initialization).unwrap();
     assert_eq!(cell.get(), None);
     let cloned = OnceLock::clone(&cell);
     assert_eq!(cloned.get(), None);
@@ -60,12 +69,12 @@ fn set_waits_for_an_active_initializer_then_returns_its_unconsumed_value() {
         move || {
             *cell.get_or_init(|| {
                 entered.send(()).unwrap();
-                gate.recv_timeout(DEADLINE).unwrap();
+                receive(&gate).unwrap();
                 11
             })
         }
     });
-    initialization.recv_timeout(DEADLINE).unwrap();
+    receive(&initialization).unwrap();
     let (finished, outcome) = mpsc::channel();
     let setter = std::thread::spawn({
         let cell = Arc::clone(&cell);
@@ -73,7 +82,7 @@ fn set_waits_for_an_active_initializer_then_returns_its_unconsumed_value() {
     });
     assert_eq!(outcome.try_recv(), Err(mpsc::TryRecvError::Empty));
     resume.send(()).unwrap();
-    assert_eq!(outcome.recv_timeout(DEADLINE).unwrap(), Err(13));
+    assert_eq!(receive(&outcome).unwrap(), Err(13));
     initializer.join().unwrap();
     setter.join().unwrap();
     assert_eq!(cell.get(), Some(&11));
@@ -90,14 +99,14 @@ fn a_waiter_survives_an_initializer_panic_and_observes_a_later_success() {
             catch_unwind(AssertUnwindSafe(|| {
                 cell.get_or_init(|| {
                     entered.send(()).unwrap();
-                    gate.recv_timeout(DEADLINE).unwrap();
+                    receive(&gate).unwrap();
                     panic!("test the first initialization failing");
                 });
             }))
             .unwrap_err();
         }
     });
-    initialization.recv_timeout(DEADLINE).unwrap();
+    receive(&initialization).unwrap();
     let (observed, observations) = mpsc::channel();
     let waiter = std::thread::spawn({
         let cell = Arc::clone(&cell);
@@ -107,7 +116,7 @@ fn a_waiter_survives_an_initializer_panic_and_observes_a_later_success() {
     initializer.join().unwrap();
     assert_eq!(cell.get(), None);
     cell.set(17).unwrap();
-    assert_eq!(observations.recv_timeout(DEADLINE).unwrap(), 17);
+    assert_eq!(receive(&observations).unwrap(), 17);
     waiter.join().unwrap();
 }
 
@@ -136,7 +145,7 @@ fn many_contenders_execute_one_once_lock_initializer() {
         .collect::<Vec<_>>();
     drop(finished);
     for _ in 0..workers {
-        assert_eq!(outcomes.recv_timeout(DEADLINE).unwrap(), (0..32).collect::<Vec<_>>());
+        assert_eq!(receive(&outcomes).unwrap(), (0..32).collect::<Vec<_>>());
     }
     for handle in handles {
         handle.join().unwrap();

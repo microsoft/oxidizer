@@ -5,8 +5,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
-use std::thread::JoinHandle;
+use std::thread::{JoinHandle, yield_now};
 use std::time::{Duration, Instant};
+
+use testing_aids::is_mutation_testing;
 
 pub(crate) const DEADLINE: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 10 });
 
@@ -23,6 +25,7 @@ impl Wake for WakeCount {
     }
 }
 
+/// Counts wakes and retains the observer's stored waker for ownership assertions.
 pub(crate) struct Task {
     count: Arc<WakeCount>,
     waker: Waker,
@@ -43,6 +46,7 @@ impl Task {
         self.count.0.load(Ordering::Relaxed)
     }
 
+    /// Includes the observer, its stored waker, and any registration-owned clones.
     pub(crate) fn references(&self) -> usize {
         Arc::strong_count(&self.count)
     }
@@ -50,10 +54,13 @@ impl Task {
 
 #[expect(clippy::unwrap_used, reason = "thread panics and lost progress must fail the bounded test")]
 pub(crate) fn join<T>(thread: JoinHandle<T>) -> T {
+    if is_mutation_testing() {
+        return thread.join().unwrap();
+    }
     let deadline = Instant::now() + DEADLINE;
     while !thread.is_finished() {
         assert!(Instant::now() < deadline, "worker did not finish before the test deadline");
-        std::thread::yield_now();
+        yield_now();
     }
     thread.join().unwrap()
 }

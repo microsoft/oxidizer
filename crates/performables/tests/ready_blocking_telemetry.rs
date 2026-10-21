@@ -3,7 +3,6 @@
 
 //! Ready fast paths and blocking fallbacks retain their public telemetry.
 
-#![cfg(feature = "seismograph")]
 #![expect(clippy::unwrap_used, reason = "test helpers surface setup and snapshot failures")]
 
 use std::sync::mpsc;
@@ -16,6 +15,7 @@ use performables::sync::condition::Condvar;
 use seismograph::recorder::event::{Event, EventKind, ObjectId};
 use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
 use seismograph::snapshot::{SnapshotOptions, decode};
+use testing_aids::is_mutation_testing;
 
 const DEADLINE: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 5 });
 
@@ -97,8 +97,12 @@ fn blocking_send_contention() {
         started_tx.send(seismograph::recorder::current_thread_id()).unwrap();
         finished_tx.send(sender.send(11)).unwrap();
     });
-    let thread_id = started_rx.recv_timeout(DEADLINE).unwrap();
-    let deadline = Instant::now() + DEADLINE;
+    let thread_id = if is_mutation_testing() {
+        started_rx.recv().unwrap()
+    } else {
+        started_rx.recv_timeout(DEADLINE).unwrap()
+    };
+    let deadline = (!is_mutation_testing()).then(|| Instant::now() + DEADLINE);
     loop {
         assert!(!worker.is_finished(), "the full queue must block its sender");
         if events()
@@ -107,11 +111,18 @@ fn blocking_send_contention() {
         {
             break;
         }
-        assert!(Instant::now() < deadline, "the blocked sender must record contention");
+        if let Some(deadline) = deadline {
+            assert!(Instant::now() < deadline, "the blocked sender must record contention");
+        }
         std::thread::yield_now();
     }
     assert_eq!(receiver.recv(), Ok(7));
-    assert_eq!(finished_rx.recv_timeout(DEADLINE).unwrap(), Ok(()));
+    let result = if is_mutation_testing() {
+        finished_rx.recv().unwrap()
+    } else {
+        finished_rx.recv_timeout(DEADLINE).unwrap()
+    };
+    assert_eq!(result, Ok(()));
     worker.join().unwrap();
     assert_eq!(receiver.recv(), Ok(11));
     assert_eq!(

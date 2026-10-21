@@ -12,13 +12,13 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use super::broadcast::{Broadcast, Registration as BroadcastRegistration};
-// Channel state is already heap-shared; another lazy sidecar would not shrink
-// the endpoint handles and would add work to their notification path.
-use super::raw_mutex::{RawMutex as StateMutex, RawMutexGuard as StateGuard};
-use super::wait_queue::{EagerWaitQueue as WaitQueue, Timeout, Waiter, block_on, block_on_until};
 use crate::Error;
 use crate::error::ErrorKind;
+use crate::sync::broadcast::{Broadcast, Registration as BroadcastRegistration};
+// Channel state is already heap-shared; another lazy sidecar would not shrink
+// the endpoint handles and would add work to their notification path.
+use crate::sync::raw_mutex::{RawMutex as StateMutex, RawMutexGuard as StateGuard};
+use crate::sync::wait_queue::{EagerWaitQueue as WaitQueue, Timeout, Waiter, block_on, block_on_until};
 use crate::telemetry::{self, EventKind};
 
 const ERROR_FULL: ErrorKind = ErrorKind::Full;
@@ -201,7 +201,7 @@ impl<T> Sender<T> {
     async fn send_with_recording_async(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
         let mut value = value;
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "queue send must make progress");
@@ -344,7 +344,7 @@ impl<T> Receiver<T> {
 
     async fn recv_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "queue receive must make progress");
@@ -862,6 +862,15 @@ const WATCH_CHANGED: u64 = 2;
 struct WatchAtomic<T>(T);
 
 #[derive(Debug)]
+// The value mutex owns access to T; release status updates publish completed
+// replacements and acquire status reads observe them before borrowing. The final
+// sender's AcqRel decrement joins earlier sender drops before publishing closure
+// in that same status word, so closure cannot hide the last value.
+//
+// Endpoint increments only count an already-owned Arc and can be relaxed. Their
+// AcqRel decrements order final-endpoint observations; they do not protect T.
+// Each receiver's observed-version AcqRel CAS claims a version once across shared
+// polls; acquire failure reads adopt the winning claim. Value access still locks.
 struct WatchShared<T> {
     state: StateMutex<WatchState<T>>,
     status: WatchAtomic<AtomicU64>,
@@ -1058,7 +1067,7 @@ impl<T> WatchReceiver<T> {
 
     async fn changed_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "watch receive must make progress");
@@ -1241,8 +1250,17 @@ impl<T> Drop for WatchChanged<'_, T> {
 }
 
 #[cfg(test)]
-fn assert_test_channel_progress(deadline: std::time::Instant, message: &str) {
-    assert!(std::time::Instant::now() < deadline, "{message}");
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn test_channel_deadline() -> Option<std::time::Instant> {
+    (!testing_aids::is_mutation_testing()).then(|| std::time::Instant::now() + Duration::from_secs(2))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn assert_test_channel_progress(deadline: Option<std::time::Instant>, message: &str) {
+    if let Some(deadline) = deadline {
+        assert!(std::time::Instant::now() < deadline, "{message}");
+    }
     std::thread::yield_now();
 }
 
@@ -1297,13 +1315,16 @@ mod tests {
     }
 
     fn wait_for_waiter<T>(has_waiters: impl Fn() -> bool, worker: &std::thread::JoinHandle<T>) {
-        let deadline = Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 });
+        let deadline =
+            (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }));
         while !has_waiters() {
             assert!(!worker.is_finished(), "the blocking operation must await its counterpart");
-            assert!(
-                Instant::now() < deadline,
-                "the blocking operation must register before the deadline"
-            );
+            if let Some(deadline) = deadline {
+                assert!(
+                    Instant::now() < deadline,
+                    "the blocking operation must register before the deadline"
+                );
+            }
             std::thread::yield_now();
         }
     }

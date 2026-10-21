@@ -3,7 +3,7 @@
 
 //! Initialized cells preserve unused-initializer destruction before access.
 
-#![cfg(all(feature = "seismograph", not(miri)))]
+#![cfg(not(miri))]
 
 use performables::sync::once::OnceLock;
 use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};

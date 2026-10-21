@@ -12,11 +12,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use performables::sync::channel::{WatchReceiver, WatchRef, WatchSender, watch};
-
-#[path = "support/waker.rs"]
-mod waker_support;
+use testing_aids::is_mutation_testing;
 
 const DEADLINE: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 10 });
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(DEADLINE)
+    }
+}
 
 struct ThreadWake(thread::Thread);
 
@@ -35,14 +41,14 @@ fn block_on<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
-    let deadline = Instant::now() + DEADLINE;
+    let deadline = (!is_mutation_testing()).then(|| Instant::now() + DEADLINE);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(value) => return value,
-            Poll::Pending => {
-                let remaining = deadline.checked_duration_since(Instant::now()).unwrap();
-                thread::park_timeout(remaining);
-            }
+            Poll::Pending => match deadline {
+                Some(deadline) => thread::park_timeout(deadline.checked_duration_since(Instant::now()).unwrap()),
+                None => thread::park(),
+            },
         }
     }
 }
@@ -69,7 +75,7 @@ fn watch_metadata_does_not_wait_for_a_borrowed_value() {
             finished.send(()).unwrap();
         }
     });
-    notifications.recv_timeout(DEADLINE).unwrap();
+    receive(&notifications).unwrap();
     assert_eq!(*held, 7);
     drop(held);
     worker.join().unwrap();
@@ -115,7 +121,7 @@ fn many_threads_cancel_waits_while_retaining_a_large_shared_backlog() {
         .collect::<Vec<_>>();
     drop(finished);
     for _ in 0..workers {
-        notifications.recv_timeout(DEADLINE).unwrap();
+        receive(&notifications).unwrap();
     }
     for handle in handles {
         handle.join().unwrap();
@@ -160,7 +166,7 @@ fn executor_threads_observe_complete_values_and_the_final_update_before_close() 
     }
     drop(sender);
     for _ in 0..workers {
-        notifications.recv_timeout(DEADLINE).unwrap();
+        receive(&notifications).unwrap();
     }
     for handle in handles {
         handle.join().unwrap();
@@ -371,3 +377,5 @@ fn unwinding_a_value_modification_releases_the_internal_hal_lock() {
     assert_eq!(receiver.has_changed(), Ok(true));
     assert_eq!(*receiver.borrow(), 13);
 }
+#[path = "support/waker.rs"]
+mod waker_support;

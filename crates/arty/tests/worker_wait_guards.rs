@@ -12,12 +12,15 @@ mod support;
 
 use std::cell::RefCell;
 use std::future::pending;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+use std::task::{Context, Poll, Waker};
 
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
-use testing_aids::TEST_TIMEOUT;
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -50,38 +53,42 @@ impl Drop for Probe {
 #[test]
 fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
     struct RemoteWake {
-        ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        waker: Option<mpsc::Sender<std::task::Waker>>,
+        ready: Arc<AtomicBool>,
+        waker: Option<mpsc::Sender<Waker>>,
     }
 
     impl Future for RemoteWake {
         type Output = u64;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<u64> {
-            if self.ready.load(std::sync::atomic::Ordering::Acquire) {
-                return std::task::Poll::Ready(7);
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u64> {
+            // Observe the readiness publication independently of wake delivery.
+            if self.ready.load(Ordering::Acquire) {
+                return Poll::Ready(7);
             }
             if let Some(sender) = self.waker.take() {
                 sender.send(cx.waker().clone()).unwrap();
             }
-            std::task::Poll::Pending
+            Poll::Pending
         }
     }
 
     let runtime = runtime();
     for _ in 0..if cfg!(miri) { 2 } else { 20 } {
-        let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ready = Arc::new(AtomicBool::new(false));
         let (sent, received) = mpsc::channel();
         let task = runtime
             .scheduler()
-            .spawn_anywhere(Unaware((std::sync::Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| {
-                RemoteWake {
-                    ready,
-                    waker: Some(sender),
-                }
+            .spawn_anywhere(Unaware((Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| RemoteWake {
+                ready,
+                waker: Some(sender),
             });
-        let waker = received.recv_timeout(TEST_TIMEOUT).unwrap();
-        ready.store(true, std::sync::atomic::Ordering::Release);
+        let waker = if is_mutation_testing() {
+            received.recv().unwrap()
+        } else {
+            received.recv_timeout(TEST_TIMEOUT).unwrap()
+        };
+        // Publish the predicate before waking; the test does not use waking as a memory barrier.
+        ready.store(true, Ordering::Release);
         waker.wake_by_ref();
         waker.wake_by_ref();
         assert_eq!(task.join().unwrap(), 7);

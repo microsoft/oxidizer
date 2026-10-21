@@ -86,6 +86,7 @@ impl Condvar {
 mod tests {
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
 
     use super::*;
@@ -148,21 +149,23 @@ mod tests {
         let condition = Arc::new(Condvar::new());
         let (started_tx, started_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
-        let other_mutex = Arc::clone(&mutex);
-        let other_condition = Arc::clone(&condition);
-        let worker = std::thread::spawn(move || {
-            let mut guard = other_mutex.lock();
-            started_tx.send(()).unwrap();
-            let result = loop {
-                let (next_guard, timed_out) = other_condition.wait(&other_mutex, guard, None);
-                guard = next_guard;
-                let poisoned = other_mutex.is_poisoned();
-                if poisoned {
-                    break (timed_out, poisoned);
-                }
-            };
-            other_mutex.unlock(guard);
-            finished_tx.send(result).unwrap();
+        let worker = std::thread::spawn({
+            let mutex = Arc::clone(&mutex);
+            let condition = Arc::clone(&condition);
+            move || {
+                let mut guard = mutex.lock();
+                started_tx.send(()).unwrap();
+                let result = loop {
+                    let (next_guard, timed_out) = condition.wait(&mutex, guard, None);
+                    guard = next_guard;
+                    let poisoned = mutex.is_poisoned();
+                    if poisoned {
+                        break (timed_out, poisoned);
+                    }
+                };
+                mutex.unlock(guard);
+                finished_tx.send(result).unwrap();
+            }
         });
         started_rx.recv().unwrap();
         catch_unwind(AssertUnwindSafe(|| {
@@ -176,7 +179,11 @@ mod tests {
         } else {
             Duration::from_secs(5)
         };
-        let result = finished_rx.recv_timeout(deadline).unwrap();
+        let result = if testing_aids::is_mutation_testing() {
+            finished_rx.recv().unwrap()
+        } else {
+            finished_rx.recv_timeout(deadline).unwrap()
+        };
         worker.join().unwrap();
         assert_eq!(result, (false, true));
     }
@@ -186,24 +193,26 @@ mod tests {
         const WAITERS: usize = 3;
         let mutex = Arc::new(Mutex::new());
         let condition = Arc::new(Condvar::new());
-        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ready = Arc::new(AtomicBool::new(false));
         let (started_tx, started_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
         let workers = (0..WAITERS)
             .map(|_| {
-                let mutex = Arc::clone(&mutex);
-                let condition = Arc::clone(&condition);
-                let ready = Arc::clone(&ready);
-                let started_tx = started_tx.clone();
-                let finished_tx = finished_tx.clone();
-                std::thread::spawn(move || {
-                    let mut guard = mutex.lock();
-                    started_tx.send(()).unwrap();
-                    while !ready.load(std::sync::atomic::Ordering::Relaxed) {
-                        guard = condition.wait(&mutex, guard, None).0;
+                std::thread::spawn({
+                    let mutex = Arc::clone(&mutex);
+                    let condition = Arc::clone(&condition);
+                    let ready = Arc::clone(&ready);
+                    let started_tx = started_tx.clone();
+                    let finished_tx = finished_tx.clone();
+                    move || {
+                        let mut guard = mutex.lock();
+                        started_tx.send(()).unwrap();
+                        while !ready.load(Ordering::Relaxed) {
+                            guard = condition.wait(&mutex, guard, None).0;
+                        }
+                        mutex.unlock(guard);
+                        finished_tx.send(()).unwrap();
                     }
-                    mutex.unlock(guard);
-                    finished_tx.send(()).unwrap();
                 })
             })
             .collect::<Vec<_>>();
@@ -211,7 +220,7 @@ mod tests {
             started_rx.recv().unwrap();
         }
         let guard = mutex.lock();
-        ready.store(true, std::sync::atomic::Ordering::Relaxed);
+        ready.store(true, Ordering::Relaxed);
         condition.notify_all();
         mutex.unlock(guard);
         let deadline = if cfg!(miri) {
@@ -220,7 +229,11 @@ mod tests {
             Duration::from_secs(5)
         };
         for _ in 0..WAITERS {
-            finished_rx.recv_timeout(deadline).unwrap();
+            if testing_aids::is_mutation_testing() {
+                finished_rx.recv().unwrap();
+            } else {
+                finished_rx.recv_timeout(deadline).unwrap();
+            }
         }
         for worker in workers {
             worker.join().unwrap();

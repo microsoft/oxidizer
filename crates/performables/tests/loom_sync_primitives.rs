@@ -9,7 +9,9 @@
 #![cfg(loom)]
 #![allow(clippy::unwrap_used, reason = "poisoning requires a prior model failure")]
 
-use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::VecDeque;
+
+use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
 use loom::sync::{Arc, Condvar, Mutex};
 use loom::thread;
 
@@ -17,14 +19,14 @@ use loom::thread;
 // is preinitialized here; OnceLock publication is supplied by the standard library.
 struct RetainedNotify {
     state: AtomicUsize,
-    queue: Mutex<std::collections::VecDeque<Arc<AtomicBool>>>,
+    queue: Mutex<VecDeque<Arc<AtomicBool>>>,
 }
 
 impl RetainedNotify {
     fn new() -> Self {
         Self {
             state: AtomicUsize::new(0),
-            queue: Mutex::new(std::collections::VecDeque::new()),
+            queue: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -53,7 +55,7 @@ impl RetainedNotify {
         let mut state = self.state.load(Ordering::Relaxed);
         loop {
             if state == 2 {
-                loom::sync::atomic::fence(Ordering::Acquire);
+                fence(Ordering::Acquire);
                 let mut queue = self.queue.lock().unwrap();
                 if let Some(waiter) = queue.pop_front() {
                     if queue.is_empty() {

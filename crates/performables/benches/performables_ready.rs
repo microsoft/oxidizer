@@ -36,6 +36,8 @@ use performables::sync::channel::{self, OneshotReceiver, Receiver, Sender, Watch
 use performables::sync::condition::Condvar;
 use performables::sync::notify::Notify;
 use performables::sync::once::{LazyLock, OnceLock};
+#[cfg(feature = "seismograph")]
+use seismograph::recorder::Configuration;
 
 const ARC_CYCLE: &str = "performables_ready/arc_clone_drop";
 const BARRIER: &str = "performables_ready/barrier";
@@ -51,10 +53,13 @@ const WATCH_WRITE: &str = "performables_ready/watch_replace";
 const ONESHOT: &str = "performables_ready/oneshot_ready";
 const PERMIT_COALESCED: &str = "performables_ready/notify_coalesced";
 const PERMIT_CYCLE: &str = "performables_ready/notify_cycle";
+// Representative spare capacity keeps these single-message operations ready.
 const QUEUE_CAPACITY: usize = 64;
 const SEND_READY: &str = "the queue has spare capacity and a live receiver";
 const RECEIVE_READY: &str = "the preceding send queued one value";
 const READY_BLOCKING_SINGLE: &str = "performables_ready/ready_blocking";
+// A representative batch amortizes the timing harness while retaining warmed
+// queues; this is a measurement choice, not a queue-capacity boundary.
 const READY_BATCH: BatchSize = BatchSize::NumIterations(64);
 
 type Queue = (Sender<u64>, Receiver<u64>);
@@ -731,7 +736,7 @@ fn watch_and_oneshot(criterion: &mut Criterion) {
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
     #[cfg(feature = "seismograph")]
-    seismograph::recorder(black_box(seismograph::recorder::Configuration::default()));
+    seismograph::recorder(black_box(Configuration::default()));
 
     ownership_and_initialization(criterion);
     barriers_and_notifications(criterion);

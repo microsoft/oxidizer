@@ -3,7 +3,7 @@
 
 //! Notification events use the outer object identity and live recording policy.
 
-#![cfg(all(feature = "seismograph", not(miri)))]
+#![cfg(not(miri))]
 
 use std::pin::{Pin, pin};
 use std::sync::{Arc, Mutex};

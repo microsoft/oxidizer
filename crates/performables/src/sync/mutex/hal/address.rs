@@ -92,17 +92,6 @@ pub(in crate::sync) struct Condvar {
     waiters: AtomicU32,
 }
 
-struct ConditionRegistration<'a> {
-    waiters: &'a AtomicU32,
-}
-
-impl Drop for ConditionRegistration<'_> {
-    fn drop(&mut self) {
-        let previous = self.waiters.fetch_sub(1, Ordering::SeqCst);
-        debug_assert!(previous > 0);
-    }
-}
-
 impl Condvar {
     pub(in crate::sync) const fn new() -> Self {
         Self {
@@ -151,6 +140,17 @@ impl Condvar {
             self.generation.fetch_add(1, Ordering::SeqCst);
             wake(&self.generation);
         }
+    }
+}
+
+struct ConditionRegistration<'a> {
+    waiters: &'a AtomicU32,
+}
+
+impl Drop for ConditionRegistration<'_> {
+    fn drop(&mut self) {
+        let previous = self.waiters.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0);
     }
 }
 
