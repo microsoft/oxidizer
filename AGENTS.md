@@ -4,10 +4,8 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 ## Documentation language
 
-Before you write or edit crate documentation or other human-facing
-documentation, read and apply the
-[`simple-english` skill](https://github.com/AminBlg/SimpleEnglish/blob/a6fcb4fde098b33617cc1578d151ebf58774b883/skills/simple-english/SKILL.md).
-Read the pinned skill once for the documentation task.
+Use the project `simple-english` skill for crate documentation and other
+human-facing documentation.
 
 ## README Files
 
