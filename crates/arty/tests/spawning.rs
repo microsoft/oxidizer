@@ -302,6 +302,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert!(!error.is_panic());
     assert!(!error.is_shutdown());
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
+    assert!(error.into_panic().is_none());
     assert!(!invoked.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(operations.workers().into_iter().len(), 1);
     runtime.stop().unwrap();
