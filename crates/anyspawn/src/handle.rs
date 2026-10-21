@@ -18,25 +18,38 @@ use performables::sync::channel::OneshotReceiver;
 ///
 /// Awaiting a `JoinHandle` will panic if the spawned task panicked or its
 /// runtime stopped before delivering the result.
-pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
+pub struct JoinHandle<T: Send + 'static>(pub(crate) JoinHandleInner<T>);
 
-pub(crate) enum JoinHandleInner<T> {
+pub(crate) enum JoinHandleInner<T: Send + 'static> {
+    #[cfg(feature = "arty")]
+    Arty(Pin<Box<::arty::task::JoinHandle<T>>>),
     #[cfg(feature = "tokio")]
     Tokio(::tokio::task::JoinHandle<T>),
     Custom(OneshotReceiver<T>),
 }
 
-impl<T> Future for JoinHandle<T> {
+impl<T: Send + 'static> Future for JoinHandle<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &mut self.get_mut().0 {
+            #[cfg(feature = "arty")]
+            JoinHandleInner::Arty(jh) => jh.as_mut().poll(cx).map(unwrap_arty_result),
             #[cfg(feature = "tokio")]
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(unwrap_tokio_result),
             JoinHandleInner::Custom(rx) => Pin::new(rx)
                 .poll(cx)
                 .map(|res| res.expect("spawned task did not produce a result because its channel closed")),
         }
+    }
+}
+
+#[cfg(feature = "arty")]
+#[expect(clippy::panic, reason = "JoinHandle documents runtime join failures as panics")]
+fn unwrap_arty_result<T>(result: Result<T, arty::task::JoinError>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) => panic!("spawned task did not complete: {error}"),
     }
 }
 
@@ -49,7 +62,7 @@ fn unwrap_tokio_result<T>(result: Result<T, tokio::task::JoinError>) -> T {
     }
 }
 
-impl<T> Debug for JoinHandle<T> {
+impl<T: Send + 'static> Debug for JoinHandle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinHandle").finish_non_exhaustive()
     }

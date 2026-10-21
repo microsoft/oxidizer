@@ -93,7 +93,7 @@ fn arty_task_panic_panics_when_joined() {
     let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
     task_ran.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert!(panic_message(&*panic).contains("channel closed"));
+    assert!(panic_message(&*panic).contains("spawned task did not complete"));
     runtime.stop().unwrap();
 }
 
@@ -110,7 +110,7 @@ fn arty_shutdown_cancels_pending_task() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
 
-    assert!(panic_message(&*panic).contains("channel closed"));
+    assert!(panic_message(&*panic).contains("spawned task did not complete"));
 }
 
 #[test]

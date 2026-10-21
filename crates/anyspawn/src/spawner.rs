@@ -5,7 +5,6 @@
 
 use std::fmt::{self, Debug};
 
-use performables::sync::channel::oneshot;
 use thread_aware::ThreadAware;
 
 use crate::custom::{CustomSpawner, SpawnCustom, spawn_anywhere_channel};
@@ -247,13 +246,7 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => {
-                let (tx, rx) = oneshot();
-                drop(scheduler.spawn(move |_| async move {
-                    let _ = tx.send(work.await);
-                }));
-                JoinHandle(JoinHandleInner::Custom(rx))
-            }
+            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(Box::pin(scheduler.spawn(move |_| work)))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -354,13 +347,7 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => {
-                let (tx, rx) = oneshot();
-                drop(scheduler.spawn_blocking(move || {
-                    let _ = tx.send(f());
-                }));
-                JoinHandle(JoinHandleInner::Custom(rx))
-            }
+            SpawnerKind::Arty(scheduler) => JoinHandle(JoinHandleInner::Arty(Box::pin(scheduler.spawn_blocking(f)))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
