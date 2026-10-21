@@ -254,9 +254,22 @@ fn sampler_drops_sink(processor_count: usize) -> Sink {
         .build()
 }
 
-fn sampler_keeps_sink(processor_count: usize) -> Sink {
+fn not_interested_sampler_keeps_sink(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, false))
+        .event_sampler(KeepAllSampler)
+        .build()
+}
+
+fn interested_sink(processor_count: usize) -> Sink {
+    Sink::builder("bench")
+        .processors(fixed_interest_processors(processor_count, true))
+        .build()
+}
+
+fn interested_sampler_keeps_sink(processor_count: usize) -> Sink {
+    Sink::builder("bench")
+        .processors(fixed_interest_processors(processor_count, true))
         .event_sampler(KeepAllSampler)
         .build()
 }
@@ -429,13 +442,22 @@ fn emit_to_noop_sink(sink: &Sink) {
 
 #[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_filtered_out")]
 #[bench::not_interested_one_processor(&not_interested_sink(1))]
-#[bench::not_interested_sampler_keeps_one_processor(&sampler_keeps_sink(1))]
+#[bench::not_interested_sampler_keeps_one_processor(&not_interested_sampler_keeps_sink(1))]
 #[bench::sampler_drops_one_processor(&sampler_drops_sink(1))]
 #[bench::not_interested_three_processors(&not_interested_sink(3))]
 #[bench::sampler_drops_three_processors(&sampler_drops_sink(3))]
 /// Emits an info log that every processor declines, with or without a sampler that keeps it, or
 /// that a sampler drops before any processor is asked; the event is never built.
 fn emit_filtered_out(sink: &Sink) {
+    observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
+}
+
+#[metabench::benchmark(EMIT_DELIVERED, EMIT_FILTERING, "emit_delivered")]
+#[bench::interested_one_processor(&interested_sink(1))]
+#[bench::interested_sampler_keeps_one_processor(&interested_sampler_keeps_sink(1))]
+/// Emits an info log that a processor receives, with or without a sampler that keeps it. The
+/// processor ignores the event, so only observed's own delivery work is measured.
+fn emit_delivered(sink: &Sink) {
     observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
 }
 
@@ -600,15 +622,23 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     sink_operations.finish();
 
     let mut emit_filtering = criterion.benchmark_group(EMIT_FILTERING);
-    for (case, filtering_sink) in [
+    for (case, case_sink) in [
         ("not_interested_one_processor", not_interested_sink(1)),
-        ("not_interested_sampler_keeps_one_processor", sampler_keeps_sink(1)),
+        ("not_interested_sampler_keeps_one_processor", not_interested_sampler_keeps_sink(1)),
         ("sampler_drops_one_processor", sampler_drops_sink(1)),
         ("not_interested_three_processors", not_interested_sink(3)),
         ("sampler_drops_three_processors", sampler_drops_sink(3)),
     ] {
         emit_filtering.bench_function(BenchmarkId::new(EMIT_FILTERED_OUT.benchmark_name(), case), |bencher| {
-            bencher.iter(|| emit_filtered_out(black_box(&filtering_sink)));
+            bencher.iter(|| emit_filtered_out(black_box(&case_sink)));
+        });
+    }
+    for (case, case_sink) in [
+        ("interested_one_processor", interested_sink(1)),
+        ("interested_sampler_keeps_one_processor", interested_sampler_keeps_sink(1)),
+    ] {
+        emit_filtering.bench_function(BenchmarkId::new(EMIT_DELIVERED.benchmark_name(), case), |bencher| {
+            bencher.iter(|| emit_delivered(black_box(&case_sink)));
         });
     }
     emit_filtering.finish();
@@ -674,6 +704,7 @@ metabench::main!(
         CONSTRUCT_PROCESSOR_FREE_SINK,
         EMIT_TO_NOOP_SINK,
         EMIT_FILTERED_OUT,
+        EMIT_DELIVERED,
         ENRICHMENT_COLLECT,
         ENRICHMENT_ENTRY_CLONE,
         PENDING_ENRICHED_FUTURE,
