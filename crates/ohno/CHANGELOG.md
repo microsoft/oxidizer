@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.3] - 2026-10-20
+
+- Refresh published documentation and runtime-analysis annotations without changing the supported API.
+- Update local dependency requirements: ohno_macros =0.5.2 -> 0.5.3.
+
 ## [0.5.2] - 2026-09-10
 
 ### Compatibility

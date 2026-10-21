@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-10-20
+
+- Add native-TLS endpoint-to-server-name mappings and replace the `TlsBackend::NativeTls` payload with `NativeTlsBackend`.
+- Update local dependency requirements: ohno ^0.5.2 -> 0.5.3.
+
 ## [0.4.1] - 2026-09-10
 
 ### Maintenance

@@ -172,46 +172,46 @@ the number of distinct strings is bounded by the 4-byte handle (approximately
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/internity">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbj0Z_EZ7O_tIbP0DJZacUVXwb3sG3ZA9s8ysbN8BvqvbiFOphZIKCaWludGVybml0eWUwLjIuMYJlc2VyZGVnMS4wLjIyOQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbj0Z_EZ7O_tIbP0DJZacUVXwb3sG3ZA9s8ysbN8BvqvbiFOphZIKCaWludGVybml0eWUwLjMuMIJlc2VyZGVnMS4wLjIyOQ
  [__link0]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/PERF.md
  [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/COMPARISON.md
  [__link10]: https://doc.rust-lang.org/stable/core/?search=hash::BuildHasher
- [__link11]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link12]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link13]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon::freeze
- [__link14]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon::index_of
- [__link15]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon::sym_at
- [__link16]: https://docs.rs/internity/0.2.1/internity/?search=Sym::as_u32
- [__link17]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link18]: https://docs.rs/internity/0.2.1/internity/?search=Sym
- [__link19]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link2]: https://docs.rs/internity/0.2.1/internity/?search=Sym
- [__link20]: https://docs.rs/internity/0.2.1/internity/?search=Sym
- [__link21]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link22]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon::freeze
- [__link23]: https://docs.rs/internity/0.2.1/internity/?search=Sym
+ [__link11]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link12]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link13]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon::freeze
+ [__link14]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon::index_of
+ [__link15]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon::sym_at
+ [__link16]: https://docs.rs/internity/0.3.0/internity/?search=Sym::as_u32
+ [__link17]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link18]: https://docs.rs/internity/0.3.0/internity/?search=Sym
+ [__link19]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link2]: https://docs.rs/internity/0.3.0/internity/?search=Sym
+ [__link20]: https://docs.rs/internity/0.3.0/internity/?search=Sym
+ [__link21]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link22]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon::freeze
+ [__link23]: https://docs.rs/internity/0.3.0/internity/?search=Sym
  [__link24]: https://docs.rs/serde/1.0.229/serde/?search=Serialize
- [__link25]: https://docs.rs/internity/0.2.1/internity/?search=se::SerializeIn
- [__link26]: https://docs.rs/internity/0.2.1/internity/?search=de::DeserializeIn
- [__link27]: https://docs.rs/internity/0.2.1/internity/?search=Reader
- [__link28]: https://docs.rs/internity/0.2.1/internity/?search=se::SerializeReader
- [__link29]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link3]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link30]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link31]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link32]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedReader
- [__link33]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon
- [__link34]: https://docs.rs/internity/0.2.1/internity/?search=LocalReader
- [__link35]: https://docs.rs/internity/0.2.1/internity/?search=Lexicon
- [__link36]: https://docs.rs/internity/0.2.1/internity/?search=Sym
- [__link37]: https://docs.rs/internity/0.2.1/internity/?search=Reader
- [__link38]: https://docs.rs/internity/0.2.1/internity/?search=se::SerializeIn
- [__link39]: https://docs.rs/internity/0.2.1/internity/?search=de::DeserializeIn
- [__link4]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link40]: https://docs.rs/internity/0.2.1/internity/?search=se::SerializeReader
- [__link41]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedLexicon
- [__link5]: https://docs.rs/internity/0.2.1/internity/?search=Lexicon
- [__link6]: https://docs.rs/internity/0.2.1/internity/?search=LocalLexicon::freeze
- [__link7]: https://docs.rs/internity/0.2.1/internity/?search=Reader
- [__link8]: https://docs.rs/internity/0.2.1/internity/?search=LocalReader
- [__link9]: https://docs.rs/internity/0.2.1/internity/?search=ThreadedReader
+ [__link25]: https://docs.rs/internity/0.3.0/internity/?search=se::SerializeIn
+ [__link26]: https://docs.rs/internity/0.3.0/internity/?search=de::DeserializeIn
+ [__link27]: https://docs.rs/internity/0.3.0/internity/?search=Reader
+ [__link28]: https://docs.rs/internity/0.3.0/internity/?search=se::SerializeReader
+ [__link29]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link3]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link30]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link31]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link32]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedReader
+ [__link33]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon
+ [__link34]: https://docs.rs/internity/0.3.0/internity/?search=LocalReader
+ [__link35]: https://docs.rs/internity/0.3.0/internity/?search=Lexicon
+ [__link36]: https://docs.rs/internity/0.3.0/internity/?search=Sym
+ [__link37]: https://docs.rs/internity/0.3.0/internity/?search=Reader
+ [__link38]: https://docs.rs/internity/0.3.0/internity/?search=se::SerializeIn
+ [__link39]: https://docs.rs/internity/0.3.0/internity/?search=de::DeserializeIn
+ [__link4]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link40]: https://docs.rs/internity/0.3.0/internity/?search=se::SerializeReader
+ [__link41]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedLexicon
+ [__link5]: https://docs.rs/internity/0.3.0/internity/?search=Lexicon
+ [__link6]: https://docs.rs/internity/0.3.0/internity/?search=LocalLexicon::freeze
+ [__link7]: https://docs.rs/internity/0.3.0/internity/?search=Reader
+ [__link8]: https://docs.rs/internity/0.3.0/internity/?search=LocalReader
+ [__link9]: https://docs.rs/internity/0.3.0/internity/?search=ThreadedReader

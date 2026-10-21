@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.1] - 2026-10-20
+
+- Move documentation-only modules to their stable names and expand thread-aware authoring guidance.
+- Update local dependency requirements: thread_aware_core ^0.1.1 -> 0.1.2; thread_aware_macros =0.12.0 -> 0.12.1.
+
 ## [0.12.0] - 2026-09-10
 
 ### Maintenance

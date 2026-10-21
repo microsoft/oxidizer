@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.0] - 2026-10-20
+
+- Align the procedural macro package with the Multitude 0.12 release.
+- Update local dependency requirements: multitude_macros_impl =0.11.1 -> 0.12.0.
+- Version alignment: group multitude [multitude, multitude_macros, multitude_macros_impl] aligns to 0.12.0.
+
 ## [0.10.0] - 2026-09-10
 
 ### Maintenance

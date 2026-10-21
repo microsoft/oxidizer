@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.1] - 2026-10-20
+
+- Refresh published macro documentation and align private implementation metadata.
+- Update local dependency requirements: data_privacy_macros_impl =0.13.0 -> 0.13.1.
+
 ## [0.13.0] - 2026-09-10
 
 ### Maintenance

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-10-20
+
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: ohno ^0.5.2 -> 0.5.3; recoverable ^0.2.0 -> 0.3.0.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance
