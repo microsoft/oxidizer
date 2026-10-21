@@ -100,52 +100,12 @@ pub struct Spawner(SpawnerKind);
 
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
-    #[cfg(feature = "arty")]
-    Arty(CustomSpawner),
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
     Custom(CustomSpawner),
 }
 
 impl Spawner {
-    /// Creates a spawner bound to an Arty worker scheduler.
-    ///
-    /// Tasks retain the scheduler's worker association. Cloning or relocating
-    /// the `Spawner` follows [`Scheduler`](::arty::task::Scheduler) semantics,
-    /// and the scheduler does not keep its runtime running.
-    ///
-    /// # Panics
-    ///
-    /// Awaiting a returned [`JoinHandle`] will panic if Arty reports a task
-    /// panic, cancellation, or shutdown rejection.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # fn main() {
-    /// # #[cfg(feature = "arty")] {
-    /// # (|| {
-    /// use anyspawn::Spawner;
-    /// use arty::runtime::Runtime;
-    ///
-    /// let runtime = Runtime::new()?;
-    /// let result = runtime.scheduler().block_on(async |cx| {
-    ///     let spawner = Spawner::new_arty(cx.scheduler().clone());
-    ///     spawner.spawn(async { 42 }).await
-    /// })?;
-    /// assert_eq!(result, 42);
-    /// runtime.stop()?;
-    /// # Ok::<(), arty::runtime::Error>(())
-    /// # })().unwrap();
-    /// # }
-    /// # }
-    /// ```
-    #[cfg(feature = "arty")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "arty")))]
-    pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
-        Self(SpawnerKind::Arty(CustomSpawner::new("arty", ArtySpawner(scheduler))))
-    }
-
     /// Creates a spawner that uses the Tokio runtime.
     ///
     /// Tasks are spawned via [`tokio::spawn`], which requires a Tokio runtime
@@ -248,8 +208,6 @@ impl Spawner {
     /// ```
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
-            #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn(work))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -291,8 +249,6 @@ impl Spawner {
         F: Future<Output = T> + Send + 'static,
     {
         match &self.0 {
-            #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -345,8 +301,6 @@ impl Spawner {
         F: FnOnce() -> T + Send + 'static,
     {
         match &self.0 {
-            #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_blocking(f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
@@ -363,32 +317,11 @@ impl Spawner {
 impl Debug for Spawner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            #[cfg(feature = "arty")]
-            SpawnerKind::Arty(c) => f.debug_tuple("Spawner").field(c).finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(Some(_)) => f.debug_tuple("Spawner").field(&"tokio(handle)").finish(),
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
         }
-    }
-}
-
-#[cfg(feature = "arty")]
-#[derive(Clone, ThreadAware)]
-struct ArtySpawner(::arty::task::Scheduler);
-
-#[cfg(feature = "arty")]
-impl SpawnCustom for ArtySpawner {
-    fn spawn(&self, task: crate::BoxedFuture) {
-        drop(self.0.spawn(move |_| task));
-    }
-
-    fn spawn_anywhere(&self, task: Box<dyn crate::ThreadAwareAsyncFnOnce<()>>) {
-        drop(self.0.spawn_anywhere(task, |task| task.call_once()));
-    }
-
-    fn spawn_blocking(&self, task: crate::BoxedBlockingTask) {
-        drop(self.0.spawn_blocking(task));
     }
 }

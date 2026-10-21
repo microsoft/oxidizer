@@ -71,6 +71,8 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]
 
+#[cfg(any(test, feature = "arty"))]
+mod arty;
 mod builder;
 mod custom;
 mod handle;
