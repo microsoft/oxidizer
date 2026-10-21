@@ -142,3 +142,19 @@ pub fn connected_pair() -> (Connection, Connection) {
 pub fn read_is_pending(connection: &Connection) -> std::io::Result<bool> {
     connection.read_is_pending()
 }
+
+/// Returns the total bytes consumed by reads on this connection and its clones.
+///
+/// Peeking does not contribute to this count.
+#[must_use]
+pub fn bytes_read(connection: &Connection) -> usize {
+    connection.bytes_read()
+}
+
+/// Returns the number of explicit close requests on this connection and its clones.
+///
+/// Dropping a handle or reaching a read deadline does not count as a close.
+#[must_use]
+pub fn close_calls(connection: &Connection) -> usize {
+    connection.close_calls()
+}

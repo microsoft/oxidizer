@@ -28,6 +28,7 @@ allowed_external_types = [
     "seismograph_protocol::Error",
     "seismograph_protocol::io::MonitorIo",
     "seismograph_protocol::monitor::MonitorDescriptor",
+    "seismograph_protocol::transport::Connection",
 ]
 
 [features]

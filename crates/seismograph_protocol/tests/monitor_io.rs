@@ -157,6 +157,27 @@ mod tests {
     }
 
     #[test]
+    fn connection_observations_follow_reads_and_explicit_close_across_clones() {
+        let (_, control) = MonitorIo::new_mocked();
+        let (mut peer, mut connection) = control.connected_pair();
+        let observer = connection.try_clone().unwrap();
+        assert_eq!(seismograph_protocol::testing::bytes_read(&observer), 0);
+        assert_eq!(seismograph_protocol::testing::close_calls(&observer), 0);
+        peer.write_all(b"data").unwrap();
+        assert_eq!(connection.peek(&mut [0; 4]).unwrap(), 4);
+        assert_eq!(seismograph_protocol::testing::bytes_read(&observer), 0);
+        assert_eq!(connection.read(&mut [0; 4]).unwrap(), 4);
+        assert_eq!(seismograph_protocol::testing::bytes_read(&observer), 4);
+        drop(connection);
+        assert_eq!(seismograph_protocol::testing::close_calls(&observer), 0);
+        observer.close().unwrap();
+        assert_eq!(seismograph_protocol::testing::close_calls(&observer), 1);
+        observer.close().unwrap();
+        assert_eq!(seismograph_protocol::testing::close_calls(&observer), 2);
+        assert_eq!(peer.read(&mut [0]).unwrap(), 0);
+    }
+
+    #[test]
     fn publication_failures_clean_up_only_exclusively_created_files() {
         for operation in [
             IoOperation::CreateDescriptor,

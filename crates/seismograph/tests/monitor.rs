@@ -8,7 +8,7 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io::{self, Read as _, Write as _};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use seismograph::monitor::Monitor;
 #[cfg(unix)]
@@ -139,6 +139,18 @@ fn dropping_a_monitor_cancels_a_client_stalled_mid_handshake() {
     )
     .unwrap();
     connection.write_all(b"SGMP").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let server = loop {
+        if let Some(server) = monitor.client_connections().unwrap().pop()
+            && seismograph_protocol::testing::bytes_read(&server) == 4
+            && seismograph_protocol::testing::read_is_pending(&server).unwrap()
+        {
+            break server;
+        }
+        assert!(Instant::now() < deadline, "server did not block after reading the partial header");
+        std::thread::yield_now();
+    };
+    assert_eq!(seismograph_protocol::testing::close_calls(&server), 0);
     let (completed, completion) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         drop(monitor);
@@ -146,8 +158,10 @@ fn dropping_a_monitor_cancels_a_client_stalled_mid_handshake() {
     });
     completion.recv_timeout(Duration::from_secs(30)).unwrap();
     worker.join().unwrap();
+    assert_eq!(seismograph_protocol::testing::close_calls(&server), 1);
     connection.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     assert_closed(&mut connection);
+    drop(server);
 }
 
 fn assert_closed(connection: &mut Connection) {

@@ -84,6 +84,27 @@ impl Monitor {
     pub fn last_error(&self) -> Option<String> {
         self.last_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
+
+    /// Returns clones of the registered server connections for testing.
+    ///
+    /// Use `seismograph_protocol::testing` to observe read progress and pending
+    /// native reads. Retained clones keep the peer open until explicit shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if duplicating a connection fails.
+    #[cfg(any(test, feature = "test-util"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+    pub fn client_connections(&self) -> io::Result<Vec<Connection>> {
+        self.active_clients
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .streams
+            .values()
+            .map(Connection::try_clone)
+            .collect()
+    }
 }
 
 impl fmt::Debug for Monitor {

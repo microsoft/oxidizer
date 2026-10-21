@@ -95,6 +95,8 @@ impl Listener {
         Ok(Connection {
             inner,
             io: self.io.clone(),
+            #[cfg(any(test, feature = "test-util"))]
+            observations: std::sync::Arc::default(),
         })
     }
 }
@@ -105,6 +107,15 @@ impl Listener {
 pub struct Connection {
     inner: ConnectionInner,
     io: MonitorIo,
+    #[cfg(any(test, feature = "test-util"))]
+    observations: std::sync::Arc<ConnectionObservations>,
+}
+
+#[cfg(any(test, feature = "test-util"))]
+#[derive(Debug, Default)]
+struct ConnectionObservations {
+    bytes_read: std::sync::atomic::AtomicUsize,
+    close_calls: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -115,6 +126,16 @@ enum ConnectionInner {
 }
 
 impl Connection {
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn bytes_read(&self) -> usize {
+        self.observations.bytes_read.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn close_calls(&self) -> usize {
+        self.observations.close_calls.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn read_is_pending(&self) -> io::Result<bool> {
         match &self.inner {
@@ -157,14 +178,20 @@ impl Connection {
         };
         #[cfg(not(any(test, feature = "test-util")))]
         let inner = ConnectionInner::Native(platform::Connection::connect(descriptor, timeout)?);
-        Ok(Self { inner, io: io.clone() })
+        Ok(Self {
+            inner,
+            io: io.clone(),
+            #[cfg(any(test, feature = "test-util"))]
+            observations: std::sync::Arc::default(),
+        })
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub(crate) const fn from_mocked(io: MonitorIo, connection: crate::io::mock::Connection) -> Self {
+    pub(crate) fn from_mocked(io: MonitorIo, connection: crate::io::mock::Connection) -> Self {
         Self {
             io,
             inner: ConnectionInner::Mocked(connection),
+            observations: std::sync::Arc::new(ConnectionObservations::default()),
         }
     }
 
@@ -186,6 +213,8 @@ impl Connection {
         Ok(Self {
             inner,
             io: self.io.clone(),
+            #[cfg(any(test, feature = "test-util"))]
+            observations: std::sync::Arc::clone(&self.observations),
         })
     }
 
@@ -239,6 +268,8 @@ impl Connection {
     ///
     /// Returns a native cancellation or shutdown error.
     pub fn close(&self) -> io::Result<()> {
+        #[cfg(any(test, feature = "test-util"))]
+        self.observations.close_calls.fetch_add(1, std::sync::atomic::Ordering::Release);
         let injected = self.io.checkpoint(IoOperation::Close);
         let closed = match &self.inner {
             ConnectionInner::Native(inner) => inner.close(),
@@ -255,11 +286,16 @@ impl Connection {
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.io.checkpoint(IoOperation::Read)?;
-        match &mut self.inner {
+        let result = match &mut self.inner {
             ConnectionInner::Native(inner) => inner.read(buf),
             #[cfg(any(test, feature = "test-util"))]
             ConnectionInner::Mocked(inner) => inner.read(buf),
+        };
+        #[cfg(any(test, feature = "test-util"))]
+        if let Ok(count) = result {
+            self.observations.bytes_read.fetch_add(count, std::sync::atomic::Ordering::Release);
         }
+        result
     }
 }
 

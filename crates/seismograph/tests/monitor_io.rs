@@ -8,7 +8,7 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io::{self, Read as _, Write as _};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use seismograph::monitor::Monitor;
 use seismograph_protocol::discovery::{self, Directory};
@@ -82,12 +82,30 @@ fn dropping_an_injected_monitor_cancels_a_partial_frame_without_advancing_time()
     let (io, control) = MonitorIo::new_mocked();
     let initial = io.instant();
     let monitor = Monitor::builder().io(io.clone()).name("worker").start().unwrap();
+    assert!(monitor.client_connections().unwrap().is_empty());
     let mut connection = Connection::connect(&io, monitor.descriptor(), Duration::from_secs(1)).unwrap();
     connection.write_all(b"SGMP").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while control
+        .operations()
+        .iter()
+        .filter(|operation| **operation == IoOperation::Read)
+        .count()
+        < 2
+    {
+        assert!(Instant::now() < deadline, "server did not start the second partial-header read");
+        std::thread::yield_now();
+    }
+    let server = monitor.client_connections().unwrap().pop().unwrap();
+    assert_eq!(seismograph_protocol::testing::bytes_read(&server), 4);
+    assert_eq!(seismograph_protocol::testing::close_calls(&server), 0);
     drop(monitor);
+    assert!(control.operations().contains(&IoOperation::Close));
+    assert_eq!(seismograph_protocol::testing::close_calls(&server), 1);
     assert_eq!(connection.read(&mut [0]).unwrap(), 0);
     assert_eq!(io.instant(), initial);
     assert!(control.operations().contains(&IoOperation::RemoveDescriptor));
+    drop(server);
 }
 
 #[test]
