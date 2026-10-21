@@ -85,9 +85,13 @@
 //!
 //! # Async I/O
 //!
-//! Arty does not provide an async I/O driver. Use
-//! [`spawn_blocking`](crate::task::Scheduler::spawn_blocking) for synchronous
-//! I/O; libraries requiring another runtime's I/O driver still need that driver.
+//! Arty hosts drivers supplied by I/O libraries built on `arty_io_core`, but it
+//! does not include a built-in network or file I/O implementation. Access
+//! compatible contexts through
+//! [`Builtins::io`](crate::task::Builtins::io); see the
+//! [I/O guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md).
+//! Use [`spawn_blocking`](crate::task::Scheduler::spawn_blocking) for synchronous
+//! I/O. Libraries requiring another runtime's I/O driver still need that runtime.
 //!
 //! # Worker placement
 //!
