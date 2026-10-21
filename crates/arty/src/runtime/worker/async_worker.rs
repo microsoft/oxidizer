@@ -97,7 +97,9 @@ pub(crate) struct AsyncWorker {
     // This drives moves the timers registered with the clock forward.
     clock_driver: ClockDriver,
 
+    // Logical time follows controlled clocks and is used to calculate timer waits.
     time: SimpleClock,
+    // System timer advancement and I/O wait accounting require precise elapsed time.
     physical_time: SimpleClock,
     signal: Arc<WorkerSignal>,
     _single_threaded: PhantomData<*const ()>,
@@ -164,13 +166,15 @@ impl AsyncWorker {
 
         if self.shutdown_signal.load(Ordering::Acquire) {
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(self.time.instant());
+            let now = self.timer_now();
+            _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         }
 
         let Some(executor) = self.executor.as_ref() else {
             // Executor drop cancels tasks before final timer callbacks can observe their state.
-            _ = self.clock_driver.advance_timers(self.time.instant());
+            let now = self.timer_now();
+            _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         };
 
@@ -180,11 +184,12 @@ impl AsyncWorker {
             // An alternate low-level owner initiated executor shutdown. Complete the surrounding
             // worker shutdown before final timer callbacks run.
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(self.time.instant());
+            let now = self.timer_now();
+            _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         }
 
-        let advance_now = self.time.instant();
+        let advance_now = self.timer_now();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
         if self.shutdown_signal.load(Ordering::Acquire) {
             self.begin_shutdown();
@@ -202,7 +207,8 @@ impl AsyncWorker {
         let cycle_started = self.physical_time.stopwatch();
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             self.begin_shutdown();
-            _ = self.clock_driver.advance_timers(self.time.instant());
+            let now = self.timer_now();
+            _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         }
 
@@ -217,6 +223,13 @@ impl AsyncWorker {
         }
 
         ControlFlow::Continue(())
+    }
+
+    fn timer_now(&self) -> Instant {
+        // Reading logical time preserves controlled-clock auto-advance. The precise physical read
+        // prevents system timer advancement from lagging behind a deadline registered during task
+        // cancellation on platforms where consecutive monotonic reads can have different precision.
+        self.time.instant().max(self.physical_time.instant())
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
@@ -264,6 +277,10 @@ impl AsyncWorker {
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
+        if self.executor.is_none() {
+            return;
+        }
+
         Scheduler::clear_current();
         // Drop worker-local services, as they may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).
@@ -276,7 +293,8 @@ impl AsyncWorker {
 
         // Safe executor drop synchronously cancels and releases all remaining task storage.
         self.executor = None;
-        RuntimeDriverHost::uninstall();
+        let driver_host = RuntimeDriverHost::uninstall();
+        drop(driver_host);
     }
 }
 

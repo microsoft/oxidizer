@@ -50,8 +50,10 @@ impl RuntimeDriverHost {
         waker
     }
 
-    pub(crate) fn uninstall() {
-        drop(CURRENT.with_borrow_mut(Option::take));
+    pub(crate) fn uninstall() -> Self {
+        CURRENT
+            .with_borrow_mut(Option::take)
+            .expect("the worker must uninstall the I/O driver host that it installed")
     }
 
     pub(crate) fn has_primary_current() -> bool {
@@ -187,9 +189,10 @@ mod tests {
     fn uninstall_removes_current_host() {
         let (runtime, thread, _host) = host();
 
-        RuntimeDriverHost::uninstall();
+        let uninstalled = RuntimeDriverHost::uninstall();
 
         assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_none());
+        drop(uninstalled);
     }
 
     #[test]
