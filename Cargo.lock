@@ -183,6 +183,7 @@ dependencies = [
  "criterion",
  "ctor",
  "futures",
+ "many_cpus",
  "opentelemetry",
  "performables",
  "smol",

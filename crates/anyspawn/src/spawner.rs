@@ -246,16 +246,16 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn(move |_| work)),
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn(move |_| work))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn(work),
                     None => ::tokio::spawn(work),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn(work))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn(work))),
         }
     }
 
@@ -290,16 +290,16 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn_anywhere(data, f)),
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_anywhere(data, f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn(f(data)),
                     None => ::tokio::spawn(f(data)),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
         }
     }
 
@@ -344,16 +344,16 @@ impl Spawner {
     {
         match &self.0 {
             #[cfg(feature = "arty")]
-            SpawnerKind::Arty(scheduler) => JoinHandle::from_arty(scheduler.spawn_blocking(f)),
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_blocking(f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn_blocking(f),
                     None => ::tokio::task::spawn_blocking(f),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_blocking(f))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn_blocking(f))),
         }
     }
 }

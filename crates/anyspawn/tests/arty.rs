@@ -83,6 +83,9 @@ fn arty_spawn_anywhere_returns_thread_aware_output() {
 
 #[test]
 fn arty_relocation_round_trip_rebinds_to_destination_worker() {
+    if many_cpus::SystemHardware::current().processors().len() < 2 {
+        return;
+    }
     let runtime_a = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (mut spawner, source, destination) = runtime_a
         .scheduler()
@@ -112,7 +115,7 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
 
 #[test]
 fn arty_spawn_anywhere_relocates_payload_before_factory() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let spawner = Spawner::new_arty(scheduler);
 

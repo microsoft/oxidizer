@@ -3,16 +3,13 @@
 
 //! [`JoinHandle`] for awaiting spawned task results.
 
+use std::cell::Cell;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::pin::Pin;
-#[cfg(feature = "arty")]
-use std::sync::Mutex;
 use std::task::{Context, Poll};
 
 use performables::sync::channel::OneshotReceiver;
-
-#[cfg(feature = "arty")]
-type ArtyJoinFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// A handle to a spawned task that can be awaited to retrieve its result.
 ///
@@ -23,38 +20,31 @@ type ArtyJoinFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 ///
 /// Awaiting a `JoinHandle` will panic if the spawned task panicked or its
 /// runtime stopped before delivering the result.
-pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
+///
+/// Handles are [`Send`] and [`Unpin`], but intentionally not [`Sync`].
+pub struct JoinHandle<T: Send + 'static>(pub(crate) JoinHandleInner<T>, PhantomData<Cell<()>>);
 
-pub(crate) enum JoinHandleInner<T> {
+pub(crate) enum JoinHandleInner<T: Send + 'static> {
     #[cfg(feature = "arty")]
-    Arty(Mutex<ArtyJoinFuture<T>>),
+    Arty(::arty::task::JoinHandle<T>),
     #[cfg(feature = "tokio")]
     Tokio(::tokio::task::JoinHandle<T>),
     Custom(OneshotReceiver<T>),
 }
 
-impl<T> JoinHandle<T> {
-    #[cfg(feature = "arty")]
-    pub(crate) fn from_arty(handle: ::arty::task::JoinHandle<T>) -> Self
-    where
-        T: Send + 'static,
-    {
-        let future = async move { unwrap_arty_result(handle.await) };
-        Self(JoinHandleInner::Arty(Mutex::new(Box::pin(future))))
+impl<T: Send + 'static> JoinHandle<T> {
+    pub(crate) const fn new(inner: JoinHandleInner<T>) -> Self {
+        Self(inner, PhantomData)
     }
 }
 
-impl<T> Future for JoinHandle<T> {
+impl<T: Send + 'static> Future for JoinHandle<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &mut self.get_mut().0 {
             #[cfg(feature = "arty")]
-            JoinHandleInner::Arty(future) => future
-                .get_mut()
-                .expect("Arty join future mutex is never locked and therefore cannot be poisoned")
-                .as_mut()
-                .poll(cx),
+            JoinHandleInner::Arty(jh) => Pin::new(jh).poll(cx).map(unwrap_arty_result),
             #[cfg(feature = "tokio")]
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(unwrap_tokio_result),
             JoinHandleInner::Custom(rx) => Pin::new(rx)
@@ -82,7 +72,7 @@ fn unwrap_tokio_result<T>(result: Result<T, tokio::task::JoinError>) -> T {
     }
 }
 
-impl<T> Debug for JoinHandle<T> {
+impl<T: Send + 'static> Debug for JoinHandle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinHandle").finish_non_exhaustive()
     }

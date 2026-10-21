@@ -46,6 +46,7 @@ arty = { path = "../arty", default-features = false, features = ["rt"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+many_cpus = { workspace = true }
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = { workspace = true }
 static_assertions = { workspace = true }
