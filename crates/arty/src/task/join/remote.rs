@@ -49,6 +49,7 @@ where
     #[debug(ignore)]
     #[pin]
     inner: RemoteJoinHandle<R>,
+    immediate_error: Option<JoinError>,
     blocking_pool: Option<Arc<()>>,
     completed: bool,
 }
@@ -60,6 +61,7 @@ where
     pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
         Self {
             inner,
+            immediate_error: None,
             blocking_pool: None,
             completed: false,
         }
@@ -69,6 +71,17 @@ where
         let (sender, inner) = pool.channel();
         drop(sender);
         Self::new(inner)
+    }
+
+    pub(crate) fn failed(pool: &RemotePool, error: JoinError) -> Self {
+        let (sender, inner) = pool.channel();
+        drop(sender);
+        Self {
+            inner,
+            immediate_error: Some(error),
+            blocking_pool: None,
+            completed: false,
+        }
     }
 
     pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
@@ -100,6 +113,10 @@ where
         let this = self.project();
         assert!(!*this.completed, "JoinHandle polled after completion");
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
+        if let Some(error) = this.immediate_error.take() {
+            *this.completed = true;
+            return Poll::Ready(Err(error));
+        }
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;

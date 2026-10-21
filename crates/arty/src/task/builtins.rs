@@ -10,6 +10,7 @@ use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
 use crate::io::Io;
+use crate::runtime::RuntimeOperations;
 use crate::runtime::dispatch::DispatcherClient;
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
@@ -52,6 +53,7 @@ use crate::task::scheduler::Scheduler;
 #[derive(Debug, Clone)]
 pub struct Builtins {
     pub(crate) scheduler: Scheduler,
+    operations: RuntimeOperations,
     thread: Thread,
     clock: Clock,
     io: Io,
@@ -87,6 +89,19 @@ impl Builtins {
         self.validate();
 
         &self.scheduler
+    }
+
+    /// Returns runtime-wide operations available to this task.
+    ///
+    /// Use [`RuntimeOperations::workers`] to inspect the runtime's worker
+    /// coordinates and [`RuntimeOperations::request_stop`] to request shutdown
+    /// without waiting.
+    #[must_use]
+    #[inline]
+    pub fn operations(&self) -> &RuntimeOperations {
+        self.validate();
+
+        &self.operations
     }
 
     /// Returns the associated worker's coordinate, including its NUMA locality.
@@ -228,7 +243,8 @@ impl ThreadAware for Builtins {
 impl Builtins {
     pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
         Self {
-            scheduler: Scheduler::new(dispatcher, thread.clone()),
+            scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
+            operations: RuntimeOperations::new(dispatcher),
             thread,
             clock,
             io,

@@ -14,18 +14,19 @@
 //! even when cloned.
 //!
 //! Use [`spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) to let the
-//! runtime choose a worker for a new task and relocate a `ThreadAware` value;
-//! [`spawn_everywhere`](crate::task::Scheduler::spawn_everywhere) starts one
-//! task per worker. The runtime-wide `spawn_anywhere` also relocates its
-//! `ThreadAware` input. Pass that input separately to a non-capturing function,
-//! rather than capturing it in a closure. The order in which you submit tasks
-//! does not determine when they finish.
+//! runtime choose a worker for a new task and relocate a `ThreadAware` value.
+//! Use [`spawn_at`](crate::task::Scheduler::spawn_at) with a coordinate from
+//! [`Builtins::operations`](crate::task::Builtins::operations) to target one
+//! worker. The runtime-wide `spawn_anywhere` also relocates its `ThreadAware`
+//! input. Pass that input separately to a non-capturing function, rather than
+//! capturing it in a closure. The order in which you submit tasks does not
+//! determine when they finish.
 //!
-//! Results from worker-bound `Scheduler::spawn_anywhere` and
-//! `spawn_everywhere` must also implement [`ThreadAware`](crate::core::ThreadAware),
-//! which includes `Send`. Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts
-//! any `Send` result. Joining does not relocate results; relocate worker-aware
-//! returned values explicitly when needed.
+//! Results from worker-bound `Scheduler::spawn_anywhere` and `spawn_at` must
+//! also implement [`ThreadAware`](crate::core::ThreadAware), which includes
+//! `Send`. Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts any `Send`
+//! result. Joining does not relocate results; relocate worker-aware returned
+//! values explicitly when needed.
 //!
 //! # Create local state on a worker
 //!

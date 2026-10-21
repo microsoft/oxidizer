@@ -13,7 +13,6 @@ mod support;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
-use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
@@ -37,7 +36,7 @@ impl Drop for CaptureDropPanic {
 #[test]
 fn queued_blocking_capture_drop_panic_still_completes_its_join() {
     let runtime = runtime();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let running = runtime.scheduler().spawn_blocking(move || {
@@ -88,7 +87,7 @@ fn running_blocking_capture_drop_panic_is_a_join_error() {
 #[test]
 fn stop_waits_for_running_blocking_panic_and_retains_its_error() {
     let runtime = runtime();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let (finished, observed) = mpsc::channel();

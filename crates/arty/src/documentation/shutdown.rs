@@ -11,7 +11,9 @@
 //!
 //! # Requesting and waiting for shutdown
 //!
-//! [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop)
+//! [`Builtins::operations`](crate::task::Builtins::operations) exposes
+//! [`RuntimeOperations`](crate::runtime::RuntimeOperations), whose
+//! [`request_stop`](crate::runtime::RuntimeOperations::request_stop) method
 //! requests shutdown without waiting and can be called repeatedly. Keep the
 //! runtime owner until you are ready to wait for its workers.
 //!
@@ -34,11 +36,11 @@
 //! A rejected submission can be handled immediately:
 //!
 //! ```
-//! use arty::runtime::{Runtime, RuntimeOperations};
+//! use arty::runtime::Runtime;
 //!
 //! let runtime = Runtime::new()?;
 //! let error = runtime.scheduler().block_on(async |cx| {
-//!     RuntimeOperations::from(&cx).request_stop();
+//!     cx.operations().request_stop();
 //!     cx.scheduler()
 //!         .spawn(async |_| 42)
 //!         .await

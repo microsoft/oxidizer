@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Builtins, JoinHandle};
@@ -105,7 +105,7 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
     runtime
         .scheduler()
         .block_on(move |cx| async move {
-            let operations = RuntimeOperations::from(&cx);
+            let operations = cx.operations().clone();
             drop(cx.scheduler().spawn(move |_| {
                 factory_invoked.store(true, Ordering::Release);
                 async {}
@@ -128,7 +128,7 @@ fn shutdown_between_same_worker_tasks_skips_later_factory() {
             let invoked = Arc::clone(&invoked);
             move |cx| async move {
                 let stopper = cx.scheduler().spawn(async |cx| {
-                    RuntimeOperations::from(&cx).request_stop();
+                    cx.operations().request_stop();
                 });
                 let skipped = cx.scheduler().spawn(move |_| {
                     invoked.store(true, Ordering::Release);
@@ -168,7 +168,7 @@ fn current_worker_stop_cancels_an_awakened_task_before_repolling() {
         .scheduler()
         .spawn_anywhere(Unaware(task_waker), |cx, Unaware(task_waker)| async move {
             task_waker.wake_by_ref();
-            RuntimeOperations::from(&cx).request_stop();
+            cx.operations().request_stop();
         })
         .join()
         .unwrap();
@@ -188,7 +188,7 @@ fn shutdown_between_remote_tasks_skips_later_factory() {
             let invoked = Arc::clone(&invoked);
             move |cx| async move {
                 let stopper = cx.scheduler().spawn_anywhere(cx.clone(), |cx| async move {
-                    RuntimeOperations::from(&cx).request_stop();
+                    cx.operations().request_stop();
                 });
                 let skipped = cx.scheduler().spawn_anywhere(Unaware(invoked), |Unaware(invoked)| {
                     invoked.store(true, Ordering::Release);
@@ -208,7 +208,7 @@ fn shutdown_between_remote_tasks_skips_later_factory() {
 #[test]
 fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
     let runtime = runtime();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     let invoked = Arc::new(AtomicBool::new(false));
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
@@ -251,7 +251,7 @@ fn stop_rejects_remote_and_blocking_factories_immediately() {
     runtime()
         .scheduler()
         .block_on(async |cx| {
-            RuntimeOperations::from(&cx).request_stop();
+            cx.operations().request_stop();
             let invoked = Arc::new(AtomicBool::new(false));
             let remote = cx.scheduler().spawn({
                 let invoked = Arc::clone(&invoked);
@@ -308,7 +308,7 @@ fn shutdown_cancels_pending_async_work_and_destroys_its_future() {
 #[test]
 fn queued_blocking_work_is_cancelled_but_running_work_finishes() {
     let runtime = runtime();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     let scheduler = runtime.scheduler();
     let (started, receive_start) = mpsc::channel();
     let (release, receive_release) = mpsc::channel();
@@ -337,7 +337,7 @@ fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
     let runtime = runtime();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let nested_scheduler = scheduler.clone();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     let callback = scheduler.spawn_blocking(move || {
         operations.request_stop();
         nested_scheduler.spawn_blocking(|| 7).join()
@@ -363,7 +363,11 @@ fn root_execution_returns_errors_and_preserves_borrowed_storage() {
             .unwrap()
             .is_panic()
     );
-    RuntimeOperations::from(&runtime).request_stop();
+    runtime
+        .scheduler()
+        .block_on(async |cx| cx.operations().clone())
+        .unwrap()
+        .request_stop();
     let mut value = 0;
     assert!(
         runtime
@@ -398,7 +402,7 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
                     ready(())
                 }
             });
-            RuntimeOperations::from(&cx).request_stop();
+            cx.operations().request_stop();
             (queued, invoked)
         })
         .unwrap();
@@ -409,7 +413,7 @@ fn shutdown_discards_queued_async_factories_before_invocation() {
 #[test]
 fn cancelling_the_root_returns_a_shutdown_error() {
     let result = runtime().scheduler().block_on(async |cx| {
-        RuntimeOperations::from(&cx).request_stop();
+        cx.operations().request_stop();
         pending::<()>().await;
     });
     assert!(
@@ -427,6 +431,6 @@ fn cancelling_the_root_returns_a_shutdown_error() {
 #[arty::test]
 #[should_panic(expected = "runtime is shutting down")]
 async fn macro_boundary_reports_root_cancellation(cx: arty::task::Builtins) {
-    RuntimeOperations::from(&cx).request_stop();
+    cx.operations().request_stop();
     pending::<()>().await;
 }

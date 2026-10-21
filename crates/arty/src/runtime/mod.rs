@@ -11,8 +11,9 @@
 //! Each task receives [`Builtins`](crate::task::Builtins) with its worker's
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
 //! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
-//! keeps children on their parent's worker. [`RuntimeOperations`] can request
-//! shutdown without consuming the runtime owner.
+//! keeps children on their parent's worker.
+//! [`Builtins::operations`](crate::task::Builtins::operations) exposes worker
+//! coordinates and can request shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
 //! pending tasks and waits for blocking callbacks that have already started;
@@ -56,7 +57,7 @@ pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
 #[doc(inline)]
-pub use operations::RuntimeOperations;
+pub use operations::{RuntimeOperations, Workers};
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]

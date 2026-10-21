@@ -184,7 +184,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         }
 
         let runtime = runtime();
-        let operations = arty::runtime::RuntimeOperations::from(&runtime);
+        let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
         let (started, received) = mpsc::channel();
         let finish = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));

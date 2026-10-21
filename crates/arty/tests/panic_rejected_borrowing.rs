@@ -11,7 +11,6 @@ mod panic_support;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
 
 testing_aids::init_tracing!();
@@ -28,7 +27,8 @@ impl Drop for BorrowedCapture<'_> {
 #[test]
 fn stopped_borrowing_factory_is_destroyed_before_its_drop_unwind_escapes() {
     let runtime = runtime();
-    RuntimeOperations::from(&runtime).request_stop();
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
+    operations.request_stop();
     let drops = AtomicUsize::new(0);
     let invoked = AtomicUsize::new(0);
     let invoked = &invoked;

@@ -15,7 +15,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
 use thread_aware::Unaware;
@@ -79,7 +78,11 @@ fn remote_panicking_join_waker_on_cancellation_is_contained() {
     }));
     assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
-    RuntimeOperations::from(&runtime).request_stop();
+    runtime
+        .scheduler()
+        .block_on(async |cx| cx.operations().clone())
+        .unwrap()
+        .request_stop();
     runtime.stop().unwrap();
 
     assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_ready());
@@ -139,7 +142,11 @@ fn blocking_panicking_join_waker_on_cancellation_is_contained() {
     }));
     assert!(queued.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
-    RuntimeOperations::from(&runtime).request_stop();
+    runtime
+        .scheduler()
+        .block_on(async |cx| cx.operations().clone())
+        .unwrap()
+        .request_stop();
     release_tx.send(()).unwrap();
     running.join().unwrap();
     runtime.stop().unwrap();

@@ -18,7 +18,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Builtins;
 use arty::task::JoinError;
@@ -360,7 +360,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
-    let operations = RuntimeOperations::from(&runtime);
+    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
     operations.request_stop();
     operations.request_stop();
     runtime.stop().unwrap();

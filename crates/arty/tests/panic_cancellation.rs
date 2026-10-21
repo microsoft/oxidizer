@@ -18,7 +18,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll};
 
-use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
@@ -110,7 +109,7 @@ fn borrowing_cancellation_drop_panic_releases_caller_storage() {
         .scheduler()
         .block_on(async move |cx| {
             let guard = borrowed;
-            RuntimeOperations::from(&cx).request_stop();
+            cx.operations().request_stop();
             std::future::pending::<()>().await;
             drop(guard);
         })

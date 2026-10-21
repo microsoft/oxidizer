@@ -82,18 +82,17 @@ fn worker_input_relocation_panics_are_join_errors() {
                 std::future::ready(())
             });
             assert!(task.await.unwrap_err().is_panic());
-            let tasks = cx.scheduler().spawn_everywhere(data, |data| {
+            let destination = cx.operations().workers().iter().next().unwrap();
+            let task = cx.scheduler().spawn_at(destination, data, |data| {
                 data.factories.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(())
             });
-            for task in tasks {
-                assert!(task.await.unwrap_err().is_panic());
-            }
+            assert!(task.await.unwrap_err().is_panic());
             assert_eq!(cx.scheduler().spawn(async |_| 7).await.unwrap(), 7);
         })
         .unwrap();
     assert_eq!(relocations.load(Ordering::SeqCst), 2);
-    assert_eq!(drops.load(Ordering::SeqCst), 3);
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
     assert_eq!(factories.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
 }

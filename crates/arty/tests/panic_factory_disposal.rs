@@ -13,7 +13,6 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use arty::runtime::RuntimeOperations;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
 
@@ -48,7 +47,7 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
                 drop(capture);
                 std::future::ready(())
             });
-            RuntimeOperations::from(&cx).request_stop();
+            cx.operations().request_stop();
             queued
         })
         .unwrap();

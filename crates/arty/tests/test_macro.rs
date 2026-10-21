@@ -45,7 +45,12 @@ async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
 #[test]
 async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     let home = cx.thread().id();
-    let tasks = cx.scheduler().spawn_everywhere((), |()| async { std::thread::current().id() });
+    let tasks: Vec<_> = cx
+        .operations()
+        .workers()
+        .iter()
+        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .collect();
     assert_eq!(tasks.len(), 1);
     for task in tasks {
         assert_eq!(task.await.unwrap(), home);
