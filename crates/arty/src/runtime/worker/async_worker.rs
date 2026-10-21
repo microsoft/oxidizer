@@ -200,7 +200,6 @@ impl AsyncWorker {
         } else {
             Duration::ZERO
         };
-        let cycle_started = self.physical_time.stopwatch();
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             self.begin_shutdown();
             let now = self.timer_now();
@@ -208,13 +207,7 @@ impl AsyncWorker {
             return ControlFlow::Break(());
         }
 
-        if should_suspend && has_primary {
-            // A notification arriving before this wait is retained by WorkerSignal.
-            match next_timer {
-                Some(_) => self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed())),
-                None => self.signal.wait_for_notification(),
-            }
-        } else if should_suspend {
+        if should_suspend && !has_primary {
             match next_timer {
                 Some(deadline) => self.signal.wait(suspend_wait(deadline, self.time.instant())),
                 None => self.signal.wait_for_notification(),
@@ -432,6 +425,50 @@ mod tests {
         );
         worker_waker.wake_by_ref();
         step_completion.recv_timeout(TEST_TIMEOUT).unwrap();
+        worker_thread.join().unwrap();
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn first_cross_thread_timer_interrupts_established_idle_wait() {
+        struct TimerWake(mpsc::Sender<()>);
+
+        impl Wake for TimerWake {
+            fn wake(self: std::sync::Arc<Self>) {
+                _ = self.0.send(());
+            }
+        }
+
+        let (wait_entered, wait_entry) = mpsc::channel();
+        let (worker_ready, worker_setup) = mpsc::channel();
+        let worker_thread = thread::spawn(move || {
+            let (command_tx, command_rx) = channel::unbounded();
+            let signal = Arc::new(WorkerSignal::with_wait_observer(wait_entered));
+            let worker_waker = WorkerSignal::waker(&signal);
+            let worker = test_worker(
+                command_tx.clone(),
+                command_rx,
+                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                InactiveClock::default(),
+                signal,
+            );
+            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            worker_ready.send((command_tx, worker_waker, clock)).unwrap();
+            worker.run();
+        });
+        let (command_tx, worker_waker, clock) = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+        wait_entry.recv_timeout(TEST_TIMEOUT).unwrap();
+        let (timer_fired, timer_completion) = mpsc::channel();
+        let timer_waker = Waker::from(std::sync::Arc::new(TimerWake(timer_fired)));
+        let mut delay = Box::pin(clock.delay(Duration::from_millis(1)));
+
+        assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(&timer_waker)).is_pending());
+        timer_completion.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        drop(delay);
+        drop(clock);
+        command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
+        worker_waker.wake_by_ref();
         worker_thread.join().unwrap();
     }
 

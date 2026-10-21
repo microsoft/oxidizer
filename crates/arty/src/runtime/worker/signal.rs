@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(test)]
+use std::sync::mpsc;
 use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::time::Duration;
@@ -15,6 +17,8 @@ pub(crate) struct WorkerSignal {
     notified: Mutex<bool>,
     ready: Condvar,
     driver_waker: OnceLock<Waker>,
+    #[cfg(test)]
+    wait_observer: Option<mpsc::Sender<()>>,
 }
 
 fn should_finish_wait(timed_out: bool, elapsed: Duration, timeout: Duration) -> bool {
@@ -41,12 +45,24 @@ fn wait_until_deadline<S>(
 }
 
 impl WorkerSignal {
+    #[cfg(test)]
+    pub(crate) fn with_wait_observer(wait_observer: mpsc::Sender<()>) -> Self {
+        Self {
+            wait_observer: Some(wait_observer),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn wait_for_notification(&self) {
         let mut notified = self.notified.lock();
         loop {
             if *notified {
                 *notified = false;
                 return;
+            }
+            #[cfg(test)]
+            if let Some(wait_observer) = &self.wait_observer {
+                _ = wait_observer.send(());
             }
             notified = self.ready.wait(notified);
         }
