@@ -42,11 +42,36 @@ let snapshot = seismograph::snapshot(Default::default())?;
 ```
 
 Inspect saved snapshots with `seismograph view` from the
-[Seismograph CLI][__link0]. For live access,
-enable the `monitor` feature and start a
-[`Monitor`][__link1],
-keeping it alive while the application runs, then connect with
-`seismograph monitor`.
+[Seismograph CLI][__link0].
+
+## Live monitoring
+
+Applications built with the `monitor` feature can publish an OS-authorized local
+endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
+for as long as local control should remain available. The owning user and
+root/elevated administrators can connect without a token. Startup creates
+the user’s private registry automatically; no administrator setup is needed.
+Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
+fallback. Windows uses the user’s local application-data directory.
+Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
+the monitor’s identity, transport, discovery, persistence, and clock
+capability. Omitting it preserves native I/O; `seismograph_protocol`’s
+`test-util` feature provides an isolated in-memory implementation for
+application tests without host registry setup.
+
+```rust
+let _monitor = seismograph::monitor::Monitor::builder()
+    .name("worker")
+    .instance("west-europe")
+    .start()
+    .unwrap();
+```
+
+## Features
+
+* **`monitor`**: Enables the OS-authorized local monitor server.
+* **`test-util`**: Enables `monitor`, the protocol’s mock I/O controls, and
+  `monitor::Builder::isolated` for native tests using a temporary registry.
 
 
 <hr/>
@@ -55,4 +80,3 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 </sub>
 
  [__link0]: https://crates.io/crates/seismograph_cli
- [__link1]: https://docs.rs/seismograph/latest/seismograph/monitor/struct.Monitor.html

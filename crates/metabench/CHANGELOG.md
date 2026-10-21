@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-10-20
+
+- Published local dependency requirement(s) will move: metabench_macros, ohno.
+- Update local dependency requirements: metabench_macros =0.2.0 -> 0.2.1; ohno ^0.5.2 -> 0.5.3.
+
 ## [0.2.0] - 2026-10-13
 
 - 🔧 Maintenance

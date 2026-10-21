@@ -49,8 +49,8 @@ assert!(generated.contains("GetBook"));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjEuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhew8pv6r7HAblYEJpTRkXpAbADOjUkxD6robydXdnodrq0xhZIGCb3JvdXRlcmFtYV9idWlsZGUwLjMuMA
  [__link0]: https://docs.rs/routerama
- [__link1]: https://docs.rs/routerama_build/0.1.1/routerama_build/?search=Route
+ [__link1]: https://docs.rs/routerama_build/0.3.0/routerama_build/?search=Route
  [__link2]: https://docs.rs/routerama_build/latest/routerama_build/?search=Generator
  [__link3]: https://docs.rs/proc-macro2/latest/proc_macro2/struct.TokenStream.html

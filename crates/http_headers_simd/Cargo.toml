@@ -4,7 +4,7 @@
 [package]
 name = "http_headers_simd"
 description = "SIMD implementation details for http_headers. Do not depend on this crate directly; use http_headers."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,9 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_headers_simd"
 keywords = ["http", "headers", "simd", "parsing"]
 categories = ["web-programming"]
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = []

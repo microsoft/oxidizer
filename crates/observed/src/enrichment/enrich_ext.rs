@@ -24,7 +24,7 @@ pub struct Enriched<T> {
     #[pin]
     inner: T,
     sink: Sink,
-    entries: Arc<[EnrichmentEntry]>,
+    entries: Option<Arc<[EnrichmentEntry]>>,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Enriched<T> {
@@ -40,16 +40,30 @@ impl<F: Future> Future for Enriched<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.sink.push_enrichment(Arc::clone(this.entries));
+        let _guard = this.entries.as_ref().map(|entries| this.sink.push_enrichment(Arc::clone(entries)));
         this.inner.poll(cx)
     }
+}
+
+fn entries(sink: &Sink, enrichment: impl Enrichment) -> Option<Arc<[EnrichmentEntry]>> {
+    sink.supports_enrichment().then(|| enrichment.into_entries().into())
+}
+
+fn targeted_entries(sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Option<Arc<[EnrichmentEntry]>> {
+    sink.supports_enrichment().then(|| {
+        enrichment
+            .into_entries()
+            .into_iter()
+            .map(move |entry| entry.with_target(target))
+            .collect()
+    })
 }
 
 /// Extension trait that adds methods for enriching an async block of code.
 pub trait EnrichFutureExt: Future + Sized {
     /// Wraps this future so that `enrichment` entries are active on every poll.
     fn enrich(self, sink: &Sink, enrichment: impl Enrichment) -> Enriched<Self> {
-        let entries: Arc<[EnrichmentEntry]> = enrichment.into_entries().into();
+        let entries = entries(sink, enrichment);
         Enriched {
             inner: self,
             entries,
@@ -60,7 +74,7 @@ pub trait EnrichFutureExt: Future + Sized {
     /// Wraps this future so that `enrichment` entries are active as targeted enrichments
     /// for `target` on every poll.
     fn enrich_for(self, sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Enriched<Self> {
-        let entries: Arc<[EnrichmentEntry]> = enrichment.into_entries().into_iter().map(move |e| e.with_target(target)).collect();
+        let entries = targeted_entries(sink, target, enrichment);
         Enriched {
             inner: self,
             entries,
@@ -99,12 +113,12 @@ impl<F: Future> EnrichFutureExt for F {}
 pub trait EnrichFnExt<R>: FnOnce() -> R + Sized {
     /// Wraps this closure so that `enrichment` entries are active when called.
     fn enrich(self, sink: &Sink, enrichment: impl Enrichment) -> impl FnOnce() -> R {
-        let entries: Arc<[EnrichmentEntry]> = enrichment.into_entries().into();
+        let entries = entries(sink, enrichment);
         let sink = sink.clone();
         move || {
             // For composite emitters, this broadcasts the push to every
             // child's slot; the returned compound guard pops them all on Drop.
-            let _guard = sink.push_enrichment(entries);
+            let _guard = entries.map(|entries| sink.push_enrichment(entries));
             self()
         }
     }
@@ -112,10 +126,10 @@ pub trait EnrichFnExt<R>: FnOnce() -> R + Sized {
     /// Wraps this closure so that `enrichment` entries are active as targeted enrichments
     /// for `target` when called.
     fn enrich_for(self, sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> impl FnOnce() -> R {
-        let entries: Arc<[EnrichmentEntry]> = enrichment.into_entries().into_iter().map(|e| e.with_target(target)).collect();
+        let entries = targeted_entries(sink, target, enrichment);
         let sink = sink.clone();
         move || {
-            let _guard = sink.push_enrichment(entries);
+            let _guard = entries.map(|entries| sink.push_enrichment(entries));
             self()
         }
     }
@@ -131,6 +145,22 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
+
+    struct UnreachableEnrichment;
+
+    impl Enrichment for UnreachableEnrichment {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            panic!("a no-op sink must not materialize enrichment entries")
+        }
+    }
+
+    #[test]
+    fn noop_sink_does_not_materialize_enrichment() {
+        let sink = Sink::noop();
+
+        (|| {}).enrich(&sink, UnreachableEnrichment)();
+        (|| {}).enrich_for(&sink, SinkId::new("target"), UnreachableEnrichment)();
+    }
 
     // `Enriched` is held across `.await` points, so losing `Send` would stop it
     // working with multi-threaded executors. It is `Send` structurally, which is

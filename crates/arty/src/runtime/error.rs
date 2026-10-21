@@ -4,11 +4,15 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
+use arty_io_core::DriverError;
+use performables::arc::Arc;
+
 /// An error constructing or operating a runtime.
 ///
 /// You may receive this error when building a runtime with an invalid worker
 /// count or blocking-pool limit, requesting more workers than are available,
-/// waiting from an async worker, or stopping a runtime whose worker panicked.
+/// waiting from an async worker, or stopping a runtime whose worker or I/O
+/// driver failed.
 ///
 /// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 /// fails because a task panicked or was cancelled, its source is a
@@ -49,6 +53,18 @@ impl Error {
 
     pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
         Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
+    }
+
+    pub(crate) fn io_outside_worker() -> Self {
+        Self::new(IoOutsideWorkerError::new())
+    }
+
+    pub(crate) fn runtime_shutting_down() -> Self {
+        Self::new(RuntimeShuttingDownError::new())
+    }
+
+    pub(crate) fn io_failure(error: Arc<DriverError>) -> Self {
+        Self::new(IoFailure::caused_by(SharedDriverError(error)))
     }
 
     #[cfg(any(test, feature = "macros"))]
@@ -109,6 +125,32 @@ impl Display for RuntimeValidation {
 }
 
 impl StdError for RuntimeValidation {}
+
+#[ohno::error]
+#[display("I/O context access cannot synchronously cross between Arty workers")]
+struct IoOutsideWorkerError;
+
+#[ohno::error]
+#[display("the runtime is shutting down")]
+struct RuntimeShuttingDownError;
+
+#[ohno::error]
+struct IoFailure;
+
+#[derive(Debug)]
+struct SharedDriverError(Arc<DriverError>);
+
+impl Display for SharedDriverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self.0.as_ref(), f)
+    }
+}
+
+impl StdError for SharedDriverError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -183,5 +225,32 @@ mod tests {
             assert_eq!(error.to_string(), message);
             assert_eq!(error.source().unwrap().downcast_ref::<RuntimeValidation>(), Some(&validation));
         }
+    }
+
+    #[test]
+    fn io_failure_preserves_driver_error_as_its_source() {
+        let error = Error::io_failure(Arc::new(DriverError::from_message("driver failed")));
+        let source = error.source().unwrap();
+
+        assert!(source.downcast_ref::<IoFailure>().is_some());
+        assert_eq!(source.to_string(), "driver failed");
+        let shared = source.source().unwrap();
+        assert!(shared.downcast_ref::<SharedDriverError>().is_some());
+        assert_eq!(shared.to_string(), "driver failed");
+        assert!(shared.source().unwrap().downcast_ref::<DriverError>().is_some());
+    }
+
+    #[test]
+    fn io_validation_failures_preserve_private_leaf_identity_and_display_context() {
+        let outside_worker = Error::io_outside_worker();
+        let shutting_down = Error::runtime_shutting_down();
+
+        assert_eq!(
+            outside_worker.to_string(),
+            "I/O context access cannot synchronously cross between Arty workers"
+        );
+        assert!(outside_worker.source().unwrap().downcast_ref::<IoOutsideWorkerError>().is_some());
+        assert_eq!(shutting_down.to_string(), "the runtime is shutting down");
+        assert!(shutting_down.source().unwrap().downcast_ref::<RuntimeShuttingDownError>().is_some());
     }
 }

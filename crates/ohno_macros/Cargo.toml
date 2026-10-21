@@ -4,7 +4,7 @@
 [package]
 name = "ohno_macros"
 description = "Macros for the ohno crate."
-version = "0.5.2"
+version = "0.5.3"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
@@ -16,6 +16,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/ohno_macros"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.docs.rs]
 all-features = true

@@ -63,6 +63,14 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # Linux accepts a pathname sockaddr both with and without its terminating null byte.
+    'crates/seismograph_protocol/src/platform/unix.rs:\d+:108: replace \+ with \* in connect_timeout_with$',
+    # These Unix open flags occupy disjoint bits; XOR is equivalent to OR at these call sites.
+    'crates/seismograph_protocol/src/platform/unix.rs:\d+:\d+: replace \| with \^ in (directory_file|open_relative|create_descriptor|read_descriptor)$',
+    # Returning fd 0 requires closing process stdin; tests do not invalidate inherited process descriptors.
+    'crates/seismograph_protocol/src/platform/unix.rs:\d+:\d+: replace < with <= in open_relative$',
+    # These native Windows access flags occupy disjoint bits, so OR and XOR are identical.
+    'crates/seismograph_protocol/src/platform/windows/security.rs:\d+:\d+: replace \| with \^ in (directory_file|make_directory)$',
     # Windows and unsupported-platform pipe adapters are compiled out on Linux.
     'crates/metabench/src/worker_log\.rs:\d+:\d+: (?:.* in (?:read_available_windows|prepare_reader_unsupported|read_available_unsupported)$|replace (?:read_available_windows|prepare_reader_unsupported|read_available_unsupported) ->)',
     # Windows metadata admission is compiled out on Linux.

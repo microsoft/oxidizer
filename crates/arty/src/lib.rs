@@ -22,9 +22,9 @@
 //! services. Workers use thread-local bookkeeping rather than a global
 //! runtime singleton.
 //!
-//! Arty provides task scheduling, clocks, telemetry, and pools for offloading
-//! blocking callbacks. It does not provide async I/O drivers or move running
-//! tasks between workers.
+//! Arty provides task scheduling, clocks, telemetry, external I/O driver
+//! hosting, and pools for offloading blocking callbacks. It does not provide
+//! an async I/O implementation or move running tasks between workers.
 //!
 //! # Quickstart
 //!
@@ -61,6 +61,9 @@
 //! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
+//! - [`Io`](crate::io::Io) registers external `arty_io_core` contexts and lazily
+//!   initializes a driver on each worker when that worker first requests the
+//!   context.
 //! - [`Scheduler`](crate::task::Scheduler) keeps child work on its worker.
 //! - [`Clock`](crate::time::Clock) provides timers and timeouts;
 //!   [`ClockControl`](crate::time::ClockControl) controls time in tests.
@@ -73,7 +76,7 @@
 //! This supports thread-local and non-`Send` state, keeps worker-local data
 //! nearby, and can reduce contention for that data. Shared data may still contend.
 //! Choose Tokio for automatic task distribution or its async I/O ecosystem;
-//! Arty does not provide Tokio's I/O or timer drivers.
+//! Arty does not provide Tokio's I/O implementations.
 //!
 //! # Blocking work
 //!
@@ -130,7 +133,7 @@
 //!
 //! The default feature set enables `rt` and `macros`.
 //!
-//! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
+//! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
@@ -298,6 +301,8 @@ pub use arty_macros::test;
 ))]
 pub mod documentation;
 
+#[cfg(any(test, feature = "rt"))]
+pub mod io;
 #[cfg(any(test, feature = "rt"))]
 pub mod runtime;
 #[cfg(any(test, feature = "rt"))]

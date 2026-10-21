@@ -3,9 +3,11 @@
 
 //! Runtime telemetry through [`observed`].
 //!
-//! Arty emits runtime events through an [`observed::Sink`]. The default sink is
-//! a no-op; supply one with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
-//! before starting the runtime. Tasks can access it through
+//! Arty emits runtime events through an [`observed::Sink`]. The default is
+//! [`Sink::noop`](observed::Sink::noop), which disables events and enrichment.
+//! Supply a regular sink with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
+//! to enable enrichment; configure its processors to receive events.
+//! Tasks can access it through
 //! [`Builtins::sink`](crate::task::Builtins::sink).
 //! Configure processors that do not panic: event delivery is synchronous and
 //! Arty does not recover from telemetry-processor panics.
@@ -14,10 +16,11 @@
 //! dependency on [`observed`]. See its documentation for event definitions,
 //! enrichment, processing, and redaction.
 //!
-//! Async tasks inherit the enrichment active when submitted and restore it
-//! while polling. Blocking callbacks and unrelated threads do not inherit that
-//! context automatically. A task cancelled at shutdown need not emit an outcome
-//! event, so task events are not an exactly-once completion record.
+//! With a regular sink configured, async tasks inherit the enrichment active
+//! when submitted and restore it while polling. Blocking callbacks and unrelated
+//! threads do not inherit that context automatically. A task cancelled at shutdown
+//! need not emit an outcome event, so task events are not an exactly-once completion
+//! record.
 //!
 //! Routine classified runtime fields use the `arty` / `SystemMetadata`
 //! identifier when configuring redaction. Panic diagnostics use the separate

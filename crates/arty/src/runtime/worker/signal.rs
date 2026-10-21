@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc as StdArc;
-#[cfg(test)]
-use std::sync::mpsc;
+use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::time::Duration;
 
@@ -14,57 +12,32 @@ use performables::sync::notify::Notify;
 #[derive(Debug, Default)]
 pub(crate) struct WorkerSignal {
     ready: Notify,
+    driver_waker: OnceLock<Waker>,
     #[cfg(test)]
-    test_hooks: WorkerSignalTestHooks,
-}
-
-#[cfg(test)]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct WorkerSignalTestHooks {
-    idle_wait_notifier: Option<mpsc::Sender<()>>,
-    notification_wait_released: Option<mpsc::Sender<()>>,
-}
-
-#[cfg(test)]
-impl WorkerSignalTestHooks {
-    pub(crate) fn with_wait_observers(idle_wait_notifier: mpsc::Sender<()>, notification_wait_released: mpsc::Sender<()>) -> Self {
-        Self {
-            idle_wait_notifier: Some(idle_wait_notifier),
-            notification_wait_released: Some(notification_wait_released),
-        }
-    }
-
-    #[cfg(test)]
-    fn notify_idle_wait(&self) {
-        if let Some(notifier) = &self.idle_wait_notifier {
-            _ = notifier.send(());
-        }
-    }
-
-    fn notify_notification_release(&self) {
-        if let Some(notifier) = &self.notification_wait_released {
-            _ = notifier.send(());
-        }
-    }
+    wait_observer: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl WorkerSignal {
     #[cfg(test)]
-    pub(crate) fn new(test_hooks: WorkerSignalTestHooks) -> Self {
+    pub(crate) fn with_wait_observer(wait_observer: std::sync::mpsc::Sender<()>) -> Self {
         Self {
-            ready: Notify::new(),
-            test_hooks,
+            wait_observer: Some(wait_observer),
+            ..Self::default()
         }
     }
 
     pub(crate) fn wait_for_notification(&self) {
         if !self.ready.try_wait() {
             #[cfg(test)]
-            self.test_hooks.notify_idle_wait();
+            if let Some(wait_observer) = &self.wait_observer {
+                _ = wait_observer.send(());
+            }
             self.ready.wait();
         }
-        #[cfg(test)]
-        self.test_hooks.notify_notification_release();
+    }
+
+    pub(crate) fn take_notification(&self) -> bool {
+        self.ready.try_wait()
     }
 
     pub(crate) fn wait(&self, timeout: Duration) {
@@ -76,6 +49,14 @@ impl WorkerSignal {
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing driver interruption strands primary waits across unrelated runtime tests.
+    pub(crate) fn set_driver_waker(&self, waker: Waker) {
+        assert!(
+            self.driver_waker.set(waker).is_ok(),
+            "a worker installs its I/O driver interrupt waker once"
+        );
+    }
+
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
@@ -83,8 +64,12 @@ impl WorkerSignal {
         self.ready.is_notified()
     }
 
+    #[cfg_attr(test, mutants::skip)] // Removing all worker and driver wake effects strands runtime tests; each effect is tested directly.
     fn notify(&self) {
         self.ready.notify_one();
+        if let Some(driver_waker) = self.driver_waker.get() {
+            driver_waker.wake_by_ref();
+        }
     }
 }
 
@@ -101,6 +86,7 @@ impl Wake for WorkerSignal {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::sync::mpsc;
     use std::thread;
 
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
@@ -138,7 +124,7 @@ mod tests {
             Err(mpsc::RecvTimeoutError::Timeout)
         );
         WorkerSignal::waker(&signal).wake_by_ref();
-        done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         worker.join().unwrap();
     }
 

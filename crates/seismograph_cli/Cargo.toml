@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Command-line tools for inspecting seismograph telemetry."
 readme = "README.md"
 keywords = ["allocator", "memory", "telemetry", "diagnostics"]
@@ -45,6 +45,8 @@ seismograph_runtime.workspace = true
 
 [dev-dependencies]
 mutants.workspace = true
+seismograph = { path = "../seismograph", features = ["test-util"] }
+seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

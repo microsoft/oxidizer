@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-10-20
+
+- Rename the public `_documentation` module to `documentation`.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; ohno ^0.5.2 -> 0.5.3; templated_uri_macros =0.6.0 -> 0.7.0.
+
 ## [0.6.0] - 2026-09-10
 
 ### Breaking

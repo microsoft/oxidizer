@@ -3,14 +3,26 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
+#[cfg(test)]
+use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::remote::Pool as RemotePool;
+#[cfg(test)]
+use nonempty::NonEmpty;
 use performables::arc::Arc;
+#[cfg(test)]
+use performables::sync::channel;
 
 use crate::runtime::Error;
+#[cfg(test)]
+use crate::runtime::blocking_worker::BlockingPool;
 use crate::runtime::blocking_worker::BlockingWorker;
+#[cfg(test)]
+use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
+#[cfg(test)]
+use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -23,6 +35,24 @@ pub(crate) struct DispatcherClient {
 impl DispatcherClient {
     pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
+    }
+
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
+        let (command_tx, _command_rx) = channel::unbounded();
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: thread.clone(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
+        };
+        Self::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            observed::Sink::noop(),
+        )))
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -91,6 +121,18 @@ impl DispatcherClient {
         self.core.spawn_everywhere(make_factory)
     }
 
+    pub(crate) fn stop_with_error(&self, error: Error) {
+        self.core.stop_with_error(error);
+    }
+
+    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
+        self.core.take_shutdown_error()
+    }
+
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
+        self.core.access_io(worker_index, access)
+    }
+
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self) {
         self.core.stop();
@@ -115,16 +157,12 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::task::Waker;
-
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
-    use performables::sync::channel;
-    use thread_aware::ThreadAware;
+    use thread_aware::{Thread, ThreadAware};
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
-    use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::runtime::thread::waiter::ThreadWaiter;
+    use crate::runtime::dispatch::test_threads;
     use crate::task::scheduler::Scheduler;
 
     #[test]
@@ -240,5 +278,70 @@ mod tests {
         );
 
         assert_eq!((before, after), ((true, false), (false, true)));
+    }
+
+    #[derive(Clone)]
+    struct TestIo;
+
+    impl ThreadAware for TestIo {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestIo {
+        type ContextOptions = ();
+        type Driver = TestDriver;
+
+        fn context((): Self::ContextOptions) -> Self {
+            Self
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(TestDriver)
+        }
+    }
+
+    struct TestDriver;
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    fn io(registered: bool) -> crate::io::Io {
+        let threads = test_threads(2);
+        let (command_tx, command_rx) = channel::unbounded();
+        drop(command_rx);
+        let worker = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: threads[0].clone(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(vec![]),
+            nonempty::NonEmpty::new(worker),
+            Sink::noop(),
+        )));
+        let thread = if registered { threads[0].clone() } else { threads[1].clone() };
+        crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
+    }
+
+    #[test]
+    fn context_access_rejects_an_unregistered_worker() {
+        assert!(io(false).try_context::<TestIo>(&()).is_err());
+    }
+
+    #[test]
+    fn context_access_rejects_a_closed_worker_channel() {
+        assert!(io(true).try_context::<TestIo>(&()).is_err());
     }
 }

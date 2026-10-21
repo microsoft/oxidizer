@@ -3,7 +3,7 @@
 
 [package]
 name = "internity_macros"
-version = "0.2.1"
+version = "0.3.0"
 description = "Procedural macros for the internity crate."
 readme = "README.md"
 keywords = ["intern", "interner", "serde", "macro", "derive"]
@@ -16,6 +16,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/internity_macros"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["internity_macros_impl::*", "syn::*"]

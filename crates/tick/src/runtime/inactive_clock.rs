@@ -43,8 +43,10 @@ pub struct Shared;
 ///   [`ThreadAware`].
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] with the runtime's driver waker to get
-/// a working [`Clock`] instance and its associated [`ClockDriver`]. First and newly earlier timer
-/// registrations invoke that waker so they can interrupt the driver's current wait.
+/// a working [`Clock`] instance and its associated [`ClockDriver`]. For system clocks, first and
+/// newly earlier timer registrations invoke that waker so they can interrupt the driver's current
+/// wait. Controlled clocks ignore it; see the [`runtime` module's controlled-clock lifecycle
+/// guidance](crate::runtime#controlled-clocks).
 ///
 /// # Examples
 ///

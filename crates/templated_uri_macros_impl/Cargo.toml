@@ -4,7 +4,7 @@
 [package]
 name = "templated_uri_macros_impl"
 description = "Macros for the templated_uri crate."
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
 categories = ["encoding", "parser-implementations", "template-engine", "web-programming"]
@@ -16,6 +16,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri_macros_impl"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.anvil.miri]
 exclude = true

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.1] - 2026-10-20
+
+- Refresh published documentation and package metadata for the current macro family.
+- Update local dependency requirements: data_privacy_core ^0.1.2 -> 0.1.3; data_privacy_macros =0.13.0 -> 0.13.1.
+
 ## [0.13.0] - 2026-09-10
 
 ### Changed

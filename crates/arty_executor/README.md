@@ -53,7 +53,7 @@ A panic in a directly registered executor task remains fail-fast.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2d-tu4PqXUsbYuzt22_JPvsb_N4PPHTp9a8brx0b6bmSDYFhZIKCaUpvaW5FcnJvcvaCbWFydHlfZXhlY3V0b3JlMC4xLjM
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2d-tu4PqXUsbYuzt22_JPvsb_N4PPHTp9a8brx0b6bmSDYFhZIKCaUpvaW5FcnJvcvaCbWFydHlfZXhlY3V0b3JlMC41LjA
  [__link0]: https://docs.rs/arty
- [__link1]: https://docs.rs/arty_executor/0.1.3/arty_executor/remote/index.html
+ [__link1]: https://docs.rs/arty_executor/0.5.0/arty_executor/remote/index.html
  [__link2]: https://crates.io/crates/JoinError

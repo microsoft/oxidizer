@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.2] - 2026-10-20
+
+- Classify the implementation crate as private API and align it with the Fakeable package family.
+
 ## [0.2.1] - 2026-10-15
 
 - Features
