@@ -44,7 +44,7 @@ fn count_workers(runtime: &Runtime) -> usize {
         .unwrap();
     let tasks: Vec<_> = operations
         .workers()
-        .iter()
+        .into_iter()
         .map(|worker| scheduler.spawn_at(worker, (), |()| async { thread::current().id() }))
         .collect();
     let count = tasks.len();
@@ -267,7 +267,7 @@ fn builtins_publish_the_same_services_on_every_worker() {
     let tasks: Vec<_> = builtins
         .operations()
         .workers()
-        .iter()
+        .into_iter()
         .map(|worker| {
             builtins.scheduler().spawn_at(worker, builtins.clone(), |cx: Builtins| async move {
                 let scheduler: &Scheduler = cx.as_ref();

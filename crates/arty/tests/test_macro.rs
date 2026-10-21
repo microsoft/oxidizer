@@ -48,7 +48,7 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     let tasks: Vec<_> = cx
         .operations()
         .workers()
-        .iter()
+        .into_iter()
         .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 1);

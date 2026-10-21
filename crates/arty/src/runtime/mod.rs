@@ -47,6 +47,7 @@ mod operations;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
+mod workers;
 
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
@@ -57,7 +58,9 @@ pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
 #[doc(inline)]
-pub use operations::{RuntimeOperations, Workers};
+pub use operations::RuntimeOperations;
+#[doc(inline)]
+pub use workers::Workers;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]

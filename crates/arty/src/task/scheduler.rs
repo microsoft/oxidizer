@@ -294,7 +294,7 @@ impl Scheduler {
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
     /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    /// let destination = cx.operations().workers().iter().next().unwrap();
+    /// let destination = cx.operations().workers().into_iter().next().unwrap();
     /// let task = cx
     ///     .scheduler()
     ///     .spawn_at(destination, cx.clone(), |worker| async move {
@@ -316,7 +316,7 @@ impl Scheduler {
     /// let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     /// let destination = runtime
     ///     .scheduler()
-    ///     .block_on(async |cx| cx.operations().workers().iter().next().unwrap().clone())
+    ///     .block_on(async |cx| cx.operations().workers().into_iter().next().unwrap().clone())
     ///     .unwrap();
     /// scheduler.spawn_at(&destination, (), |()| async { SendOnly });
     /// ```
@@ -330,10 +330,7 @@ impl Scheduler {
             return JoinHandle::shutdown(self.dispatcher.remote_results());
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::failed(
-                self.dispatcher.remote_results(),
-                crate::task::JoinError::invalid_destination(destination.clone()),
-            );
+            return JoinHandle::failed(self.dispatcher.remote_results(), crate::task::JoinError::invalid_destination());
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {

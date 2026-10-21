@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::slice;
-
-use thread_aware::Thread;
-
+use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::task::Scheduler;
 
@@ -83,49 +80,5 @@ impl RuntimeOperations {
     pub fn request_stop(&self) {
         Scheduler::begin_current_executor_shutdown(&self.dispatcher);
         self.dispatcher.stop();
-    }
-}
-
-/// A runtime's worker coordinates.
-///
-/// Obtain this view from [`RuntimeOperations::workers`]. Each item is borrowed
-/// from the runtime and can be passed directly to
-/// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
-#[derive(Debug)]
-pub struct Workers {
-    inner: Box<[Thread]>,
-}
-
-impl Workers {
-    pub(crate) fn new(inner: Box<[Thread]>) -> Self {
-        Self { inner }
-    }
-
-    /// Iterates over the runtime's worker coordinates.
-    pub fn iter(&self) -> slice::Iter<'_, Thread> {
-        self.inner.iter()
-    }
-
-    /// Returns the number of workers in the runtime.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Returns `true` if the runtime has no workers.
-    ///
-    /// A running Arty runtime always has at least one worker.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-}
-
-impl<'a> IntoIterator for &'a Workers {
-    type Item = &'a Thread;
-    type IntoIter = slice::Iter<'a, Thread>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
     }
 }

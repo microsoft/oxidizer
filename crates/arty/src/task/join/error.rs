@@ -6,7 +6,6 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display};
 
 use performables::sync::mutex::Mutex;
-use thread_aware::Thread;
 
 /// A task failed to return its result.
 ///
@@ -50,7 +49,7 @@ enum Kind {
     // The payload can be Send without being Sync. It is only consumed, never borrowed.
     Panic(Mutex<Box<dyn Any + Send + 'static>>),
     Shutdown,
-    InvalidDestination(Thread),
+    InvalidDestination,
 }
 
 impl JoinError {
@@ -105,16 +104,7 @@ impl JoinError {
     /// Returns `true` if the requested destination is not a worker of the runtime.
     #[must_use]
     pub const fn is_invalid_destination(&self) -> bool {
-        matches!(&self.kind, Kind::InvalidDestination(_))
-    }
-
-    /// Returns the unsupported destination coordinate, if this is a destination error.
-    #[must_use]
-    pub const fn destination(&self) -> Option<&Thread> {
-        match &self.kind {
-            Kind::InvalidDestination(destination) => Some(destination),
-            Kind::Panic(_) | Kind::Shutdown => None,
-        }
+        matches!(&self.kind, Kind::InvalidDestination)
     }
 
     pub(crate) fn panicked(payload: Box<dyn Any + Send + 'static>) -> Self {
@@ -127,9 +117,9 @@ impl JoinError {
         Self { kind: Kind::Shutdown }
     }
 
-    pub(crate) fn invalid_destination(destination: Thread) -> Self {
+    pub(crate) const fn invalid_destination() -> Self {
         Self {
-            kind: Kind::InvalidDestination(destination),
+            kind: Kind::InvalidDestination,
         }
     }
 
@@ -138,7 +128,7 @@ impl JoinError {
     pub fn into_panic(self) -> Option<Box<dyn Any + Send + 'static>> {
         match self.kind {
             Kind::Panic(payload) => Some(payload.into_inner()),
-            Kind::Shutdown | Kind::InvalidDestination(_) => None,
+            Kind::Shutdown | Kind::InvalidDestination => None,
         }
     }
 }
@@ -158,7 +148,6 @@ impl Debug for JoinError {
             .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
             .field("is_invalid_destination", &self.is_invalid_destination())
-            .field("destination", &self.destination())
             .finish()
     }
 }
@@ -168,7 +157,7 @@ impl Display for JoinError {
         f.write_str(match &self.kind {
             Kind::Panic(_) => "task panicked",
             Kind::Shutdown => "runtime is shutting down",
-            Kind::InvalidDestination(_) => "target thread is not a worker of this runtime",
+            Kind::InvalidDestination => "target thread is not a worker of this runtime",
         })
     }
 }
@@ -187,14 +176,12 @@ mod tests {
         assert!(panic.is_panic());
         assert!(!panic.is_shutdown());
         assert!(!panic.is_invalid_destination());
-        assert!(panic.destination().is_none());
         assert_eq!(panic.to_string(), "task panicked");
 
         let shutdown = JoinError::shutdown();
         assert!(!shutdown.is_panic());
         assert!(shutdown.is_shutdown());
         assert!(!shutdown.is_invalid_destination());
-        assert!(shutdown.destination().is_none());
         assert_eq!(shutdown.to_string(), "runtime is shutting down");
         assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
         assert!(shutdown.source().is_none());
