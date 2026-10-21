@@ -168,7 +168,7 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
 
 const VERSIONS: &Section = section!("CRATE VERSIONS";
     "Monitor (seismograph_cli)" => "Semantic version compiled into this local monitor executable. Shown in the Info view for live connections and saved snapshots.",
-    "Server (seismograph)" => "Semantic version of the seismograph crate in the connected application, queried during discovery after authentication, before any capture. Shown in the Info view. This is not the protocol crate version or the application's own version.",
+    "Server (seismograph)" => "Semantic version of the seismograph crate in the connected application, queried during discovery after the OS-authorized handshake, before any capture. Shown in the Info view. This is not the protocol crate version or the application's own version.",
     "unknown (legacy server)" => "The server closed the version query without a response. Older servers do not report their version; no version is inferred from the local monitor.",
     "unknown (not recorded in snapshot)" => "Saved snapshots do not contain the server crate version. The local monitor version is not the snapshot producer's version.",
 );
@@ -176,6 +176,7 @@ const VERSIONS: &Section = section!("CRATE VERSIONS";
 const BROWSER: &Section = section!("APPLICATIONS";
     "Application / instance" => "Discovered application name, with an optional instance name in parentheses.",
     "pid" => "Operating-system process ID of the application.",
+    "owner" => "Owning Unix UID or Windows user SID. Registries are created automatically. Regular users can connect to their own processes; root/elevated administrators can discover and connect across accessible user registries.",
     "off / on / custom" => "off: all recorder groups disabled. on: every enabled group has backtraces and sampling 1/1; not necessarily every group is enabled. custom: an enabled group has other settings.",
     "Up/Down" => "Select an application.",
     "Enter / click row" => "Connect to the selected application.",
@@ -188,7 +189,8 @@ const INFO: &Section = section!("INFO / SOURCE";
     "Name" => "Connected application name.",
     "Instance" => "Application-supplied instance name; '-' means absent.",
     "PID" => "Operating-system process ID.",
-    "Monitor port" => "Port serving the application's monitor connection.",
+    "OS owner" => "Verified owning Unix UID or Windows user SID. Access is enforced by the operating system, not an authentication token.",
+    "Endpoint" => "Local Unix socket path or Windows named-pipe name. Knowing the name does not grant connection access.",
     "Event ring buffer" => "Capacity in events per recording thread.",
     "Allocations / General events / Arc dereferences / Runtime tasks / I/O / Cache" => "Independent recording policies. Each shows enabled state, backtraces on/off, and sample 1/N (percentage = 100/N).",
     "Telemetry memory / thread" => "Ring-buffer memory for the configured capacity, not application heap usage.",
@@ -702,7 +704,8 @@ mod tests {
                 "Name",
                 "Instance",
                 "PID",
-                "Monitor port",
+                "OS owner",
+                "Endpoint",
                 "Event ring buffer",
                 "Telemetry memory / thread",
                 "Telemetry threads",

@@ -51,7 +51,7 @@ impl App {
     }
 
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
-        self.draw_with_snapshot_time(frame, snapshot_time);
+        self.draw_with_snapshot_time(frame, |snapshot| snapshot_time_at(snapshot, self.io.instant()));
     }
 
     fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
@@ -130,7 +130,7 @@ impl App {
         frame.render_widget(Paragraph::new(line).style(Style::default().bg(Color::DarkGray)), footer);
         self.draw_filter_banner(frame, filter_banner);
         if let (Some(started_at), Some(step)) = (self.capture_started_at, self.capture_step) {
-            Self::draw_capture_popup(frame, started_at.elapsed(), step);
+            Self::draw_capture_popup(frame, self.io.instant().saturating_duration_since(started_at), step);
         }
         if let Some(popup) = self.recording_configuration_popup {
             Self::draw_recording_configuration_popup(frame, popup);
@@ -148,7 +148,8 @@ impl App {
                 |name| format!("{} ({name})", instance.descriptor.name),
             );
             ListItem::new(format!(
-                "{label}  pid={}  {}",
+                "{label}  owner={}  pid={}  {}",
+                instance.descriptor.owner,
                 instance.descriptor.process_id,
                 recording_configuration_label(instance.recording)
             ))
@@ -998,7 +999,8 @@ fn draw_info(
         metric_line("Name", descriptor.name.clone()),
         metric_line("Instance", descriptor.instance.clone().unwrap_or_else(|| "-".into())),
         metric_line("PID", descriptor.process_id.to_string()),
-        metric_line("Monitor port", descriptor.port.to_string()),
+        metric_line("OS owner", descriptor.owner.to_string()),
+        metric_line("Endpoint", descriptor.endpoint.to_string()),
         Line::from(""),
         metric_line("Event ring buffer", format!("{} events / thread", format_count(event_capacity))),
         recording_policy_line("Allocations", recording.allocations),
@@ -1010,7 +1012,7 @@ fn draw_info(
         metric_line("Telemetry memory / thread", format_bytes(memory_per_thread)),
     ];
     if view.recording_unknown {
-        lines.truncate(7);
+        lines.truncate(8);
         lines.push(Line::from(
             "Recording state UNKNOWN; waiting for authoritative server configuration.",
         ));
@@ -1884,6 +1886,7 @@ fn key_style() -> Style {
     Style::default().fg(KEY_COLOR).add_modifier(Modifier::BOLD)
 }
 
+#[cfg(test)]
 fn snapshot_time(snapshot: &CapturedSnapshot) -> String {
     snapshot_time_at(snapshot, Instant::now())
 }
@@ -1967,8 +1970,12 @@ mod tests {
             instance: Some("west".into()),
             process_id: 42,
             instance_id: seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
-            port: 1234,
-            authentication: seismograph_protocol::monitor::AuthenticationToken::from_bytes([2; 32]),
+
+            owner: seismograph_protocol::monitor::MonitorOwner::UnixUser(1001),
+
+            endpoint: seismograph_protocol::monitor::MonitorEndpoint::UnixSocket(std::path::PathBuf::from(
+                "/run/seismograph/1001/42-01010101010101010101010101010101.sock",
+            )),
         }
     }
 
@@ -4115,6 +4122,35 @@ mod tests {
     }
 
     #[test]
+    fn capture_progress_and_snapshot_age_use_the_selected_clock() {
+        let (io, control) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut capture = representative_capture();
+        capture.captured_at = Some(io.system_time());
+        capture.captured_instant = Some(io.instant());
+        let mut app = App::with_io(io.clone());
+        app.screen = Screen::Connected {
+            descriptor: descriptor(),
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Info,
+            snapshot: Some(capture),
+        };
+        app.capture_started_at = Some(io.instant());
+        app.capture_step = Some(CaptureStep::Decode);
+        control.advance_time(Duration::from_secs(5));
+        let mut terminal = Terminal::new(TestBackend::new(180, 60)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("5.0s"));
+        assert!(rendered.contains("5s ago"));
+    }
+
+    #[test]
     fn recording_popup_hides_custom_settings_and_restores_them_when_reselected() {
         use crossterm::event::KeyCode;
 
@@ -4761,6 +4797,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (691_592, 3_962_280_200_487_367_007));
+        assert_eq!(stable_digest(&output), (691_747, 13_906_322_091_552_892_060));
     }
 }
