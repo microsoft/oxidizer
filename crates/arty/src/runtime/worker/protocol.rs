@@ -11,62 +11,44 @@ use crate::task::execution::BoxedRemoteFutureFactory;
 
 pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
 
+/// Owns a queued closure until the destination worker consumes it.
+///
+/// Dropping the wrapper contains a panic from disposing the closure. Successful
+/// consumption transfers the closure out exactly once.
+pub(crate) struct QueuedClosure<T> {
+    inner: Option<T>,
+}
+
+impl<T> QueuedClosure<T> {
+    pub(crate) fn new(inner: T) -> Self {
+        Self { inner: Some(inner) }
+    }
+
+    pub(crate) fn into_inner(mut self) -> T {
+        self.inner.take().expect("a queued closure is consumed exactly once")
+    }
+}
+
+impl<T> Drop for QueuedClosure<T> {
+    fn drop(&mut self) {
+        let Some(closure) = self.inner.take() else {
+            return;
+        };
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(closure))) {
+            discard_task_panic_payload(panic);
+        }
+    }
+}
+
 /// Owns a complete submission closure until the destination worker registers it.
 ///
 /// The closure includes every unregistered capture, such as the user's factory and its result
-/// sender. Dropping the wrapper contains a panic from disposing that complete closure; successful
-/// registration transfers the closure out. Captured endpoints retain their own disposal guards for
-/// paths that do not pass through this wrapper.
-pub(crate) struct QueuedTaskFactory {
-    inner: Option<BoxedRemoteFutureFactory>,
-}
-
-impl QueuedTaskFactory {
-    pub(crate) fn new(inner: BoxedRemoteFutureFactory) -> Self {
-        Self { inner: Some(inner) }
-    }
-
-    pub(crate) fn into_inner(mut self) -> BoxedRemoteFutureFactory {
-        self.inner.take().expect("a queued task factory is consumed exactly once")
-    }
-}
-
-impl Drop for QueuedTaskFactory {
-    fn drop(&mut self) {
-        let Some(factory) = self.inner.take() else {
-            return;
-        };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
-            discard_task_panic_payload(panic);
-        }
-    }
-}
+/// sender. Captured endpoints retain their own disposal guards for paths that do not pass through
+/// this wrapper.
+pub(crate) type QueuedTaskFactory = QueuedClosure<BoxedRemoteFutureFactory>;
 
 /// Owns a synchronous I/O access closure until the destination worker invokes it.
-pub(crate) struct QueuedIoAccess {
-    inner: Option<IoAccess>,
-}
-
-impl QueuedIoAccess {
-    pub(crate) fn new(inner: IoAccess) -> Self {
-        Self { inner: Some(inner) }
-    }
-
-    pub(crate) fn into_inner(mut self) -> IoAccess {
-        self.inner.take().expect("a queued I/O access is consumed exactly once")
-    }
-}
-
-impl Drop for QueuedIoAccess {
-    fn drop(&mut self) {
-        let Some(access) = self.inner.take() else {
-            return;
-        };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(access))) {
-            discard_task_panic_payload(panic);
-        }
-    }
-}
+pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
 pub(crate) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will

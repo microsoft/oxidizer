@@ -129,7 +129,7 @@ impl DispatcherClient {
         self.core.take_shutdown_error()
     }
 
-    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> bool {
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
         self.core.access_io(worker_index, access)
     }
 

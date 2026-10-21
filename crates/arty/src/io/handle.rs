@@ -125,9 +125,7 @@ impl Io {
                 .unwrap_or_else(|| Err(Error::io_outside_worker()));
             _ = result_tx.send(result);
         });
-        if !self.dispatcher.access_io(worker_index, access) {
-            return Err(runtime_error(&self.dispatcher).unwrap_or_else(Error::runtime_shutting_down));
-        }
+        self.dispatcher.access_io(worker_index, access)?;
         result_rx
             .recv()
             .map_err(|disconnected| runtime_error(&self.dispatcher).unwrap_or_else(|| Error::new(disconnected)))?

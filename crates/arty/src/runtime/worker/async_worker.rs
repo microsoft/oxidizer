@@ -23,10 +23,6 @@ use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
 
 const COMMANDS_PER_CYCLE: usize = 256;
-// Recheck timers and non-blocking secondary drivers at least every millisecond.
-// If a primary returns early, WorkerSignal spends the remaining budget so an
-// idle driver cannot turn the worker loop into a busy poll.
-const IO_IDLE_WAIT: Duration = Duration::from_millis(1);
 
 fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
@@ -193,14 +189,14 @@ impl AsyncWorker {
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
         if self.shutdown_signal.load(Ordering::Acquire) {
             self.begin_shutdown();
+            let now = self.timer_now();
+            _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         }
         let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
         let has_primary = RuntimeDriverHost::has_primary_current();
         let max_wait = if should_suspend && has_primary {
-            next_timer
-                .map_or(IO_IDLE_WAIT, |deadline| suspend_wait(deadline, self.time.instant()))
-                .min(IO_IDLE_WAIT)
+            next_timer.map_or(Duration::MAX, |deadline| suspend_wait(deadline, self.time.instant()))
         } else {
             Duration::ZERO
         };
@@ -214,7 +210,10 @@ impl AsyncWorker {
 
         if should_suspend && has_primary {
             // A notification arriving before this wait is retained by WorkerSignal.
-            self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed()));
+            match next_timer {
+                Some(_) => self.signal.wait(max_wait.saturating_sub(cycle_started.elapsed())),
+                None => self.signal.wait_for_notification(),
+            }
         } else if should_suspend {
             match next_timer {
                 Some(deadline) => self.signal.wait(suspend_wait(deadline, self.time.instant())),

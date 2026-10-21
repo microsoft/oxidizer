@@ -189,9 +189,9 @@ impl DispatcherCore {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> bool {
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
         if self.is_shutting_down() {
-            return false;
+            return Err(Error::runtime_shutting_down());
         }
         let endpoint = self
             .worker_endpoints
@@ -201,7 +201,7 @@ impl DispatcherCore {
             access: QueuedIoAccess::new(access),
         });
         endpoint.waker.wake_by_ref();
-        send_result.is_ok()
+        send_result.map_err(|_error| Error::runtime_shutting_down())
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -468,13 +468,17 @@ mod tests {
         dispatcher.stop();
         let invoked = Arc::new(AtomicBool::new(false));
 
-        assert!(!dispatcher.access_io(
-            WorkerIndex(0),
-            Box::new({
-                let invoked = Arc::clone(&invoked);
-                move |_| invoked.store(true, Ordering::Relaxed)
-            }),
-        ));
+        assert!(
+            dispatcher
+                .access_io(
+                    WorkerIndex(0),
+                    Box::new({
+                        let invoked = Arc::clone(&invoked);
+                        move |_| invoked.store(true, Ordering::Relaxed)
+                    }),
+                )
+                .is_err()
+        );
 
         // Rejection is synchronous and the callback publishes no other data.
         assert!(!invoked.load(Ordering::Relaxed));
