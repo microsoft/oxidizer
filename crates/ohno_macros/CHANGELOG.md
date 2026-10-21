@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.3] - 2026-10-20
+
+- Refresh published macro documentation and classify the macro crate as private API.
+- Update local dependency requirements: ohno_macros_impl =0.5.2 -> 0.5.3.
+
 ## [0.5.2] - 2026-09-10
 
 ### Maintenance

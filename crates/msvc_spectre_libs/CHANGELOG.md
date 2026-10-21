@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.2] - 2026-10-20
+
+- Refresh published documentation and inherited package metadata.
+- Update local dependency requirements: msvc_spectre_libs_build ^0.1.1 -> 0.1.2.
+
 ## [0.2.1] - 2026-09-10
 
 ### Maintenance

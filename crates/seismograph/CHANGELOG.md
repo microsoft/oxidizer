@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Consolidate monitor startup errors at the crate root and migrate allocator diagnostics to the native-v4 model.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

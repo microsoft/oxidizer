@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; multitude_macros =0.11.1 -> 0.12.0.
+
 ## [0.11.0] - 2026-10-05
 
 - ⚠️ Breaking

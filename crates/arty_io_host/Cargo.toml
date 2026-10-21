@@ -4,7 +4,7 @@
 [package]
 name = "arty_io_host"
 description = "Unstable I/O driver hosting utilities for the Arty runtime."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
 categories = ["asynchronous"]
