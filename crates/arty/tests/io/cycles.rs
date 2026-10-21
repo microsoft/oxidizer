@@ -185,6 +185,37 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
 }
 
 #[test]
+fn notification_during_first_driver_construction_prevents_primary_wait() {
+    let runtime = runtime(1);
+    let worker = worker_schedulers(&runtime, 1).pop().unwrap();
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.block_driver_at.store(1, Ordering::SeqCst);
+    scenario.block_primary.store(true, Ordering::SeqCst);
+    scenario.block_primary_until_woken.store(true, Ordering::SeqCst);
+    let initialization = worker.spawn({
+        let scenario = scenario.clone();
+        async move |builtins| {
+            let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+            std::future::pending::<()>().await;
+        }
+    });
+    scenario.wait_until_driver_blocked();
+    let (completed, completion) = mpsc::channel();
+    let queued = worker.spawn(async move |_| completed.send(()).unwrap());
+
+    scenario.release_driver();
+    let result = completion.recv_timeout(testing_aids::TEST_TIMEOUT);
+    if result.is_err() {
+        scenario.wake_driver_interrupts();
+    }
+
+    result.unwrap();
+    queued.join().unwrap();
+    runtime.stop().unwrap();
+    assert!(initialization.join().unwrap_err().is_shutdown());
+}
+
+#[test]
 fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
     // `AsyncWorker::injected_time_advances_worker_timers_without_elapsed_wall_time`
     // separately covers worker-driven ClockDriver advancement.
