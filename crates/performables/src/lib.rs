@@ -12,6 +12,11 @@
 //! Synchronization supports blocking callers and executor-independent async
 //! waits.
 //!
+//! Ready blocking channel operations do not allocate waiter storage. Queue
+//! payload storage and enabled telemetry may allocate independently. Final
+//! arrivals at an async-capable barrier do not allocate their own waiter
+//! storage.
+//!
 //! # Why use this instead of `std` or `tokio`?
 //!
 //! The crate offers:

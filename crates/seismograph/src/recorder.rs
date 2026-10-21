@@ -3209,6 +3209,22 @@ mod tests {
 
     #[test]
     fn standalone_clear_reuses_rings_and_preserves_enabled_and_disabled_policies() {
+        fn install_recorder() -> &'static ThreadRecorder {
+            LOCAL_RECORDER.with(|local| {
+                assert!(local.recorder.get().is_null());
+                // Safe ownership lets the fixture inspect process-lifetime metadata without dereferencing raw pointers.
+                let recorder: &'static ThreadRecorder = Box::leak(Box::new(ThreadRecorder::new()));
+                RECORDERS
+                    .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+                        recorder.next.store(head, Ordering::Relaxed);
+                        Some(ptr::from_ref(recorder).cast_mut())
+                    })
+                    .unwrap();
+                local.recorder.set(ptr::from_ref(recorder));
+                recorder
+            })
+        }
+
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = Configuration {
             allocations: RecordingPolicy {
@@ -3224,23 +3240,44 @@ mod tests {
             ..timeout_configuration()
         };
         configure(enabled);
+        let recorder = install_recorder();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
-        let before = statistics().allocated_bytes;
+        // Clear may release retired history without replacing this thread's active ring.
+        let retired = std::thread::spawn(|| {
+            let recorder = install_recorder();
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+            });
+            recorder
+        })
+        .join()
+        .unwrap();
+        assert!(retired.retired.load(Ordering::Acquire));
+        let active_storage = || {
+            let ring = recorder.ring().unwrap();
+            (ring.slots.as_ptr(), ring.capacity())
+        };
+        let before = active_storage();
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (enabled, 0, before)
         );
+        {
+            let _ring = retired.ring_lock();
+            assert!(retired.ring().is_none());
+            assert_eq!(retired.ring_capacity.load(Ordering::Acquire), 0);
+        }
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
-        assert_eq!(statistics().retained_events, 1);
+        assert_eq!(try_statistics().unwrap().retained_events, 1);
         configure(Configuration::default());
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (Configuration::default(), 0, before)
         );
     }

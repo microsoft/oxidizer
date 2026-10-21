@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Uncontended ownership and lock benchmarks.
+//! Uncontended ownership, lock, and ready blocking benchmarks.
+//!
+//! Scalar payload values are arbitrary transfer markers without payload allocations.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -15,10 +17,13 @@ use std::hint::black_box;
 use std::pin::pin;
 use std::sync::PoisonError;
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
-use criterion::Criterion;
+use criterion::{BatchSize, Criterion};
 use performables::arc::Arc;
 use performables::sync;
+use performables::sync::barrier::Barrier;
+use performables::sync::channel::{self, OneshotReceiver, Receiver, Sender, WatchReceiver, WatchSender};
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
 
@@ -28,6 +33,134 @@ const ARC_CLONE_DROP: &str = "performables_uncontended/arc_clone_drop";
 const MUTEX_LOCK: &str = "performables_uncontended/mutex_lock";
 const RW_LOCK_READ: &str = "performables_uncontended/rw_lock_read";
 const RW_LOCK_WRITE: &str = "performables_uncontended/rw_lock_write";
+const READY_BLOCKING: &str = "performables_uncontended/ready_blocking";
+// Fixed batches keep fixture setup outside measurements without scaling the
+// working set with the speed of the operation.
+const READY_BATCH: BatchSize = BatchSize::NumIterations(64);
+
+type Queue = (Sender<u64>, Receiver<u64>);
+
+/// Warms payload storage and initial queue bookkeeping outside the measured operation.
+fn empty_queue(bounded: bool) -> Queue {
+    let queue = if bounded { channel::bounded(1) } else { channel::unbounded() };
+    queue.0.try_send(7).expect("an empty queue with a live receiver accepts a value");
+    queue.1.try_recv().expect("the fixture just buffered a value");
+    queue
+}
+
+fn ready_queue(bounded: bool) -> Queue {
+    let queue = empty_queue(bounded);
+    queue.0.try_send(7).expect("an empty queue with a live receiver accepts a value");
+    queue
+}
+
+#[metabench::benchmark(QUEUE_SEND, READY_BLOCKING, "queue_send")]
+#[bench::bounded(&mut empty_queue(true))]
+#[bench::unbounded(&mut empty_queue(false))]
+fn queue_send(queue: &mut Queue) {
+    black_box(&queue.0)
+        .send(black_box(7))
+        .expect("the fixture provides an empty queue with a live receiver");
+}
+
+#[metabench::benchmark(QUEUE_RECV, READY_BLOCKING, "queue_recv")]
+#[bench::bounded(&mut ready_queue(true))]
+#[bench::unbounded(&mut ready_queue(false))]
+fn queue_recv(queue: &mut Queue) -> u64 {
+    black_box(&queue.1).recv().expect("the fixture provides a buffered value")
+}
+
+#[metabench::benchmark(QUEUE_RECV_TIMEOUT, READY_BLOCKING, "queue_recv_timeout")]
+#[bench::bounded(&mut ready_queue(true))]
+#[bench::unbounded(&mut ready_queue(false))]
+fn queue_recv_timeout(queue: &mut Queue) -> u64 {
+    black_box(&queue.1)
+        .recv_timeout(Duration::ZERO)
+        .expect("an already buffered value completes even at a zero deadline")
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "batched fixtures take the receiver through an exclusive reference to the Option"
+)]
+fn ready_oneshot() -> Option<OneshotReceiver<u64>> {
+    let (sender, receiver) = channel::oneshot();
+    sender.send(7).expect("the fixture retains a live receiver");
+    Some(receiver)
+}
+
+#[metabench::benchmark(ONESHOT_RECV, READY_BLOCKING, "oneshot_recv")]
+#[bench::value(&mut ready_oneshot())]
+fn oneshot_recv(receiver: &mut Option<OneshotReceiver<u64>>) -> u64 {
+    black_box(receiver.take().expect("each batch supplies a fresh receiver"))
+        .recv()
+        .expect("the fixture provides a completed oneshot")
+}
+
+#[metabench::benchmark(ONESHOT_RECV_TIMEOUT, READY_BLOCKING, "oneshot_recv_timeout")]
+#[bench::value(&mut ready_oneshot())]
+fn oneshot_recv_timeout(receiver: &mut Option<OneshotReceiver<u64>>) -> u64 {
+    black_box(receiver.take().expect("each batch supplies a fresh receiver"))
+        .recv_timeout(Duration::ZERO)
+        .expect("an already completed oneshot succeeds even at a zero deadline")
+}
+
+fn ready_watch() -> (WatchSender<u64>, WatchReceiver<u64>) {
+    let pair = channel::watch(0);
+    pair.0.send(7).expect("the fixture retains a live receiver");
+    pair
+}
+
+#[metabench::benchmark(WATCH_CHANGED, READY_BLOCKING, "watch_changed")]
+#[bench::value(&mut ready_watch())]
+fn watch_changed(pair: &mut (WatchSender<u64>, WatchReceiver<u64>)) {
+    black_box(&pair.1).changed().expect("the fixture provides an unobserved version");
+}
+
+#[metabench::benchmark(BARRIER_SYNC, READY_BLOCKING, "barrier_sync")]
+#[bench::value(&Barrier::<sync::Sync>::new(1))]
+fn barrier_sync(barrier: &Barrier) -> bool {
+    black_box(barrier).wait().is_leader()
+}
+
+#[metabench::benchmark(BARRIER_ASYNC_BLOCKING, READY_BLOCKING, "barrier_async_blocking")]
+#[bench::value(&Barrier::<sync::Async>::new(1))]
+fn barrier_async_blocking(barrier: &Barrier<sync::Async>) -> bool {
+    black_box(barrier).wait().is_leader()
+}
+
+fn ready_blocking_benchmarks(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group(READY_BLOCKING);
+    for (name, bounded) in [("bounded", true), ("unbounded", false)] {
+        group.bench_function(format!("queue_send/{name}"), |bencher| {
+            bencher.iter_batched_ref(|| empty_queue(bounded), queue_send, READY_BATCH);
+        });
+        group.bench_function(format!("queue_recv/{name}"), |bencher| {
+            bencher.iter_batched_ref(|| ready_queue(bounded), queue_recv, READY_BATCH);
+        });
+        group.bench_function(format!("queue_recv_timeout/{name}"), |bencher| {
+            bencher.iter_batched_ref(|| ready_queue(bounded), queue_recv_timeout, READY_BATCH);
+        });
+    }
+    group.bench_function(ONESHOT_RECV.benchmark_name(), |bencher| {
+        bencher.iter_batched_ref(ready_oneshot, oneshot_recv, READY_BATCH);
+    });
+    group.bench_function(ONESHOT_RECV_TIMEOUT.benchmark_name(), |bencher| {
+        bencher.iter_batched_ref(ready_oneshot, oneshot_recv_timeout, READY_BATCH);
+    });
+    group.bench_function(WATCH_CHANGED.benchmark_name(), |bencher| {
+        bencher.iter_batched_ref(ready_watch, watch_changed, READY_BATCH);
+    });
+    let sync_barrier = Barrier::new(1);
+    let async_barrier = Barrier::<sync::Async>::new(1);
+    group.bench_function(BARRIER_SYNC.benchmark_name(), |bencher| {
+        bencher.iter(|| barrier_sync(&sync_barrier));
+    });
+    group.bench_function(BARRIER_ASYNC_BLOCKING.benchmark_name(), |bencher| {
+        bencher.iter(|| barrier_async_blocking(&async_barrier));
+    });
+    group.finish();
+}
 
 #[metabench::benchmark(ARC_NEW_STD, ARC_NEW_DROP, "std")]
 fn arc_new_std() -> std::sync::Arc<u64> {
@@ -179,6 +312,7 @@ fn rw_lock_write_performables_async(input: &mut AsyncRwLockInput) -> u64 {
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
+    ready_blocking_benchmarks(criterion);
     let mut group = criterion.benchmark_group(ARC_NEW_DROP);
 
     group.bench_function(ARC_NEW_STD.benchmark_name(), |bencher| bencher.iter(arc_new_std));
@@ -284,5 +418,13 @@ metabench::main!(
         RW_LOCK_WRITE_STD,
         RW_LOCK_WRITE_PERFORMABLES_SYNC,
         RW_LOCK_WRITE_PERFORMABLES_ASYNC,
+        QUEUE_SEND,
+        QUEUE_RECV,
+        QUEUE_RECV_TIMEOUT,
+        ONESHOT_RECV,
+        ONESHOT_RECV_TIMEOUT,
+        WATCH_CHANGED,
+        BARRIER_SYNC,
+        BARRIER_ASYNC_BLOCKING,
     ],
 );
