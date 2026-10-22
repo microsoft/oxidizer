@@ -3,15 +3,13 @@
 
 //! Wall-clock benchmarks for [`Router::resolve_request_uri`], the per-request routing step.
 //!
-//! For every outgoing request an HTTP client resolves the target URI against the configured
-//! endpoint: it picks the [`BaseUri`] and materializes the request's `http::Uri`. This is run
-//! once per request, and again per attempt under retry/hedging. The benchmark exercises it on
-//! a request built through [`HttpRequestBuilder`] (so the build-time path rendering is cached
-//! and reused) for a fixed base endpoint.
+//! An HTTP client resolves the target URI against its endpoint for each request attempt.
+//! It selects the [`BaseUri`] and creates the request `http::Uri`.
+//! This benchmark uses a request from [`HttpRequestBuilder`] and a fixed endpoint.
+//! The builder caches the rendered path.
 //!
-//! Paired with `router_resolve_cg.rs`, which measures the same operation under Callgrind.
-//! Instruction counts are the authoritative signal here; wall-clock cannot resolve the small
-//! per-attempt differences this path involves.
+//! `router_resolve_cg.rs` measures the same operation with Callgrind.
+//! Use its instruction count for small differences that wall-clock timing cannot resolve.
 
 #![allow(
     clippy::missing_panics_doc,
@@ -34,13 +32,12 @@ fn built_request(path: &'static str) -> HttpRequest {
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("router_resolve");
 
-    // A fixed endpoint with a root base path (the common case): the reused rendered path is
-    // returned directly without a re-validation scan.
+    // A fixed endpoint with a root base path returns the cached path directly.
     let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
     let mut request = built_request("/users/42/posts/hello-world?active=true");
 
-    // `resolve_request_uri` re-routes idempotently from the request's preserved original
-    // target, so repeated calls do identical work - exactly the per-attempt cost.
+    // resolve_request_uri starts from the preserved original target.
+    // Repeated calls therefore measure the same work for each attempt.
     group.bench_function("fixed_root_base", |b| {
         b.iter(|| {
             black_box(&router)
@@ -49,7 +46,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    // A fixed endpoint with a non-root base path: the join must concatenate and re-validate.
+    // A fixed endpoint with a non-root base path requires a join and a second URI inspection.
     let router_prefixed = Router::fixed(BaseUri::from_static("https://api.example.com/v1/"));
     let mut request_prefixed = built_request("/users/42/posts/hello-world?active=true");
 

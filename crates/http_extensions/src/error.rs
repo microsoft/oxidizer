@@ -23,15 +23,14 @@ use crate::http_utils::SyncHolder;
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
 
-/// A unified HTTP error type.
+/// The HTTP error type for this crate.
 ///
-/// Combines various HTTP-related errors into a single type with useful features:
+/// This type:
 ///
-/// - Captures backtraces automatically
-/// - Tells you if an error is temporary (transient) or permanent
-/// - Works with `http` crate errors out of the box
-/// - Carries an [`ErrorLabel`] for metrics and logging (see its docs for
-///   cardinality requirements)
+/// - Captures backtraces.
+/// - Classifies errors as temporary or permanent.
+/// - Converts errors from the `http` crate.
+/// - Stores an [`ErrorLabel`] for metrics and logging.
 ///
 /// # Examples
 ///
@@ -50,24 +49,25 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// # Error Interoperability
 ///
-/// Works with many error types through `From` implementations, so you can use
-/// the `?` operator with them. Also tells you if errors can be recovered from.
+/// `From` implementations convert several error types.
+/// You can use the `?` operator with these errors.
+/// The result includes recovery information.
 ///
 /// ## Standard Library Errors
 ///
-/// - [`std::io::Error`] - Auto-classified as retry, unavailable, or never based on error kind
-/// - [`std::convert::Infallible`] - Handled for pattern matching completeness
+/// - [`std::io::Error`] is classified from its error kind.
+/// - [`std::convert::Infallible`] supports complete pattern matching.
 ///
 /// ## Works with `http` crate
 ///
-/// Converts from these error types automatically:
+/// The following error types convert to [`HttpError`]:
 ///
-/// - `http::Error` - General HTTP errors
-/// - `http::uri::InvalidUri` and `http::uri::InvalidUriParts` - Bad URIs
-/// - `http::header::InvalidHeaderValue` - Invalid headers
-/// - `http::method::InvalidMethod` - Invalid HTTP methods
-/// - `http::status::InvalidStatusCode` - Invalid status codes
-/// - `http::header::MaxSizeReached` - Headers too large
+/// - `http::Error` for general HTTP errors.
+/// - `http::uri::InvalidUri` and `http::uri::InvalidUriParts` for invalid URIs.
+/// - `http::header::InvalidHeaderValue` for invalid headers.
+/// - `http::method::InvalidMethod` for invalid HTTP methods.
+/// - `http::status::InvalidStatusCode` for invalid status codes.
+/// - `http::header::MaxSizeReached` for headers that are too large.
 ///
 /// ```
 /// # use http_extensions::HttpError;
@@ -80,11 +80,11 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Works with `templated_uri` crate
 ///
-/// - `templated_uri::UriError` - Invalid URI template parameters
+/// - `templated_uri::UriError` for invalid URI template parameters.
 ///
 /// ## Custom Errors
 ///
-/// Custom errors can be wrapped using [`HttpError::other()`]:
+/// Wrap custom errors with [`HttpError::other()`]:
 ///
 /// ```
 /// # use http_extensions::{HttpError};
@@ -117,14 +117,14 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 pub struct HttpError {
     label: ErrorLabel,
     recovery: RecoveryInfo,
-    // NOTE: Boxed to keep the size of HttpError small and wrapped
-    // in SyncHolder to make HttpError Sync even if HttpRequest is not Sync.
+    // The box keeps HttpError small.
+    // SyncHolder makes HttpError Sync when HttpRequest is not Sync.
     request: Option<SyncHolder<Box<HttpRequest>>>,
 }
 
 impl ThreadAware for HttpError {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-        // no thread-local state to relocate
+        // This type has no thread-local state.
     }
 }
 
@@ -138,8 +138,9 @@ impl HttpError {
         Self::caused_by(label, recovery, None, error)
     }
 
-    /// Wraps an error that implements [`Recovery`] into an [`HttpError`],
-    /// extracting recovery information automatically via [`Recovery::recovery()`].
+    /// Wraps an error that implements [`Recovery`] in an [`HttpError`].
+    ///
+    /// [`Recovery::recovery()`] supplies the recovery information.
     ///
     /// The `label` accepts anything that implements `Into<ErrorLabel>`.
     /// See [`ErrorLabel`] docs for cardinality requirements.
@@ -165,7 +166,7 @@ impl HttpError {
 
     /// Creates a validation error.
     ///
-    /// This is a convenience method to create a validation error with a standard message format.
+    /// This method uses the standard message format for validation errors.
     /// The error is classified as non-retryable.
     #[must_use]
     pub fn validation(msg: impl Into<Cow<'static, str>>) -> Self {
@@ -243,7 +244,7 @@ impl HttpError {
 
     /// Attaches HTTP request to this error.
     ///
-    /// Useful for rejected requests that you may want to retry later.
+    /// Use the attached request for a later retry.
     #[must_use]
     pub fn with_request(mut self, request: HttpRequest) -> Self {
         self.request = Some(SyncHolder::new(Box::new(request)));
@@ -483,7 +484,7 @@ mod tests {
 
         assert_eq!(error.take_request().unwrap().uri().to_string(), "https://dummy/");
 
-        // Later calls should return None
+        // Later calls return None.
         assert!(error.take_request().is_none());
     }
 

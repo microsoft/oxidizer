@@ -3,18 +3,17 @@
 
 //! HTTP body types for requests and responses.
 //!
-//! This module provides a flexible way to handle HTTP bodies. The main type is [`HttpBody`],
-//! which can work with:
+//! [`HttpBody`] supports:
 //!
-//! - Text and string data
-//! - Binary data
-//! - JSON data (with the `json` feature)
-//! - Streaming content
-//! - Empty bodies
-//! - Custom body implementations
+//! - Text and string data.
+//! - Binary data.
+//! - JSON data with the `json` feature.
+//! - Streaming content.
+//! - Empty bodies.
+//! - Custom body implementations.
 //!
-//! Bodies are created through [`HttpBodyBuilder`], which optimizes memory usage and supports testing.
-//! All bodies implement the standard `http_body::Body` trait for ecosystem compatibility.
+//! Create bodies with [`HttpBodyBuilder`].
+//! All bodies implement the standard `http_body::Body` trait.
 
 use std::fmt::{Debug, Formatter};
 use std::future::ready;
@@ -42,11 +41,11 @@ pub use options::HttpBodyOptions;
 
 pub(crate) mod timeout_body;
 
-/// A flexible HTTP body container for various data types.
+/// An HTTP body that can contain several data types.
 ///
-/// `HttpBody` handles text, binary data, JSON (with the `json` feature), streaming content,
-/// and more. Always use the [`HttpBodyBuilder`] to create bodies instead of constructing
-/// them directly.
+/// `HttpBody` supports text, binary data, JSON, and streaming content.
+/// JSON requires the `json` feature.
+/// Use [`HttpBodyBuilder`] to create bodies.
 ///
 /// # Examples
 ///
@@ -55,7 +54,7 @@ pub(crate) mod timeout_body;
 /// # #[cfg(feature = "test-util")] {
 /// # use http_extensions::HttpBodyBuilder;
 /// # let builder = HttpBodyBuilder::new_fake();
-/// // Create different body types
+/// // Create different body types.
 /// let text_body = builder.text("Hello world");
 /// let binary_body = builder.slice(&[1, 2, 3, 4]);
 /// let empty_body = builder.empty();
@@ -65,59 +64,56 @@ pub(crate) mod timeout_body;
 ///
 /// # How does `HttpBody` work?
 ///
-/// At its core, [`HttpBody`] implements the [`http_body::Body`] trait, which provides a standardized
-/// way to process HTTP data as it arrives. Here's what makes it efficient:
+/// [`HttpBody`] implements the [`http_body::Body`] trait.
+/// The trait processes HTTP data as it arrives:
 ///
-/// 1. **Streaming data**: Instead of waiting for the entire response, data comes in as individual
-///    frames via [`http_body::Frame`] that you can process immediately.
-/// 2. **Memory efficiency**: Each chunk is represented by a [`bytesbuf::BytesView`], ensuring that
-///    its backing memory gets automatically returned to a memory pool when consumed.
-/// 3. **Zero-copy when possible**: The implementation uses [`bytesbuf::BytesView`] under the hood and
-///    avoids unnecessary copying, making it efficient for large responses.
+/// 1. Data arrives in individual [`http_body::Frame`] values.
+///    You do not have to wait for the complete response.
+/// 2. Each chunk is a [`bytesbuf::BytesView`].
+///    The memory pool reuses its memory after the chunk is consumed.
+/// 3. [`bytesbuf::BytesView`] avoids data copies when possible.
 ///
-/// When you call [`HttpBody::poll_frame`], the body notifies you when new data is available through
-/// a [`Poll`] result. After consuming data from a [`BytesView`], its memory is automatically
-/// recycled back to the memory pool, reducing allocation overhead for future requests.
+/// [`HttpBody::poll_frame`] returns a [`Poll`] value when data is available.
+/// After you consume data from a [`BytesView`], the memory returns to the pool.
 ///
 /// # Buffering
 ///
-/// When you call [`HttpBody::into_buffered`], the entire body content is loaded into memory
-/// and the underlying network connection is freed. This is helpful when you need to:
+/// [`HttpBody::into_buffered`] loads the complete body into memory.
+/// It also releases the underlying network connection.
+/// Use buffering to:
 ///
 /// - Process the same data multiple times
-/// - Clone a streaming body that would otherwise be consumed
-/// - Keep data available after the network connection would close
+/// - Clone a streaming body before it is consumed
+/// - Keep data after the network connection closes
 ///
-/// Buffering has a configurable memory limit (default: 2 GB) to prevent out-of-memory issues
-/// with extremely large responses. If a response exceeds this limit, you'll get an error.
-/// You can customize this limit via [`HttpBodyOptions::buffer_limit`].
+/// Buffering uses a memory limit to prevent an out-of-memory failure.
+/// The default limit is 2 GB.
+/// If a response exceeds the limit, the operation returns an error.
+/// Set a different limit with [`HttpBodyOptions::buffer_limit`].
 ///
 /// # Streaming
 ///
-/// Process bodies in a streaming fashion to handle data chunk-by-chunk as it arrives.
+/// A stream processes each data chunk when it arrives.
+/// Use a stream for large response bodies, such as file downloads.
+/// A stream has no buffering limit because it does not store the complete body.
 ///
-/// Streaming is great for processing data incrementally. This is useful when you know that you are
-/// working with large HTTP response bodies, e.g., downloading large files. Unlike regular responses,
-/// **streaming has no buffering limits**, so you can efficiently handle bodies of any size without
-/// worrying about memory constraints.
-///
-/// The example below shows how to download a large file and write it to disk:
+/// The following example writes a downloaded file to disk:
 ///
 /// ```
-/// use futures::TryStreamExt; // For stream operations
-/// use http_body_util::BodyExt; // For into_data_stream() method
+/// use futures::TryStreamExt; // Provides stream operations.
+/// use http_body_util::BodyExt; // Provides into_data_stream().
 /// use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
 ///
 /// async fn download_to_file(
 ///     body: HttpBody,
 ///     output_file: &mut std::fs::File,
 /// ) -> Result<(), HttpError> {
-///     // Convert the response into a stream
+///     // Convert the response into a stream.
 ///     let mut stream = body.into_data_stream();
 ///
-///     // Process each chunk as it arrives
+///     // Process each chunk when it arrives.
 ///     while let Some(mut data) = stream.try_next().await? {
-///         // Write the chunk to the output file (BytesView implements Read)
+///         // Write the chunk to the output file. BytesView implements Read.
 ///         std::io::copy(&mut data, output_file)?;
 ///     }
 ///
@@ -134,12 +130,13 @@ pub(crate) mod timeout_body;
 /// # }
 /// ```
 ///
-/// To simplify processing, you convert the `HttpBody` into a [`Stream`][futures::Stream] by calling
-/// the [`into_data_stream`][http_body_util::BodyExt::into_data_stream] method. Then you can use the
-/// many extensions methods provided for the [`Stream`][futures::Stream] trait to process the data.
+/// Call [`into_data_stream`][http_body_util::BodyExt::into_data_stream] to convert
+/// `HttpBody` into a [`Stream`][futures::Stream].
+/// You can then use the extension methods for [`Stream`][futures::Stream].
 ///
-/// > **Note**: The above example uses the [`futures`] crate for stream processing and the [`http_body_util`] crate
-/// > for converting the body into a data stream.
+/// > [!NOTE]
+/// > The example uses [`futures`] for stream processing.
+/// > It uses [`http_body_util`] to convert the body into a data stream.
 ///
 /// [http-body-util]: https://docs.rs/http-body-util/latest/http_body_util/
 /// [futures]: https://docs.rs/futures/latest/futures/
@@ -152,7 +149,7 @@ pub struct HttpBody {
     kind: Kind,
 }
 
-// Implementations for HttpBody
+// HttpBody implementations.
 
 impl HttpBody {
     /// Creates an empty body (zero bytes).
@@ -191,7 +188,7 @@ impl HttpBody {
     ///
     /// # Errors
     ///
-    /// Returns an error if the body can't be collected or was already consumed.
+    /// Returns an error if the body cannot be collected or was already consumed.
     ///
     /// # Examples
     ///
@@ -266,23 +263,24 @@ impl HttpBody {
 
     /// Loads the entire body into memory for easier handling.
     ///
-    /// Useful when you need to:
+    /// Use this method to:
     ///
     /// - Read a streaming body multiple times
-    /// - Clone a body that couldn't be cloned before
+    /// - Clone a body that was not cloneable before buffering
     /// - Preload data to avoid connection issues later
     ///
-    /// To change the memory limit, use [`HttpBodyOptions::buffer_limit`] when constructing the builder.
-    /// By default, it's capped at `2GB` to prevent memory issues.
+    /// Set the memory limit with [`HttpBodyOptions::buffer_limit`] on the builder.
+    /// The default limit is 2 GB.
     ///
     /// # Caveats
     ///
-    /// Be careful with large bodies; this loads everything into memory at once.
+    /// Do not use this method for an unbounded body.
+    /// It loads the complete body into memory.
     ///
     /// # Errors
     ///
-    /// - Network problems while collecting data
-    /// - Body already consumed elsewhere
+    /// - A network problem stops data collection.
+    /// - Another operation already consumed the body.
     ///
     /// # Examples
     ///
@@ -290,10 +288,10 @@ impl HttpBody {
     /// use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
-    ///     // Load the entire body into memory
+    ///     // Load the complete body into memory.
     ///     let buffered = body.into_buffered().await?;
     ///
-    ///     // Now you can work with it multiple times...
+    ///     // The buffered body can be used more than once.
     ///     Ok(())
     /// }
     /// # #[cfg(not(feature = "test-util"))] fn main() {}
@@ -324,7 +322,7 @@ impl HttpBody {
     ///
     /// # Errors
     ///
-    /// Returns an error if the body can't be collected or JSON parsing fails.
+    /// Returns an error if the body cannot be collected or JSON parsing fails.
     ///
     /// # Examples
     ///
@@ -362,23 +360,23 @@ impl HttpBody {
         self.into_json_ref::<T>().map(|json| Ok(json?.read_owned()?))
     }
 
-    /// Consumes the body and converts it to a zero-copy JSON parser.
+    /// Consumes the body and creates a JSON parser that can borrow data.
     ///
-    /// This method provides zero-copy JSON parsing by working directly with the underlying
-    /// memory buffer. Unlike [`into_json`][HttpBody::into_json], this method can work with borrowed data
-    /// and types that use `Cow<str>` for efficient string handling.
+    /// The parser reads directly from the body buffer.
+    /// Unlike [`into_json`][HttpBody::into_json], it supports borrowed data
+    /// and types that use `Cow<str>`.
     ///
-    /// The returned [`Json<T>`][crate::Json] allows you to deserialize into types that can borrow from
-    /// the original data, making it more memory-efficient for large JSON payloads.
+    /// The returned [`Json<T>`][crate::Json] can deserialize types that borrow
+    /// from the original data.
     ///
     /// # Errors
     ///
-    /// Returns an error if the body can't be collected into a sequence.
+    /// Returns an error if the body cannot be collected into a sequence.
     /// JSON parsing errors occur when you call methods on the returned [`Json<T>`][crate::Json].
     ///
     /// # Examples
     ///
-    /// Basic usage with borrowed strings:
+    /// The following example borrows strings:
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpBody};
@@ -396,14 +394,14 @@ impl HttpBody {
     /// }
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
-    ///     // Parse JSON while potentially borrowing string data
+    ///     // Parse JSON and permit borrowed strings.
     ///     let mut json = body.into_json_ref::<User>().await?;
     ///     let user = json.read()?;
     ///
     ///     println!("User: {} <{}> (ID: {})", user.name, user.email, user.id);
     ///
-    ///     // The name and email fields may be borrowed from the original JSON buffer,
-    ///     // avoiding unnecessary string allocations for better performance
+    ///     // The name and email fields can borrow from the original JSON buffer.
+    ///     // This avoids string allocations.
     ///     Ok(())
     /// }
     /// # #[cfg(not(feature = "test-util"))] fn main() {}
@@ -416,7 +414,7 @@ impl HttpBody {
     /// # }
     /// ```
     ///
-    /// For types that don't need borrowing, prefer [`into_json`][HttpBody::into_json] for simpler usage.
+    /// For types that do not borrow data, use [`into_json`][HttpBody::into_json].
     #[cfg(any(feature = "json", test))]
     pub fn into_json_ref<'a, T: serde_core::de::Deserialize<'a>>(self) -> impl Future<Output = Result<crate::json::Json<T>>> + Send {
         self.into_bytes().map_ok(crate::json::Json::<T>::new)
@@ -424,8 +422,9 @@ impl HttpBody {
 
     /// Gets the body's content length in bytes, if known.
     ///
-    /// Checks the size without consuming the body - used for setting `Content-Length`
-    /// headers or pre-allocating buffers.
+    /// Returns the size without consuming the body.
+    ///
+    /// Use the result to set `Content-Length` headers or allocate buffers.
     ///
     /// Returns `Some(size)` for known-length bodies, `None` for streaming bodies with unknown length.
     ///
@@ -455,7 +454,7 @@ impl HttpBody {
 
     /// Returns `true` if the body is known to be empty (zero bytes).
     ///
-    /// This checks whether the body's content length is exactly zero.
+    /// This method returns `true` when the content length is exactly zero.
     /// For streaming bodies with unknown length, this returns `false`.
     ///
     /// # Examples
@@ -484,8 +483,8 @@ impl HttpBody {
     /// Streaming bodies or those created from custom implementations cannot be cloned.
     ///
     /// To turn a non-cloneable body into a cloneable one, use [`into_buffered()`][HttpBody::into_buffered()]
-    /// to load the entire content into memory first. Note that this may have memory implications
-    /// for large bodies.
+    /// to load the complete content into memory first.
+    /// Large bodies can then use a large amount of memory.
     #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.kind {
@@ -497,9 +496,9 @@ impl HttpBody {
 
     /// Converts this body into a stream of byte chunks.
     ///
-    /// This is a convenience wrapper around
-    /// [`BodyExt::into_data_stream()`][http_body_util::BodyExt::into_data_stream],
-    /// eliminating the need to import `http_body_util::BodyExt` directly.
+    /// This method wraps
+    /// [`BodyExt::into_data_stream()`][http_body_util::BodyExt::into_data_stream].
+    /// Callers do not need to import `http_body_util::BodyExt`.
     ///
     /// # Examples
     ///
@@ -543,10 +542,9 @@ impl TryFrom<HttpBody> for BytesView {
     }
 }
 
-/// Makes `HttpBody` compatible with the standard HTTP ecosystem.
+/// Implements the standard `http_body::Body` interface for [`HttpBody`].
 ///
-/// By implementing `http_body::Body`, our `HttpBody` type works seamlessly with any HTTP
-/// client or server that uses this standard interface.
+/// This interface lets HTTP clients and servers use [`HttpBody`].
 impl Body for HttpBody {
     type Data = BytesView;
     type Error = HttpError;
@@ -582,7 +580,7 @@ impl Body for HttpBody {
 
 #[expect(
     clippy::large_enum_variant,
-    reason = "BytesView is intentionally large, though future optimizations may decrease size"
+    reason = "BytesView is intentionally large, but a future optimization can reduce its size"
 )]
 #[pin_project(project = BodyInnerProj)]
 enum Kind {
@@ -682,7 +680,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let body = builder.text("{invalid json}");
 
-        // Attempt to deserialize to our model, which should fail
+        // Deserialization into this model is expected to fail.
         let result: Result<Model> = block_on(body.into_json());
         result.unwrap_err();
     }
@@ -756,7 +754,7 @@ mod tests {
         // Consume the body bytes via poll_frame, which sets Kind::Bytes to None.
         let _frame = block_on(body.frame());
 
-        // Now the body is consumed; into_buffered should fail.
+        // The body is now consumed. into_buffered is expected to fail.
         let err = block_on(body.into_buffered()).unwrap_err();
         assert_eq!(err.label(), "body_consumed");
         assert!(

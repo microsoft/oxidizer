@@ -6,15 +6,16 @@ use recoverable::RecoveryInfo;
 
 use crate::{HttpError, Result};
 
-/// Status code validation and recovery classification.
+/// Status code and recovery classification.
 ///
-/// Provides methods to validate status codes and determine recovery strategies.
-/// Implemented for both [`StatusCode`] and [`Response<B>`].
+/// The success methods return errors for unsuccessful status codes.
+/// [`StatusExt::recovery`] defines recovery behavior.
+/// [`StatusCode`] and [`Response<B>`] implement this trait.
 pub trait StatusExt: sealed::Sealed
 where
     Self: Sized,
 {
-    /// Ensures that the status code is a successful status code (`2xx` range).
+    /// Returns the value if the status code is in the `2xx` range.
     ///
     /// # Errors
     ///
@@ -35,10 +36,9 @@ where
     /// ```
     fn ensure_success(self) -> Result<Self>;
 
-    /// Ensures that the status code is a successful status code (`2xx` range)
-    /// and returns a custom error if it is not.
+    /// Returns the value if the status code is in the `2xx` range.
     ///
-    /// This allows you to provide your own error type and construction logic.
+    /// If the status code is not successful, this method returns a custom error.
     ///
     /// # Errors
     ///
@@ -72,13 +72,13 @@ where
 
     /// Returns the recovery metadata for this status code.
     ///
-    /// A status is considered recoverable when:
+    /// The following status codes permit recovery:
     ///
-    /// - It is in the `5xx` range (server errors), or
-    /// - It is `429 Too Many Requests`, or
-    /// - It is `408 Request Timeout`.
+    /// - A code in the `5xx` range.
+    /// - `429 Too Many Requests`.
+    /// - `408 Request Timeout`.
     ///
-    /// Other statuses return [`RecoveryInfo::never`][recoverable::RecoveryInfo::never]
+    /// Other statuses return [`RecoveryInfo::never`][recoverable::RecoveryInfo::never].
     ///
     /// # Examples
     ///
@@ -139,7 +139,7 @@ impl StatusExt for StatusCode {
         if self.is_success() { Ok(self) } else { Err(factory(self)) }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Causes test timeouts, but it's well tested.
+    #[cfg_attr(test, mutants::skip)] // This mutation causes test timeouts. Other tests cover this function.
     fn recovery(&self) -> RecoveryInfo {
         match self {
             s if s >= &Self::INTERNAL_SERVER_ERROR => RecoveryInfo::retry(),

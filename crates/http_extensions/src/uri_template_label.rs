@@ -3,11 +3,11 @@
 
 use std::borrow::Cow;
 
-/// A label for the URL template that can be attached to HTTP requests as an extension.
+/// A URL template label for an HTTP request extension.
 ///
-/// This type is a **workaround** for cases where a templated URI cannot be used.
-/// When possible, prefer using templated URIs via the `#[templated]` macro from
-/// `templated_uri`, as they provide better type safety and automatic template extraction.
+/// Use this type when you cannot use a templated URI.
+/// Otherwise, use the `#[templated]` macro from `templated_uri`.
+/// The macro provides a typed URI and extracts its template.
 ///
 /// When both a templated URI and a `UriTemplateLabel` are present on a request,
 /// the explicit `UriTemplateLabel` takes precedence.
@@ -31,9 +31,9 @@ use std::borrow::Cow;
 pub struct UriTemplateLabel(Cow<'static, str>);
 
 impl UriTemplateLabel {
-    /// Creates a new `UriTemplateLabel` from any type that can be converted to a `Cow<'static, str>`.
+    /// Creates a `UriTemplateLabel` from a value that converts to `Cow<'static, str>`.
     ///
-    /// This accepts static strings, owned `String`s, or `Cow<'static, str>` directly.
+    /// It accepts static strings, owned `String` values, and `Cow<'static, str>` values.
     #[must_use]
     pub fn new(label: impl Into<Cow<'static, str>>) -> Self {
         Self(label.into())
@@ -41,7 +41,7 @@ impl UriTemplateLabel {
 
     /// Creates a new `UriTemplateLabel` from a static string.
     ///
-    /// This is a const function that can be used in const contexts.
+    /// You can call this `const` function in a constant expression.
     #[must_use]
     pub const fn new_static(label: &'static str) -> Self {
         Self(Cow::Borrowed(label))

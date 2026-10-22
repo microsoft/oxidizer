@@ -17,18 +17,17 @@ use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header
 use crate::timeout::{BodyTimeout, ResponseTimeout};
 use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result, StatusExt};
 
-/// A fluent builder for creating HTTP requests.
+/// A builder for HTTP requests.
 ///
-/// `HttpRequestBuilder` simplifies the process of building HTTP requests by providing a chainable API.
-/// It handles setting headers and different body types, and offers convenient methods for common
-/// request building patterns.
+/// Methods on `HttpRequestBuilder` can be chained.
+/// They set headers, methods, URIs, body types, and timeouts.
 ///
 /// # Creating a Request Builder
 ///
-/// There are two main ways to create an `HttpRequestBuilder`:
+/// Create an `HttpRequestBuilder` in one of two ways:
 ///
-/// 1. **Without a request handler** - Use [`new`](Self::new) to create a builder that can only
-///    build requests via [`build`](Self::build):
+/// 1. Use [`new`](Self::new) without a request handler.
+///    This builder creates requests through [`build`](Self::build).
 ///
 ///    ```
 ///    # fn main() {
@@ -49,9 +48,9 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, 
 ///    # }
 ///    ```
 ///
-/// 2. **With a request handler** - Use [`with_request_handler`](Self::with_request_handler) to create
-///    a builder that can send requests directly using fetch methods like [`fetch`](Self::fetch) or
-///    [`fetch_text`](Self::fetch_text):
+/// 2. Use [`with_request_handler`](Self::with_request_handler) with a request handler.
+///    This builder sends requests through methods such as [`fetch`](Self::fetch)
+///    and [`fetch_text`](Self::fetch_text).
 ///
 ///    ```
 ///    # #[cfg(not(feature = "test-util"))] fn main() {}
@@ -86,9 +85,8 @@ pub struct HttpRequestBuilder<'a, R = ()> {
 impl HttpRequestBuilder<'static> {
     /// Creates a new request builder instance for testing.
     ///
-    /// This method provides a convenient way to create a `HttpRequestBuilder` for tests
-    /// without needing an existing body builder. The request builder is ready to be
-    /// configured with headers, method, URI, and body.
+    /// This method creates a builder without an existing body builder.
+    /// Use it to set headers, a method, a URI, and a body in tests.
     ///
     /// The `test-util` feature must be enabled to use this method.
     ///
@@ -195,10 +193,10 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Provides mutable access to the request headers.
     ///
-    /// Use this when you need to manipulate headers directly.
-    /// For simple header addition, prefer using the [`header`](Self::header) method.
+    /// Use this method to change the complete header map.
+    /// Use [`header`](Self::header) to add one header.
     ///
-    /// When the builder has errors, this method will return `None`.
+    /// If the builder contains an error, this method returns `None`.
     pub fn headers_mut(&mut self) -> Option<&mut HeaderMap<HeaderValue>> {
         self.builder.headers_mut()
     }
@@ -210,8 +208,8 @@ impl<R> HttpRequestBuilder<'_, R> {
     ///
     /// # Performance
     ///
-    /// It's better to use pre-created `HeaderName` and `HeaderValue` instances to avoid
-    /// parsing overhead. This applies for values that are fixed and used multiple times.
+    /// Reuse `HeaderName` and `HeaderValue` instances for fixed values.
+    /// This avoids repeated parsing.
     pub fn header(
         mut self,
         key: impl TryInto<HeaderName, Error: Into<http::Error>>,
@@ -229,8 +227,8 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Adds an extension to the request.
     ///
-    /// Extensions are type-mapped data that can be attached to requests for use by
-    /// middleware, handlers, or other parts of your application.
+    /// Extensions are typed data attached to a request.
+    /// Middleware and handlers can read them.
     ///
     /// # Examples
     ///
@@ -259,21 +257,20 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Sets a response-level timeout for receiving the response.
     ///
-    /// This attaches a [`ResponseTimeout`] extension to the request, which middleware
-    /// or HTTP clients can use to enforce a maximum duration for receiving the response.
-    /// The timeout covers connection, sending the request, and receiving the response
-    /// headers. It does not cover reading data from the response body; use
-    /// [`body_timeout`](Self::body_timeout) for that.
+    /// This method attaches a [`ResponseTimeout`] extension to the request.
+    /// Middleware or HTTP clients can apply this limit.
+    /// It covers the connection, request sending, and response headers.
+    /// It does not cover the response body.
+    /// Use [`body_timeout`](Self::body_timeout) for the body.
     pub fn response_timeout(self, duration: Duration) -> Self {
         self.extension(ResponseTimeout::new(duration))
     }
 
     /// Sets a body-level idle timeout for streaming the response body.
     ///
-    /// This attaches a [`BodyTimeout`] extension to the request, which middleware
-    /// or HTTP clients can use to limit how long the client will wait between
-    /// chunks of body data. The timer resets every time the body makes progress,
-    /// so only idle periods (no data received) count toward the timeout.
+    /// This method attaches a [`BodyTimeout`] extension to the request.
+    /// Middleware or HTTP clients can limit the wait between body chunks.
+    /// Each received chunk resets the timer.
     pub fn body_timeout(self, duration: Duration) -> Self {
         self.extension(BodyTimeout::new(duration))
     }
@@ -302,7 +299,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// Sets a byte sequence as the request body.
     ///
     /// Use this when you need to send raw binary data.
-    /// Unlike [`text`](Self::text), this doesn't set a `Content-Type` header.
+    /// Unlike [`text`](Self::text), this method does not set a `Content-Type` header.
     pub fn bytes(self, b: impl Into<BytesView>) -> Self {
         let body = self.body_builder.bytes(b);
         self.body(body)
@@ -310,10 +307,10 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Sets a JSON-serialized body for the request.
     ///
-    /// Takes any type that implements `serde::Serialize` and converts it to JSON with the following rules:
+    /// Converts any `serde::Serialize` value to JSON:
     ///
-    /// - The `Content-Type` header is set to `application/json` if not already set.
-    /// - The data is always encoded as UTF-8.
+    /// - It sets `Content-Type` to `application/json` if the header is absent.
+    /// - It encodes the data as UTF-8.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -336,24 +333,24 @@ impl<R> HttpRequestBuilder<'_, R> {
         self.body_result(Ok(body))
     }
 
-    /// Sets the request body from a result that might contain an error.
+    /// Sets the request body from a result that can contain an error.
     ///
-    /// This is used internally by methods that might fail when creating the body.
+    /// Methods that can fail during body creation use this method internally.
     fn body_result(mut self, body: Result<HttpBody>) -> Self {
         self.body = Some(body);
         self
     }
 
-    /// Creates a request with the configured settings.
+    /// Creates a request from the current configuration.
     ///
     /// This method consumes the `HttpRequestBuilder` instance. It automatically sets
     /// appropriate headers based on the body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// if they have not been set already.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The URI is missing, or invalid
     /// - Body processing failed
     pub fn build(mut self) -> Result<HttpRequest> {
@@ -448,7 +445,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// Calling this method consumes the `HttpRequestBuilder` instance. It automatically sets
     /// appropriate headers based on the body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// if they have not been set already.
     ///
     /// # Examples
     ///
@@ -471,7 +468,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - Body processing failed
     pub fn fetch(self) -> impl Future<Output = Result<HttpResponse>> + Send {
@@ -489,9 +486,8 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// memory before returning. This is useful when you need to process the entire
     /// response at once.
     ///
-    /// Calling this method consumes the [`HttpRequestBuilder`] instance. It automatically sets
-    /// appropriate headers based on the request body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// This method consumes the [`HttpRequestBuilder`].
+    /// It sets `Content-Length` and `Content-Type` from the request body when needed.
     ///
     /// # Examples
     ///
@@ -517,7 +513,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - Body processing failed
     /// - The response content exceeds the size limit (default is 2 GB)
@@ -532,13 +528,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// Calling this method consumes the [`HttpRequestBuilder`] instance. It automatically sets
     /// appropriate headers based on the request body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// if they have not been set already.
     ///
     /// # Body Processing
     ///
-    /// The response body is processed as UTF-8 text. If the response body is not valid UTF-8,
-    /// this method will return an error. This method returns a [`Response<String>`], where the body
-    /// is the text content of the response. This preserves all the information about the response.
+    /// This method reads the response body as UTF-8 text.
+    /// It returns an error for invalid UTF-8.
+    /// The returned [`Response<String>`] keeps the response metadata.
     ///
     /// # Examples
     ///
@@ -562,7 +558,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - Body processing failed
     pub fn fetch_text(self) -> impl Future<Output = Result<Response<String>>> + Send {
@@ -574,17 +570,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
 
     /// Sends the request and fetches the response body as a byte sequence.
     ///
-    /// This is useful when working with binary data or when you need
-    /// low-level access to the response bytes.
+    /// Use this method for binary data or direct access to response bytes.
     ///
-    /// Calling this method consumes the [`HttpRequestBuilder`] instance. It automatically sets
-    /// appropriate headers based on the request body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// This method consumes the [`HttpRequestBuilder`].
+    /// It sets `Content-Length` and `Content-Type` from the request body when needed.
     ///
     /// # Body Processing
     ///
-    /// The response body is processed as a sequence of bytes. This method returns a [`Response<BytesView>`],
-    /// where the body is the raw byte content of the response. This preserves all the information about the response.
+    /// This method reads the response body as bytes.
+    /// The returned [`Response<BytesView>`] keeps the response metadata.
     ///
     /// # Examples
     ///
@@ -613,7 +607,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - Body processing failed
     pub fn fetch_bytes(self) -> impl Future<Output = Result<Response<BytesView>>> + Send {
@@ -625,13 +619,12 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
 
     /// Sends the request and deserializes the response body as owned JSON.
     ///
-    /// Handles the complete request-response cycle and JSON deserialization. Consumes the
-    /// [`HttpRequestBuilder`] and automatically sets headers like `Content-Length` and `Content-Type`.
-    /// This is the most common way to read a JSON response: it deserializes directly into an owned
-    /// value that can outlive the response and cross thread boundaries.
+    /// This method sends the request and deserializes the response.
+    /// It consumes the [`HttpRequestBuilder`].
+    /// The returned owned value can outlive the response and move between threads.
     ///
-    /// For performance-sensitive scenarios where you want to borrow string and byte data directly from
-    /// the response buffer, use [`fetch_json_ref`](Self::fetch_json_ref) instead.
+    /// Use [`fetch_json_ref`](Self::fetch_json_ref) to borrow strings and bytes
+    /// from the response buffer.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -669,9 +662,9 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built
+    /// - Request construction failed
     /// - The network request failed
-    /// - The response body isn't valid UTF-8
+    /// - The response body is not valid UTF-8
     /// - JSON deserialization failed
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<Response<J>>> + Send {
@@ -683,20 +676,20 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
 
     /// Sends the request and deserializes the response body as JSON with optional borrowing.
     ///
-    /// Handles the complete request-response cycle and JSON deserialization. Consumes the
-    /// [`HttpRequestBuilder`] and automatically sets headers like `Content-Length` and `Content-Type`.
-    /// Returns a [`Json<T>`][crate::Json] wrapper that can borrow strings and byte arrays directly from
-    /// the underlying response data, avoiding allocations in performance-sensitive code.
+    /// This method sends the request and prepares the response for JSON deserialization.
+    /// It consumes the [`HttpRequestBuilder`].
+    /// The returned [`Json<T>`][crate::Json] can borrow strings and byte arrays
+    /// from the response data.
     ///
-    /// For the common case where you want owned data, prefer [`fetch_json`](Self::fetch_json).
+    /// Use [`fetch_json`](Self::fetch_json) when you need owned data.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
     /// # Note
     ///
-    /// This method only prepares the data for deserialization by downloading all content
-    /// to memory. The actual JSON deserialization happens lazily when you access the data
-    /// through the [`Json<T>`][crate::Json] wrapper.
+    /// This method downloads the complete body into memory.
+    /// It does not deserialize the data.
+    /// A read method on [`Json<T>`][crate::Json] performs deserialization.
     ///
     /// # Examples
     ///
@@ -734,9 +727,9 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built
+    /// - Request construction failed
     /// - The network request failed
-    /// - The response body isn't valid UTF-8
+    /// - The response body is not valid UTF-8
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_ref<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
         self.fetch().and_then(|response| {
@@ -745,15 +738,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
         })
     }
 
-    /// Sends the request, validates the response status, and returns just the response body as text.
+    /// Sends the request, requires a successful response, and returns the response body as text.
     ///
-    /// This is a convenience method equivalent to calling [`fetch`](Self::fetch), then
-    /// [`ensure_success`](crate::StatusExt::ensure_success) on the response, and finally reading the
-    /// body as UTF-8 text. The response metadata is discarded, yielding only the materialized text body.
+    /// This method calls [`fetch`](Self::fetch) and
+    /// [`ensure_success`](crate::StatusExt::ensure_success).
+    /// It then reads the body as UTF-8 text.
+    /// The result does not include response metadata.
     ///
-    /// Calling this method consumes the [`HttpRequestBuilder`] instance. It automatically sets
-    /// appropriate headers based on the request body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// This method consumes the [`HttpRequestBuilder`].
+    /// It sets `Content-Length` and `Content-Type` from the request body when needed.
     ///
     /// # Examples
     ///
@@ -777,7 +770,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - The response status is not in the `2xx` success range
     /// - Body processing failed
@@ -787,15 +780,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
             .and_then(|response| response.into_body().into_text())
     }
 
-    /// Sends the request, validates the response status, and returns just the response body as bytes.
+    /// Sends the request, requires a successful response, and returns the response body as bytes.
     ///
-    /// This is a convenience method equivalent to calling [`fetch`](Self::fetch), then
-    /// [`ensure_success`](crate::StatusExt::ensure_success) on the response, and finally reading the
-    /// body as raw bytes. The response metadata is discarded, yielding only the materialized byte body.
+    /// This method calls [`fetch`](Self::fetch) and
+    /// [`ensure_success`](crate::StatusExt::ensure_success).
+    /// It then reads the body as bytes.
+    /// The result does not include response metadata.
     ///
-    /// Calling this method consumes the [`HttpRequestBuilder`] instance. It automatically sets
-    /// appropriate headers based on the request body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// This method consumes the [`HttpRequestBuilder`].
+    /// It sets `Content-Length` and `Content-Type` from the request body when needed.
     ///
     /// # Examples
     ///
@@ -820,7 +813,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built because of errors
+    /// - An error prevented request construction
     /// - The network request failed
     /// - The response status is not in the `2xx` success range
     /// - Body processing failed
@@ -830,16 +823,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
             .and_then(|response| response.into_body().into_bytes())
     }
 
-    /// Sends the request, validates the response status, and returns just the deserialized JSON body.
+    /// Sends the request, requires a successful response, and returns the deserialized JSON body.
     ///
-    /// This is a convenience method equivalent to calling [`fetch`](Self::fetch), then
-    /// [`ensure_success`](crate::StatusExt::ensure_success) on the response, and finally deserializing
-    /// the body into an owned value of type `J`. The response metadata is discarded, yielding only the
-    /// materialized body.
+    /// This method calls [`fetch`](Self::fetch) and
+    /// [`ensure_success`](crate::StatusExt::ensure_success).
+    /// It then deserializes the body into an owned `J` value.
+    /// The result does not include response metadata.
     ///
-    /// Like [`fetch_json`](Self::fetch_json), this deserializes into an owned type that can
-    /// outlive the response. When you want to borrow from the response buffer for zero-copy parsing, use
-    /// [`fetch_json_ref`](Self::fetch_json_ref) and read from the returned [`Json<J>`][crate::Json] instead.
+    /// Like [`fetch_json`](Self::fetch_json), this method returns an owned value.
+    /// Use [`fetch_json_ref`](Self::fetch_json_ref) to borrow from the response buffer.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -876,14 +868,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built
+    /// - Request construction failed
     /// - The network request failed
     /// - The response status is not in the `2xx` success range
-    /// - The response body isn't valid UTF-8
+    /// - The response body is not valid UTF-8
     /// - JSON deserialization failed
-    // Chained `and_then` (rather than `Either` + `ready(Err(..))`) keeps the returned future
-    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json`,
-    // which never stores the value in its future state, so no `J` is held across the chain.
+    // Chained and_then keeps the returned future Send without J: Send.
+    // Only into_json mentions J, and its future does not store a J value.
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_body<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<J>> + Send {
         self.fetch()
@@ -891,25 +882,24 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
             .and_then(|response| response.into_body().into_json::<J>())
     }
 
-    /// Sends the request, validates the response status, and returns the JSON body with optional borrowing.
+    /// Sends the request, requires a successful response, and returns JSON that can borrow data.
     ///
-    /// This is a convenience method equivalent to calling [`fetch`](Self::fetch), then
-    /// [`ensure_success`](crate::StatusExt::ensure_success) on the response, and finally preparing the
-    /// body for borrowed JSON deserialization. The response metadata is discarded, yielding only the
-    /// [`Json<J>`][crate::Json] wrapper.
+    /// This method calls [`fetch`](Self::fetch) and
+    /// [`ensure_success`](crate::StatusExt::ensure_success).
+    /// It then prepares the body for borrowed JSON deserialization.
+    /// The result contains only the [`Json<J>`][crate::Json] wrapper.
     ///
-    /// Like [`fetch_json_ref`](Self::fetch_json_ref), the returned [`Json<J>`][crate::Json] can borrow
-    /// strings and byte arrays directly from the underlying response data, avoiding allocations in
-    /// performance-sensitive code. When you want an owned value instead, prefer
-    /// [`fetch_json_body`](Self::fetch_json_body).
+    /// Like [`fetch_json_ref`](Self::fetch_json_ref), the returned [`Json<J>`][crate::Json]
+    /// can borrow strings and byte arrays from the response data.
+    /// Use [`fetch_json_body`](Self::fetch_json_body) when you need an owned value.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
     /// # Note
     ///
-    /// This method only prepares the data for deserialization by downloading all content
-    /// to memory. The actual JSON deserialization happens lazily when you access the data
-    /// through the [`Json<J>`][crate::Json] wrapper.
+    /// This method downloads the complete body into memory.
+    /// It does not deserialize the data.
+    /// A read method on [`Json<J>`][crate::Json] performs deserialization.
     ///
     /// # Examples
     ///
@@ -946,13 +936,12 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The request couldn't be built
+    /// - Request construction failed
     /// - The network request failed
     /// - The response status is not in the `2xx` success range
-    /// - The response body isn't valid UTF-8
-    // Chained `and_then` (rather than `Either` + `ready(Err(..))`) keeps the returned future
-    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json_ref`, which
-    // yields the `Json<J>` wrapper as its final output and never holds it across an await point.
+    /// - The response body is not valid UTF-8
+    // Chained and_then keeps the returned future Send without J: Send.
+    // into_json_ref returns Json<J> as its final value and does not store it across an await point.
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_ref_body<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<crate::Json<J>>> + Send {
         self.fetch()
@@ -1202,7 +1191,7 @@ mod tests {
             .build()
             .unwrap();
 
-        // Streams don't have a known content length
+        // Streams do not have a known content length.
         assert!(request.headers().get(CONTENT_LENGTH).is_none());
         assert_eq!(block_on(request.into_body().into_text()).unwrap(), "hello streaming world");
     }
@@ -1266,7 +1255,7 @@ mod tests {
         // Force an error in the builder by adding an invalid header
         request_builder = request_builder.header("invalid\0header", "value");
 
-        // headers_mut should return None when builder has errors
+        // headers_mut returns None when the builder contains errors.
         assert!(request_builder.headers_mut().is_none());
     }
 
@@ -1295,7 +1284,7 @@ mod tests {
             .build()
             .unwrap();
 
-        // Both Content-Length and Content-Type should be set
+        // Both Content-Length and Content-Type are present.
         assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
         assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
     }
@@ -1316,7 +1305,7 @@ mod tests {
 
     #[test]
     fn fetch_json_borrowed_with_escaped_strings() {
-        // JSON with escaped characters that should be properly deserialized into Cow
+        // Escaped JSON characters are deserialized into Cow.
         let json_response = r#"{"id":123,"name":"John Doe","description":"A person with \"special\" characters: \n\t\\"}"#;
 
         let client = FakeHandler::from_fn(move |_request| {
@@ -1341,11 +1330,11 @@ mod tests {
 
         let json_data = response.read().unwrap();
 
-        // Verify the basic fields
+        // Compare the basic fields.
         assert_eq!(json_data.id, 123);
         assert_eq!(json_data.name, "John Doe");
 
-        // Verify that escaped characters are properly decoded
+        // Compare the decoded escape characters.
         let expected_description = "A person with \"special\" characters: \n\t\\";
         assert_eq!(json_data.description, expected_description);
 
@@ -1612,7 +1601,7 @@ mod tests {
             println!("{name} future size: {size} bytes");
 
             // The fetch futures are built from `futures` combinators rather than `async fn` state
-            // machines to keep them compact. This guards against accidental regressions that would
+            // machines to keep them compact. This guards against regressions that can
             // reintroduce large generated futures.
             assert!(size <= 1024, "{name} future grew to {size} bytes");
         }
@@ -1644,7 +1633,7 @@ mod tests {
     fn fetch_with_request_validation() {
         let client = FakeHandler::from_async_fn(|request| {
             async move {
-                // Validate the request that was sent
+                // Inspect the sent request.
                 assert_eq!(request.method(), Method::POST);
                 assert_eq!(request.headers().get_str_value_or("x-test", ""), "chained");
                 assert_eq!(request.version(), http::Version::HTTP_2);
@@ -1686,7 +1675,7 @@ mod tests {
     #[test]
     fn fetch_with_json_body_validation() {
         let client = FakeHandler::from_fn(|request| {
-            // Both Content-Length and Content-Type should be set
+            // Both Content-Length and Content-Type are present.
             assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
             assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
 
@@ -1830,7 +1819,10 @@ mod tests {
             .build()
             .unwrap();
 
-        let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
+        let label = request
+            .extensions()
+            .get::<UriTemplateLabel>()
+            .expect("the request builder attaches the URI template label extension");
         assert_eq!(label.as_str(), "/api/users/{id}");
     }
 
@@ -1848,9 +1840,9 @@ mod tests {
         let uris = request
             .extensions()
             .get::<RequestUris>()
-            .expect("RequestUris extension should be present");
+            .expect("the request builder attaches the RequestUris extension");
         assert_eq!(uris.original().to_string().declassify_ref(), "https://example.com/api/users/123");
-        assert!(uris.routed().is_none(), "routed should be None before any router runs");
+        assert!(uris.routed().is_none(), "routed is empty before a router runs");
     }
 
     #[test]
@@ -1864,7 +1856,10 @@ mod tests {
             .build()
             .unwrap();
 
-        let id = request.extensions().get::<RequestId>().expect("extension should be present");
+        let id = request
+            .extensions()
+            .get::<RequestId>()
+            .expect("the request builder attaches the request ID extension");
         assert_eq!(id.0, "req-123");
     }
 
@@ -1883,13 +1878,13 @@ mod tests {
         let response_timeout = request
             .extensions()
             .get::<ResponseTimeout>()
-            .expect("response timeout extension should be present");
+            .expect("the request builder attaches the response timeout extension");
         assert_eq!(response_timeout.duration(), Duration::from_secs(30));
 
         let body_timeout = request
             .extensions()
             .get::<BodyTimeout>()
-            .expect("body timeout extension should be present");
+            .expect("the request builder attaches the body timeout extension");
         assert_eq!(body_timeout.duration(), Duration::from_secs(30));
     }
 
@@ -1908,7 +1903,7 @@ mod tests {
         let timeout = request
             .extensions()
             .get::<ResponseTimeout>()
-            .expect("response timeout extension should be present");
+            .expect("the request builder attaches the response timeout extension");
         assert_eq!(timeout.duration(), Duration::from_secs(15));
     }
 
@@ -1927,7 +1922,7 @@ mod tests {
         let timeout = request
             .extensions()
             .get::<BodyTimeout>()
-            .expect("body timeout extension should be present");
+            .expect("the request builder attaches the body timeout extension");
         assert_eq!(timeout.duration(), Duration::from_mins(1));
     }
 

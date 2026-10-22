@@ -16,13 +16,13 @@ use super::timeout_body::TimeoutBody;
 use crate::json::JsonError;
 use crate::{HttpError, Result};
 
-/// Builder for creating optimized HTTP bodies.
+/// A builder for HTTP bodies.
 ///
-/// This builder optimizes memory usage and performance for HTTP bodies by providing:
+/// The builder provides:
 ///
-/// - Memory pooling for better performance
-/// - Runtime-specific optimizations
-/// - Easier testing with the `test-util` feature
+/// - Pooled memory.
+/// - Optimizations for each runtime.
+/// - Test support through the `test-util` feature.
 ///
 /// # Examples
 ///
@@ -31,7 +31,7 @@ use crate::{HttpError, Result};
 /// # #[cfg(feature = "test-util")] {
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
 /// # let builder = HttpBodyBuilder::new_fake();
-/// // Create different body types
+/// // Create different body types.
 /// let text_body: HttpBody = builder.text("Hello world");
 /// let empty_body: HttpBody = builder.empty();
 /// let binary_body: HttpBody = builder.slice(&[1, 2, 3, 4]);
@@ -41,7 +41,7 @@ use crate::{HttpError, Result};
 ///
 /// # Testing
 ///
-/// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
+/// The `test-util` feature provides [`HttpBodyBuilder::new_fake`].
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
     memory: BodyMemory,
@@ -52,8 +52,9 @@ pub struct HttpBodyBuilder {
 impl HttpBodyBuilder {
     /// Creates a test-friendly [`HttpBodyBuilder`] instance.
     ///
-    /// Useful for unit tests. Available with the `test-util` feature, this allows creating and
-    /// working with HTTP bodies without any real network or server setup.
+    /// Use this method in unit tests.
+    /// The `test-util` feature provides it.
+    /// It creates HTTP bodies without a network or server.
     ///
     /// Uses a frozen clock, so body data receive timeouts will never fire.
     ///
@@ -88,10 +89,10 @@ impl HttpBodyBuilder {
 
     /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
     ///
-    /// The provided memory provider is type-erased and used in place of the global per-thread
-    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: when the builder is moved
-    /// between threads via a thread-aware runtime mechanism, the provider's thread-affine state is
-    /// relocated along with it.
+    /// This method type-erases the memory provider.
+    /// It uses the provider instead of the global per-thread memory from [`HttpBodyBuilder::new`].
+    /// The provider remains thread-aware.
+    /// If the runtime moves the builder to another thread, it also moves the provider state.
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
@@ -103,8 +104,7 @@ impl HttpBodyBuilder {
 
     /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
     ///
-    /// Per-call options passed to [`body`](Self::body) or [`stream`](Self::stream) are
-    /// merged on top: the per-call value wins when both sides set the same field.
+    /// Options for [`body`](Self::body) or [`stream`](Self::stream) override these defaults.
     #[must_use]
     pub fn with_options(mut self, options: HttpBodyOptions) -> Self {
         self.options = options;
@@ -117,8 +117,8 @@ impl HttpBodyBuilder {
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
     /// implementations.
     ///
-    /// When `options` contains a timeout, the body is wrapped with an idle timeout that limits
-    /// how long the body may go without yielding a frame.
+    /// If `options` contains a timeout, the builder wraps the body with an idle timeout.
+    /// The timeout limits the time between frames.
     ///
     /// # Examples
     ///
@@ -167,15 +167,13 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Interposes `wrap` on `body`'s frames, keeping the policies it already carries.
+    /// Applies `wrap` to the frames and keeps the existing body policies.
     ///
-    /// Use this to transform a body in flight - decoding, counting, tracing -
-    /// rather than [`body`](Self::body), which builds a body from scratch and
-    /// would layer a second idle timeout over the one `body` already applies.
-    /// The existing options travel to the result, so a later
-    /// [`into_buffered`](HttpBody::into_buffered) still applies the buffer limit
-    /// the body was created with. A body carrying no policy of its own falls
-    /// back to this builder's defaults.
+    /// Use this method to decode, count, or trace a body in flight.
+    /// [`body`](Self::body) builds a body from the start and can add a second idle timeout.
+    /// This method copies the existing options to the result.
+    /// A later [`into_buffered`](HttpBody::into_buffered) still applies the original buffer limit.
+    /// If the body has no policy, this method uses the builder defaults.
     ///
     /// # Examples
     ///
@@ -205,9 +203,9 @@ impl HttpBodyBuilder {
             // yet enforced anywhere: install it rather than record a policy
             // nothing applies.
             (None, Some(timeout)) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(wrapped, timeout, &self.clock)), options),
-            // Already enforced underneath. Wrapping again would time the
-            // transformed frames instead, which a body turning many input
-            // frames into few output ones would trip.
+            // The wrapped body already applies this timeout.
+            // Another timeout measures the transformed frames.
+            // A transformation that combines many input frames can then time out.
             _ => HttpBody::from_streaming(Box::pin(wrapped), options),
         }
     }
@@ -217,8 +215,8 @@ impl HttpBodyBuilder {
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
     /// body from them.
     ///
-    /// When `options` contains a timeout, the stream is wrapped with an idle timeout that limits
-    /// how long the body may go without yielding a frame.
+    /// If `options` contains a timeout, the builder wraps the stream with an idle timeout.
+    /// The timeout limits the time between frames.
     ///
     /// # Examples
     ///
@@ -279,8 +277,8 @@ impl HttpBodyBuilder {
     ///
     /// # Performance
     ///
-    /// This will copy the contents of the byte slice. For more efficiency, you should consider
-    /// using [`bytes()`][Self::bytes].
+    /// This method copies the byte slice.
+    /// Use [`bytes()`][Self::bytes] to avoid this copy.
     ///
     /// # Examples
     ///
@@ -310,8 +308,8 @@ impl HttpBodyBuilder {
     ///
     /// # Performance
     ///
-    /// This method does not copy the contents of the [`BytesView`],
-    /// providing greater efficiency compared to [`slice()`][Self::slice].
+    /// This method does not copy the contents of the [`BytesView`].
+    /// [`slice()`][Self::slice] copies the data.
     ///
     /// # Examples
     ///
@@ -328,16 +326,16 @@ impl HttpBodyBuilder {
     /// # }
     /// # }
     /// ```
-    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
+    #[expect(clippy::unused_self, reason = "the builder can add data in a future implementation")]
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
         HttpBody::from_bytes(b.into())
     }
 
     /// Creates an empty body (zero bytes).
     ///
-    /// Use this for HTTP methods that don't need a body like GET or HEAD requests,
-    /// or for responses that only need status codes or headers.
-    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
+    /// Use this for HTTP methods that do not need a body, such as GET and HEAD.
+    /// You can also use it for responses that contain only status codes or headers.
+    #[expect(clippy::unused_self, reason = "the builder can add data in a future implementation")]
     pub fn empty(&self) -> HttpBody {
         HttpBody::empty()
     }
@@ -784,7 +782,7 @@ mod tests {
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
         let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
-        // Body created successfully — timeout was applied from per_call.
+        // The body uses the timeout from per_call.
         assert_eq!(body.content_length(), None);
     }
 

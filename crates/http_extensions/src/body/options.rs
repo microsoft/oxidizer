@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use thread_aware::ThreadAware;
 
-/// Options for configuring body-level behavior.
+/// Options for body behavior.
 ///
-/// This is passed to [`HttpBodyBuilder::body`][super::HttpBodyBuilder::body] and [`HttpBodyBuilder::stream`][super::HttpBodyBuilder::stream] so that
-/// the builder can apply body-specific policies such as an idle timeout.
+/// Pass this value to [`HttpBodyBuilder::body`][super::HttpBodyBuilder::body]
+/// or [`HttpBodyBuilder::stream`][super::HttpBodyBuilder::stream].
+/// The builder applies body policies such as an idle timeout.
 ///
 /// Use [`Default::default()`] when no special behavior is needed.
 ///
@@ -50,16 +51,18 @@ impl HttpBodyOptions {
 
     /// Sets the body buffer limit.
     ///
-    /// This limits the maximum amount of memory that may be used when buffering
-    /// the body via [`HttpBody::into_buffered`][super::HttpBody::into_buffered]. If the body exceeds this limit,
-    /// an error is returned.
+    /// This value limits the memory used when
+    /// [`HttpBody::into_buffered`][super::HttpBody::into_buffered] buffers the body.
+    /// The operation returns an error if the body exceeds this limit.
     #[must_use]
     pub const fn buffer_limit(mut self, limit: usize) -> Self {
         self.buffer_limit = Some(limit);
         self
     }
 
-    /// Merges `self` with `other`, preferring values from `self` when both are set.
+    /// Merges `self` with `other`.
+    ///
+    /// A value from `self` takes precedence.
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub(crate) fn merge(&self, other: &Self) -> Self {
         Self {
