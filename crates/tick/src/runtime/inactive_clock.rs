@@ -110,17 +110,11 @@ impl Clone for InactiveClock<Isolated> {
     }
 }
 
-impl Default for InactiveClock<Isolated> {
-    fn default() -> Self {
-        Self::new_isolated()
-    }
-}
-
 impl InactiveClock<Isolated> {
     /// Creates an [`InactiveClock`] with timer storage that can be isolated per thread.
     ///
     /// Clone and relocate the inactive clock before activation when each runtime thread needs its
-    /// own timer set. [`Default::default`] creates the same mode.
+    /// own timer set.
     #[must_use]
     pub fn new_isolated() -> Self {
         Self {
