@@ -186,10 +186,15 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn new_test_task_value() -> impl TypeErasedTask + Debug {
+pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
     let events = events_once::LocalEventPool::<()>::new();
     let (sender, _receiver) = events.rent();
-    Task::new(std::future::pending(), sender)
+    TaskHandle::new(pool.alloc_arc_pin(Task::new(std::future::pending(), sender)))
+}
+
+#[cfg(test)]
+pub(crate) fn allocate_test_task() -> TaskHandle {
+    allocate_test_task_in(&MultiPool::new())
 }
 
 impl<F, R, T> TypeErasedTask for Task<F, R, T>
@@ -600,7 +605,6 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::TaskHandle;
     use crate::remote::Pool as RemotePool;
     use crate::testing::TestSubjectFuture;
 

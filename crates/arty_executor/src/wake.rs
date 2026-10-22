@@ -14,7 +14,9 @@ use std::thread::ThreadId;
 
 use performables::sync::channel;
 
-use crate::{TaskHandle, TaskPtr, executor_context};
+#[cfg(test)]
+use crate::TaskHandle;
+use crate::{RemoteTaskHandle, TaskPtr, executor_context};
 
 const TASK_ACTIVE: u8 = 0b001;
 const TASK_ACTIVE_LOCAL: u8 = 0b011;
@@ -227,18 +229,20 @@ impl Drop for WakeSignal {
     }
 }
 
-pub(crate) struct RemoteWake(TaskHandle);
+pub(crate) struct RemoteWake(RemoteTaskHandle);
 
 impl RemoteWake {
     fn new(signal: &WakeSignal) -> Self {
         // SAFETY: The live signal's enclosing task owns the allocation during notification setup.
-        Self(unsafe { signal.task_ptr.retain() })
+        Self(unsafe { signal.task_ptr.retain_remote() })
     }
 
     fn schedule_local(self, owner: ThreadId) {
         // SAFETY: The receiving executor owns this thread, and the notification retains the task.
         if unsafe { self.0.as_task() }.promote_remote_notification() {
-            executor_context::enqueue(owner, self.0).expect("remote wakes are drained by their registered executor owner");
+            // SAFETY: Remote wakes are drained only by the registered executor owner.
+            let task_handle = unsafe { self.0.into_owner() };
+            executor_context::enqueue(owner, task_handle).expect("remote wakes are drained by their registered executor owner");
         }
     }
 }
@@ -283,7 +287,7 @@ fn waker_clone(ptr: *const ()) -> RawWaker {
 
 fn waker_wake(ptr: *const ()) {
     // SAFETY: Consuming wake transfers this raw waker's ownership into the guard.
-    let _owner = unsafe { signal_from_raw(ptr).task_ptr.into_handle() };
+    let _owner = unsafe { signal_from_raw(ptr).task_ptr.into_remote() };
     signal_from_raw(ptr).wake();
 }
 
@@ -293,7 +297,7 @@ fn waker_wake_by_ref(ptr: *const ()) {
 
 fn waker_drop(ptr: *const ()) {
     // SAFETY: Dropping transfers this raw waker's ownership into the guard.
-    drop(unsafe { signal_from_raw(ptr).task_ptr.into_handle() });
+    drop(unsafe { signal_from_raw(ptr).task_ptr.into_remote() });
 }
 
 fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
@@ -304,12 +308,10 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 
 #[cfg(test)]
 mod tests {
-    use std::future::pending;
     use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
-    use events_once::LocalEventPool;
     use plurality::MultiPool;
 
     use super::*;
@@ -453,7 +455,8 @@ mod tests {
     #[test]
     fn remote_wake_has_non_exhaustive_diagnostics() {
         let task_handle = crate::testing::new_test_task_handle();
-        let remote = RemoteWake(task_handle);
+        // SAFETY: `task_handle` keeps the initialized ownership template alive.
+        let remote = RemoteWake(unsafe { task_handle.as_ptr().retain_remote() });
 
         assert_eq!(format!("{remote:?}"), "RemoteWake { .. }");
     }
@@ -484,7 +487,7 @@ mod tests {
     #[test]
     fn dropping_an_owned_waker_releases_its_task_reference() {
         let pool = MultiPool::new();
-        let task_handle = TaskHandle::new(pool.alloc_arc_pin(crate::testing::new_test_task()));
+        let task_handle = crate::allocate_test_task_in(&pool);
         {
             let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_handle));
             // SAFETY: The clone acquires independent task ownership before the borrow ends.

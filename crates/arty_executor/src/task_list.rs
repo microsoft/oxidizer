@@ -85,10 +85,10 @@ mod tests {
     use plurality::MultiPool;
 
     use super::*;
-    use crate::testing::new_test_task;
+    use crate::allocate_test_task_in;
 
     fn task(pool: &MultiPool) -> TaskHandle {
-        TaskHandle::new(pool.alloc_arc_pin(new_test_task()))
+        allocate_test_task_in(pool)
     }
 
     #[test]

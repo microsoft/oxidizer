@@ -8,13 +8,8 @@ use scopeguard::{Always, ScopeGuard};
 
 use crate::{CycleOutcome, Executor};
 
-pub(crate) fn new_test_task() -> impl crate::TypeErasedTask + std::fmt::Debug {
-    crate::new_test_task_value()
-}
-
 pub(crate) fn new_test_task_handle() -> crate::TaskHandle {
-    let pool = plurality::Pool::new();
-    crate::TaskHandle::new(pool.alloc_arc_pin(new_test_task()))
+    crate::allocate_test_task()
 }
 
 /// Creates an executor with unit-test cleanup that drives explicit shutdown.

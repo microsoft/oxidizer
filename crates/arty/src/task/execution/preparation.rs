@@ -324,7 +324,7 @@ mod tests {
         let (runtime, builtins) = test_builtins();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
-        crate::runtime::RuntimeOperations::from(&builtins).request_stop();
+        builtins.control().request_stop();
         let mut task = pin!(DeferredTask::new(
             move |_| {
                 factory_invoked.store(true, Ordering::Release);
