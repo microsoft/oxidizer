@@ -13,8 +13,11 @@
 //! See the [`event`](macro@crate::event) attribute macro documentation for the full
 //! attribute syntax reference.
 
+use std::borrow::Cow;
+
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
+use smallvec::SmallVec;
 use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -252,10 +255,10 @@ impl FieldDef<'_> {
     /// The name is unraw-ed, so a field written as `r#type` is logged under the
     /// domain key `type` rather than leaking Rust's raw-identifier escape into
     /// telemetry.
-    fn log_key(&self) -> Option<String> {
+    fn log_key(&self) -> Option<Cow<'_, str>> {
         match &self.log {
-            LogRouting::Default => Some(self.ident.unraw().to_string()),
-            LogRouting::Rename(name) => Some(name.clone()),
+            LogRouting::Default => Some(Cow::Owned(self.ident.unraw().to_string())),
+            LogRouting::Rename(name) => Some(Cow::Borrowed(name)),
             LogRouting::Exclude => None,
         }
     }
@@ -442,7 +445,9 @@ fn parse_event_def<'a>(
     }
 
     let mut log: Option<LogArgs> = None;
-    let mut metric_specs: Vec<MetricSpec> = Vec::new();
+    // Keep an event counter plus one field instrument inline instead of allocating
+    // a Vec. Events with more instruments spill to the heap.
+    let mut metric_specs: SmallVec<[MetricSpec; 2]> = SmallVec::new();
 
     for attr in attrs {
         let Some(ident) = attr.path().get_ident() else {
@@ -535,7 +540,7 @@ fn parse_metric_attr(attr: &Attribute) -> Result<MetricAttrBody> {
 /// per emission. In both cases the instrument's metric name defaults to the
 /// event name; an explicit `name = "..."` overrides it. Returns the
 /// event-level metric, if any.
-fn resolve_metrics(specs: Vec<MetricSpec<'_>>, fields: &mut [FieldDef<'_>], event_name: &str) -> Result<Option<EventMetric>> {
+fn resolve_metrics(specs: SmallVec<[MetricSpec<'_>; 2]>, fields: &mut [FieldDef<'_>], event_name: &str) -> Result<Option<EventMetric>> {
     let mut event_metric: Option<EventMetric> = None;
 
     for spec in specs {
@@ -855,7 +860,7 @@ fn validate_message_placeholders(def: &EventDef<'_>) -> Result<()> {
     }
 
     // Collect valid log key names.
-    let log_key_names: Vec<String> = def.fields.iter().filter_map(FieldDef::log_key).collect();
+    let log_key_names: Vec<_> = def.fields.iter().filter_map(FieldDef::log_key).collect();
 
     // Extract placeholders from the message template: substrings inside `{...}`.
     // Using `split_once` (rather than index arithmetic) keeps the scan free of
@@ -1071,7 +1076,13 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
     let default_key = field.ident.unraw().to_string();
 
     // Log routing
-    let log_key = if has_log { field.log_key() } else { None };
+    let log_key = if !has_log {
+        None
+    } else if matches!(field.log, LogRouting::Default) {
+        Some(Cow::Borrowed(default_key.as_str()))
+    } else {
+        field.log_key()
+    };
     let log_entry = if let Some(key) = &log_key {
         quote! { ::core::option::Option::Some(::observed::metadata::LogFieldEntry::new(#key)) }
     } else {
@@ -1112,16 +1123,16 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
         return generate_option_field_visit(field, inner_ty, &field_desc);
     }
 
-    let owned = quote! { self.#field_ident.clone() };
-    let by_ref = if is_reference_type(field.ty) {
-        // Field is already a reference (`&T`), so `self.field` is `&T`; pass it
-        // directly to avoid a double-reference `&&T`.
-        quote! { self.#field_ident }
-    } else {
-        // Field is an owned type, so `&self.field` produces `&T`.
-        quote! { &self.#field_ident }
+    let owned = || quote! { self.#field_ident.clone() };
+    let by_ref = || {
+        if is_reference_type(field.ty) {
+            // The field is already a reference, so do not add a second borrow.
+            quote! { self.#field_ident }
+        } else {
+            quote! { &self.#field_ident }
+        }
     };
-    let value = value_expr(&field.redaction, &owned, &by_ref, &quote! { engine }, is_borrowed_str(field.ty));
+    let value = value_expr(&field.redaction, owned, by_ref, &quote! { engine }, is_borrowed_str(field.ty));
     let getter = if matches!(field.redaction, FieldRedaction::Unredacted) {
         quote! { |_| #value }
     } else {
@@ -1142,15 +1153,15 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
 /// expression is interpolated into this output, so importing `Value` here would
 /// shadow a consumer type of the same name and break otherwise valid input.
 ///
-/// `owned` are tokens evaluating to an owned `T` (for the `Into<Value>` path);
-/// `by_ref` are tokens evaluating to `&T` (for both redaction paths); `engine`
-/// names the redaction engine bound in the enclosing closure. The same helper
-/// drives the non-optional path and both arms of an `Option<T>` field, so the
-/// three redaction variants are defined once.
+/// `owned` builds tokens for an owned `T` (for the `Into<Value>` path).
+/// `by_ref` builds tokens for `&T` (for both redaction paths).
+/// Only the selected builder runs. `engine` names the redaction engine bound
+/// in the enclosing closure. The same helper drives optional and non-optional
+/// fields, so the three redaction variants are defined once.
 fn value_expr(
     redaction: &FieldRedaction,
-    owned: &TokenStream,
-    by_ref: &TokenStream,
+    owned: impl FnOnce() -> TokenStream,
+    by_ref: impl FnOnce() -> TokenStream,
     engine: &TokenStream,
     borrowed_str: bool,
 ) -> TokenStream {
@@ -1158,21 +1169,29 @@ fn value_expr(
         // A borrowed `&str` cannot be stored by reference, so the macro spells
         // out the copy that `Value` has no `From<&str>` impl to hide.
         FieldRedaction::Unredacted if borrowed_str => {
+            let by_ref = by_ref();
             quote! { ::observed::Value::from(::std::sync::Arc::<str>::from(#by_ref)) }
         }
-        FieldRedaction::Unredacted => quote! { ::observed::Value::from(#owned) },
+        FieldRedaction::Unredacted => {
+            let owned = owned();
+            quote! { ::observed::Value::from(#owned) }
+        }
         // `Sensitive<T>` is `RedactedDisplay` whenever `T: Display`, and a
         // reference to a `Display` type is itself `Display`, so the classified
         // value can be borrowed rather than cloned. `from_redacted` only
         // borrows the temporary `Sensitive`, so nothing needs to own the value.
-        FieldRedaction::DataClass(expr) => quote! {
-            ::observed::Value::from_redacted(
-                &::observed::__private::Sensitive::new(#by_ref, #expr),
-                #engine)
-        },
-        FieldRedaction::Default => quote! {
-            ::observed::Value::from_redacted(#by_ref, #engine)
-        },
+        FieldRedaction::DataClass(expr) => {
+            let by_ref = by_ref();
+            quote! {
+                ::observed::Value::from_redacted(
+                    &::observed::__private::Sensitive::new(#by_ref, #expr),
+                    #engine)
+            }
+        }
+        FieldRedaction::Default => {
+            let by_ref = by_ref();
+            quote! { ::observed::Value::from_redacted(#by_ref, #engine) }
+        }
     }
 }
 
@@ -1193,12 +1212,21 @@ fn generate_option_field_visit(field: &FieldDef<'_>, inner_ty: &syn::Type, field
     // For `Value::from_redacted` we need `&T`: when the inner type is already a reference
     // (`__val: &&T`) we deref once; otherwise `__val: &T` is used directly. The
     // owned form clones an owned inner, or copies the reference for a reference inner.
-    let (val_owned, val_ref) = if inner_is_ref {
-        (quote! { *__val }, quote! { *__val })
-    } else {
-        (quote! { __val.clone() }, quote! { __val })
+    let val_owned = || {
+        if inner_is_ref {
+            quote! { *__val }
+        } else {
+            quote! { __val.clone() }
+        }
     };
-    let some_value = value_expr(&field.redaction, &val_owned, &val_ref, &engine, is_borrowed_str(inner_ty));
+    let val_ref = || {
+        if inner_is_ref {
+            quote! { *__val }
+        } else {
+            quote! { __val }
+        }
+    };
+    let some_value = value_expr(&field.redaction, val_owned, val_ref, &engine, is_borrowed_str(inner_ty));
 
     match &field.if_none {
         // `drop`: omit the field entirely when `None`.

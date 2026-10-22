@@ -7,6 +7,9 @@
 //! Both `#[event(...)]` and `#[derive(Enrichment)]` accept these attributes on fields.
 //! This module provides the types and parsing logic so neither macro duplicates it.
 
+use std::borrow::Cow;
+
+use smallvec::{SmallVec, smallvec};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Error, Expr, Ident, LitStr, Meta, Result, Token};
@@ -47,11 +50,11 @@ impl MetricRouting {
 
     /// Resolves the dimension key, or `None` when the field is not a metric dimension.
     /// `own_name` supplies the key for the bare `metric` (own-name) opt-in.
-    pub(crate) fn resolve_key(&self, own_name: &str) -> Option<String> {
+    pub(crate) fn resolve_key<'a>(&'a self, own_name: &'a str) -> Option<&'a str> {
         match self {
             Self::None => None,
-            Self::OwnName => Some(own_name.to_owned()),
-            Self::Named(name) => Some(name.clone()),
+            Self::OwnName => Some(own_name),
+            Self::Named(name) => Some(name),
         }
     }
 }
@@ -133,7 +136,7 @@ fn parse_dimension(attr: &Attribute) -> Result<Dimension> {
         )),
         Meta::List(list) => {
             let items = list.parse_args_with(Punctuated::<DimensionItem, Token![,]>::parse_terminated)?;
-            fold_dimension(attr, items.into_iter().collect())
+            fold_dimension(attr, items)
         }
     }
 }
@@ -142,7 +145,7 @@ fn parse_dimension(attr: &Attribute) -> Result<Dimension> {
 ///
 /// A `log` item occupies the `log` slot and may be paired with a `metric`
 /// opt-in (but not a second `log` item).
-fn fold_dimension(attr: &Attribute, items: Vec<DimensionItem>) -> Result<Dimension> {
+fn fold_dimension(attr: &Attribute, items: Punctuated<DimensionItem, Token![,]>) -> Result<Dimension> {
     if items.is_empty() {
         return Err(Error::new_spanned(
             attr,
@@ -208,12 +211,12 @@ pub(crate) enum IfNone {
     /// Omit the field entirely: no log attribute and no metric dimension are recorded.
     Drop,
     /// Record the given placeholder string in place of the missing value.
-    Fill(String),
+    Fill(Cow<'static, str>),
 }
 
 impl Default for IfNone {
     fn default() -> Self {
-        Self::Fill("n/a".to_owned())
+        Self::Fill(Cow::Borrowed("n/a"))
     }
 }
 
@@ -228,7 +231,7 @@ fn parse_if_none(attr: &Attribute) -> Result<IfNone> {
     };
     attr.parse_args_with(|input: ParseStream<'_>| {
         if input.peek(LitStr) {
-            return Ok(IfNone::Fill(input.parse::<LitStr>()?.value()));
+            return Ok(IfNone::Fill(Cow::Owned(input.parse::<LitStr>()?.value())));
         }
         let key: Ident = input.parse()?;
         if key == "drop" {
@@ -441,16 +444,18 @@ fn walk_tokens(token: &proc_macro2::TokenTree, params: &[Ident], found: &mut boo
 /// reference because `Value::from_redacted` takes
 /// `&impl RedactedDisplay`.
 ///
-/// Returns an empty vector for field types that do not mention `params`.
-pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, params: &[Ident]) -> Vec<syn::WherePredicate> {
+/// Returns an empty collection for field types that do not mention `params`.
+pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, params: &[Ident]) -> SmallVec<[syn::WherePredicate; 2]> {
     let owned = option_inner_type(ty).unwrap_or(ty);
     if !mentions_any_type_param(owned, params) {
-        return Vec::new();
+        return SmallVec::new();
     }
     let by_ref = strip_reference(owned);
 
     match redaction {
-        FieldRedaction::Unredacted => vec![
+        // At most two predicates are needed, so keep them inline instead of
+        // allocating a Vec for each generic field.
+        FieldRedaction::Unredacted => smallvec![
             syn::parse_quote!(#owned: ::core::clone::Clone),
             syn::parse_quote!(::observed::Value: ::core::convert::From<#owned>),
         ],
@@ -458,10 +463,10 @@ pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, param
             // The value is borrowed, not cloned, so the bound is `Display` on
             // the pointee: `Sensitive<T>: RedactedDisplay` holds when
             // `T: Display`, and `&T: Display` follows from `T: Display`.
-            vec![syn::parse_quote!(#by_ref: ::core::fmt::Display)]
+            smallvec![syn::parse_quote!(#by_ref: ::core::fmt::Display)]
         }
         FieldRedaction::Default => {
-            vec![syn::parse_quote!(#by_ref: ::observed::__private::RedactedDisplay)]
+            smallvec![syn::parse_quote!(#by_ref: ::observed::__private::RedactedDisplay)]
         }
     }
 }

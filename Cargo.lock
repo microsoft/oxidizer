@@ -3903,6 +3903,7 @@ dependencies = [
  "metabench",
  "proc-macro2",
  "quote",
+ "smallvec",
  "syn 3.0.5",
  "testing_aids",
 ]
