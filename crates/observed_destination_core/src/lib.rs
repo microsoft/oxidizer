@@ -115,3 +115,46 @@ impl<D: MetricDestination + 'static> IntoMetricDestination for D {
         self
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::{IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination};
+
+    #[derive(Debug, PartialEq)]
+    struct TestDestination {
+        id: u32,
+    }
+
+    impl LogDestination for TestDestination {
+        fn register(
+            self,
+            builder: opentelemetry_sdk::logs::LoggerProviderBuilder,
+        ) -> crate::DestinationResult<opentelemetry_sdk::logs::LoggerProviderBuilder> {
+            Ok(builder)
+        }
+    }
+
+    impl MetricDestination for TestDestination {
+        fn register(
+            self,
+            builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+        ) -> crate::DestinationResult<opentelemetry_sdk::metrics::MeterProviderBuilder> {
+            Ok(builder)
+        }
+    }
+
+    #[test]
+    fn log_destination_is_into_log_destination() {
+        let test_destination = TestDestination { id: 1 };
+
+        assert_eq!(test_destination.into_log_destination(), TestDestination { id: 1 });
+    }
+
+    #[test]
+    fn metric_destination_is_into_metric_destination() {
+        let test_destination = TestDestination { id: 2 };
+
+        assert_eq!(test_destination.into_metric_destination(), TestDestination { id: 2 });
+    }
+}

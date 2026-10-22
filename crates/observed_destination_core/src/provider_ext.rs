@@ -94,3 +94,105 @@ impl MeterProviderBuilderExt for MeterProviderBuilder {
         dest.into_metric_destination().register(self)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::fmt::Debug;
+    use std::sync::{Arc, Mutex};
+
+    use crate::{LogDestination, LoggerProviderBuilderExt, MeterProviderBuilderExt, MetricDestination};
+
+    #[derive(Debug, Clone)]
+    struct TestDestination {
+        should_succeed: bool,
+        registered_log: Arc<Mutex<bool>>,
+        registered_metric: Arc<Mutex<bool>>,
+    }
+
+    impl TestDestination {
+        fn new(should_succeed: bool) -> Self {
+            Self {
+                should_succeed,
+                registered_log: Arc::new(Mutex::new(false)),
+                registered_metric: Arc::new(Mutex::new(false)),
+            }
+        }
+    }
+
+    impl LogDestination for TestDestination {
+        fn register(
+            self,
+            builder: opentelemetry_sdk::logs::LoggerProviderBuilder,
+        ) -> crate::DestinationResult<opentelemetry_sdk::logs::LoggerProviderBuilder> {
+            if self.should_succeed {
+                *self.registered_log.lock().unwrap() = true;
+                Ok(builder)
+            } else {
+                Err("Failed to register log destination".into())
+            }
+        }
+    }
+
+    impl MetricDestination for TestDestination {
+        fn register(
+            self,
+            builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+        ) -> crate::DestinationResult<opentelemetry_sdk::metrics::MeterProviderBuilder> {
+            if self.should_succeed {
+                *self.registered_metric.lock().unwrap() = true;
+                Ok(builder)
+            } else {
+                Err("Failed to register metric destination".into())
+            }
+        }
+    }
+
+    #[test]
+    fn logger_provider_builder_ext_registers_destination() {
+        let test_destination = TestDestination::new(true);
+
+        let result = opentelemetry_sdk::logs::SdkLoggerProvider::builder().register(test_destination.clone());
+
+        assert!(result.is_ok(), "Expected successful registration, but got an error");
+        assert!(
+            *test_destination.registered_log.lock().unwrap(),
+            "Log destination was not registered"
+        );
+    }
+
+    #[test]
+    fn logger_provider_builder_ext_propagates_error() {
+        let result = opentelemetry_sdk::logs::SdkLoggerProvider::builder().register(TestDestination::new(false));
+
+        assert!(result.is_err(), "Expected registration to fail, but it succeeded");
+        assert!(
+            result.unwrap_err().to_string().contains("Failed to register log destination"),
+            "Unexpected error message"
+        );
+    }
+
+    #[test]
+    fn meter_provider_builder_ext_registers_destination() {
+        let test_destination = TestDestination::new(true);
+
+        let result = opentelemetry_sdk::metrics::SdkMeterProvider::builder().register(test_destination.clone());
+
+        assert!(result.is_ok(), "Expected successful registration, but got an error");
+        assert!(
+            *test_destination.registered_metric.lock().unwrap(),
+            "Metric destination was not registered"
+        );
+    }
+
+    #[test]
+    fn meter_provider_builder_ext_propagates_error() {
+        let result = opentelemetry_sdk::metrics::SdkMeterProvider::builder().register(TestDestination::new(false));
+
+        assert!(result.is_err(), "Expected registration to fail, but it succeeded");
+        assert!(
+            result.unwrap_err().to_string().contains("Failed to register metric destination"),
+            "Unexpected error message"
+        );
+    }
+}

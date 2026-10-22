@@ -112,7 +112,7 @@ mod tests {
 
         fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
             assert_eq!(timeout, Duration::from_secs(5));
-            self.0.lock().push("shutdown");
+            self.0.lock().push("shutdown_with_timeout");
             Ok(())
         }
 
@@ -120,6 +120,18 @@ mod tests {
             assert_eq!(resource.get(&"service.name".into()), Some("example".into()));
             self.0.lock().push("resource");
         }
+    }
+
+    #[test]
+    fn shutdown_with_timeout_propagates_to_inner() {
+        let inner = RecordingProcessor::default();
+        let calls = Arc::clone(&inner.0);
+        let filter = SeverityFilter::new(Severity::Warn, inner);
+
+        filter.shutdown_with_timeout(Duration::from_secs(5)).unwrap();
+
+        assert_eq!(*calls.lock(), ["shutdown_with_timeout"]);
+        assert!(filter.is_shutdown.into_inner());
     }
 
     #[test]
@@ -169,7 +181,7 @@ mod tests {
         filter.shutdown().unwrap();
         filter.emit(&mut record, &scope);
 
-        assert_eq!(*calls.lock(), ["resource", "emit", "emit", "flush", "shutdown"]);
+        assert_eq!(*calls.lock(), ["resource", "emit", "emit", "flush", "shutdown_with_timeout"]);
     }
 
     #[test]
