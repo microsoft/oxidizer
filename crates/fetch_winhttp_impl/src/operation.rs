@@ -430,6 +430,7 @@ mod tests {
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
+    use events_once::RawReceiver;
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
@@ -455,6 +456,7 @@ mod tests {
     assert_not_impl_any!(RawContextOwner: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: Sync);
+    assert_impl_all!(RawReceiver<CompletionResult>: Send);
     assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
     // The future mutably borrows the request-handle slot.
     assert_not_impl_any!(OperationFuture<'static>: UnwindSafe);
