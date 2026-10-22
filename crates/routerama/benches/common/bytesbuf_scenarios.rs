@@ -15,7 +15,7 @@ use bytesbuf::{BytesBuf, BytesView};
 use http::{Request, Response};
 use http_body::{Body as HttpBody, Frame, SizeHint};
 use routerama::response::IntoResponse as _;
-use routerama::response::bytesbuf::template::{BytesViewTemplate, json_number, json_string};
+use routerama::response::bytesbuf::template::{BytesViewTemplate, Json, json_number, json_string};
 use routerama::route::bytesbuf::BytesViewBody;
 use routerama::route::tower::RouteService;
 use routerama::route::{FromRequestBody as _, router};
@@ -259,12 +259,12 @@ fn run_extraction(prepared: PreparedExtraction) -> Observation {
 #[derive(Debug)]
 struct PreparedTemplate {
     memory: GlobalPool,
-    template: BytesViewTemplate<3>,
+    template: BytesViewTemplate<3, Json>,
 }
 
 fn prepare_template() -> PreparedTemplate {
     let memory = GlobalPool::new();
-    let template = BytesViewTemplate::prepare(&memory, [br#"{"id":"#, br#","name":"#, b"}"]);
+    let template = BytesViewTemplate::<3, Json>::prepare(&memory, [br#"{"id":"#, br#","name":"#, b"}"]);
     PreparedTemplate { memory, template }
 }
 

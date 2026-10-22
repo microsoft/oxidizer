@@ -203,7 +203,7 @@ where
         if frames > budget {
             return Err(BodyRejection::TooManyFrames(BodyFrameLimitError::new(budget, frames)));
         }
-        let frame = frame.map_err(|error| BodyRejection::Transport(BodyTransportError::new(error)))?;
+        let frame = frame.map_err(BodyTransportError::new)?;
         let Ok(data) = frame.into_data() else {
             continue;
         };
@@ -282,6 +282,11 @@ fn validate_utf8(view: &BytesView) -> Result<(), InvalidUtf8Error> {
     }
 }
 
+// The `_` arm is unreachable: `carry[0]` is only ever set from a lead byte
+// that `core::str::from_utf8` already judged to start a valid, merely
+// incomplete sequence (error_len == None), and that outcome only occurs for
+// leads in 0xc2..=0xf4 (verified empirically against every byte 0x80..=0xff).
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn utf8_sequence_length(first: u8) -> usize {
     match first {
         0xc2..=0xdf => 2,

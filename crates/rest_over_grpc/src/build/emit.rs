@@ -66,7 +66,7 @@ fn route_to_routerama(route: &Route) -> routerama_build::Route {
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
 /// use rest_over_grpc::build::{HttpRule, generate_router};
-/// use routerama::HttpMethod;
+/// use routerama::resolve::HttpMethod;
 ///
 /// let rule = HttpRule::new(
 ///     "ListBooks",
@@ -99,7 +99,7 @@ pub(crate) fn generate_router_with_visibility(routes: &[Route], public: bool) ->
 #[cfg(test)]
 mod tests {
     use http_path_template::{Grammar, PathTemplate};
-    use routerama::HttpMethod;
+    use routerama::resolve::HttpMethod;
 
     use super::*;
 

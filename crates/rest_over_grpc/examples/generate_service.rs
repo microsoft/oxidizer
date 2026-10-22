@@ -18,7 +18,7 @@
 
 use http_path_template::{Grammar, PathTemplate};
 use rest_over_grpc::build::{Generator, HttpRule, RequestBody, ServiceDefinition};
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 fn main() {
     let get_shelf = HttpRule::new(

@@ -36,6 +36,7 @@ use smallvec::SmallVec;
 
 use crate::captures::materialize_range;
 use crate::codegen_helpers::ScannedPath;
+#[doc(inline)]
 pub use crate::configuration_error::ConfigurationError;
 use crate::decode::decode;
 use crate::dyn_builder::DynBuilder;
@@ -203,8 +204,7 @@ pub struct ErasedMountRouterBuilder<B, S: ?Sized, D: bytes::Buf = Bytes> {
 
 impl<B, S: ?Sized> ErasedMountRouterBuilder<B, S, Bytes> {
     /// Creates an empty builder.
-    #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::new_with_fallback(boxed_status)
     }
 }
@@ -219,7 +219,7 @@ where
     /// [`Bytes`]. The fallback supplies matching data for `404` and `400`
     /// responses without requiring a conversion.
     #[must_use]
-    pub fn new_with_fallback(fallback: fn(http::StatusCode) -> Response<BoxBody<D>>) -> Self {
+    pub(crate) fn new_with_fallback(fallback: fn(http::StatusCode) -> Response<BoxBody<D>>) -> Self {
         Self {
             inner: DynBuilder::new(),
             fallback,
@@ -245,15 +245,9 @@ where
     /// templates, and conflicting method/template shapes.
     pub fn build(self) -> Result<ErasedMountRouter<B, S, D>, ConfigurationError> {
         self.inner.finish_mounts().map(|resolver| ErasedMountRouter {
-            resolver,
+            resolver: Rc::new(resolver),
             fallback: self.fallback,
         })
-    }
-}
-
-impl<B, S: ?Sized> Default for ErasedMountRouterBuilder<B, S, Bytes> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -267,7 +261,10 @@ impl<B, S: ?Sized, D: bytes::Buf> fmt::Debug for ErasedMountRouterBuilder<B, S, 
 
 /// An immutable method/path router for explicitly erased mounted services.
 pub struct ErasedMountRouter<B, S: ?Sized, D: bytes::Buf = Bytes> {
-    resolver: RawResolver<DynRoute<ErasedMountService<B, S, D>>>,
+    /// Shared so cloning a router is a refcount bump rather than a route-table rebuild.
+    ///
+    /// The mounted services are already `Rc`-shared.
+    resolver: Rc<RawResolver<DynRoute<ErasedMountService<B, S, D>>>>,
     fallback: fn(http::StatusCode) -> Response<BoxBody<D>>,
 }
 
@@ -295,10 +292,20 @@ where
     /// `400 Bad Request`. A match invokes the erased service. Request parts and
     /// body move directly into [`MountedRequest`] without boxing, cloning, or
     /// reconstruction.
+    ///
+    /// The `Err(_)` (invalid path) arm below is unreachable through this
+    /// method: a raw `?` or `#` byte is the only condition
+    /// [`RawResolver::resolve_scanned_checked`] treats as an invalid path, and
+    /// both bytes are always consumed by [`http::Uri`] parsing (as the query
+    /// and fragment delimiters respectively) before a path ever reaches
+    /// [`http::Request::uri`]. `coverage(off)` is applied to this whole
+    /// method — rather than to a smaller helper — because match arms cannot
+    /// be excluded individually; only items can.
     #[expect(
         clippy::future_not_send,
         reason = "the core mounted-service boundary intentionally supports local futures, bodies, and state"
     )]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn route(&self, request: http::Request<B>, state: &S) -> Response<BoxBody<D>> {
         let matched = self
             .resolver
@@ -309,6 +316,15 @@ where
             Ok(Some((service, captures))) => service.call(MountedRequest { request, captures }, state).await,
             Ok(None) => (self.fallback)(http::StatusCode::NOT_FOUND),
             Err(_) => (self.fallback)(http::StatusCode::BAD_REQUEST),
+        }
+    }
+}
+
+impl<B, S: ?Sized, D: bytes::Buf> Clone for ErasedMountRouter<B, S, D> {
+    fn clone(&self) -> Self {
+        Self {
+            resolver: Rc::clone(&self.resolver),
+            fallback: self.fallback,
         }
     }
 }
@@ -465,8 +481,9 @@ fn boxed_status(status: http::StatusCode) -> Response<BoxBody> {
     status.into_response().map(BoxBody::new)
 }
 
-/// A concrete [`Send`] service contract that can be explicitly erased for
-/// mounting behind a multi-threaded transport.
+/// A concrete [`Send`] service contract that can be explicitly erased for mounting.
+///
+/// Erasure lets the service be mounted behind a multi-threaded transport.
 ///
 /// This is the [`Send`] counterpart of [`MountedService`]. It differs in
 /// exactly one way: the returned future must be [`Send`], which is what lets
@@ -600,8 +617,7 @@ pub struct SendErasedMountRouterBuilder<B, S: ?Sized, D: bytes::Buf = Bytes> {
 
 impl<B, S: ?Sized> SendErasedMountRouterBuilder<B, S, Bytes> {
     /// Creates an empty builder.
-    #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::new_with_fallback(send_boxed_status)
     }
 }
@@ -615,7 +631,7 @@ where
     /// Use this constructor when mounted services emit data other than
     /// [`Bytes`].
     #[must_use]
-    pub fn new_with_fallback(fallback: fn(http::StatusCode) -> Response<SendBoxBody<D>>) -> Self {
+    pub(crate) fn new_with_fallback(fallback: fn(http::StatusCode) -> Response<SendBoxBody<D>>) -> Self {
         Self {
             inner: DynBuilder::new(),
             fallback,
@@ -641,15 +657,9 @@ where
     /// templates, and conflicting method/template shapes.
     pub fn build(self) -> Result<SendErasedMountRouter<B, S, D>, ConfigurationError> {
         self.inner.finish_mounts().map(|resolver| SendErasedMountRouter {
-            resolver,
+            resolver: Arc::new(resolver),
             fallback: self.fallback,
         })
-    }
-}
-
-impl<B, S: ?Sized> Default for SendErasedMountRouterBuilder<B, S, Bytes> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -661,15 +671,17 @@ impl<B, S: ?Sized, D: bytes::Buf> fmt::Debug for SendErasedMountRouterBuilder<B,
     }
 }
 
-/// An immutable method/path router for explicitly erased [`Send`] mounted
-/// services.
+/// An immutable method/path router for explicitly erased [`Send`] mounted services.
 ///
 /// Resolution is the same table and the same single vtable hop as
 /// [`ErasedMountRouter`]; only the erasure boundary differs, so a mounted
 /// response reaches a multi-threaded transport with one boxed body rather
 /// than none at all.
 pub struct SendErasedMountRouter<B, S: ?Sized, D: bytes::Buf = Bytes> {
-    resolver: RawResolver<DynRoute<SendErasedMountService<B, S, D>>>,
+    /// Shared so cloning a router is a refcount bump rather than a route-table rebuild.
+    ///
+    /// The mounted services are already `Arc`-shared.
+    resolver: Arc<RawResolver<DynRoute<SendErasedMountService<B, S, D>>>>,
     fallback: fn(http::StatusCode) -> Response<SendBoxBody<D>>,
 }
 
@@ -698,6 +710,12 @@ where
     /// A complete miss becomes `404 Not Found`; an invalid path becomes
     /// `400 Bad Request`. Request parts and body move directly into
     /// [`MountedRequest`] without boxing, cloning, or reconstruction.
+    ///
+    /// See [`ErasedMountRouter::route`] — the same reasoning applies here: a
+    /// raw `?` or `#` byte is the only condition that would make the
+    /// `Err(_)` arm reachable, and [`http::Uri`] parsing always consumes both
+    /// bytes before a path ever reaches [`http::Request::uri`].
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn route(&self, request: http::Request<B>, state: &S) -> Response<SendBoxBody<D>> {
         let matched = self
             .resolver
@@ -708,6 +726,15 @@ where
             Ok(Some((service, captures))) => service.call(MountedRequest { request, captures }, state).await,
             Ok(None) => (self.fallback)(http::StatusCode::NOT_FOUND),
             Err(_) => (self.fallback)(http::StatusCode::BAD_REQUEST),
+        }
+    }
+}
+
+impl<B, S: ?Sized, D: bytes::Buf> Clone for SendErasedMountRouter<B, S, D> {
+    fn clone(&self) -> Self {
+        Self {
+            resolver: Arc::clone(&self.resolver),
+            fallback: self.fallback,
         }
     }
 }

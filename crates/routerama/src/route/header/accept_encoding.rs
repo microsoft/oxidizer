@@ -374,6 +374,21 @@ mod tests {
     }
 
     #[test]
+    fn zstd_and_compress_codings_are_recognized_with_aliases() {
+        let decision = AcceptEncoding::parse(b"zstd, x-compress;q=0.5, compress;q=0.9").expect("valid");
+        assert!(decision.accepts(Encoding::Zstd));
+        assert_eq!(decision.quality(Encoding::Zstd), MAX_QUALITY);
+        assert_eq!(decision.quality(Encoding::Compress), 900);
+    }
+
+    #[test]
+    fn repeated_commas_between_entries_are_skipped() {
+        let decision = AcceptEncoding::parse(b"gzip,,, br").expect("valid");
+        assert!(decision.accepts(Encoding::Gzip));
+        assert!(decision.accepts(Encoding::Brotli));
+    }
+
+    #[test]
     fn malformed_fields_are_rejected() {
         for value in [
             &b"gzip;"[..],

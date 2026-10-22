@@ -26,12 +26,42 @@ fn before_context_enriches_and_reads_request_metadata() {
     assert_eq!(context.uri().path(), "/widgets/7");
     assert_eq!(context.headers()["x-api-key"], "secret");
     assert_eq!(context.insert_extension(UserId(42)), None);
-    assert_eq!(context.get_extension::<UserId>(), Some(&UserId(42)));
+    assert_eq!(context.extension::<UserId>(), Some(&UserId(42)));
     context.headers_mut().insert("x-checked", "1".parse().expect("valid header"));
     assert_eq!(context.remove_extension::<UserId>(), Some(UserId(42)));
-    assert_eq!(context.get_extension::<UserId>(), None);
+    assert_eq!(context.extension::<UserId>(), None);
 
     assert_eq!(parts.headers["x-checked"], "1");
+}
+
+#[test]
+fn before_context_exposes_mutable_method_uri_version_extensions_and_whole_parts() {
+    let (mut parts, ()) = Request::builder()
+        .method("GET")
+        .uri("/widgets/7")
+        .body(())
+        .expect("static request metadata is valid")
+        .into_parts();
+
+    let mut context = BeforeContext::new(&mut parts);
+    *context.method_mut() = Method::POST;
+    assert_eq!(context.method(), Method::POST);
+
+    *context.uri_mut() = "/widgets/9".parse().expect("valid uri");
+    assert_eq!(context.uri().path(), "/widgets/9");
+
+    assert_eq!(context.version(), Version::HTTP_11);
+
+    assert!(context.extensions().get::<u32>().is_none());
+    context.extensions_mut().insert(7_u32);
+    assert_eq!(context.extensions().get::<u32>(), Some(&7));
+
+    assert_eq!(context.parts().method, Method::POST);
+    context.parts_mut().method = Method::DELETE;
+
+    assert_eq!(parts.method, Method::DELETE);
+    assert_eq!(parts.uri.path(), "/widgets/9");
+    assert_eq!(parts.extensions.get::<u32>(), Some(&7));
 }
 
 #[test]
@@ -56,14 +86,21 @@ fn selected_context_coexists_with_a_borrowed_uri_capture() {
     assert_eq!(context.version(), Version::HTTP_11);
     assert_eq!(context.headers()["x-api-key"], "secret");
     assert_eq!(context.insert_extension(UserId(3)), None);
-    assert_eq!(context.get_extension::<UserId>(), Some(&UserId(3)));
+    assert_eq!(context.extension::<UserId>(), Some(&UserId(3)));
     context.headers_mut().insert("x-guarded", "1".parse().expect("valid header"));
     assert_eq!(context.remove_extension::<UserId>(), Some(UserId(3)));
+
+    // The extensions field is directly readable/writable too, distinct from
+    // the typed insert/get/remove helpers exercised above.
+    assert!(context.extensions().get::<u32>().is_none());
+    context.extensions_mut().insert(11_u32);
+    assert_eq!(context.extensions().get::<u32>(), Some(&11));
 
     // The capture is still live after the guard mutated headers and
     // extensions, which is the borrow the split context preserves.
     assert_eq!(capture, "rust-in-action");
     assert_eq!(parts.headers["x-guarded"], "1");
+    assert_eq!(parts.extensions.get::<u32>(), Some(&11));
 }
 
 #[test]
@@ -82,6 +119,37 @@ fn after_context_mutates_response_and_reads_request() {
 
     assert_eq!(response_parts.status, StatusCode::CREATED);
     assert_eq!(response_parts.headers["x-trace"], "abc");
+}
+
+#[test]
+fn after_context_exposes_status_mut_version_and_typed_extensions() {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TraceId(u32);
+
+    let (request_parts, ()) = Request::builder()
+        .uri("/status")
+        .body(())
+        .expect("static request metadata is valid")
+        .into_parts();
+    let (mut response_parts, _body) = Response::new(Body::empty()).into_parts();
+    response_parts.status = StatusCode::OK;
+
+    let mut context = AfterContext::new(&request_parts, &mut response_parts);
+    *context.status_mut() = StatusCode::ACCEPTED;
+    assert_eq!(context.status(), StatusCode::ACCEPTED);
+    assert_eq!(context.version(), Version::HTTP_11);
+
+    assert!(context.extensions().get::<u32>().is_none());
+    context.extensions_mut().insert(5_u32);
+    assert_eq!(context.extensions().get::<u32>(), Some(&5));
+
+    assert_eq!(context.insert_extension(TraceId(1)), None);
+    assert_eq!(context.extension::<TraceId>(), Some(&TraceId(1)));
+    assert_eq!(context.remove_extension::<TraceId>(), Some(TraceId(1)));
+    assert_eq!(context.extension::<TraceId>(), None);
+
+    assert_eq!(response_parts.status, StatusCode::ACCEPTED);
+    assert_eq!(response_parts.extensions.get::<u32>(), Some(&5));
 }
 
 #[test]

@@ -12,8 +12,10 @@ pub trait EncodeFields {
     /// Writes the fields of this schema to an encoder.
     fn encode_fields<W: fmt::Write>(&self, encoder: &mut Encoder<'_, W>) -> Result<(), Error>;
 
-    /// Returns the exact generated encoded length when it is known without
-    /// formatting user-defined values.
+    /// Returns the exact generated encoded length, when it is cheaply known.
+    ///
+    /// The length is returned only when it can be determined without formatting
+    /// user-defined values.
     fn encoded_length_hint(&self) -> Option<usize> {
         None
     }
@@ -170,6 +172,40 @@ mod tests {
             encoder.pair_str("", "", value).expect("test value encodes");
             assert_eq!(encoded_str_length(value), output.len() - 1);
         }
+    }
+
+    /// A hand-written [`EncodeFields`] implementation keeping the default `encoded_length_hint`.
+    ///
+    /// Derive-generated code always overrides that trait default instead.
+    struct NoHint;
+
+    impl EncodeFields for NoHint {
+        fn encode_fields<W: fmt::Write>(&self, _encoder: &mut Encoder<'_, W>) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_default_length_hint_is_unknown() {
+        assert_eq!(NoHint.encoded_length_hint(), None);
+
+        let mut output = String::new();
+        let mut encoder = Encoder::new(&mut output, QueryLimits::UNLIMITED);
+        NoHint
+            .encode_fields(&mut encoder)
+            .expect("the no-op implementation always succeeds");
+    }
+
+    #[test]
+    fn flattening_a_zero_length_nested_estimate_leaves_the_hint_unchanged() {
+        let mut empty = EncodedLengthHint::new();
+        empty.flatten(0);
+        assert_eq!(empty.finish(), 0);
+
+        let mut hint = EncodedLengthHint::new();
+        hint.pair("a", 1);
+        hint.flatten(0);
+        assert_eq!(hint.finish(), "a".len() + 1 + 1);
     }
 
     #[test]

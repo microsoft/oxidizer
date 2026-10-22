@@ -14,8 +14,9 @@ use super::route_attr::{RouteAttr, RouteTarget};
 use crate::trie::capture_field_names;
 use crate::{Route, route_field_name};
 
-/// Validates the enum's generics and reports whether it carries the capture
-/// lifetime `'p`. Only a single lifetime named `'p` is allowed.
+/// Validates the enum's generics and reports whether it carries the capture lifetime `'p`.
+///
+/// Only a single lifetime named `'p` is allowed.
 #[cfg(any(feature = "resolve", feature = "route"))]
 pub(super) fn has_capture_lifetime(generics: &Generics) -> syn::Result<bool> {
     if let Some(where_clause) = &generics.where_clause {
@@ -63,8 +64,9 @@ pub(super) fn has_capture_lifetime(generics: &Generics) -> syn::Result<bool> {
     }
     Ok(lifetime)
 }
-/// Lowers a variant and each of its `#[route(...)]` attributes into [`Route`]s,
-/// validating that the variant's fields match every route's path captures.
+/// Lowers a variant and each of its `#[route(...)]` attributes into [`Route`]s.
+///
+/// The variant's fields are validated to match every route's path captures.
 ///
 /// A variant may carry more than one `#[route]` to bind the same route name to
 /// several method/path pairs (e.g. one handler for both `GET` and `HEAD`); each
@@ -178,8 +180,10 @@ mod tests {
 
     use super::*;
 
-    /// Parses a single enum variant from source for exercising the shared
-    /// lowering helpers (`routes_for_variant`, `declared_fields`) directly.
+    /// Parses a single enum variant from source.
+    ///
+    /// This exercises the shared lowering helpers (`routes_for_variant`,
+    /// `declared_fields`) directly.
     fn variant(src: proc_macro2::TokenStream) -> Variant {
         syn::parse2(src).expect("a valid variant")
     }
@@ -259,6 +263,22 @@ mod tests {
             GetBook(&'p str)
         });
         let _ = routes_for_variant(&variant).expect_err("a tuple variant must be rejected");
+    }
+
+    #[test]
+    fn a_dynamic_route_target_on_a_variant_is_rejected() {
+        // `routes_for_variant` only lowers static method/path routes;
+        // `#[route(dynamic)]` on a variant must hit the `RouteTarget::Static`
+        // else-branch and be rejected.
+        let variant = variant(quote! {
+            #[route(dynamic)]
+            GetBook
+        });
+        let error = routes_for_variant(&variant).expect_err("a dynamic route target on a variant must be rejected");
+        assert!(
+            error.to_string().contains("does not declare a compile-time method or path"),
+            "{error}"
+        );
     }
 
     #[test]

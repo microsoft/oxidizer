@@ -133,12 +133,12 @@ impl Api {
     #[before(admin, upload)]
     async fn guard(&self, ctx: &mut SelectedContext<'_>) -> Before<StatusCode> {
         if ctx.uri().path().starts_with("/uploads/") {
-            return match ctx.get_extension::<Caller>() {
+            return match ctx.extension::<Caller>() {
                 Some(_) => Before::Next,
                 None => Before::Respond(StatusCode::UNAUTHORIZED),
             };
         }
-        match ctx.get_extension::<Caller>() {
+        match ctx.extension::<Caller>() {
             Some(caller) if caller.admin => Before::Next,
             _ => Before::Respond(StatusCode::FORBIDDEN),
         }

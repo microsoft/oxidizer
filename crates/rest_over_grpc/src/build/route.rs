@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 use super::{RequestBody, ResponseBody};
 

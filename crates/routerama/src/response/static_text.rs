@@ -9,7 +9,7 @@ use super::{Body, Response};
 /// A zero-copy text response backed by a static string.
 ///
 /// The payload is wrapped with [`Bytes::from_static`] without allocating or
-/// copying it. Like [`String`] and `&str` responses, `StaticText` sets
+/// copying it. Like [`String`](alloc::string::String) and `&str` responses, `StaticText` sets
 /// `Content-Type` to `text/plain; charset=utf-8`.
 ///
 /// # Examples

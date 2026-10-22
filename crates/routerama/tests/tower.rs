@@ -116,7 +116,7 @@ impl Guarded {
 
     #[before]
     async fn authenticate(&self, context: &mut BeforeContext<'_>) -> Before<StatusCode> {
-        match context.get_extension::<Caller>().copied() {
+        match context.extension::<Caller>().copied() {
             Some(caller) => {
                 let _ = context.insert_extension(Authenticated(caller.0));
                 Before::Next
@@ -407,6 +407,22 @@ async fn generated_static_first_mount_integration_names_one_boxed_response() {
             .expect("routing is infallible"),
     );
     assert_eq!(text(mounted).await, b"mounted"[..]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn route_service_and_route_future_expose_a_non_exhaustive_debug_impl() {
+    let mut service = RouteService::new(Api, state(), |api: Api, state: AppState, request: Request<Body>| async move {
+        api.route(request, &state).await
+    });
+    let debugged_service = format!("{service:?}");
+    assert!(debugged_service.contains("RouteService"), "{debugged_service}");
+
+    let future = service.call(request("/books/42"));
+    let debugged_future = format!("{future:?}");
+    assert!(debugged_future.contains("RouteFuture"), "{debugged_future}");
+
+    let response = future.await.expect("routing is infallible");
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test(flavor = "current_thread")]

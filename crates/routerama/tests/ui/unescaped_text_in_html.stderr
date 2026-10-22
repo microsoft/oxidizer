@@ -1,0 +1,24 @@
+error[E0277]: the trait bound `routerama::response::__template::PlainText<&str>: SlotFor<Html>` is not satisfied
+  --> tests/ui/unescaped_text_in_html.rs:16:35
+   |
+16 |     let _ = page.render(&memory, (unescaped_text("<script>alert('x')</script>"),));
+   |                  ------           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `SlotFor<Html>` is not implemented for `routerama::response::__template::PlainText<&str>`
+   |                  |
+   |                  required by a bound introduced by this call
+   |
+help: the trait `SlotFor<Html>` is not implemented for `routerama::response::__template::PlainText<&str>`
+      but trait `SlotFor<Plain>` is implemented for it
+  --> src/response/bytesbuf/template.rs
+   |
+   | impl<T: AsRef<str>> SlotFor<Plain> for PlainText<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `Plain`, found `Html`
+   = note: required for `(routerama::response::__template::PlainText<&str>,)` to implement `routerama::response::bytesbuf::template::TemplateSlots<2, Html>`
+note: required by a bound in `BytesViewTemplate::<N, K>::render`
+  --> src/response/bytesbuf/template.rs
+   |
+   |     pub fn render<M, S>(&self, memory: &M, slots: S) -> BytesView
+   |            ------ required by a bound in this associated function
+...
+   |         S: TemplateSlots<N, K>,
+   |            ^^^^^^^^^^^^^^^^^^^ required by this bound in `BytesViewTemplate::<N, K>::render`

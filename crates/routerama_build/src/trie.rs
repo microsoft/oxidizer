@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Framework-neutral routing trie shared by static code generation and runtime
-//! resolution.
+//! Framework-neutral routing trie shared by static code generation and runtime resolution.
 //!
 //! Edge ordering implements literal, affix, single-segment, and catch-all
 //! precedence without depending on code-generation crates.
@@ -19,8 +18,7 @@ use http_path_template::{PathTemplate, Segment};
 
 use crate::route::Route;
 
-/// A flattened path-template element, with variables expanded into their
-/// constituent atoms.
+/// A flattened path-template element, with variables expanded into their constituent atoms.
 enum Atom {
     Literal(String),
     Single,
@@ -37,8 +35,9 @@ struct VarSpan {
     name: Vec<String>,
     first: usize,
     last: usize,
-    /// For an affix parameter, the byte lengths of the literal prefix/suffix
-    /// wrapping the capture within its single segment.
+    /// For an affix parameter, the byte lengths of the literal prefix and suffix.
+    ///
+    /// The capture sits between them, within the parameter's single segment.
     affix: Option<(usize, usize)>,
 }
 
@@ -51,13 +50,13 @@ struct VarSpan {
 /// the runtime capture key.
 #[derive(Debug)]
 pub enum VarPlan {
-    /// A value spanning atoms `a..=b`, sliced from the path as
-    /// `&body[starts[a]..ends[b]]`.
+    /// A value spanning atoms `a..=b`, sliced from the path as `&body[starts[a]..ends[b]]`.
     Span { field: String, key: String, a: usize, b: usize },
     /// A `**` capture from atom `a` to the end of the path.
     Rest { field: String, key: String, a: usize },
-    /// An intra-segment capture: the middle of segment `a`, sliced as
-    /// `&body[starts[a] + prefix_len .. ends[a] - suffix_len]`.
+    /// An intra-segment capture: the middle of segment `a`.
+    ///
+    /// Sliced as `&body[starts[a] + prefix_len .. ends[a] - suffix_len]`.
     Affix {
         field: String,
         key: String,
@@ -68,8 +67,7 @@ pub enum VarPlan {
 }
 
 impl VarPlan {
-    /// The sanitized Rust identifier the static codegen uses for this variable's
-    /// struct-variant field.
+    /// The sanitized Rust identifier the static codegen uses for this variable's struct-variant field.
     #[must_use]
     #[inline]
     pub fn field(&self) -> &str {
@@ -78,8 +76,7 @@ impl VarPlan {
         }
     }
 
-    /// This variable's original (unmangled) name, used as the runtime `capture`
-    /// key by both backends.
+    /// This variable's original (unmangled) name, used as the runtime `capture` key by both backends.
     #[must_use]
     #[inline]
     pub fn key(&self) -> &str {
@@ -96,8 +93,9 @@ pub struct Leaf {
     pub verb: Option<String>,
     pub name: String,
     pub vars: Vec<VarPlan>,
-    /// The position of the route that produced this leaf in the input route set,
-    /// so a runtime backend can index a parallel per-route payload table. The
+    /// The position of the route that produced this leaf in the input route set.
+    ///
+    /// A runtime backend can use it to index a parallel per-route payload table. The
     /// static (codegen) backend ignores it.
     pub route_index: usize,
 }
@@ -105,21 +103,20 @@ pub struct Leaf {
 /// A node of the routing trie.
 #[derive(Debug, Default)]
 pub struct Node {
-    /// Literal-segment edges, keyed by the literal text (ordered for
-    /// deterministic codegen).
+    /// Literal-segment edges, keyed by the literal text (ordered for deterministic codegen).
     pub literals: BTreeMap<String, Self>,
-    /// Intra-segment affix edges, keyed by `(prefix, suffix)` (ordered for
-    /// deterministic codegen; matched most-specific-first — see
-    /// [`affix_edges_in_match_order`]).
+    /// Intra-segment affix edges, keyed by `(prefix, suffix)`.
+    ///
+    /// Ordered for deterministic codegen; matched most-specific-first — see
+    /// [`affix_edges_in_match_order`].
     pub affix: BTreeMap<(String, String), Self>,
-    /// The single-segment wildcard edge (`*` / `{var}`), if any route uses one
-    /// at this depth.
+    /// The single-segment wildcard edge (`*` / `{var}`), if any route uses one at this depth.
     pub single: Option<Box<Self>>,
-    /// Routes that end exactly at this node (matched when the path has exactly
-    /// this many segments).
+    /// Routes that end exactly at this node.
+    ///
+    /// Matched when the path has exactly this many segments.
     pub exact: Vec<Leaf>,
-    /// Routes whose `**` catch-all begins at this node (matched by any, possibly
-    /// empty, remainder).
+    /// Routes whose `**` catch-all begins at this node (matched by any, possibly empty, remainder).
     pub rest: Vec<Leaf>,
 }
 
@@ -128,12 +125,14 @@ pub struct Node {
 pub struct Trie {
     /// The root node.
     pub root: Node,
-    /// The largest number of path segments any route in the set has — the size
-    /// of the segment-offset scratch buffers the interpreter (or generated
-    /// `match`) needs.
+    /// The largest number of path segments any route in the set has.
+    ///
+    /// This is the size of the segment-offset scratch buffers the interpreter (or
+    /// generated `match`) needs.
     pub max_segments: usize,
-    /// Whether any route declares a custom `:verb`; when `false` the path is not
-    /// verb-split at all.
+    /// Whether any route declares a custom `:verb`.
+    ///
+    /// When `false`, the path is not verb-split at all.
     pub any_verb: bool,
 }
 
@@ -154,8 +153,9 @@ pub fn build_trie(routes: &[Route]) -> Trie {
 /// below the depth at which those recursions become a risk.
 pub const MAX_TEMPLATE_SEGMENTS: usize = 256;
 
-/// The number of trie levels a template occupies: its segments with each
-/// variable expanded into its constituent atoms.
+/// The number of trie levels a template occupies.
+///
+/// This is its segment count, with each variable expanded into its constituent atoms.
 #[must_use]
 pub fn template_depth(segments: &[Segment]) -> usize {
     flatten(segments).0.len()
@@ -253,26 +253,70 @@ fn check_bucket(leaves: &[Leaf], prefix: &str, is_rest: bool, out: &mut Vec<Stri
     }
 }
 
-/// Reports affix siblings of `node` that are equally specific yet can both match
-/// the same request, so the match-order tie-break between them is arbitrary.
+/// Reports affix siblings of `node` that are equally specific yet can both match the same request.
+///
+/// The match-order tie-break between such siblings is arbitrary.
 ///
 /// Affix edges of *different* specificity are deliberately ordered longest
 /// literal prefix+suffix first (see [`affix_edges_in_match_order`]), so those
 /// overlaps have a documented winner and are not reported.
+///
+/// Only siblings that share a specificity and differ in prefix length are
+/// compared. Equal specificity means `prefix.len() + suffix.len()` agrees, so
+/// two siblings whose prefixes are also the same length have same-length
+/// suffixes too; [`affix_edges_overlap`] then needs one prefix to contain the
+/// other and one suffix to contain the other, which at equal lengths means both
+/// pairs are identical, and `Node::affix` is keyed on exactly that pair. Such a
+/// pair therefore cannot exist, and a node whose siblings all share one shape --
+/// the ordinary case, as in `{name}.css` beside `{name}.js` -- has nothing to
+/// compare at all.
 fn check_affix_siblings(node: &Node, prefix: &str, out: &mut Vec<String>) {
+    if node.affix.len() < 2 {
+        return;
+    }
     let edges: Vec<(&(String, String), &Node)> = node.affix.iter().collect();
-    for (index, (left_key, left_child)) in edges.iter().enumerate() {
-        for (right_key, right_child) in edges.iter().skip(index + 1) {
-            let (left_prefix, left_suffix) = (left_key.0.as_str(), left_key.1.as_str());
+
+    // Specificity, then prefix length, to the ascending edge indices sharing both.
+    let mut by_shape: BTreeMap<usize, BTreeMap<usize, Vec<usize>>> = BTreeMap::new();
+    for (index, (key, _)) in edges.iter().enumerate() {
+        by_shape
+            .entry(affix_specificity(&key.0, &key.1))
+            .or_default()
+            .entry(key.0.len())
+            .or_default()
+            .push(index);
+    }
+
+    // `leaf_shapes` walks a whole subtree and allocates per route, so it runs at
+    // most once per edge, and only for edges that reach the pair test.
+    let mut shapes: Vec<Option<Vec<LeafShape<'_>>>> = edges.iter().map(|_| None).collect();
+    let mut candidates: Vec<usize> = Vec::new();
+
+    for (index, (left_key, _)) in edges.iter().enumerate() {
+        let (left_prefix, left_suffix) = (left_key.0.as_str(), left_key.1.as_str());
+        candidates.clear();
+        for (prefix_len, bucket) in &by_shape[&affix_specificity(left_prefix, left_suffix)] {
+            if *prefix_len != left_prefix.len() {
+                candidates.extend(bucket.iter().copied().filter(|other| *other > index));
+            }
+        }
+        candidates.sort_unstable();
+
+        for &other in &candidates {
+            let (right_key, _) = edges[other];
             let (right_prefix, right_suffix) = (right_key.0.as_str(), right_key.1.as_str());
-            if affix_specificity(left_prefix, left_suffix) != affix_specificity(right_prefix, right_suffix)
-                || !affix_edges_overlap((left_prefix, left_suffix), (right_prefix, right_suffix))
-            {
+            if !affix_edges_overlap((left_prefix, left_suffix), (right_prefix, right_suffix)) {
                 continue;
             }
 
-            let left_shapes = leaf_shapes(left_child);
-            let right_shapes = leaf_shapes(right_child);
+            for slot in [index, other] {
+                if shapes[slot].is_none() {
+                    shapes[slot] = Some(leaf_shapes(edges[slot].1));
+                }
+            }
+            let filled = "just populated above if it was empty";
+            let left_shapes = shapes[index].as_ref().expect(filled);
+            let right_shapes = shapes[other].as_ref().expect(filled);
             let ambiguous = left_shapes.iter().find_map(|left| {
                 right_shapes
                     .iter()
@@ -332,8 +376,10 @@ enum EdgeShape<'a> {
     Single,
 }
 
-/// One route of a subtree: the edges walked from the root of that subtree to
-/// reach it, the leaf itself, and whether it terminates in a `**` catch-all.
+/// One route of a subtree, with the edges leading to it.
+///
+/// Records the edges walked from the root of that subtree to reach the leaf, the
+/// leaf itself, and whether it terminates in a `**` catch-all.
 struct LeafShape<'a> {
     edges: Vec<EdgeShape<'a>>,
     leaf: &'a Leaf,
@@ -371,8 +417,10 @@ fn leaf_shapes(node: &Node) -> Vec<LeafShape<'_>> {
     shapes
 }
 
-/// Whether some request matches both routes: same HTTP method and custom verb,
-/// and a path every edge pair can agree on.
+/// Whether some request matches both routes.
+///
+/// That requires the same HTTP method and custom verb, and a path every edge pair
+/// can agree on.
 fn shapes_can_match_same_request(left: &LeafShape<'_>, right: &LeafShape<'_>) -> bool {
     if left.leaf.method != right.leaf.method || left.leaf.verb != right.leaf.verb {
         return false;
@@ -415,8 +463,10 @@ fn segments_can_agree(left: EdgeShape<'_>, right: EdgeShape<'_>) -> bool {
     }
 }
 
-/// Renders a route's path: the node's own path, the affix edge reaching the
-/// subtree, and the edges leading to the leaf within it.
+/// Renders a route's path.
+///
+/// The rendering joins the node's own path, the affix edge reaching the subtree,
+/// and the edges leading to the leaf within it.
 fn render_shape(prefix: &str, edge: EdgeShape<'_>, shape: &LeafShape<'_>) -> String {
     let mut path = String::from(prefix);
     for edge in core::iter::once(edge).chain(shape.edges.iter().copied()) {
@@ -509,8 +559,9 @@ fn insert_route(root: &mut Node, route: &Route, template: &PathTemplate<'_>, rou
     atom_count
 }
 
-/// The affix edges of `node` in the order both backends must try them: longer
-/// literal prefix+suffix first, so the more specific edge wins.
+/// The affix edges of `node` in the order both backends must try them.
+///
+/// The longer literal prefix+suffix comes first, so the more specific edge wins.
 ///
 /// Equally specific edges are ordered by key, which is only a determinism
 /// tie-break: [`conflicts`] rejects equally specific edges that can both match a
@@ -549,8 +600,9 @@ pub fn capture_field_names(segments: &[Segment]) -> Vec<Vec<String>> {
     flatten(segments).1.into_iter().map(|var| var.name).collect()
 }
 
-/// Maps a route template variable's name to the sanitized Rust *field*
-/// identifier the generated `Route` enum uses for it.
+/// Maps a route template variable's name to a sanitized Rust *field* identifier.
+///
+/// The identifier is the one the generated `Route` enum uses for that variable.
 ///
 /// This is only the codegen field identifier; it is **not** the runtime
 /// `capture` key. Both backends key `capture` on the variable's original
@@ -575,9 +627,11 @@ pub fn route_field_name(name: impl AsRef<str>) -> String {
     field_name(&name.as_ref().replace('.', "_"))
 }
 
-/// Turns a `_`-joined candidate field name into a valid identifier: used as-is
-/// when it already is one, otherwise sanitized (non-identifier characters
-/// replaced with `_`) and given an `_f_` prefix so it still tokenizes.
+/// Turns a `_`-joined candidate field name into a valid identifier.
+///
+/// The name is used as-is when it already is one, otherwise sanitized
+/// (non-identifier characters replaced with `_`) and given an `_f_` prefix so it
+/// still tokenizes.
 pub(crate) fn field_name(joined: &str) -> String {
     if is_valid_variant(joined) {
         joined.to_owned()
@@ -590,8 +644,9 @@ pub(crate) fn field_name(joined: &str) -> String {
     }
 }
 
-/// Whether `name` can be used verbatim as a route enum variant: a non-empty,
-/// non-keyword Rust identifier.
+/// Whether `name` can be used verbatim as a route enum variant.
+///
+/// That requires a non-empty, non-keyword Rust identifier.
 #[must_use]
 pub fn is_valid_variant(name: &str) -> bool {
     let mut chars = name.chars();
@@ -662,8 +717,9 @@ pub fn is_valid_variant(name: &str) -> bool {
     )
 }
 
-/// Flattens a template's top-level segments into a linear atom sequence,
-/// recording the capture span of each variable.
+/// Flattens a template's top-level segments into a linear atom sequence.
+///
+/// The capture span of each variable is recorded alongside.
 // Coverage off: the defensive wildcard arms exist only because `Segment` is
 // non-exhaustive; every variant that exists today is covered by unit tests.
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -903,6 +959,101 @@ mod tests {
         // starts with both `a` and `A` and the two edges never both match.
         let trie = build_trie(&[ext_rule("Lower", "GET", "/a{x}"), ext_rule("Upper", "GET", "/A{y}")]);
         assert!(conflicts(&trie.root).is_empty(), "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn same_specificity_affix_siblings_with_different_prefix_lengths_can_be_disjoint() {
+        // `/bb{v}cc` (prefix len 2) and `/a{v}bbb` (prefix len 1) share the
+        // same specificity (4) but their prefixes ("a" vs "bb") and suffixes
+        // ("bbb" vs "cc") do not agree, so the pair test's `affix_edges_overlap`
+        // check fails and the loop continues past it without a conflict.
+        let trie = build_trie(&[ext_rule("First", "GET", "/x/a{v}bbb"), ext_rule("Second", "GET", "/x/bb{v}cc")]);
+        assert!(conflicts(&trie.root).is_empty(), "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn same_specificity_affix_siblings_with_different_prefix_lengths_can_overlap() {
+        // `/x/a{v}bbb` (prefix len 1) and `/x/aa{v}bb` (prefix len 2) share the
+        // same specificity (4) but different prefix lengths (so they land in
+        // different `by_shape` prefix-length buckets), and both terminate with
+        // the same method, so a segment like `aaZbb` can match both, which is a
+        // real conflict.
+        let trie = build_trie(&[ext_rule("First", "GET", "/x/a{v}bbb"), ext_rule("Second", "GET", "/x/aa{v}bb")]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn nested_affix_edges_deeper_in_a_conflicting_subtree_are_reachable_via_leaf_shapes() {
+        // Both top-level affix edges overlap on the first segment, and each
+        // leads to a further affix edge one segment deeper, exercising the
+        // `descend(EdgeShape::Affix { .. }, child)` arm of `leaf_shapes` when it
+        // walks each candidate's subtree looking for a truly ambiguous leaf.
+        let trie = build_trie(&[
+            ext_rule("First", "GET", "/x/a{v}bbb/c{w}ddd"),
+            ext_rule("Second", "GET", "/x/aa{v}bb/cc{w}dd"),
+        ]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn two_catch_all_leaves_behind_overlapping_affixes_always_agree_in_depth() {
+        // Both routes terminate in `**`, hitting the `(true, true) => true`
+        // depth arm of `shapes_can_match_same_request` unconditionally.
+        let trie = build_trie(&[ext_rule("Left", "GET", "/n/a{x}/**"), ext_rule("Right", "GET", "/n/{y}b/**")]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn an_exact_leaf_deeper_than_a_catch_all_sibling_is_still_ambiguous() {
+        // The exact leaf's tail is at least as deep as the `**` sibling's, so
+        // the `(false, true) => left.edges.len() >= right.edges.len()` arm
+        // evaluates to `true` and the pair is reported as a conflict.
+        // `("", "b")` sorts before `("a", "")` in the `BTreeMap`, so the
+        // exact-tail route must use the `("", "b")` key to be paired as the
+        // first (non-rest) element of the comparison.
+        let trie = build_trie(&[ext_rule("Left", "GET", "/a{x}/**"), ext_rule("Right", "GET", "/{y}b/one")]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn a_literal_tail_segment_can_agree_with_an_affix_tail_segment() {
+        // One subtree continues with a plain literal segment, the other with
+        // an affix segment, exercising the mixed `(Literal, Affix)` arm of
+        // `segments_can_agree`. `"exactlit"` starts with `"e"` and (trivially)
+        // ends with `""`, so the two tails can both match `"exactlit"`.
+        // The routes are ordered so the smaller `(prefix, suffix)` key (`("",
+        // "b")`, which sorts first in the `BTreeMap`) is paired as the
+        // `Literal` side, hitting the first alternative of the `|`-pattern.
+        let trie = build_trie(&[
+            ext_rule("Left", "GET", "/n/a{x}/e{z}"),
+            ext_rule("Right", "GET", "/n/{y}b/exactlit"),
+        ]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn an_affix_tail_segment_can_agree_with_a_literal_tail_segment() {
+        // The mirror of the previous test: the smaller `(prefix, suffix)` key
+        // now belongs to the affix-tailed route, hitting the second
+        // alternative of the `(Literal, Affix) | (Affix, Literal)` pattern.
+        let trie = build_trie(&[
+            ext_rule("Left", "GET", "/n/a{x}/exactlit"),
+            ext_rule("Right", "GET", "/n/{y}b/e{z}"),
+        ]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn a_single_segment_wildcard_tail_always_agrees_with_an_affix_tail_segment() {
+        // One subtree continues with an unconstrained `{plain}` capture, the
+        // other with an affix segment; a single-segment wildcard matches any
+        // non-empty segment, so the `(Affix, Single) | (Single, Affix)` arm of
+        // `segments_can_agree` always returns `true`.
+        let trie = build_trie(&[
+            ext_rule("Left", "GET", "/n/a{x}/{plain}"),
+            ext_rule("Right", "GET", "/n/{y}b/e{z}f"),
+        ]);
+        assert_eq!(conflicts(&trie.root).len(), 1, "{:?}", conflicts(&trie.root));
     }
 
     #[test]

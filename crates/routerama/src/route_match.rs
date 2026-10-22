@@ -6,8 +6,9 @@ pub trait RouteMatch<'p> {
     /// The matched route's registered name.
     fn name(&self) -> &str;
 
-    /// The captured value of the path variable `name`, or [`None`] if the matched
-    /// route has no such variable.
+    /// The captured value of the path variable `name`.
+    ///
+    /// Returns [`None`] if the matched route has no such variable.
     ///
     /// `name` is the template variable exactly as written, including dotted
     /// names and Rust keywords.

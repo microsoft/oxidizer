@@ -46,8 +46,9 @@ const PUBLIC: u16 = 0b0000_0100_0000;
 const PRIVATE: u16 = 0b0000_1000_0000;
 const IMMUTABLE: u16 = 0b0001_0000_0000;
 
-/// The directives [`CacheControl`] records as a flag, paired with the bit each
-/// one sets in [`Directives::flags`].
+/// The directives [`CacheControl`] records as a flag.
+///
+/// Each is paired with the bit it sets in [`Directives::flags`].
 const FLAG_DIRECTIVES: [(&[u8], u16); 9] = [
     (b"no-cache", NO_CACHE),
     (b"no-store", NO_STORE),
@@ -183,8 +184,10 @@ impl Directives {
     }
 }
 
-/// Parses RFC `delta-seconds`, saturating at [`u64::MAX`] as RFC 9111,
-/// Section 1.2.2 permits for values a recipient cannot represent.
+/// Parses RFC `delta-seconds`, saturating at [`u64::MAX`].
+///
+/// RFC 9111, Section 1.2.2 permits saturation for values a recipient cannot
+/// represent.
 fn delta_seconds(value: &[u8]) -> Option<u64> {
     if value.is_empty() || !value.iter().all(u8::is_ascii_digit) {
         return None;
@@ -245,6 +248,10 @@ impl<'value> Cursor<'value> {
     /// Reads a quoted string, returning its content with `\`-escapes intact.
     ///
     /// A quoted string with no closing quote consumes the rest of the field.
+    // Both call sites (`argument` and `skip_directive`) only invoke this
+    // after confirming `self.at(b'"')`, so `consume(b'"')` can never fail here;
+    // the early return exists only to make the precondition explicit.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn quoted_string(&mut self) -> Option<&'value [u8]> {
         if !self.consume(b'"') {
             return None;
@@ -378,6 +385,13 @@ mod tests {
         let control = parse(b" , community=\"UCI\", , stale-while-revalidate=30, no-store ,");
         assert!(control.no_store());
         assert_eq!(control.max_age(), None);
+    }
+
+    #[test]
+    fn an_unknown_directive_with_no_argument_is_ignored() {
+        let control = parse(b"unknown-flag, no-store");
+        assert!(control.no_store());
+        assert_eq!(control, parse(b"no-store"));
     }
 
     #[test]

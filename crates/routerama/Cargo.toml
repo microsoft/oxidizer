@@ -263,6 +263,60 @@ harness = false
 required-features = ["json"]
 
 [[bench]]
+name = "routerama_response_heads"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_heads_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_typed_body"
+harness = false
+required-features = ["json", "form"]
+
+[[bench]]
+name = "routerama_typed_body_cg"
+harness = false
+required-features = ["json", "form"]
+
+[[bench]]
+name = "routerama_resolver_build"
+harness = false
+
+[[bench]]
+name = "routerama_resolver_build_cg"
+harness = false
+
+[[bench]]
+name = "routerama_path_template"
+harness = false
+
+[[bench]]
+name = "routerama_path_template_cg"
+harness = false
+
+[[bench]]
+name = "routerama_rejections"
+harness = false
+required-features = ["route", "json"]
+
+[[bench]]
+name = "routerama_rejections_cg"
+harness = false
+required-features = ["route", "json"]
+
+[[bench]]
+name = "routerama_affix_match"
+harness = false
+
+[[bench]]
+name = "routerama_affix_match_cg"
+harness = false
+
+[[bench]]
 name = "routerama_text_body"
 harness = false
 required-features = ["route"]
@@ -428,17 +482,22 @@ harness = false
 required-features = ["route"]
 
 [[bench]]
-name = "routerama_response_body_variants_1"
+name = "routerama_response_body_size_variants_1"
 harness = false
 required-features = ["route"]
 
 [[bench]]
-name = "routerama_response_body_variants_4"
+name = "routerama_response_body_size_variants_4"
 harness = false
 required-features = ["route"]
 
 [[bench]]
-name = "routerama_response_body_variants_16"
+name = "routerama_response_body_size_variants_16"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_body_size_variants_128"
 harness = false
 required-features = ["route"]
 
@@ -539,12 +598,32 @@ name = "dynamic_parity"
 required-features = ["resolve"]
 
 [[test]]
+name = "extract_coverage"
+required-features = ["route", "query"]
+
+[[test]]
 name = "feature_gates"
 required-features = ["response"]
 
 [[test]]
 name = "form_extraction_fixtures"
 required-features = ["form"]
+
+[[test]]
+name = "form_body"
+required-features = ["form"]
+
+[[test]]
+name = "json_body"
+required-features = ["json"]
+
+[[test]]
+name = "header"
+required-features = ["route"]
+
+[[test]]
+name = "interceptor_context"
+required-features = ["route"]
 
 [[test]]
 name = "http_method"
@@ -564,6 +643,10 @@ required-features = ["route", "resolve"]
 
 [[test]]
 name = "mount"
+required-features = ["mount"]
+
+[[test]]
+name = "mount_coverage"
 required-features = ["mount"]
 
 [[test]]

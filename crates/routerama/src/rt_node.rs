@@ -11,13 +11,17 @@ use core::{iter, mem};
 use routerama_build::trie::{Leaf, Node, affix_edges_in_match_order};
 
 use crate::affix_edge::AffixEdge;
+use crate::affix_table::AffixTable;
 use crate::literal_edge::{LiteralEdge, SORTED_LITERAL_FANOUT};
 
 /// Runtime representation of a [`Node`].
 pub(crate) struct RtNode {
     pub(crate) literals: Box<[LiteralEdge]>,
-    /// Affix edges, in most-specific-first match order.
-    pub(crate) affix: Box<[AffixEdge]>,
+    /// Affix edges and their rejection filters, absent when the node has none.
+    ///
+    /// Held behind a pointer so that literal-only routing does not pay for affix storage
+    /// in every node it walks. See [`AffixTable`].
+    pub(crate) affix: Option<Box<AffixTable>>,
     pub(crate) single: Option<Box<Self>>,
     pub(crate) exact: Box<[Leaf]>,
     pub(crate) rest: Box<[Leaf]>,
@@ -127,7 +131,7 @@ impl RtNode {
                             .expect("children are queued after parents and built in reverse order"),
                     )
                 })
-                .collect();
+                .collect::<Box<[AffixEdge]>>();
             let single = node.single.map(|child| {
                 Box::new(
                     built[child]
@@ -137,13 +141,15 @@ impl RtNode {
             });
             built[index] = Some(Self {
                 literals,
-                affix,
+                affix: AffixTable::new(affix),
                 single,
                 exact: node.exact,
                 rest: node.rest,
             });
         }
-        built[0].take().expect("the root is always built")
+        built[0]
+            .take()
+            .expect("index 0 holds the root queued before the loop, and the loop assigns every queued index exactly once")
     }
 
     // The iterative destruction strategy is validated by the isolated
@@ -151,7 +157,9 @@ impl RtNode {
     #[cfg_attr(test, mutants::skip)]
     fn move_children_to(&mut self, pending: &mut Vec<Self>) {
         pending.extend(mem::take(&mut self.literals).into_vec().into_iter().map(|(_, child)| child));
-        pending.extend(mem::take(&mut self.affix).into_vec().into_iter().map(|(_, _, child)| child));
+        if let Some(table) = self.affix.take() {
+            pending.extend(table.into_edges().into_vec().into_iter().map(|(_, _, child)| child));
+        }
         if let Some(child) = self.single.take() {
             pending.push(*child);
         }

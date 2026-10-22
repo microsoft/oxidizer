@@ -13,7 +13,7 @@ prettyplease = "0.2"
 syn = { version = "2", features = ["full", "parsing"] }
 ---
 
-//! Runs performance suites and rebuilds `docs/PERF.md`.
+//! Runs performance suites and rebuilds `docs/PERF.md` and `docs/PERF-INTERNAL.md`.
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -24,7 +24,7 @@ use std::{env, fs};
 use clap::Parser;
 use ohno::{AppError, app_err, bail};
 
-/// Run the routerama benchmark suites and rebuild `docs/PERF.md`.
+/// Run the routerama benchmark suites and rebuild the two performance reports.
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
 struct Args {
@@ -44,7 +44,9 @@ struct Args {
     #[arg(long)]
     warm_up_time: Option<u32>,
 
-    /// Skip the gungraun (Callgrind) suite; the instruction-count columns show "—".
+    /// Skip the gungraun (Callgrind) suite; `docs/PERF-INTERNAL.md` is left untouched.
+    ///
+    /// The customer-facing `docs/PERF.md` carries no instruction counts and is unaffected.
     #[arg(long)]
     no_gungraun: bool,
 
@@ -374,31 +376,102 @@ fn fmt_ratio(value: Option<f64>, baseline: Option<f64>) -> String {
     }
 }
 
-fn write_query_report(out: &mut String, crit: &[(String, f64)], gung: &[GungEntry]) {
-    out.push_str("\n## Query codecs\n\n");
-    out.push_str(
-        "Each table compares complete typed parsing or canonical production of \
-         the same schema and values. Ratios are relative to Routerama; lower is \
-         better. Reserved production reuses a caller-provided `String`, while \
-         allocating production returns a new `String`.\n\n",
-    );
+/// Writes a Mermaid `xychart-beta` bar chart for one comparison group.
+///
+/// The chart accompanies the table it precedes and never replaces it, so the exact figures stay
+/// available. Series with fewer than two measured bars are skipped, because a one-bar chart says
+/// less than the row it would duplicate.
+fn write_chart<'a>(
+    out: &mut String,
+    title: &str,
+    y_label: &str,
+    series: impl IntoIterator<Item = (&'a str, Option<f64>)>,
+) {
+    let points: Vec<(&str, f64)> = series
+        .into_iter()
+        .filter_map(|(label, value)| value.map(|value| (label, value)))
+        .collect();
+    if points.len() < 2 {
+        return;
+    }
+
+    // Mermaid draws no bar at all when the axis starts above zero, so the range is always
+    // anchored at zero and padded above the tallest bar to leave room for the plot frame.
+    let max = points.iter().map(|&(_, value)| value).fold(0.0_f64, f64::max);
+    let top = if max > 0.0 { max * 1.1 } else { 1.0 };
+
+    out.push_str("```mermaid\nxychart-beta\n");
+    let _ = writeln!(out, "    title \"{title}\"");
+    out.push_str("    x-axis [");
+    for (index, (label, _)) in points.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "\"{label}\"");
+    }
+    out.push_str("]\n");
+    let _ = writeln!(out, "    y-axis \"{y_label}\" 0 --> {top:.0}");
+    out.push_str("    bar [");
+    for (index, (_, value)) in points.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "{value:.0}");
+    }
+    out.push_str("]\n```\n\n");
+}
+
+/// One region of a report file that this script owns and rewrites in place.
+struct Block {
+    /// The name appearing in the `BEGIN GENERATED` / `END GENERATED` markers.
+    name: &'static str,
+    /// The Markdown that replaces whatever currently sits between those markers.
+    body: String,
+}
+
+/// Builds the query-codec wall-clock tables for the customer-facing report.
+fn query_time_tables(crit: &[(String, f64)]) -> String {
+    let mut out = String::new();
     for (group_index, group) in QUERY_GROUPS.iter().enumerate() {
         let baseline = group.variants.first().expect("every query group has a Routerama baseline");
         let baseline_time = lookup_time_by_key(crit, baseline.criterion);
+
+        let _ = writeln!(out, "### {}\n", group.title);
+        write_chart(
+            &mut out,
+            &format!("{} — time (lower is better)", group.title),
+            "Time (ns)",
+            group.variants.iter().map(|variant| (variant.label, lookup_time_by_key(crit, variant.criterion))),
+        );
+        out.push_str("| Implementation | Time | Time vs Routerama |\n");
+        out.push_str("|---|---:|---:|\n");
+        for variant in group.variants {
+            let time = lookup_time_by_key(crit, variant.criterion);
+            let _ = writeln!(out, "| `{}` | {} | {} |", variant.label, fmt_ns(time), fmt_ratio(time, baseline_time));
+        }
+        if group_index + 1 != QUERY_GROUPS.len() {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Builds the query-codec instruction-count tables for the internal report.
+fn query_instruction_tables(gung: &[GungEntry]) -> String {
+    let mut out = String::new();
+    for (group_index, group) in QUERY_GROUPS.iter().enumerate() {
+        let baseline = group.variants.first().expect("every query group has a Routerama baseline");
         let baseline_instructions = gung_metric(gung, baseline.gungraun, "Instructions");
 
         let _ = writeln!(out, "### {}\n", group.title);
-        out.push_str("| Implementation | Time | Time vs Routerama | Instructions | Instructions vs Routerama |\n");
-        out.push_str("|---|---:|---:|---:|---:|\n");
+        out.push_str("| Implementation | Instructions | Instructions vs Routerama |\n");
+        out.push_str("|---|---:|---:|\n");
         for variant in group.variants {
-            let time = lookup_time_by_key(crit, variant.criterion);
             let instructions = gung_metric(gung, variant.gungraun, "Instructions");
             let _ = writeln!(
                 out,
-                "| `{}` | {} | {} | {} | {} |",
+                "| `{}` | {} | {} |",
                 variant.label,
-                fmt_ns(time),
-                fmt_ratio(time, baseline_time),
                 fmt_int(instructions),
                 fmt_ratio(
                     instructions.map(|value| value as f64),
@@ -410,135 +483,174 @@ fn write_query_report(out: &mut String, crit: &[(String, f64)], gung: &[GungEntr
             out.push('\n');
         }
     }
-}
-
-fn build_report(crit: &[(String, f64)], gung: &[GungEntry]) -> String {
-    let mut out = String::new();
-    out.push_str("# Routerama Performance Report\n\n");
-    out.push_str("Generated by `scripts/perf_report.rs`:\n");
-    out.push_str("- `cargo bench --features resolve --bench criterion_routers` — criterion wall-clock timings.\n");
-    out.push_str("- `cargo bench --features resolve --bench gungraun_routers` — Callgrind instruction-precise counts.\n");
-    out.push_str("- `cargo bench --features query --bench routerama_query` — differential query-codec timings.\n");
-    out.push_str("- `cargo bench --features query --bench routerama_query_cg` — differential query-codec instruction counts.\n\n");
-    out.push_str(
-        "Dated measurement sections state the toolchain and exact commands of the run \
-         that produced them. Results are never re-run in place: an older table keeps its \
-         original figures and its original label, and a newer measurement is added as its \
-         own dated section.\n\n\
-         Raw benchmark output is not checked in. Each section quotes the exact commands \
-         that produce it, so a run can be reproduced on any host; only compare numbers \
-         that were captured on the same host, toolchain, and date.\n\n",
-    );
-    out.push_str(
-        "**Workload:** one full sweep of the shared request-path lookups (see \
-         `benches/common/routes_data.rs`) against each router. Every router is \
-         built from the same route table (literal segments plus single-segment \
-         `{var}` parameters — the common subset all of them express) in a setup \
-         step that is excluded from the measured region. Setup also performs one \
-         full unmeasured lookup sweep to initialize lazy matcher and allocator \
-         state before measuring the steady-state hot path; `routerama_static` is \
-         the compile-time `#[resolver]` router, so it has no construction cost, \
-         while `routerama_dynamic` is the run-time router registered from the \
-         same table.\n\n",
-    );
-    out.push_str(
-        "**Apples-to-apples:** every router is driven to the same *typed* end \
-         state — the HTTP method (verb) validated against the request and every \
-         captured path variable coerced into its declared type (`u32` parsed, \
-         `String` percent-decoded and owned, `&str` borrowed). `routerama` \
-         reaches this in one step (a typed enum variant with the method already \
-         matched and every field coerced); the third-party routers only *select* \
-         a route, so the harness explicitly checks the method and coerces each \
-         parameter the same way afterwards. `regex` selects the winner with a \
-         `RegexSet` and then re-scans it with the winning `Regex` to capture (two \
-         passes), so it does structurally more work — read it as an upper bound \
-         for a regex-based router reaching the same end state.  \n",
-    );
-    out.push_str(
-        "Criterion median is reported (default 30 samples, 1 s warm-up, 2 s \
-         measurement; override with `--samples` / `--measurement-time` / \
-         `--warm-up-time`).  \n",
-    );
-    out.push_str("Instructions, branch misses, and total reads+writes are per full lookup sweep.\n");
-    out.push_str("Total reads+writes = instruction reads + data reads + data writes.\n\n");
-
-    let _ = writeln!(out, "## `{GROUP}`\n");
-    out.push_str("| Resolver | Time (criterion) | Instructions | Branch misses | Total reads+writes |\n");
-    out.push_str("|---|---:|---:|---:|---:|\n");
-    for variant in VARIANTS {
-        let t = lookup_time(crit, variant);
-        let instr = gung_metric(gung, variant, "Instructions");
-        let bcm = gung_metric(gung, variant, "Bcm");
-        let mem = gung_metric(gung, variant, "Total read+write");
-        let _ = writeln!(
-            out,
-            "| `{variant}` | {} | {} | {} | {} |",
-            fmt_ns(t),
-            fmt_int(instr),
-            fmt_int(bcm),
-            fmt_int(mem),
-        );
-    }
-    write_query_report(&mut out, crit, gung);
     out
 }
 
-fn merge_generated_sections(existing: &str, generated: &str) -> Option<String> {
-    const COMPARE: &str = "## `compare_routers`";
-    const HTTP: &str = "## HTTP routing and dispatch";
-    const QUERY: &str = "## Query codecs";
+/// Builds the generated blocks of the customer-facing `docs/PERF.md`.
+///
+/// Only wall-clock comparisons appear here. Instruction counts and the engineering records that
+/// accompany them are not a comparative claim, so they live in `docs/PERF-INTERNAL.md` instead.
+fn build_report(crit: &[(String, f64)]) -> Vec<Block> {
+    let mut resolver = String::new();
+    let baseline_time = lookup_time(crit, VARIANTS.first().expect("VARIANTS lists the Routerama baseline first"));
+    write_chart(
+        &mut resolver,
+        "Full lookup sweep — time (lower is better)",
+        "Time (ns)",
+        VARIANTS.iter().map(|variant| (*variant, lookup_time(crit, variant))),
+    );
+    resolver.push_str("| Resolver | Time (criterion) | Time vs Routerama |\n");
+    resolver.push_str("|---|---:|---:|\n");
+    for variant in VARIANTS {
+        let time = lookup_time(crit, variant);
+        let _ = writeln!(resolver, "| `{variant}` | {} | {} |", fmt_ns(time), fmt_ratio(time, baseline_time));
+    }
 
-    let generated_compare = generated.find(COMPARE)?;
-    let generated_query = generated.find(QUERY)?;
-    let existing_http = existing.find(HTTP)?;
-    let existing_query = existing.find(QUERY)?;
+    vec![
+        Block { name: "resolver-comparison", body: resolver },
+        Block { name: "query-codecs", body: query_time_tables(crit) },
+    ]
+}
 
-    let mut merged = String::with_capacity(existing.len().max(generated.len()));
-    merged.push_str(&generated[..generated_compare]);
-    merged.push_str(&generated[generated_compare..generated_query]);
-    merged.push_str(&existing[existing_http..existing_query]);
-    merged.push_str(&generated[generated_query..]);
-    Some(merged)
+/// Builds the generated blocks of the internal `docs/PERF-INTERNAL.md`.
+fn build_internal_report(gung: &[GungEntry]) -> Vec<Block> {
+    let mut resolver = String::new();
+    resolver.push_str("| Resolver | Instructions | Branch misses | Total reads+writes |\n");
+    resolver.push_str("|---|---:|---:|---:|\n");
+    for variant in VARIANTS {
+        let _ = writeln!(
+            resolver,
+            "| `{variant}` | {} | {} | {} |",
+            fmt_int(gung_metric(gung, variant, "Instructions")),
+            fmt_int(gung_metric(gung, variant, "Bcm")),
+            fmt_int(gung_metric(gung, variant, "Total read+write")),
+        );
+    }
+
+    vec![
+        Block { name: "resolver-instructions", body: resolver },
+        Block { name: "query-instructions", body: query_instruction_tables(gung) },
+    ]
+}
+
+/// Replaces each generated block in `existing` with its freshly measured body.
+///
+/// Everything outside the markers is hand-written prose and is copied through untouched, so a
+/// regeneration can never silently discard an explanation, a dated provenance note, or a caveat.
+/// A block named here but absent from the file is an error rather than a silent no-op, because
+/// that means the measurement it carries would vanish from the report.
+fn splice_blocks(existing: &str, blocks: &[Block]) -> Result<String, AppError> {
+    let mut out = existing.to_string();
+    for block in blocks {
+        let begin_marker = format!("<!-- BEGIN GENERATED: {} -->", block.name);
+        let end_marker = format!("<!-- END GENERATED: {} -->", block.name);
+
+        let begin = out
+            .find(&begin_marker)
+            .ok_or_else(|| app_err!("report is missing the marker `{begin_marker}`"))?;
+        let body_start = begin + begin_marker.len();
+        let end = out[body_start..]
+            .find(&end_marker)
+            .map(|offset| body_start + offset)
+            .ok_or_else(|| app_err!("report is missing the marker `{end_marker}` after `{begin_marker}`"))?;
+
+        out.replace_range(body_start..end, &format!("\n\n{}\n", block.body.trim_end()));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::merge_generated_sections;
+    use super::Block;
+    use super::splice_blocks;
+    use super::write_chart;
 
     #[test]
-    fn generated_sections_do_not_replace_hand_written_results() {
+    fn splicing_replaces_block_bodies_and_preserves_surrounding_prose() {
         let existing = "\
-# Existing preface
-## `compare_routers`
-old resolver
-## HTTP routing and dispatch
-preserved dispatch
-## Query codecs
-old query
+# Report
+
+Hand-written preface.
+
+## Resolvers
+
+A dated provenance note that must survive.
+
+<!-- BEGIN GENERATED: resolver-comparison -->
+
+stale table
+
+<!-- END GENERATED: resolver-comparison -->
+
+A caveat written by hand after the table.
 ";
-        let generated = "\
-# Generated preface
-## `compare_routers`
-new resolver
-## Query codecs
-new query
-";
+        let blocks = [Block {
+            name: "resolver-comparison",
+            body: "| a |\n|---|\n| 1 |\n".to_string(),
+        }];
 
         assert_eq!(
-            merge_generated_sections(existing, generated),
-            Some(
-                "\
-# Generated preface
-## `compare_routers`
-new resolver
-## HTTP routing and dispatch
-preserved dispatch
-## Query codecs
-new query
+            splice_blocks(existing, &blocks).unwrap(),
+            "\
+# Report
+
+Hand-written preface.
+
+## Resolvers
+
+A dated provenance note that must survive.
+
+<!-- BEGIN GENERATED: resolver-comparison -->
+
+| a |
+|---|
+| 1 |
+<!-- END GENERATED: resolver-comparison -->
+
+A caveat written by hand after the table.
 "
-                .to_string()
-            )
         );
+    }
+
+    #[test]
+    fn splicing_is_idempotent() {
+        let existing = "<!-- BEGIN GENERATED: x -->\n\nold\n<!-- END GENERATED: x -->\n";
+        let blocks = [Block { name: "x", body: "new\n".to_string() }];
+
+        let once = splice_blocks(existing, &blocks).unwrap();
+        let twice = splice_blocks(&once, &blocks).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn a_missing_marker_is_an_error_rather_than_a_silent_no_op() {
+        let blocks = [Block { name: "absent", body: String::new() }];
+        assert!(splice_blocks("# Report\n", &blocks).is_err());
+    }
+
+    #[test]
+    fn an_unterminated_block_is_an_error() {
+        let blocks = [Block { name: "x", body: String::new() }];
+        assert!(splice_blocks("<!-- BEGIN GENERATED: x -->\n", &blocks).is_err());
+    }
+
+    #[test]
+    fn chart_is_skipped_when_fewer_than_two_bars_are_measured() {
+        let mut out = String::new();
+        write_chart(&mut out, "t", "y", [("a", Some(1.0)), ("b", None)]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn chart_anchors_the_axis_at_zero_and_pads_above_the_tallest_bar() {
+        let mut out = String::new();
+        write_chart(&mut out, "Lookup", "Time (ns)", [("a", Some(100.0)), ("b", Some(200.0))]);
+        assert!(out.starts_with("```mermaid\nxychart-beta\n"), "{out}");
+        assert!(out.contains("    title \"Lookup\"\n"), "{out}");
+        assert!(out.contains("    x-axis [\"a\", \"b\"]\n"), "{out}");
+        assert!(out.contains("    y-axis \"Time (ns)\" 0 --> 220\n"), "{out}");
+        assert!(out.contains("    bar [100, 200]\n"), "{out}");
+        assert!(out.ends_with("```\n\n"), "{out}");
     }
 }
 
@@ -719,12 +831,12 @@ fn run(args: &Args) -> Result<(), AppError> {
         if !args.no_gungraun {
             eprintln!(
                 "note: skipping gungraun benches; valgrind is unavailable on Windows. \
-                 Gungraun columns in docs/PERF.md will show \"—\"."
+                 docs/PERF-INTERNAL.md will not be regenerated."
             );
         }
         false
     } else if args.no_gungraun {
-        eprintln!("note: --no-gungraun set; gungraun columns will show \"—\".");
+        eprintln!("note: --no-gungraun set; docs/PERF-INTERNAL.md will not be regenerated.");
         false
     } else if have_valgrind() {
         true
@@ -781,26 +893,32 @@ fn run(args: &Args) -> Result<(), AppError> {
     let crit = parse_criterion(&(crit_log + &query_crit_log));
     let gung = parse_gungraun(&gung_log);
 
-    let generated = build_report(&crit, &gung);
-    let out_path = crate_dir.join("docs").join("PERF.md");
-    let existing =
-        fs::read_to_string(&out_path).map_err(|e| app_err!("reading {}: {e}", out_path.display()))?;
-    let report = merge_generated_sections(&existing, &generated).ok_or_else(|| {
-        app_err!(
-            "{} is missing a generated or preserved performance-report section",
-            out_path.display()
-        )
-    })?;
-    fs::write(&out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
+    let docs_dir = crate_dir.join("docs");
+    write_merged(&docs_dir.join("PERF.md"), &build_report(&crit))?;
+
+    if run_gungraun {
+        println!("==> Building docs/PERF-INTERNAL.md");
+        write_merged(&docs_dir.join("PERF-INTERNAL.md"), &build_internal_report(&gung))?;
+    } else {
+        println!("==> Skipping docs/PERF-INTERNAL.md (no gungraun run); docs/PERF.md is unaffected.");
+    }
 
     println!(
-        "Wrote {} ({} criterion, {} gungraun benches)",
-        out_path.display(),
+        "Wrote docs/PERF.md ({} criterion, {} gungraun benches)",
         crit.len(),
         gung.len(),
     );
-    println!("==> Done. Report written to docs/PERF.md");
+    println!("==> Done.");
     Ok(())
+}
+
+/// Regenerates one report in place, preserving every hand-written line it already holds.
+fn write_merged(out_path: &Path, blocks: &[Block]) -> Result<(), AppError> {
+    let existing =
+        fs::read_to_string(out_path).map_err(|e| app_err!("reading {}: {e}", out_path.display()))?;
+    let report = splice_blocks(&existing, blocks)
+        .map_err(|e| app_err!("regenerating {}: {e}", out_path.display()))?;
+    fs::write(out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))
 }
 
 fn main() -> ExitCode {

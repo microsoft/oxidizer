@@ -108,6 +108,9 @@ impl http_body::Body for Body {
 #[derive(Clone, Copy, Debug)]
 pub enum NeverBody {}
 
+// `NeverBody` is an uninhabited enum: no safe code can ever construct a value
+// to call these methods on, so they can never execute and cannot be covered.
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl http_body::Body for NeverBody {
     type Data = Bytes;
     type Error = Infallible;
@@ -127,8 +130,7 @@ impl http_body::Body for NeverBody {
 }
 
 pin_project! {
-    /// A concrete two-way response body used by [`Result`](core::result::Result)
-    /// response conversion.
+    /// A concrete two-way response body used by [`Result`](core::result::Result) conversion.
     ///
     /// Each branch retains its original body. Polling delegates directly to the
     /// active branch and maps only its error into [`EitherBodyError`].

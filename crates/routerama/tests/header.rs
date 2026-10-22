@@ -5,7 +5,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use http::header::{ACCEPT_ENCODING, CACHE_CONTROL, DATE, EXPIRES, HeaderName, LAST_MODIFIED};
+use http::header::{ACCEPT_ENCODING, CACHE_CONTROL, DATE, EXPIRES, HeaderName, IF_MODIFIED_SINCE, IF_UNMODIFIED_SINCE, LAST_MODIFIED};
 use http::{HeaderMap, HeaderValue};
 use routerama::route::header::{Encoding, HeaderExt as _};
 
@@ -29,6 +29,26 @@ fn typed_accessors_parse_each_field() {
 
     let map = headers(ACCEPT_ENCODING, "br");
     assert!(map.accept_encoding().expect("encoding").accepts(Encoding::Brotli));
+}
+
+#[test]
+fn if_modified_and_if_unmodified_since_parse_each_field() {
+    let map = headers(IF_MODIFIED_SINCE, "Sun, 06 Nov 1994 08:49:37 GMT");
+    let parsed: SystemTime = map.if_modified_since().expect("valid If-Modified-Since").into();
+    assert_eq!(
+        parsed.duration_since(UNIX_EPOCH).expect("date is after the epoch"),
+        Duration::from_secs(784_111_777)
+    );
+
+    let map = headers(IF_UNMODIFIED_SINCE, "Sun, 06 Nov 1994 08:49:37 GMT");
+    let parsed: SystemTime = map.if_unmodified_since().expect("valid If-Unmodified-Since").into();
+    assert_eq!(
+        parsed.duration_since(UNIX_EPOCH).expect("date is after the epoch"),
+        Duration::from_secs(784_111_777)
+    );
+
+    assert!(HeaderMap::new().if_modified_since().is_none());
+    assert!(HeaderMap::new().if_unmodified_since().is_none());
 }
 
 #[test]

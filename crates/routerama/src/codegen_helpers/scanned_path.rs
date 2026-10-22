@@ -53,8 +53,7 @@ impl<'p, 's> ScannedPath<'p, 's> {
         self.capacity >= if self.count < max_segments { self.count } else { max_segments }
     }
 
-    /// Validates that this scan contains every offset a generated route table
-    /// can access.
+    /// Validates that this scan contains every offset a generated route table can access.
     #[doc(hidden)]
     #[must_use]
     #[inline]

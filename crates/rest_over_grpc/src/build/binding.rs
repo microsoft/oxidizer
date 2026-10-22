@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 use super::request_body::RequestBody;
 use super::response_body::ResponseBody;
@@ -15,7 +15,7 @@ use super::route::Route;
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
 /// use rest_over_grpc::build::{Binding, RequestBody};
-/// use routerama::HttpMethod;
+/// use routerama::resolve::HttpMethod;
 ///
 /// let binding = Binding::new(
 ///     HttpMethod::GET,

@@ -7,8 +7,9 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ResolveError<'p> {
-    /// The input contained a query (`?`) or fragment (`#`) delimiter and was
-    /// therefore not a URI path.
+    /// The input contained a query (`?`) or fragment (`#`) delimiter.
+    ///
+    /// The input was therefore not a URI path.
     InvalidPath(&'p str),
 
     /// No static or dynamic route matched the request.
@@ -22,8 +23,7 @@ pub enum ResolveError<'p> {
     /// A captured value could not be parsed into its field type.
     InvalidCapture(&'static str),
 
-    /// A captured value contained malformed percent encoding or decoded to
-    /// invalid UTF-8.
+    /// A captured value contained malformed percent encoding or decoded to invalid UTF-8.
     UndecodableCapture(&'static str),
 }
 

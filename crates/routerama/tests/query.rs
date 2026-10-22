@@ -709,10 +709,7 @@ fn produces_canonical_form_encoding_and_repeated_pairs() {
 
 #[test]
 fn resource_limits_apply_to_parsing_and_production() {
-    let input_length_limits = QueryLimits {
-        max_query_length: 5,
-        ..QueryLimits::UNLIMITED
-    };
+    let input_length_limits = QueryLimits::UNLIMITED.with_max_query_length(5);
     assert_eq!(
         SearchQuery::from_query_with("q=rust", input_length_limits)
             .expect_err("input length limit")
@@ -720,10 +717,7 @@ fn resource_limits_apply_to_parsing_and_production() {
         ErrorKind::QueryTooLong
     );
 
-    let parse_limits = QueryLimits {
-        max_pairs: 1,
-        ..QueryLimits::UNLIMITED
-    };
+    let parse_limits = QueryLimits::UNLIMITED.with_max_pairs(1);
     assert_eq!(
         SearchQuery::from_query_with("q=rust&page=2", parse_limits)
             .expect_err("pair limit")
@@ -731,10 +725,7 @@ fn resource_limits_apply_to_parsing_and_production() {
         ErrorKind::TooManyPairs
     );
 
-    let decoded_limits = QueryLimits {
-        max_decoded_length: 4,
-        ..QueryLimits::UNLIMITED
-    };
+    let decoded_limits = QueryLimits::UNLIMITED.with_max_decoded_length(4);
     assert_eq!(
         SearchQuery::from_query_with("q=rust", decoded_limits)
             .expect_err("decoded length limit")
@@ -742,10 +733,7 @@ fn resource_limits_apply_to_parsing_and_production() {
         ErrorKind::DecodedTooLong
     );
 
-    let repeated_limits = QueryLimits {
-        max_repeated_values: 1,
-        ..QueryLimits::UNLIMITED
-    };
+    let repeated_limits = QueryLimits::UNLIMITED.with_max_repeated_values(1);
     assert_eq!(
         SearchQuery::from_query_with("q=rust&tag=a&tag=b", repeated_limits)
             .expect_err("repeated value limit")
@@ -758,10 +746,7 @@ fn resource_limits_apply_to_parsing_and_production() {
         maximum: 10,
     };
     let mut output = String::new();
-    let write_limits = QueryLimits {
-        max_encoded_length: 4,
-        ..QueryLimits::UNLIMITED
-    };
+    let write_limits = QueryLimits::UNLIMITED.with_max_encoded_length(4);
     let error = query.write_query_with(&mut output, write_limits).expect_err("encoded output limit");
     assert_eq!(error.kind(), ErrorKind::TooLong);
     assert_eq!(
@@ -926,10 +911,7 @@ fn percent_encoded_bool_and_schema_errors_preserve_query_semantics() {
         }
     );
 
-    let repeated_limits = QueryLimits {
-        max_repeated_values: 1,
-        ..QueryLimits::UNLIMITED
-    };
+    let repeated_limits = QueryLimits::UNLIMITED.with_max_repeated_values(1);
     let error = PrimitiveContainers::from_query_with("repeated=%31&repeated=%78", repeated_limits)
         .expect_err("the repetition limit precedes primitive value parsing");
     assert_eq!(error.kind(), ErrorKind::TooManyValues);
@@ -942,10 +924,7 @@ fn percent_encoded_bool_and_schema_errors_preserve_query_semantics() {
     assert_eq!(error.parameter(), None);
     assert_eq!(error.pair_offset(), Some(22));
 
-    let decoded_limits = QueryLimits {
-        max_decoded_length: 5,
-        ..QueryLimits::UNLIMITED
-    };
+    let decoded_limits = QueryLimits::UNLIMITED.with_max_decoded_length(5);
     assert_parse_error(
         EncodedU8::from_query_with("value=%31", decoded_limits).map(|parsed| parsed.value),
         ErrorKind::DecodedTooLong,
@@ -988,13 +967,7 @@ fn custom_display_values_escape_and_propagate_failures() {
 
     let mut output = String::new();
     let limit_error = escaped
-        .write_query_with(
-            &mut output,
-            QueryLimits {
-                max_encoded_length: 7,
-                ..QueryLimits::UNLIMITED
-            },
-        )
+        .write_query_with(&mut output, QueryLimits::UNLIMITED.with_max_encoded_length(7))
         .expect_err("display adapter propagates limits");
     assert_eq!(limit_error.parameter(), Some("value"));
     assert_eq!(limit_error.kind(), ErrorKind::TooLong);

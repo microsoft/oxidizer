@@ -9,7 +9,7 @@ use super::{Body, Response};
 /// A zero-copy byte response backed by a static byte slice.
 ///
 /// The payload is wrapped with [`Bytes::from_static`] without allocating or
-/// copying it. Like [`Bytes`] and [`Vec<u8>`] responses, `StaticBytes` does not
+/// copying it. Like [`Bytes`] and [`Vec<u8>`](alloc::vec::Vec) responses, `StaticBytes` does not
 /// set a `Content-Type` header.
 ///
 /// # Examples

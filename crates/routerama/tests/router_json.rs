@@ -205,3 +205,112 @@ fn request(content_type: &'static str, frames: Vec<Bytes>) -> Request<FrameBody>
         .body(FrameBody::new(frames))
         .expect("the test request uses valid static metadata")
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TestBodyError(&'static str);
+
+impl std::fmt::Display for TestBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for TestBodyError {}
+
+struct FailingBody {
+    error: Option<TestBodyError>,
+}
+
+impl FailingBody {
+    fn new(error: &'static str) -> Self {
+        Self {
+            error: Some(TestBodyError(error)),
+        }
+    }
+}
+
+impl http_body::Body for FailingBody {
+    type Data = Bytes;
+    type Error = TestBodyError;
+
+    fn poll_frame(mut self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Poll::Ready(self.error.take().map(Err))
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::default()
+    }
+}
+
+/// Extracts a `Document` and returns the rejection it produces.
+async fn document_rejection<B>(content_types: &[&str], body: B) -> JsonRejection<B::Error>
+where
+    B: http_body::Body<Data = Bytes>,
+{
+    let mut request = Request::post("/");
+    for content_type in content_types {
+        request = request.header(CONTENT_TYPE, *content_type);
+    }
+    let (parts, ()) = request.body(()).expect("the test request uses valid static metadata").into_parts();
+    <Json<Document, 64> as routerama::route::FromRequestBody<(), B>>::from_request_body(&parts, body, &())
+        .await
+        .expect_err("the extraction is set up to fail")
+}
+
+#[tokio::test]
+async fn every_content_type_error_renders_a_distinct_message_and_exposes_no_source() {
+    use std::error::Error as _;
+
+    let json = "application/json";
+    let cases: [(&[&str], &str); 4] = [
+        (&[], "JSON request body requires a Content-Type header"),
+        (&[json, json], "JSON request body requires one Content-Type header, but received 2"),
+        (&["text/plain"], r#"JSON request body does not support Content-Type "text/plain""#),
+        (
+            &["application/xml"],
+            r#"JSON request body does not support Content-Type "application/xml""#,
+        ),
+    ];
+
+    for (content_types, expected) in cases {
+        let rejection = document_rejection(content_types, FrameBody::new(vec![Bytes::from_static(b"{\"title\":\"x\"}")])).await;
+        let JsonRejection::UnsupportedMediaType(error) = &rejection else {
+            panic!("expected an unsupported media type rejection for {content_types:?}");
+        };
+        assert_eq!(error.to_string(), expected);
+        // The rejection delegates `Display` to the inner error.
+        assert_eq!(rejection.to_string(), expected);
+        assert!(rejection.source().is_some());
+    }
+}
+
+#[tokio::test]
+async fn malformed_and_transport_rejections_render_and_expose_their_source() {
+    use std::error::Error as _;
+
+    let json = "application/json";
+
+    let malformed = document_rejection(&[json], FrameBody::new(vec![Bytes::from_static(b"{\"title\":}")])).await;
+    let JsonRejection::Malformed(error) = &malformed else {
+        panic!("expected a malformed JSON rejection");
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("request body contains malformed JSON: {}", error.error())
+    );
+    assert!(error.source().is_some());
+    assert_eq!(malformed.to_string(), error.to_string());
+    assert!(malformed.source().is_some());
+
+    let owned_malformed = document_rejection(&[json], FrameBody::new(vec![Bytes::from_static(b"{\"title\":}")])).await;
+    let JsonRejection::Malformed(owned_error) = owned_malformed else {
+        panic!("expected a malformed JSON rejection");
+    };
+    let inner = owned_error.into_inner();
+    assert!(inner.is_syntax());
+
+    let transport = document_rejection(&[json], FailingBody::new("diagnostic")).await;
+    assert!(matches!(transport, JsonRejection::Body(_)));
+    assert!(transport.to_string().contains("diagnostic"), "unexpected message: {transport}");
+    assert!(transport.source().is_some());
+}

@@ -290,6 +290,22 @@ mod tests {
     }
 
     #[test]
+    fn reserve_with_invalid_template_records_a_build_error() {
+        let mut builder = DynBuilder::<()>::new();
+        builder.reserve("GET", "/{broken", "Broken");
+        let error = builder.finish().expect_err("an invalid reserved template must fail the build");
+        assert!(error.to_string().contains("Broken"), "{error}");
+    }
+
+    #[test]
+    fn add_with_invalid_method_records_a_build_error() {
+        let mut builder = DynBuilder::new();
+        builder.add("NOT A METHOD", "/dyn", &[], "BadMethod", ());
+        let error = builder.finish().expect_err("an invalid HTTP method must fail the build");
+        assert!(error.to_string().contains("BadMethod"), "{error}");
+    }
+
+    #[test]
     fn reserved_static_shapes_reject_dynamic_collisions_without_entering_dispatch() {
         let mut builder = DynBuilder::new();
         builder.reserve("GET", "/fixed/{id}", "Fixed");

@@ -8,8 +8,9 @@ use routerama_build::trie::{Leaf, VarPlan};
 
 use crate::codegen_helpers::ScannedPath;
 
-/// A view over a resolved match's captured path variables, passed to the
-/// `#[resolver]`-generated dynamic-route extractors.
+/// A view over a resolved match's captured path variables.
+///
+/// It is passed to the `#[resolver]`-generated dynamic-route extractors.
 ///
 /// Captured values are the raw, still percent-encoded slices borrowed from the
 /// request path; decoding happens per field during coercion.

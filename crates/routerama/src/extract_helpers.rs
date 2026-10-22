@@ -127,6 +127,9 @@ macro_rules! unsigned_primitive {
         $(
             impl PrimitivePath for $ty {
                 #[inline]
+                // Coverage off: `decode_unsigned` bounds every returned magnitude by `$max`
+                // (the concrete type's own maximum), so `<$ty>::try_from` can never fail here.
+                #[cfg_attr(coverage_nightly, coverage(off))]
                 fn decode_path(raw: &str) -> PrimitiveCapture<Self> {
                     if raw.find('%').is_none() {
                         return raw.parse().map_or(PrimitiveCapture::Invalid, PrimitiveCapture::Value);
@@ -147,6 +150,10 @@ macro_rules! signed_primitive {
         $(
             impl PrimitivePath for $ty {
                 #[inline]
+                // Coverage off: `decode_signed` bounds every magnitude by `$max` (or `$max + 1`
+                // for the sole negative edge case handled explicitly above), so `<$ty>::try_from`
+                // can never fail once that edge case is excluded.
+                #[cfg_attr(coverage_nightly, coverage(off))]
                 fn decode_path(raw: &str) -> PrimitiveCapture<Self> {
                     if raw.find('%').is_none() {
                         return raw.parse().map_or(PrimitiveCapture::Invalid, PrimitiveCapture::Value);
@@ -197,6 +204,12 @@ signed_primitive!(
 
 impl PrimitivePath for bool {
     #[inline]
+    // Coverage off: the leading `None` arm below can never run. `decode_path` only reaches
+    // `DecodedBytes::new(raw)` after the `raw.find('%').is_none()` guard fails, which proves
+    // `raw` (and therefore its underlying bytes) is non-empty, so the very first `bytes.next()`
+    // call always finds a byte at the freshly reset cursor. The remaining arms are exercised by
+    // `crates/routerama/tests/extract_coverage.rs`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn decode_path(raw: &str) -> PrimitiveCapture<Self> {
         if raw.find('%').is_none() {
             return raw.parse().map_or(PrimitiveCapture::Invalid, PrimitiveCapture::Value);
@@ -242,6 +255,12 @@ struct SignedMagnitude {
     negative: bool,
 }
 
+// Coverage off: the leading `else` arm below can never run. Every caller of `decode_unsigned`
+// checks `raw.find('%').is_none()` first and only calls this function when that check fails,
+// which proves `raw` is non-empty, so the very first `bytes.next()` call on a freshly reset
+// cursor always finds a byte. The remaining branches are exercised by
+// `crates/routerama/tests/extract_coverage.rs`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn decode_unsigned(raw: &str, max: u128) -> PrimitiveCapture<u128> {
     let mut bytes = DecodedBytes::new(raw);
     let Some(first) = bytes.next() else {
@@ -287,6 +306,11 @@ fn decode_unsigned(raw: &str, max: u128) -> PrimitiveCapture<u128> {
     primitive_end(&bytes, Some(value))
 }
 
+// Coverage off: the leading `else` arm below can never run, for the same reason as in
+// `decode_unsigned` above: every caller checks `raw.find('%').is_none()` first, so `raw` is
+// non-empty and the very first `bytes.next()` call always finds a byte. The remaining branches
+// are exercised by `crates/routerama/tests/extract_coverage.rs`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn decode_signed(raw: &str, positive_max: u128) -> PrimitiveCapture<SignedMagnitude> {
     let mut bytes = DecodedBytes::new(raw);
     let Some(first) = bytes.next() else {

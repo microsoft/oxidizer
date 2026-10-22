@@ -621,8 +621,10 @@ pub(crate) fn expand_named(
     })
 }
 
-/// Rejects a template whose segment count would drive the code generator's
-/// per-segment recursion beyond [`crate::trie::MAX_TEMPLATE_SEGMENTS`].
+/// Rejects a template that declares too many segments.
+///
+/// The limit is the point at which the code generator's per-segment recursion
+/// would exceed [`crate::trie::MAX_TEMPLATE_SEGMENTS`].
 fn reject_deep_templates(variant: &syn::Variant) -> syn::Result<()> {
     for attribute in variant.attrs.iter().filter(|attribute| attribute.path().is_ident("route")) {
         let RouteAttr { target, .. } = attribute.parse_args()?;
@@ -1503,5 +1505,62 @@ mod tests {
         assert!(!code.contains("fn __static_resolve"), "{code}");
         assert!(code.contains("fn add_get_book"), "{code}");
         assert!(code.contains("fn __extract"), "{code}");
+    }
+
+    #[test]
+    fn a_resolver_with_no_variants_generates_an_always_not_found_static_resolve() {
+        // Neither static nor dynamic variants: `has_static` and `has_dynamic`
+        // are both false, hitting the `!has_dynamic` branch that always
+        // returns `ResolveError::NotFound`.
+        let item: ItemEnum = parse_quote! {
+            enum Empty {}
+        };
+        let code = expand_str(item).expect("an empty route enum is valid");
+        assert!(code.contains("fn __static_resolve"), "{code}");
+        assert!(code.contains("ResolveError :: NotFound"), "{code}");
+    }
+
+    #[test]
+    #[cfg(feature = "query")]
+    fn expand_named_supports_the_query_runtime_capability() {
+        // `RuntimeCapability::Query` is never routed to `expand_named` by any
+        // current macro entry point (query derives use their own codegen),
+        // but the match over `capability` is exhaustive over the enum; call
+        // the function directly to exercise that arm.
+        let item: ItemEnum = parse_quote! {
+            enum Route {
+                #[route(dynamic)]
+                Plugin { name: String },
+            }
+        };
+        let code = expand_named(item, None, RuntimeCapability::Query)
+            .expect("the query capability is a valid, if unused, resolver target")
+            .to_string();
+        assert!(code.contains("AsRef"), "{code}");
+    }
+
+    #[test]
+    fn reject_deep_templates_ignores_dynamic_route_targets() {
+        // `reject_deep_templates` is only ever called for statically
+        // declared variants in the real pipeline (a `#[route(dynamic)]`
+        // variant is classified as `RouteDeclaration::Dynamic` and never
+        // reaches this helper), so directly unit-test its defensive
+        // `RouteTarget::Dynamic` skip.
+        let variant: syn::Variant = parse_quote! {
+            #[route(dynamic)]
+            Plugin
+        };
+        reject_deep_templates(&variant).unwrap();
+    }
+
+    #[test]
+    fn reject_deep_templates_ignores_malformed_path_templates() {
+        // A malformed template is skipped here; `routes_for_variant` reports
+        // the actual parse-failure diagnostic afterward.
+        let variant: syn::Variant = parse_quote! {
+            #[route(GET, "/books/{unclosed")]
+            GetBook
+        };
+        reject_deep_templates(&variant).unwrap();
     }
 }

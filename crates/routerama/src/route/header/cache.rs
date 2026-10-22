@@ -103,8 +103,9 @@ impl HeaderCache {
         self.expires.resolve(value.as_bytes(), || headers.typed_get())
     }
 
-    /// Returns the resolved `Accept-Encoding` decision, memoizing one field
-    /// line by its exact raw bytes.
+    /// Returns the resolved `Accept-Encoding` decision.
+    ///
+    /// One field line is memoized by its exact raw bytes.
     ///
     /// Repeated field lines are combined without caching.
     pub fn accept_encoding(&mut self, headers: &HeaderMap) -> Option<AcceptEncoding> {
@@ -237,6 +238,28 @@ mod tests {
         let second = cache.date(&map).expect("valid Date");
         assert_eq!(first, second);
         assert_eq!(cache.date.len, 1);
+    }
+
+    #[test]
+    fn last_modified_and_expires_are_cached_like_date() {
+        let mut cache = HeaderCache::new();
+        let map = headers(LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT");
+        let first = cache.last_modified(&map).expect("valid Last-Modified");
+        let second = cache.last_modified(&map).expect("valid Last-Modified");
+        assert_eq!(first, second);
+        assert_eq!(cache.last_modified.len, 1);
+
+        let map = headers(EXPIRES, "Sun, 06 Nov 1994 08:49:37 GMT");
+        let first = cache.expires(&map).expect("valid Expires");
+        let second = cache.expires(&map).expect("valid Expires");
+        assert_eq!(first, second);
+        assert_eq!(cache.expires.len, 1);
+    }
+
+    #[test]
+    fn default_builds_an_empty_cache() {
+        let cache = HeaderCache::default();
+        assert_eq!(cache.date.len, 0);
     }
 
     #[test]

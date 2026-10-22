@@ -58,12 +58,13 @@ mod tests {
     use crate::literal_edge::{LiteralEdge, SORTED_LITERAL_FANOUT, find_literal};
     use crate::rt_node::RtNode;
 
-    /// Builds a childless node carrying `marker + 1` exact leaves, so a lookup
-    /// result can be told apart from its siblings.
+    /// Builds a childless node carrying `marker + 1` exact leaves.
+    ///
+    /// The leaf count lets a lookup result be told apart from its siblings.
     fn leaf_node(marker: usize) -> RtNode {
         RtNode {
             literals: Box::default(),
-            affix: Box::default(),
+            affix: None,
             single: None,
             exact: (0..=marker)
                 .map(|route_index| Leaf {
@@ -91,8 +92,7 @@ mod tests {
             .collect()
     }
 
-    /// The reference lookup: the linear scan the hybrid replaces above the
-    /// threshold.
+    /// The reference lookup: the linear scan the hybrid replaces above the threshold.
     fn reference(literals: &[LiteralEdge], segment: &[u8]) -> Option<usize> {
         literals
             .iter()

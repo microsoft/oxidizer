@@ -26,7 +26,7 @@ use super::{DescriptorError, DescriptorOptions};
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
 /// use rest_over_grpc::build::{Generator, HttpRule, ServiceDefinition};
-/// use routerama::HttpMethod;
+/// use routerama::resolve::HttpMethod;
 ///
 /// let rule = HttpRule::new(
 ///     "CreateShelf",
@@ -143,7 +143,7 @@ impl ServiceDefinition {
     /// ```
     /// use http_path_template::{Grammar, PathTemplate};
     /// use rest_over_grpc::build::{Generator, HttpRule, ServiceDefinition};
-    /// use routerama::HttpMethod;
+    /// use routerama::resolve::HttpMethod;
     ///
     /// let rule = HttpRule::new(
     ///     "GetShelf",
@@ -1042,7 +1042,7 @@ pub(crate) fn to_snake_case(name: &str) -> String {
 )]
 mod tests {
     use http_path_template::Grammar;
-    use routerama::HttpMethod;
+    use routerama::resolve::HttpMethod;
 
     use super::*;
     use crate::build::Binding;

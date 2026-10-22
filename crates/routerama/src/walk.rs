@@ -35,7 +35,7 @@ impl Walk<'_, '_> {
                 .as_deref()
                 .filter(|_| segment.is_some_and(|segment| !segment.is_empty()));
             if node.literals.is_empty()
-                && node.affix.is_empty()
+                && node.affix.is_none()
                 && node.rest.is_empty()
                 && let Some(single) = single
             {
@@ -44,15 +44,14 @@ impl Walk<'_, '_> {
                 continue;
             }
             if let Some(segment) = segment
-                && (!node.literals.is_empty() || !node.affix.is_empty())
+                && (!node.literals.is_empty() || node.affix.is_some())
             {
                 let bytes = segment.as_bytes();
                 let literal = find_literal(&node.literals, bytes);
-                let first_affix = node.affix.iter().enumerate().find(|(_, (prefix, suffix, _))| {
-                    bytes.len() > prefix.len() + suffix.len() && bytes.starts_with(prefix.as_bytes()) && bytes.ends_with(suffix.as_bytes())
-                });
+                let affix = node.affix.as_deref();
+                let first_affix = affix.and_then(|affix| affix.first_match(bytes));
 
-                if node.affix.is_empty()
+                if node.affix.is_none()
                     && node.single.is_none()
                     && node.rest.is_empty()
                     && let Some(child) = literal
@@ -75,14 +74,11 @@ impl Walk<'_, '_> {
                     // after it is rescanned; the first match itself is already
                     // known to match and is only an alternative when a literal
                     // edge is taken instead.
-                    if let Some((first_index, (_, _, first_child))) = first_affix {
-                        for (prefix, suffix, child) in node.affix.iter().skip(first_index + 1).rev() {
-                            if bytes.len() > prefix.len() + suffix.len()
-                                && bytes.starts_with(prefix.as_bytes())
-                                && bytes.ends_with(suffix.as_bytes())
-                            {
-                                pending.push(WalkAction::Node(child, depth + 1));
-                            }
+                    if let Some((first_index, (_, _, first_child))) = first_affix
+                        && let Some(affix) = affix
+                    {
+                        for child in affix.matches_after(first_index, bytes).rev() {
+                            pending.push(WalkAction::Node(child, depth + 1));
                         }
                         if literal.is_some() {
                             pending.push(WalkAction::Node(first_child, depth + 1));
@@ -92,7 +88,7 @@ impl Walk<'_, '_> {
                     node = literal
                         .or_else(|| first_affix.map(|(_, (_, _, child))| child))
                         .or(single)
-                        .expect("at least one matching child was found");
+                        .expect("guarded by the `literal.is_some() || first_affix.is_some() || single.is_some()` check above, so at least one alternative is present");
                     depth += 1;
                     continue;
                 }

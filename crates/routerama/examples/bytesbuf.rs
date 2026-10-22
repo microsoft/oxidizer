@@ -6,13 +6,13 @@
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use http_body_util::BodyExt as _;
-use routerama::response::bytesbuf::template::{BytesViewTemplate, json_number, json_string};
+use routerama::response::bytesbuf::template::{BytesViewTemplate, Json, json_number, json_string};
 use routerama::route::{Request, State, router};
 
 #[derive(Clone, Debug)]
 struct AppState {
     memory: GlobalPool,
-    document: BytesViewTemplate<3>,
+    document: BytesViewTemplate<3, Json>,
 }
 
 struct Api;
@@ -41,7 +41,7 @@ impl Api {
 async fn main() {
     let memory = GlobalPool::new();
     let state = AppState {
-        document: BytesViewTemplate::prepare(&memory, [br#"{"id":"#, br#","name":"#, b"}"]),
+        document: BytesViewTemplate::<3, Json>::prepare(&memory, [br#"{"id":"#, br#","name":"#, b"}"]),
         memory,
     };
     let request = Request::get("/document/42").body(()).expect("valid request");

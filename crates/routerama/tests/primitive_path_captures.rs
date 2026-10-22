@@ -251,3 +251,20 @@ fn dynamic_primitive_extractors_share_static_semantics() {
         Err(ResolveError::InvalidCapture("value"))
     );
 }
+
+#[test]
+fn unencoded_and_lowercase_escaped_captures_take_their_own_decoding_paths() {
+    let resolver = static_resolver();
+
+    // No `%` anywhere, so the 128-bit capture parses the raw slice directly
+    // instead of running the byte-at-a-time decoder.
+    assert_eq!(
+        resolver.resolve("GET", "/u128/340282366920938463463374607431768211455"),
+        Ok(StaticPrimitive::U128 { value: u128::MAX })
+    );
+
+    // Lowercase escapes spelling a three-byte UTF-8 sequence with an `0xE0` lead:
+    // the escape decodes and the sequence is well formed, so the capture is
+    // rejected as invalid rather than undecodable.
+    assert_eq!(resolver.resolve("GET", "/u8/%e0%a0%80"), Err(ResolveError::InvalidCapture("value")));
+}

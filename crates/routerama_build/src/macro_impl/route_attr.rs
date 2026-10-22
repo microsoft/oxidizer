@@ -23,7 +23,7 @@ pub(super) enum RouteTarget {
 /// An explicitly declared static-route priority.
 #[derive(Clone)]
 #[cfg_attr(
-    not(feature = "route"),
+    all(not(feature = "route"), not(test)),
     expect(dead_code, reason = "direct resolvers reject priority by span before its value is used")
 )]
 #[cfg(any(feature = "resolve", feature = "route"))]
@@ -43,7 +43,7 @@ pub(super) struct RoutePredicates {
 
 #[cfg(any(feature = "resolve", feature = "route"))]
 impl RoutePredicates {
-    #[cfg(feature = "route")]
+    #[cfg(any(feature = "route", test))]
     pub(super) const fn is_empty(&self) -> bool {
         self.host.is_none() && self.consumes.is_none() && self.produces.is_none()
     }
@@ -97,7 +97,7 @@ pub(super) enum StaticHeaderOperation {
 /// One validated compile-time response header attached to a route.
 #[derive(Clone)]
 #[cfg_attr(
-    not(feature = "route"),
+    all(not(feature = "route"), not(test)),
     expect(
         dead_code,
         reason = "direct resolvers reject static response headers by name span before using their operation or value"
@@ -421,14 +421,30 @@ mod tests {
 
     use super::*;
 
+    /// Extracts the static method/path pair from a `RouteAttr::target`.
+    /// Every call site here parses a `METHOD, "path"` attribute, so the
+    /// `Dynamic` arm can never be reached; it exists only because
+    /// `RouteTarget` is not a two-field struct, and is marked
+    /// `coverage(off)` rather than contorting call sites into constructing
+    /// an unreachable `panic!`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[expect(
+        clippy::panic,
+        reason = "test helper only ever called with `Static` targets; this arm is unreachable"
+    )]
+    fn expect_static(target: RouteTarget) -> (String, LitStr) {
+        match target {
+            RouteTarget::Static { method, path } => (method, path),
+            RouteTarget::Dynamic => panic!("this helper is only used with `METHOD, \"path\"` attributes"),
+        }
+    }
+
     #[test]
     fn a_valid_route_attribute_parses() {
         // The success path of `RouteAttr::parse` (`METHOD, "path"`).
         let attr = quote! { GET, "/books/{book}" };
         let parsed: RouteAttr = syn::parse2(attr).expect("a `METHOD, \"path\"` attribute parses");
-        let RouteTarget::Static { method, path } = parsed.target else {
-            panic!("the method-and-path form is static");
-        };
+        let (method, path) = expect_static(parsed.target);
         assert_eq!(method, "GET");
         assert_eq!(path.value(), "/books/{book}");
         assert!(parsed.predicates.is_empty());
@@ -437,9 +453,7 @@ mod tests {
     #[test]
     fn a_hyphenated_method_string_parses_exactly() {
         let parsed: RouteAttr = syn::parse2(quote! { "M-SEARCH", "/devices" }).expect("a valid HTTP token parses");
-        let RouteTarget::Static { method, .. } = parsed.target else {
-            panic!("the string method form is static");
-        };
+        let (method, _) = expect_static(parsed.target);
         assert_eq!(method, "M-SEARCH");
 
         let error = syn::parse2::<RouteAttr>(quote! { "BAD METHOD", "/devices" })
@@ -451,9 +465,7 @@ mod tests {
     #[test]
     fn identifier_methods_are_normalized_and_validated() {
         let parsed: RouteAttr = syn::parse2(quote! { r#match, "/items" }).expect("raw method identifier parses");
-        let RouteTarget::Static { method, .. } = parsed.target else {
-            panic!("the raw method form is static");
-        };
+        let (method, _) = expect_static(parsed.target);
         assert_eq!(method, "MATCH");
 
         let non_token = Ident::new("\u{03bb}", proc_macro2::Span::call_site());
@@ -592,5 +604,84 @@ mod tests {
                 .err()
                 .expect("malformed dynamic predicate syntax is rejected");
         }
+    }
+
+    #[cfg(feature = "route")]
+    fn header(operation: StaticHeaderOperation, name: &str, value: &str) -> StaticHeader {
+        StaticHeader {
+            operation,
+            name: LitStr::new(name, proc_macro2::Span::call_site()),
+            value: LitStr::new(value, proc_macro2::Span::call_site()),
+        }
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn same_static_headers_compares_operation_name_and_value() {
+        let left = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let right = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        assert!(same_static_headers(&left, &right));
+
+        let differing_value = [header(StaticHeaderOperation::Insert, "x-a", "2")];
+        assert!(!same_static_headers(&left, &differing_value));
+
+        let differing_name = [header(StaticHeaderOperation::Insert, "x-b", "1")];
+        assert!(!same_static_headers(&left, &differing_name));
+
+        let differing_operation = [header(StaticHeaderOperation::Append, "x-a", "1")];
+        assert!(!same_static_headers(&left, &differing_operation));
+
+        let differing_length = [
+            header(StaticHeaderOperation::Insert, "x-a", "1"),
+            header(StaticHeaderOperation::Insert, "x-c", "3"),
+        ];
+        assert!(!same_static_headers(&left, &differing_length));
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn differing_static_header_reports_the_first_value_mismatch() {
+        let current = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let expected = [header(StaticHeaderOperation::Insert, "x-a", "2")];
+        let mismatch = differing_static_header(&current, &expected).expect("a value mismatch is reported");
+        assert_eq!(mismatch.value(), "1");
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn differing_static_header_reports_a_name_mismatch() {
+        let current = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let expected = [header(StaticHeaderOperation::Insert, "x-b", "1")];
+        let mismatch = differing_static_header(&current, &expected).expect("a name mismatch is reported");
+        assert_eq!(mismatch.value(), "x-a");
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn differing_static_header_reports_an_operation_mismatch() {
+        let current = [header(StaticHeaderOperation::Append, "x-a", "1")];
+        let expected = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let mismatch = differing_static_header(&current, &expected).expect("an operation mismatch is reported");
+        assert_eq!(mismatch.value(), "x-a");
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn differing_static_header_reports_an_extra_trailing_header() {
+        let current = [
+            header(StaticHeaderOperation::Insert, "x-a", "1"),
+            header(StaticHeaderOperation::Insert, "x-c", "3"),
+        ];
+        let expected = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let extra = differing_static_header(&current, &expected).expect("the extra trailing header is reported");
+        assert_eq!(extra.value(), "x-c");
+    }
+
+    #[cfg(feature = "route")]
+    #[test]
+    fn differing_static_header_agrees_when_headers_match_exactly() {
+        let current = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        let expected = [header(StaticHeaderOperation::Insert, "x-a", "1")];
+        assert!(differing_static_header(&current, &expected).is_none());
     }
 }

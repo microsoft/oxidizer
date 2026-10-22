@@ -13,7 +13,10 @@ mod cache_control;
 pub(super) mod grammar;
 mod header_ext;
 
+#[doc(inline)]
 pub use accept_encoding::{AcceptEncoding, Encoding};
+#[doc(inline)]
 pub use cache::HeaderCache;
+#[doc(inline)]
 pub use header_ext::HeaderExt;
 pub use headers::{CacheControl, Date, Expires, IfModifiedSince, IfUnmodifiedSince, LastModified};

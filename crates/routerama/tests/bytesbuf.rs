@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(feature = "bytesbuf")]
 //! `bytesbuf` response, extraction, generated-routing, and Tower integration.
+
+#![cfg(feature = "bytesbuf")]
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -16,8 +17,10 @@ use http_body::{Body as HttpBody, Frame, SizeHint};
 use http_body_util::BodyExt as _;
 use routerama::response::bytesbuf::BytesViewBody as ResponseBytesViewBody;
 #[cfg(feature = "bytesbuf-std")]
-use routerama::response::bytesbuf::template::{BytesViewTemplate, html_text, json_number, json_string, unescaped_text};
-use routerama::response::{BoxBody, HeterogeneousResult, IntoResponse, SendBoxBody};
+use routerama::response::bytesbuf::template::{BytesViewTemplate, Plain, html_text, json_number, json_string, unescaped_text};
+use routerama::response::{
+    BoxBody, HeterogeneousResult, IntoResponse, SendBoxBody, html_view_template, json_view_template, text_view_template,
+};
 #[cfg(all(feature = "json", feature = "bytesbuf-std"))]
 use routerama::route::bytesbuf::JsonView;
 use routerama::route::bytesbuf::{BytesViewBody, Utf8BytesViewBody};
@@ -491,7 +494,7 @@ async fn erased_mounts_preserve_bytes_view_data() {
 #[test]
 fn prepared_templates_reuse_static_views_and_encode_typed_slots() {
     let memory = bytesbuf::mem::GlobalPool::new();
-    let json = BytesViewTemplate::prepare(&memory, [br#"{"id":"#, br#","name":"#, b"}"]);
+    let json = json_view_template!(&memory, br#"{"id":"#, br#","name":"#, b"}");
     let fixed_pointers: Vec<_> = json.fragments().iter().map(|fragment| fragment.first_slice().as_ptr()).collect();
 
     let rendered = json.render(&memory, (json_number(42_u32), json_string("a\n\"b")));
@@ -501,18 +504,20 @@ fn prepared_templates_reuse_static_views_and_encode_typed_slots() {
         assert!(rendered_pointers.contains(&pointer));
     }
 
-    let plain = BytesViewTemplate::prepare(&memory, [b"hello ", b"!"]);
+    let plain = text_view_template!(&memory, b"hello ", b"!");
     assert_eq!(plain.render(&memory, (unescaped_text("routerama"),)).to_vec(), b"hello routerama!");
 }
 
 #[cfg(feature = "bytesbuf-std")]
 #[test]
-fn the_bytes_view_template_offers_an_escaping_html_slot() {
-    // A `BytesViewTemplate` built from HTML fragments must have an escaping slot
-    // to reach for; the verbatim slot is named `unescaped_text` so that choosing
-    // it is explicit at the call site.
+fn an_html_view_template_escapes_every_slot_it_accepts() {
+    // An HTML template is of kind `Html`, and the only slot implementing
+    // `SlotFor<Html>` escapes. `unescaped_text` is `SlotFor<Plain>` alone, so
+    // the unescaped rendering below is rejected by the type checker rather than
+    // left to call-site discipline; `tests/ui/unescaped_text_in_html.rs` pins
+    // that.
     let memory = bytesbuf::mem::GlobalPool::new();
-    let page = BytesViewTemplate::prepare(&memory, [b"<p>", b"</p>"]);
+    let page = html_view_template!(&memory, b"<p>", b"</p>");
     let injection = "<script>alert('x')&\"</script>";
 
     let escaped = page.render(&memory, (html_text(injection),));
@@ -520,9 +525,6 @@ fn the_bytes_view_template_offers_an_escaping_html_slot() {
         escaped.to_vec(),
         b"<p>&lt;script&gt;alert(&#39;x&#39;)&amp;&quot;&lt;/script&gt;</p>".to_vec()
     );
-
-    let verbatim = page.render(&memory, (unescaped_text(injection),));
-    assert_eq!(verbatim.to_vec(), format!("<p>{injection}</p>").into_bytes());
 }
 
 #[cfg(feature = "tower")]
@@ -608,4 +610,110 @@ where
         panic!("the frame contains data");
     };
     data.chunk().as_ptr()
+}
+
+#[test]
+fn response_bytes_view_body_exposes_empty_view_and_into_inner() {
+    let empty = ResponseBytesViewBody::empty();
+    assert!(empty.view().is_none());
+    assert!(empty.is_end_stream());
+    assert_eq!(empty.into_inner(), BytesView::default());
+
+    let payload = view(b"payload");
+    let body = ResponseBytesViewBody::new(payload.clone());
+    assert_eq!(body.view(), Some(&payload));
+    assert!(!body.is_end_stream());
+    assert_eq!(body.into_inner(), payload);
+
+    let from_view: ResponseBytesViewBody = payload.clone().into();
+    assert_eq!(from_view.into_inner(), payload);
+}
+
+#[cfg(feature = "bytesbuf-std")]
+#[test]
+fn a_single_fragment_template_renders_with_no_slots() {
+    let memory = bytesbuf::mem::GlobalPool::new();
+    let template: BytesViewTemplate<1, Plain> = BytesViewTemplate::prepare(&memory, [b"only-fragment"]);
+
+    assert_eq!(template.render(&memory, ()).to_vec(), b"only-fragment");
+}
+
+#[tokio::test]
+async fn utf8_bytes_view_body_exposes_deref_and_into_inner() {
+    let extracted = Utf8BytesViewBody::<5>::from_request_body(&request_parts(), ViewFrames::new([Frame::data(view(b"hello"))]), &())
+        .await
+        .expect("a valid UTF-8 body succeeds");
+    assert_eq!(&*extracted, &view(b"hello"));
+    assert_eq!(extracted.into_inner(), view(b"hello"));
+}
+
+#[cfg(all(feature = "json", feature = "bytesbuf-std"))]
+#[tokio::test]
+async fn json_view_exposes_deref_to_the_decoded_value() {
+    #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+    struct Payload {
+        id: u32,
+    }
+
+    let mut parts = request_parts();
+    parts
+        .headers
+        .insert(http::header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let decoded = JsonView::<Payload, 64>::from_request_body(&parts, ViewFrames::new([Frame::data(view(br#"{"id":7}"#))]), &())
+        .await
+        .expect("a well-formed JSON body decodes");
+
+    assert_eq!(decoded.id, 7);
+}
+
+#[tokio::test]
+async fn bounded_extraction_skips_empty_data_frames() {
+    let extracted = BytesViewBody::<5>::from_request_body(
+        &request_parts(),
+        ViewFrames::new([Frame::data(view(b"")), Frame::data(view(b"hello"))]),
+        &(),
+    )
+    .await
+    .expect("an interleaved empty frame is skipped, not counted toward the limit");
+
+    assert_eq!(extracted.view().to_vec(), b"hello");
+}
+
+#[tokio::test]
+async fn utf8_validation_rejects_an_invalid_completion_of_a_carried_sequence() {
+    // The first frame ends mid-sequence on a valid two-byte lead (`0xc2`); the
+    // second frame supplies a continuation byte that is not a valid
+    // continuation, so completing the carry itself is invalid UTF-8.
+    // Reuses the `<5>` instantiation (already exercised on a success path
+    // elsewhere) so this error-only call doesn't leave a distinct generic
+    // instantiation's success arm uncovered.
+    let invalid = Utf8BytesViewBody::<5>::from_request_body(
+        &request_parts(),
+        ViewFrames::new([Frame::data(view(&[0xc2])), Frame::data(view(&[0x20]))]),
+        &(),
+    )
+    .await
+    .expect_err("an invalid continuation byte completing a carried sequence is rejected");
+    assert!(matches!(invalid, BodyRejection::InvalidUtf8(error) if error.valid_up_to() == 0));
+}
+
+#[tokio::test]
+async fn utf8_validation_rejects_a_standalone_invalid_byte_with_a_known_error_length() {
+    // `0xff` is never a valid UTF-8 lead byte, so `core::str::from_utf8` reports
+    // a concrete `error_len` instead of treating it as an incomplete sequence.
+    // Reuses the `<5>` instantiation for the same reason as the carried-sequence test above.
+    let invalid =
+        Utf8BytesViewBody::<5>::from_request_body(&request_parts(), ViewFrames::new([Frame::data(view(&[b'a', 0xff, b'b']))]), &())
+            .await
+            .expect_err("a standalone invalid lead byte is rejected");
+    assert!(matches!(invalid, BodyRejection::InvalidUtf8(error) if error.valid_up_to() == 1));
+}
+
+#[tokio::test]
+async fn bytes_view_body_display_reports_the_collected_length() {
+    let extracted = BytesViewBody::<6>::from_request_body(&request_parts(), ViewFrames::new([Frame::data(view(b"six!!!"))]), &())
+        .await
+        .expect("an exact-limit body succeeds");
+
+    assert_eq!(extracted.to_string(), "6 collected bytes");
 }

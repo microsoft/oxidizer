@@ -57,7 +57,7 @@ pbjson-build = { workspace = true }
 prost-build = { workspace = true }
 protox = { workspace = true }
 rest_over_grpc = { workspace = true, features = ["build-openapi"] }
-routerama = { workspace = true }
+routerama = { workspace = true, features = ["resolve"] }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]

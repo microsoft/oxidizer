@@ -14,9 +14,10 @@ fn generated_variant_fixtures_are_deterministic_and_current() {
     let generated = codegen::generated_fixtures();
     let repeated = codegen::generated_fixtures();
     let committed = [
-        include_str!("../benches/routerama_response_body_variants_1.rs"),
-        include_str!("../benches/routerama_response_body_variants_4.rs"),
-        include_str!("../benches/routerama_response_body_variants_16.rs"),
+        include_str!("../benches/routerama_response_body_size_variants_1.rs"),
+        include_str!("../benches/routerama_response_body_size_variants_4.rs"),
+        include_str!("../benches/routerama_response_body_size_variants_16.rs"),
+        include_str!("../benches/routerama_response_body_size_variants_128.rs"),
     ];
 
     for ((fixture, repeated), committed) in generated.into_iter().zip(repeated).zip(committed) {

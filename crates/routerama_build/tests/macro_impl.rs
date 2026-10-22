@@ -3,14 +3,18 @@
 
 //! Procedural macro expansion public API tests.
 
-#![cfg(feature = "codegen")]
+#![cfg(any(feature = "query", feature = "resolve", feature = "route"))]
 
 use quote::quote;
+#[cfg(feature = "resolve")]
+use routerama_build::macro_impl::resolver;
 #[cfg(feature = "route")]
 use routerama_build::macro_impl::router;
-use routerama_build::macro_impl::{derive_from_query, derive_to_query, resolver};
+#[cfg(feature = "query")]
+use routerama_build::macro_impl::{derive_from_query, derive_to_query};
 
 #[test]
+#[cfg(feature = "query")]
 fn from_query_expands_a_decoder() {
     let expanded = derive_from_query(quote! {
         struct Request {
@@ -23,6 +27,7 @@ fn from_query_expands_a_decoder() {
 }
 
 #[test]
+#[cfg(feature = "query")]
 fn to_query_expands_an_encoder() {
     let expanded = derive_to_query(quote! {
         struct Request {
@@ -35,6 +40,7 @@ fn to_query_expands_an_encoder() {
 }
 
 #[test]
+#[cfg(feature = "query")]
 fn query_derives_preserve_generics_and_where_clauses() {
     let input = quote! {
         struct Request<'q, 'marker, T, const N: usize>
@@ -60,6 +66,7 @@ fn query_derives_preserve_generics_and_where_clauses() {
 }
 
 #[test]
+#[cfg(feature = "resolve")]
 fn static_resolver_expands_an_infallible_constructor_without_a_builder() {
     let expanded = resolver(
         quote! {},
@@ -78,6 +85,7 @@ fn static_resolver_expands_an_infallible_constructor_without_a_builder() {
 }
 
 #[test]
+#[cfg(feature = "resolve")]
 fn dynamic_resolver_expands_a_builder() {
     let expanded = resolver(
         quote! {},
@@ -96,6 +104,7 @@ fn dynamic_resolver_expands_a_builder() {
 }
 
 #[test]
+#[cfg(feature = "resolve")]
 fn resolver_accepts_an_explicit_type_name() {
     let expanded = resolver(
         quote! { name = ApiResolver },
@@ -113,6 +122,7 @@ fn resolver_accepts_an_explicit_type_name() {
 }
 
 #[test]
+#[cfg(feature = "resolve")]
 fn resolver_rejects_unknown_naming_arguments() {
     let expanded = resolver(
         quote! { type_name = ApiResolver },
@@ -217,7 +227,7 @@ fn router_rejects_unknown_fixed_state_arguments() {
 }
 
 #[test]
-#[cfg(feature = "route")]
+#[cfg(all(feature = "route", feature = "resolve"))]
 fn generated_relaxed_bounds_qualify_sized() {
     let router_expansion = router(
         quote! {},
@@ -311,6 +321,7 @@ fn router_rejects_a_template_deeper_than_the_segment_limit() {
 }
 
 #[test]
+#[cfg(feature = "resolve")]
 fn resolver_rejects_a_template_deeper_than_the_segment_limit() {
     let (accepted, rejected) = depth_limit_templates();
 
@@ -326,10 +337,12 @@ fn resolver_rejects_a_template_deeper_than_the_segment_limit() {
 }
 
 /// A template at the segment limit and the first one past it.
+#[cfg(any(feature = "route", feature = "resolve"))]
 fn depth_limit_templates() -> (String, String) {
     ("/a".repeat(256), "/a".repeat(257))
 }
 
+#[cfg(feature = "route")]
 fn router_item(path: &str) -> proc_macro2::TokenStream {
     let path = syn::LitStr::new(path, proc_macro2::Span::call_site());
     quote! {
@@ -342,6 +355,7 @@ fn router_item(path: &str) -> proc_macro2::TokenStream {
     }
 }
 
+#[cfg(feature = "resolve")]
 fn resolver_item(path: &str) -> proc_macro2::TokenStream {
     let path = syn::LitStr::new(path, proc_macro2::Span::call_site());
     quote! {

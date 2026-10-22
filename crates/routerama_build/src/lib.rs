@@ -63,7 +63,9 @@ mod route;
 pub mod trie;
 
 #[cfg(feature = "codegen")]
+#[doc(inline)]
 pub use generator::Generator;
+#[doc(inline)]
 pub use route::Route;
 #[doc(hidden)]
 pub use route::is_http_token;

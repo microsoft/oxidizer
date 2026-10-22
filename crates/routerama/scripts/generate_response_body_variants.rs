@@ -34,7 +34,7 @@ fn main() -> ExitCode {
         println!(
             "Usage: generate_response_body_variants.rs [--check]\n\
              \n\
-             With no option, regenerate the 1/4/16-variant benchmark controls.\n\
+             With no option, regenerate the 1/4/16/128-variant benchmark controls.\n\
              With --check, fail when any checked-in fixture is stale."
         );
         return ExitCode::SUCCESS;

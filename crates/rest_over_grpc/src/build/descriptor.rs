@@ -29,7 +29,7 @@ use prost_reflect::{
     DescriptorPool, DynamicMessage, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor, MethodDescriptor, ServiceDescriptor,
     Value,
 };
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 use super::binding::Binding;
 use super::descriptor_error::DescriptorError;

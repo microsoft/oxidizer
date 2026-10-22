@@ -697,8 +697,10 @@ impl core::error::Error for BodyFrameLimitError {}
 /// The smallest average payload a body frame must carry to be worth its bookkeeping.
 const MIN_AVERAGE_FRAME_BYTES: usize = 64;
 
-/// Frames allowed on top of the byte-derived budget, so that a small limit still
-/// tolerates trailers and the occasional empty frame.
+/// Frames allowed on top of the byte-derived budget.
+///
+/// The slack lets a small limit still tolerate trailers and the occasional empty
+/// frame.
 const FRAME_BUDGET_SLACK: usize = 64;
 
 /// Returns the number of frames an extractor with `limit` bytes will read.
@@ -860,6 +862,12 @@ where
     }
 }
 
+impl<E> From<BodyTransportError<E>> for BodyRejection<E> {
+    fn from(error: BodyTransportError<E>) -> Self {
+        Self::Transport(error)
+    }
+}
+
 impl<E> core::error::Error for BodyRejection<E>
 where
     E: core::error::Error + 'static,
@@ -908,7 +916,7 @@ where
         if frames > budget {
             return Err(BodyRejection::TooManyFrames(BodyFrameLimitError::new(budget, frames)));
         }
-        let frame = frame.map_err(|error| BodyRejection::Transport(BodyTransportError::new(error)))?;
+        let frame = frame.map_err(BodyTransportError::new)?;
         let Ok(data) = frame.into_data() else {
             continue;
         };
@@ -1006,5 +1014,33 @@ where
     fn from_request_parts(parts: &'request Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let query = parts.uri.query().unwrap_or_default();
         T::from_query(query).map(Self).map_err(|error| QueryRejection { error })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::task::Waker;
+
+    use super::*;
+
+    /// `BodyStateWitnessBody` is a compile-only witness.
+    ///
+    /// Generated code never constructs or polls it at runtime; only a same-module
+    /// unit test can build one, since its field is private.
+    #[test]
+    fn body_state_witness_body_never_yields_a_frame() {
+        let mut body = BodyStateWitnessBody::<Infallible>(PhantomData);
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(None)));
+    }
+
+    /// `hinted_capacity` caps its reservation at a multiple of `received`.
+    ///
+    /// When that multiplication overflows `usize` the earned capacity saturates to
+    /// `usize::MAX`, a branch only reachable with a `received` value no real body
+    /// could deliver.
+    #[test]
+    fn hinted_capacity_saturates_when_the_amplified_reservation_overflows() {
+        assert_eq!(hinted_capacity(usize::MAX, usize::MAX), usize::MAX);
     }
 }

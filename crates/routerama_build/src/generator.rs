@@ -47,9 +47,10 @@ pub struct Generator {
 }
 
 impl Generator {
-    /// Creates an empty generator that emits an enum named `route_type` (which
-    /// must be a valid Rust identifier), `pub` when `public` and private
-    /// otherwise.
+    /// Creates an empty generator that emits an enum named `route_type`.
+    ///
+    /// `route_type` must be a valid Rust identifier. The enum is `pub` when
+    /// `public` and private otherwise.
     #[must_use]
     pub fn new(route_type: impl Into<String>, public: bool) -> Self {
         Self {
@@ -70,8 +71,9 @@ impl Generator {
         self
     }
 
-    /// Selects whether to emit the general-purpose derives and `RouteMatch`
-    /// implementation in addition to the resolver.
+    /// Selects whether to emit the general-purpose derives and `RouteMatch` implementation.
+    ///
+    /// These are emitted in addition to the resolver.
     ///
     /// The resolver macro disables these for its private intermediate enum,
     /// which is immediately converted into the user-facing typed enum.
@@ -96,8 +98,9 @@ impl Generator {
         self
     }
 
-    /// Generates the static resolver, returning the
-    /// [`TokenStream`] of the route `enum` and its `resolve` function.
+    /// Generates the static resolver.
+    ///
+    /// Returns the [`TokenStream`] of the route `enum` and its `resolve` function.
     #[must_use]
     pub fn generate(&self) -> TokenStream {
         crate::codegen::generate(&self.routes, &self.route_type, self.public, self.full_api, &self.runtime)

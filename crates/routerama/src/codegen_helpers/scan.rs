@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Splits a request `path` into its path body and an optional trailing custom
-/// `:verb` (the text after the final `:` of the last segment).
+/// Splits a request `path` into its path body and an optional trailing custom `:verb`.
+///
+/// The verb is the text after the final `:` of the last segment.
 ///
 /// The query string must already be stripped.
 ///
@@ -121,7 +122,7 @@ pub(super) fn scan_segments_checked(body: &str, starts: &mut [usize], ends: &mut
 pub fn seg_bytes(body: &str, start: usize, end: usize) -> &[u8] {
     body.as_bytes()
         .get(start..end)
-        .expect("segment start and end must delimit a byte range within the path")
+        .expect("the caller passed offsets that `scan_segments` did not produce for this same path; generated routers always pair the two")
 }
 
 /// Returns `body[start..end]`.
@@ -138,7 +139,7 @@ pub fn seg_bytes(body: &str, start: usize, end: usize) -> &[u8] {
 #[must_use]
 pub fn substr(body: &str, start: usize, end: usize) -> &str {
     body.get(start..end)
-        .expect("capture start and end must delimit UTF-8 character boundaries within the path")
+        .expect("the caller passed offsets that `scan_segments` did not produce for this same path; segment boundaries it reports are always UTF-8 boundaries")
 }
 
 /// Scalar reference implementation of [`scan_segments`].
@@ -175,9 +176,10 @@ fn scan_segments_scalar(body: &str, starts: &mut [usize], ends: &mut [usize]) ->
     ScanResult { count: count + 1, valid }
 }
 
-/// SSE2 implementation of [`scan_segments`]: finds `/` separators 16 bytes at a
-/// time via `pcmpeqb` + `pmovmskb`, then handles the sub-16-byte tail with a
-/// scalar loop.
+/// SSE2 implementation of [`scan_segments`].
+///
+/// It finds `/` separators 16 bytes at a time via `pcmpeqb` + `pmovmskb`, then
+/// handles the sub-16-byte tail with a scalar loop.
 #[cfg(target_arch = "x86_64")]
 #[inline]
 #[expect(

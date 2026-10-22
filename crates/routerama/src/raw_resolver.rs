@@ -37,11 +37,21 @@ fn debug_assert_no_conflicts(found: &[String]) {
 }
 
 /// A resolver for routes registered at run time.
+///
+/// # Trust
+///
+/// A route set is configuration, not request data. Building a resolver
+/// validates the whole set, and that validation compares sibling routes that
+/// constrain the same path segment, so its cost grows faster than linearly in
+/// the number of routes that share a shape. Build resolvers from route tables
+/// the application controls. Do not build one directly from untrusted input,
+/// where an adversary chooses both the number of routes and their shapes.
 pub struct RawResolver<T = ()> {
     root: RtNode,
     max_segments: usize,
-    /// Whether any registered route declares a `:verb`, which makes verb
-    /// splitting apply to every path this table resolves.
+    /// Whether any registered route declares a `:verb`.
+    ///
+    /// When it does, verb splitting applies to every path this table resolves.
     any_verb: bool,
     /// Values indexed by [`Leaf::route_index`].
     payloads: Box<[T]>,

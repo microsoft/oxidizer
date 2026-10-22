@@ -13,13 +13,11 @@
 ///     q: String,
 /// }
 ///
-/// let limits = QueryLimits {
-///     max_query_length: 3,
-///     ..QueryLimits::DEFAULT
-/// };
+/// let limits = QueryLimits::DEFAULT.with_max_query_length(3);
 /// assert!(Search::from_query_with("q=rust", limits).is_err());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 #[expect(clippy::struct_field_names, reason = "the max_ prefix makes each public limit unambiguous")]
 pub struct QueryLimits {
     /// Maximum encoded input length.
@@ -63,6 +61,41 @@ impl QueryLimits {
         max_repeated_values: usize::MAX,
         max_encoded_length: usize::MAX,
     };
+
+    /// Returns these limits with [`max_query_length`](Self::max_query_length) replaced.
+    #[must_use]
+    pub const fn with_max_query_length(mut self, value: usize) -> Self {
+        self.max_query_length = value;
+        self
+    }
+
+    /// Returns these limits with [`max_pairs`](Self::max_pairs) replaced.
+    #[must_use]
+    pub const fn with_max_pairs(mut self, value: usize) -> Self {
+        self.max_pairs = value;
+        self
+    }
+
+    /// Returns these limits with [`max_decoded_length`](Self::max_decoded_length) replaced.
+    #[must_use]
+    pub const fn with_max_decoded_length(mut self, value: usize) -> Self {
+        self.max_decoded_length = value;
+        self
+    }
+
+    /// Returns these limits with [`max_repeated_values`](Self::max_repeated_values) replaced.
+    #[must_use]
+    pub const fn with_max_repeated_values(mut self, value: usize) -> Self {
+        self.max_repeated_values = value;
+        self
+    }
+
+    /// Returns these limits with [`max_encoded_length`](Self::max_encoded_length) replaced.
+    #[must_use]
+    pub const fn with_max_encoded_length(mut self, value: usize) -> Self {
+        self.max_encoded_length = value;
+        self
+    }
 }
 
 impl Default for QueryLimits {

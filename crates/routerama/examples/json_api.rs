@@ -6,10 +6,10 @@
 use core::convert::Infallible;
 
 use bytes::Bytes;
-use http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
+use http::header::{CONTENT_TYPE, HeaderValue};
 use http_body_util::BodyExt as _;
 use routerama::response::Body;
-use routerama::route::json::{Json, JsonRejection};
+use routerama::route::json::{Json, JsonBody, JsonEncodeError, JsonRejection};
 use routerama::route::{Request, StatusCode, router};
 use serde::{Deserialize, Serialize};
 
@@ -31,15 +31,17 @@ struct ErrorReply {
     error: &'static str,
 }
 
-/// A JSON reply: status, media type, and an already encoded body.
-type JsonReply = (StatusCode, [(HeaderName, HeaderValue); 1], String);
+/// A JSON reply: a status and a serialized body, or the serialization failure.
+///
+/// [`JsonBody`] sets `Content-Type` itself, and a `JsonEncodeError` becomes
+/// `500 Internal Server Error` through its own [`IntoResponse`] implementation,
+/// so no branch of this example has to invent an encoding policy.
+///
+/// [`IntoResponse`]: routerama::response::IntoResponse
+type JsonReply = Result<(StatusCode, JsonBody), JsonEncodeError>;
 
 fn json_reply<T: Serialize>(status: StatusCode, body: &T) -> JsonReply {
-    (
-        status,
-        [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
-        serde_json::to_string(body).expect("the example reply types serialize"),
-    )
+    JsonBody::new(body).map(|body| (status, body))
 }
 
 struct Documents;

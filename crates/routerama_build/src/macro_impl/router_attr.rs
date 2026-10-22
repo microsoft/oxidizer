@@ -328,11 +328,35 @@ mod tests {
             (quote! { state = dyn StateContract }, "explicit `+ 'static`"),
             (quote! { state = StateContract + Send }, "must use `dyn Trait"),
             (quote! { state = Self }, "cannot use `Self`"),
+            (quote! { state = [u8; _] }, "cannot contain an inferred const"),
+            (quote! { state = &'a AppState }, "cannot capture a local lifetime"),
         ] {
             let error = syn::parse2::<RouterAttr>(invalid)
                 .err()
                 .expect("non-concrete router state is rejected");
             assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    #[cfg(feature = "route")]
+    fn router_accepts_a_parenthesized_fn_trait_path_argument() {
+        // `Fn(&AppState)` uses `syn::PathArguments::Parenthesized`, which
+        // bumps `callable_depth` so the unadorned `&AppState` reference
+        // inside it does not require an explicit `'static` lifetime.
+        let parsed = syn::parse2::<RouterAttr>(quote! { state = dyn Fn(&AppState) + 'static })
+            .expect("a parenthesized `Fn` trait bound is a valid callable state type");
+        assert!(parsed.state.is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "route")]
+    fn a_bound_generic_type_parameter_is_not_collected_as_a_lifetime() {
+        // `BoundLifetimeCollector::visit_bound_lifetimes` only collects
+        // `GenericParam::Lifetime` entries; a `for<T>` type parameter (legal
+        // HRTB syntax accepted by `syn`) hits the `None` filter arm instead.
+        let parsed = syn::parse2::<RouterAttr>(quote! { state = dyn for<T> Fn(T) -> T + 'static })
+            .expect("a `for<T>` bound is a valid trait-object state type");
+        assert!(parsed.state.is_some());
     }
 }

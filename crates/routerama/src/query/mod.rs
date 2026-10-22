@@ -29,10 +29,14 @@ use decode_fields::DecodeFields;
 use decoded::Decoded;
 use encode_fields::EncodeFields;
 use encoder::Encoder;
+#[doc(inline)]
 pub use error::Error;
+#[doc(inline)]
 pub use error_kind::ErrorKind;
+#[doc(inline)]
 pub use from_query::FromQuery;
 use query_decoder::QueryDecoder;
+#[doc(inline)]
 pub use query_limits::QueryLimits;
 /// Derives direct query-string decoding for a named-field struct.
 ///
@@ -45,6 +49,7 @@ pub use routerama_macros::FromQuery;
 /// Fields are emitted in declaration order; optional values are omitted and
 /// repeated values emit one parameter per element.
 pub use routerama_macros::ToQuery;
+#[doc(inline)]
 pub use to_query::ToQuery;
 
 /// Runtime support referenced by generated query codecs.

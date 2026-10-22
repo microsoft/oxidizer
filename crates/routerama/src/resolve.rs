@@ -69,9 +69,13 @@
 
 pub use routerama_macros::resolver;
 
+#[doc(inline)]
 pub use crate::configuration_error::ConfigurationError;
+#[doc(inline)]
 pub use crate::http_method::HttpMethod;
+#[doc(inline)]
 pub use crate::resolve_error::ResolveError;
+#[doc(inline)]
 pub use crate::resolver::Resolver;
 
 /// Runtime support referenced by generated resolvers.

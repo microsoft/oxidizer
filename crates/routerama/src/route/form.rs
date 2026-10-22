@@ -1,24 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Bounded `application/x-www-form-urlencoded` body extraction.
+//! Bounded `application/x-www-form-urlencoded` body extraction and encoding.
 //!
-//! [`Form`] reuses [`FromQuery`](crate::query::FromQuery). The encoded body is
-//! temporary, so decoded schemas must own their data and implement
-//! `FromQuery` for every input lifetime.
+//! [`Form`] decodes a request body up to an explicit limit, reusing
+//! [`FromQuery`](crate::query::FromQuery). The encoded body is temporary, so
+//! decoded schemas must own their data and implement `FromQuery` for every
+//! input lifetime. [`FormBody`] encodes a value for a response through
+//! [`ToQuery`].
 
+use alloc::string::String;
 use core::fmt;
 use core::ops::Deref;
 
 use bytes::Bytes;
 use http::StatusCode;
-use http::header::HeaderValue;
+use http::header::{CONTENT_TYPE, HeaderValue};
 use http::request::Parts;
 use http_body::Body as HttpBody;
 
 use super::extract::{BodyStateWitnessBody, collect_body};
 use super::predicate::{ContentTypeCardinality, parse_content_type, single_content_type};
 use super::{BodyRejection, BodyStateWitness, FromRequestBody, InvalidUtf8Error};
+use crate::query::{QueryLimits, ToQuery};
 use crate::response::{Body, IntoResponse, Response};
 
 /// A decoded form request body with an explicit maximum encoded size.
@@ -198,6 +202,139 @@ impl<E> IntoResponse for FormRejection<E> {
             Self::Body(error) => error.into_response(),
             Self::InvalidUtf8(_) | Self::Malformed(_) => StatusCode::BAD_REQUEST.into_response(),
         }
+    }
+}
+
+/// An encoded `application/x-www-form-urlencoded` response body.
+///
+/// Encoding happens in [`FormBody::new`], so converting the value into a
+/// response cannot fail and no encoding policy is baked into this type. A
+/// handler that returns `Result<FormBody, FormEncodeError>` composes through
+/// the [`IntoResponse`] implementation for `Result`, which turns an encoding
+/// failure into `500 Internal Server Error`. A handler that wants a different
+/// outcome maps the error to its own type instead.
+///
+/// # Examples
+///
+/// ```
+/// use routerama::query::ToQuery;
+/// use routerama::response::IntoResponse;
+/// use routerama::route::form::FormBody;
+///
+/// #[derive(ToQuery)]
+/// struct Paging {
+///     page: usize,
+/// }
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let body = FormBody::new(&Paging { page: 3 })?;
+/// assert_eq!(body.as_str(), "page=3");
+///
+/// let response = body.into_response();
+/// assert_eq!(
+///     response.headers()["content-type"],
+///     "application/x-www-form-urlencoded"
+/// );
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormBody {
+    text: String,
+}
+
+impl FormBody {
+    /// Encodes `value` with [`QueryLimits::default`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when formatting or the output limit fails.
+    pub fn new<T>(value: &T) -> Result<Self, FormEncodeError>
+    where
+        T: ToQuery + ?Sized,
+    {
+        Self::new_with(value, QueryLimits::default())
+    }
+
+    /// Encodes `value` with explicit resource limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when formatting or the output limit fails.
+    pub fn new_with<T>(value: &T, limits: QueryLimits) -> Result<Self, FormEncodeError>
+    where
+        T: ToQuery + ?Sized,
+    {
+        match value.to_query_string_with(limits) {
+            Ok(text) => Ok(Self { text }),
+            Err(error) => Err(FormEncodeError { error }),
+        }
+    }
+
+    /// Returns the encoded form.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    /// Consumes the wrapper and returns the encoded form.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.text
+    }
+}
+
+impl IntoResponse for FormBody {
+    type Body = Body;
+
+    fn into_response(self) -> Response<Body> {
+        let mut response = Response::new(Body::from(self.text));
+        _ = response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/x-www-form-urlencoded"));
+        response
+    }
+}
+
+/// A failure reported by Routerama's query codec while encoding a form.
+///
+/// Becomes `500 Internal Server Error` with an empty body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FormEncodeError {
+    error: crate::query::Error,
+}
+
+impl FormEncodeError {
+    /// Returns the detailed query-codec error.
+    #[must_use]
+    pub const fn error(&self) -> &crate::query::Error {
+        &self.error
+    }
+
+    /// Consumes the wrapper and returns the detailed query-codec error.
+    #[must_use]
+    pub const fn into_inner(self) -> crate::query::Error {
+        self.error
+    }
+}
+
+impl fmt::Display for FormEncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "response value could not be encoded as a form: {}", self.error)
+    }
+}
+
+impl core::error::Error for FormEncodeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl IntoResponse for FormEncodeError {
+    type Body = Body;
+
+    fn into_response(self) -> Response<Body> {
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
 

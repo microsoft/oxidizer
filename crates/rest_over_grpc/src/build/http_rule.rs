@@ -4,7 +4,7 @@
 use http_path_template::PathTemplate;
 #[cfg(feature = "build")]
 use http_path_template::Segment;
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 use super::binding::Binding;
 use super::request_body::RequestBody;
@@ -22,7 +22,7 @@ use super::route::Route;
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
 /// use rest_over_grpc::build::{Binding, HttpRule, RequestBody, ResponseBody};
-/// use routerama::HttpMethod;
+/// use routerama::resolve::HttpMethod;
 ///
 /// let rule = HttpRule::new(
 ///     "UpdateBook",
@@ -61,7 +61,7 @@ impl HttpRule {
     /// ```
     /// use http_path_template::{Grammar, PathTemplate};
     /// use rest_over_grpc::build::HttpRule;
-    /// use routerama::HttpMethod;
+    /// use routerama::resolve::HttpMethod;
     ///
     /// let rule = HttpRule::new(
     ///     "GetBook",
@@ -133,7 +133,7 @@ impl HttpRule {
     /// ```
     /// use http_path_template::{Grammar, PathTemplate};
     /// use rest_over_grpc::build::{Binding, HttpRule};
-    /// use routerama::HttpMethod;
+    /// use routerama::resolve::HttpMethod;
     ///
     /// let rule = HttpRule::new(
     ///     "GetBook",
@@ -171,7 +171,7 @@ impl HttpRule {
     /// ```
     /// use http_path_template::{Grammar, PathTemplate};
     /// use rest_over_grpc::build::HttpRule;
-    /// use routerama::HttpMethod;
+    /// use routerama::resolve::HttpMethod;
     ///
     /// let rule = HttpRule::new(
     ///     "GetBooksByState",

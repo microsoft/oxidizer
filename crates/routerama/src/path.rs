@@ -80,13 +80,13 @@ pub enum RepeatedSlashes {
 /// into routing structure; use [`EncodedSeparators::Reject`] to refuse those.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DotSegments {
-    /// Keep `.` and `..` as ordinary segments, matching what the resolver sees
-    /// today.
+    /// Keep `.` and `..` as ordinary segments, matching what the resolver sees today.
     Preserve,
     /// Reject the path with [`PathError::DotSegment`].
     Reject,
-    /// Resolve them as RFC 3986 section 5.2.4 does, discarding any `..` that
-    /// would escape above the root.
+    /// Resolve them as RFC 3986 section 5.2.4 does.
+    ///
+    /// Any `..` that would escape above the root is discarded.
     Remove,
 }
 
@@ -216,28 +216,28 @@ impl Default for PathPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PathError {
-    /// The input contained a query (`?`) or fragment (`#`) delimiter and was
-    /// therefore not a URI path.
+    /// The input contained a query (`?`) or fragment (`#`) delimiter.
+    ///
+    /// The input was therefore not a URI path.
     QueryOrFragment,
 
-    /// The input contained a `%` that was not followed by two hexadecimal
-    /// digits.
+    /// The input contained a `%` that was not followed by two hexadecimal digits.
     MalformedEscape,
 
-    /// The input contained two or more consecutive separators and the policy
-    /// is [`RepeatedSlashes::Reject`].
+    /// The input contained two or more consecutive separators.
+    ///
+    /// The policy is [`RepeatedSlashes::Reject`].
     RepeatedSlashes,
 
-    /// The input contained a `.` or `..` segment and the policy is
-    /// [`DotSegments::Reject`].
+    /// The input contained a `.` or `..` segment and the policy is [`DotSegments::Reject`].
     DotSegment,
 
-    /// The input ended with a separator and the policy is
-    /// [`TrailingSlash::Reject`].
+    /// The input ended with a separator and the policy is [`TrailingSlash::Reject`].
     TrailingSlash,
 
-    /// The input contained a percent escape that would decode into routing
-    /// structure and the policy is [`EncodedSeparators::Reject`].
+    /// The input contained a percent escape that would decode into routing structure.
+    ///
+    /// The policy is [`EncodedSeparators::Reject`].
     EncodedSeparator,
 }
 
@@ -424,8 +424,9 @@ fn decodes_to_dot_segment(segment: &str) -> bool {
     decode(segment).is_some_and(|decoded| is_dot_segment(&decoded))
 }
 
-/// Rewrites `body` under `policy`, or returns [`None`] when the policy asks for
-/// no rewriting at all.
+/// Rewrites `body` under `policy`.
+///
+/// Returns [`None`] when the policy asks for no rewriting at all.
 fn rewrite(body: &str, leading_slash: bool, policy: PathPolicy) -> Option<String> {
     let collapse = policy.repeated_slashes == RepeatedSlashes::Collapse;
     let remove_dots = policy.dot_segments == DotSegments::Remove;

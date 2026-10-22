@@ -31,14 +31,21 @@ mod response_parts;
 mod static_bytes;
 mod static_text;
 
+#[doc(inline)]
 pub use body::{
     Body, BoxBody, BoxBodyError, DataEitherBody, EitherBody, EitherBodyError, EitherData, NeverBody, SendBoxBody, SendBoxBodyError,
 };
+#[doc(inline)]
 pub use heterogeneous_result::HeterogeneousResult;
+#[doc(inline)]
 pub use into_response::IntoResponse;
+#[doc(inline)]
 pub use into_response_parts::IntoResponseParts;
+#[doc(inline)]
 pub use response_parts::ResponseParts;
+#[doc(inline)]
 pub use static_bytes::StaticBytes;
+#[doc(inline)]
 pub use static_text::StaticText;
 
 /// Renders an HTML body template with escaped text-content slots.
@@ -60,6 +67,8 @@ pub use static_text::StaticText;
 /// assert_eq!(body.as_bytes(), b"<h1>&lt;Routerama&gt;</h1>");
 /// ```
 pub use crate::__routerama_html_body_template as html_body_template;
+#[doc(inline)]
+pub use crate::__routerama_html_view_template as html_view_template;
 /// Renders a JSON body template with integer and escaped-string slots.
 ///
 /// Static fragments must be string literals. Every declared slot is one
@@ -96,6 +105,10 @@ pub use crate::__routerama_html_body_template as html_body_template;
 /// );
 /// ```
 pub use crate::__routerama_json_body_template as json_body_template;
+#[doc(inline)]
+pub use crate::__routerama_json_view_template as json_view_template;
+#[doc(inline)]
+pub use crate::__routerama_text_view_template as text_view_template;
 
 /// An HTTP response, using Routerama's fixed [`Body`] by default.
 pub type Response<B = Body> = http::Response<B>;

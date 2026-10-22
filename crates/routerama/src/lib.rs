@@ -77,6 +77,10 @@ extern crate std;
 #[cfg(any(feature = "resolve", feature = "route"))]
 mod affix_edge;
 #[cfg(any(feature = "resolve", feature = "route"))]
+mod affix_filter;
+#[cfg(any(feature = "resolve", feature = "route"))]
+mod affix_table;
+#[cfg(any(feature = "resolve", feature = "route"))]
 mod build_error_entry;
 #[cfg(any(feature = "resolve", feature = "route"))]
 mod captures;

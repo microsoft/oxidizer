@@ -93,7 +93,7 @@ impl Api {
     #[before(admin)]
     async fn require_admin(&self, ctx: &mut SelectedContext<'_>) -> Before<StatusCode> {
         self.log.borrow_mut().push("before:admin");
-        match ctx.get_extension::<UserId>() {
+        match ctx.extension::<UserId>() {
             Some(_) => Before::Next,
             None => Before::Respond(StatusCode::UNAUTHORIZED),
         }
@@ -367,7 +367,7 @@ impl Configured {
     #[before(plugin)]
     async fn guard_plugin(&self, ctx: &mut SelectedContext<'_>) -> Before<StatusCode> {
         self.log.borrow_mut().push("guard");
-        if ctx.get_extension::<UserId>().is_some() {
+        if ctx.extension::<UserId>().is_some() {
             Before::Next
         } else {
             Before::Respond(StatusCode::FORBIDDEN)
@@ -616,7 +616,7 @@ impl Zero {
         let id = user.parse().unwrap_or(0);
         ctx.headers_mut().insert("x-checked", "1".parse().expect("valid header value"));
         assert_eq!(ctx.insert_extension(UserId(id)), None);
-        assert_eq!(ctx.get_extension::<UserId>(), Some(&UserId(id)));
+        assert_eq!(ctx.extension::<UserId>(), Some(&UserId(id)));
         Before::Next
     }
 }

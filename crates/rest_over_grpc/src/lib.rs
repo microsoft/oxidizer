@@ -328,7 +328,7 @@ pub mod handling {
 #[doc(hidden)]
 pub mod codegen_helpers {
     pub use http::{HeaderMap, HeaderName, HeaderValue};
-    pub use routerama::codegen_helpers::{InvalidPath, RouteMatch, scan_segments, split_verb, with_scanned_path};
+    pub use routerama::resolve::__private::{InvalidPath, RouteMatch, ScannedPath, scan_segments, split_verb, with_scanned_path};
 
     pub use crate::path::{QueryPairs, parse_query, split_query};
     pub use crate::stream::{Stream, StreamEncoding, encode_frames, map_stream_status};

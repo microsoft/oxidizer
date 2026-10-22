@@ -6,7 +6,7 @@ use http::{Extensions, HeaderMap, StatusCode, Version};
 /// The metadata being composed around a response body.
 ///
 /// This type deliberately exposes status, version, headers, and extensions,
-/// but not the response body. An [`IntoResponseParts`] implementation returns
+/// but not the response body. An [`IntoResponseParts`](crate::response::IntoResponseParts) implementation returns
 /// the value on success. On failure, tuple conversion discards this value and
 /// the original success body before converting the typed rejection.
 #[derive(Debug)]

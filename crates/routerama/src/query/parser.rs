@@ -29,8 +29,10 @@ pub struct RawValue<'q> {
     inner: RawValueInner<'q>,
 }
 
-/// A decoded primitive whose invalid-value error is deferred until schema
-/// duplicate, ambiguity, and repetition checks have run.
+/// A decoded primitive whose invalid-value error is reported late.
+///
+/// The error is deferred until schema duplicate, ambiguity, and repetition checks
+/// have run.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct ParsedPrimitive<T> {
@@ -381,6 +383,10 @@ primitive_parsers!(
     clippy::needless_pass_by_value,
     reason = "consuming the token prevents generated code from accounting an encoded value more than once"
 )]
+// `add_decoded` only ever reports `ErrorKind::DecodedTooLong`, so once it
+// succeeds a fresh `DecodeError::InvalidEncoding` can never appear; that arm
+// below exists solely to keep the inner match exhaustive and is unreachable.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_primitive<T: core::str::FromStr + primitive::Primitive>(
     value: RawValue<'_>,
     decoded_total: &mut usize,
@@ -566,6 +572,14 @@ mod tests {
         let pair = parser.next_pair_scalar().expect("encoded key is valid").expect("pair is present");
         assert_eq!(pair.key, "a");
         assert_eq!(raw_text(&pair.value), "b");
+    }
+
+    #[test]
+    fn raw_text_reports_the_undecoded_slice_for_encoded_values() {
+        let mut parser = Parser::<false>::new("a=b%20c", QueryLimits::UNLIMITED).expect("query is within limits");
+        let pair = parser.next_pair_scalar().expect("encoded value is valid").expect("pair is present");
+        assert_eq!(pair.key, "a");
+        assert_eq!(raw_text(&pair.value), "b%20c");
     }
 
     #[test]

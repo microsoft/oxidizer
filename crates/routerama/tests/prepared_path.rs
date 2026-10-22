@@ -132,3 +132,15 @@ fn a_rejecting_policy_turns_a_non_canonical_spelling_into_a_refusal() {
         Ok(Route::Admin { name: "root" })
     );
 }
+
+#[test]
+fn removing_dot_segments_preserves_repeated_slashes_when_that_axis_is_untouched() {
+    // `RepeatedSlashes::Preserve` keeps interior empty segments even though
+    // `DotSegments::Remove` still triggers a rewrite for the trailing `.`.
+    let policy = PathPolicy::EXACT
+        .with_repeated_slashes(RepeatedSlashes::Preserve)
+        .with_dot_segments(DotSegments::Remove);
+    let prepared = PreparedPath::new("/admin//root/.", policy).expect("dot segment is removable");
+    assert_eq!(prepared.as_str(), "/admin//root/");
+    assert!(prepared.was_changed());
+}

@@ -290,8 +290,9 @@ fn emit_resolve_methods(
     }
 }
 
-/// Emits the `Route` enum definition (one struct/unit variant per route), with
-/// the canonical derive set.
+/// Emits the `Route` enum definition, one struct/unit variant per route.
+///
+/// The definition carries the canonical derive set.
 fn emit_enum_def(visibility: &TokenStream, route_enum: &Ident, variants: &[VariantSpec], lt: &TokenStream, full_api: bool) -> TokenStream {
     let variant_defs = variants.iter().map(|variant| {
         let ident = &variant.ident;
@@ -445,8 +446,10 @@ fn fmt_fields(fields: &[String]) -> String {
     }
 }
 
-/// The struct-variant field identifier for a captured variable, whose (possibly
-/// dotted) name is given as its path segments — the token [`Ident`] form of
+/// The struct-variant field identifier for a captured variable.
+///
+/// The variable's (possibly dotted) name is given as its path segments. This is
+/// the token [`Ident`] form of
 /// [`route_field_name`](crate::trie::route_field_name).
 fn field_ident(name: &[String]) -> Ident {
     Ident::new(&field_name(&name.join("_")), Span::call_site())
@@ -468,8 +471,9 @@ fn variant_ident(name: &str) -> Ident {
     }
 }
 
-/// Emits the matching code for a trie `node` reached after consuming `depth`
-/// segments. On a match the code `return`s; otherwise it falls through.
+/// Emits the matching code for a trie `node` reached after consuming `depth` segments.
+///
+/// On a match the code `return`s; otherwise it falls through.
 fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident, fuse_literals: bool) -> TokenStream {
     if fuse_literals && let Some(fused) = emit_fused_literal_chain(node, depth, any_verb, route_enum) {
         return fused;
@@ -639,8 +643,10 @@ fn emit_single(child: Option<&Node>, depth: usize, any_verb: bool, route_enum: &
     }
 }
 
-/// Emits `method` (and, when any route uses one, `:verb`) dispatch for a set of
-/// leaves terminating at the same trie node, returning the matched `Route` on a hit.
+/// Emits `method` (and, when any route uses one, `:verb`) dispatch for a set of leaves.
+///
+/// The leaves all terminate at the same trie node, and the emitted code returns
+/// the matched `Route` on a hit.
 fn emit_leaves(leaves: &[Leaf], any_verb: bool, route_enum: &Ident) -> TokenStream {
     if leaves.is_empty() {
         return quote! {};
@@ -690,8 +696,9 @@ fn emit_leaves(leaves: &[Leaf], any_verb: bool, route_enum: &Ident) -> TokenStre
     }
 }
 
-/// Emits a `return Some(...)` of the matched leaf's route enum variant, with its
-/// captured path variables filled into the variant's named fields.
+/// Emits a `return Some(...)` of the matched leaf's route enum variant.
+///
+/// The leaf's captured path variables are filled into the variant's named fields.
 fn emit_return(leaf: &Leaf, route_enum: &Ident) -> TokenStream {
     let variant = variant_ident(&leaf.name);
     let route_val = if leaf.vars.is_empty() {
@@ -709,9 +716,10 @@ fn emit_return(leaf: &Leaf, route_enum: &Ident) -> TokenStream {
     }
 }
 
-/// Emits the expression that slices a captured path variable's value out of the
-/// scanned request path (`&'p str`), used by [`emit_return`] to initialize the
-/// matched variant's fields.
+/// Emits the expression slicing a captured variable's value out of the scanned path.
+///
+/// The scanned request path is a `&'p str`. [`emit_return`] uses the expression
+/// to initialize the matched variant's fields.
 fn var_slice_expr(plan: &VarPlan) -> TokenStream {
     match plan {
         VarPlan::Span { a, b, .. } => {

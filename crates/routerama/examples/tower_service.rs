@@ -54,7 +54,7 @@ impl Books {
     /// A generated router-wide guard that reads what the Tower layer inserted.
     #[before]
     async fn authenticate(&self, context: &mut BeforeContext<'_>) -> Before<StatusCode> {
-        match context.get_extension::<Caller>().copied() {
+        match context.extension::<Caller>().copied() {
             Some(caller) => {
                 let _ = context.insert_extension(Authenticated(caller.0));
                 Before::Next

@@ -15,8 +15,7 @@ use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
 
 use crate::response::IntoResponse;
 
-/// The mutable request head passed to a generated router-wide `#[before]`
-/// interceptor.
+/// The mutable request head passed to a generated router-wide `#[before]` interceptor.
 ///
 /// It runs before route resolution and may mutate all request metadata. The
 /// request body is not exposed.
@@ -116,7 +115,7 @@ impl<'request> BeforeContext<'request> {
 
     /// Returns a typed request-local value inserted earlier.
     #[must_use]
-    pub fn get_extension<T>(&self) -> Option<&T>
+    pub fn extension<T>(&self) -> Option<&T>
     where
         T: Send + Sync + 'static,
     {
@@ -132,8 +131,7 @@ impl<'request> BeforeContext<'request> {
     }
 }
 
-/// The split request head passed to a generated per-handler
-/// `#[before(handler, ...)]` interceptor.
+/// The split request head passed to a generated per-handler `#[before(handler, ...)]` interceptor.
 ///
 /// It provides read-only method, URI, and version access with mutable headers
 /// and extensions. The split borrow preserves path captures.
@@ -232,7 +230,7 @@ impl<'request> SelectedContext<'request> {
     /// A router-wide `#[before]` interceptor runs first, so its enrichment is
     /// visible here.
     #[must_use]
-    pub fn get_extension<T>(&self) -> Option<&T>
+    pub fn extension<T>(&self) -> Option<&T>
     where
         T: Send + Sync + 'static,
     {
@@ -248,8 +246,9 @@ impl<'request> SelectedContext<'request> {
     }
 }
 
-/// The immutable request head and mutable response head passed to a generated
-/// `#[after]` interceptor.
+/// The request and response heads passed to a generated `#[after]` interceptor.
+///
+/// The request head is immutable and the response head is mutable.
 ///
 /// Bare interceptors observe every generated response; handler-scoped
 /// interceptors observe only their handlers. Mounted responses are excluded.
@@ -331,7 +330,7 @@ impl<'response> AfterContext<'response> {
 
     /// Returns a typed response extension.
     #[must_use]
-    pub fn get_extension<T>(&self) -> Option<&T>
+    pub fn extension<T>(&self) -> Option<&T>
     where
         T: Send + Sync + 'static,
     {
@@ -368,8 +367,7 @@ where
     Respond(R),
 }
 
-/// The outcome of a generated `#[transform]` interceptor that replaces the
-/// request body.
+/// The outcome of a generated `#[transform]` interceptor that replaces the request body.
 ///
 /// [`Replace`](Self::Replace) supplies a concrete body for later extraction;
 /// [`Respond`](Self::Respond) short-circuits. Buffered and streaming transforms
@@ -386,8 +384,9 @@ where
     Respond(R),
 }
 
-/// The outcome of a generated `#[transform]` interceptor that consumes the
-/// request body without producing a replacement.
+/// The outcome of a generated `#[transform]` interceptor that consumes the request body.
+///
+/// The interceptor produces no replacement body.
 ///
 /// Covered handlers cannot also declare a `#[body]` parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

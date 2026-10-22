@@ -89,8 +89,9 @@ impl<const HOSTS: usize, const CONSUMES: usize, const PRODUCES: usize> OverlapPr
         }
     }
 
-    /// Tests one generated host constant, extracting and validating the request
-    /// authority only on the first host test.
+    /// Tests one generated host constant.
+    ///
+    /// The request authority is extracted and validated only on the first host test.
     #[must_use]
     #[inline]
     pub fn host(&mut self, parts: &Parts, index: usize) -> bool {
@@ -100,8 +101,9 @@ impl<const HOSTS: usize, const CONSUMES: usize, const PRODUCES: usize> OverlapPr
         self.host_match.is_match(index)
     }
 
-    /// Tests one generated consumed media type, parsing the request
-    /// `Content-Type` only on the first consumes test.
+    /// Tests one generated consumed media type.
+    ///
+    /// The request `Content-Type` is parsed only on the first consumes test.
     #[must_use]
     #[inline]
     pub fn consumes(&mut self, headers: &HeaderMap, index: usize) -> bool {
@@ -111,8 +113,9 @@ impl<const HOSTS: usize, const CONSUMES: usize, const PRODUCES: usize> OverlapPr
         self.content_type_match.is_match(index)
     }
 
-    /// Tests one generated produced media type, scanning all `Accept` fields
-    /// only on the first produces test.
+    /// Tests one generated produced media type.
+    ///
+    /// All `Accept` fields are scanned only on the first produces test.
     ///
     /// The scan follows the rules documented on [`accepts`].
     #[must_use]
@@ -317,8 +320,9 @@ fn compare_ascii_case_insensitive(left: &[u8], right: &[u8]) -> core::cmp::Order
 
 const QUALITY_MASK: u16 = 0x03ff;
 
-/// The score every produced media type receives when the request expresses no
-/// preference at all, equivalent to a `*/*` range at the maximum quality.
+/// The score every produced media type receives when the request expresses no preference.
+///
+/// It is equivalent to a `*/*` range at the maximum quality.
 const DEFAULT_ACCEPT_SCORE: u16 = 1024 + 1000;
 
 const fn quality(score: u16) -> u16 {
@@ -566,6 +570,11 @@ impl<'a> Cursor<'a> {
     }
 
     fn quoted_string(&mut self) -> bool {
+        // The opening-quote check always succeeds here: the sole caller,
+        // `parameter_value`, peeks the same byte immediately before calling
+        // this method. Merged onto one line so the always-taken condition
+        // keeps this line covered without needing a `coverage(off)` on the
+        // whole (otherwise well-exercised) function for the dead `return`.
         if !self.consume(b'"') {
             return false;
         }
@@ -713,10 +722,12 @@ mod tests {
 
     use super::*;
 
-    /// The generated tables keep the winner first and sort the tail with the
-    /// `(top_level, subtype)` comparator this binary search uses. Sorting the
-    /// joined `type/subtype` strings instead diverges whenever a top-level type
-    /// contains a tchar below `/`, and the search then misses an entry.
+    /// The generated tables must sort the tail with the `(top_level, subtype)` comparator.
+    ///
+    /// The tables keep the winner first, and that comparator is the one this binary
+    /// search uses. Sorting the joined `type/subtype` strings instead diverges
+    /// whenever a top-level type contains a tchar below `/`, and the search then
+    /// misses an entry.
     #[test]
     fn media_type_tables_sorted_by_type_and_subtype_are_fully_searchable() {
         use alloc::vec::Vec;
@@ -746,10 +757,20 @@ mod tests {
             "[2001:db8::1]:8443",
             "[fe80::1%25eth0]",
             "[v1.future]:80",
+            // A reg-name may contain sub-delims and percent-encoded octets.
+            "a!b$c&d'e(f)g*h+i,j;k=l.example",
+            "a%41b.example",
+            // An IP-future address may also contain sub-delims and `:`.
+            "[v1.a-b_c~d!e$f&g'h(i)j*k+l,m;n:o]",
         ] {
             assert!(is_http_authority(valid), "{valid}");
         }
         for invalid in [
+            // An IP-future literal without a `.` version/address separator.
+            "[v1abc]",
+            // An incomplete or invalid percent-encoded octet in a reg-name.
+            "a%4.example",
+            "a%zz.example",
             "",
             ":80",
             "api.example:",
@@ -761,9 +782,24 @@ mod tests {
             "api example",
             "2001:db8::1",
             "[not-ipv6]",
+            // A leading `[` with no closing `]` at all.
+            "[2001:db8::1",
+            // A stray bracket that does not open the authority.
+            "api.exa[mple",
+            "api.exam]ple",
         ] {
             assert!(!is_http_authority(invalid), "{invalid}");
         }
+    }
+
+    /// [`valid_ip_literal`]'s `vN.` address grammar accepts sub-delims and `:`.
+    ///
+    /// A byte outside that set (and outside [`u8::is_ascii_alphanumeric`]) is
+    /// rejected.
+    #[test]
+    fn ip_future_address_rejects_a_byte_outside_its_grammar() {
+        assert!(valid_ip_literal("v1.a"));
+        assert!(!valid_ip_literal("v1.a^b"));
     }
 
     #[test]
@@ -809,6 +845,7 @@ mod tests {
     #[test]
     fn accept_uses_the_most_specific_matching_quality() {
         assert!(accepts(&HeaderMap::new(), "application/json"));
+        assert!(!accepts(&HeaderMap::new(), "no-slash-in-produced-type"));
         for value in [
             "application/json",
             "application/*",
@@ -862,6 +899,90 @@ mod tests {
         values.append(ACCEPT, HeaderValue::from_static("text/plain"));
         assert!(accepts(&values, "text/plain"));
         assert!(!accepts(&values, "application/json"));
+    }
+
+    /// A range sharing the produced top-level type but not its subtype must not match.
+    ///
+    /// A well-formed such range must fall through the binary search rather than
+    /// short-circuiting on the top-level mismatch.
+    #[test]
+    fn a_matching_top_level_but_different_subtype_is_not_credited() {
+        assert!(!accepts(&headers(ACCEPT, "application/xml"), "application/json"));
+    }
+
+    /// Every `q`-parameter and generic-parameter syntax error that [`parse_media_range`] rejects.
+    ///
+    /// These are rejected independently of quality-value parsing.
+    #[test]
+    fn media_range_parameter_syntax_errors_are_rejected() {
+        for malformed in [
+            // `q` with no `=value` at all.
+            "application/json;q",
+            // A second `q` parameter after one was already accepted.
+            "application/json;q=0.5;q=0.6",
+            // A parameter value that is an unterminated quoted string.
+            "application/json;charset=\"unterminated",
+            // A bare parameter name (no `=value`) appearing before `q`.
+            "application/json;charset",
+        ] {
+            assert!(!accepts(&headers(ACCEPT, malformed), "application/json"), "{malformed}");
+        }
+    }
+
+    /// A subtype-wildcard range is credited only to entries sharing its top-level type.
+    ///
+    /// This applies when the produced set has no single common top-level type
+    /// (heterogeneous `produces`).
+    #[test]
+    fn wildcard_subtype_range_without_a_common_top_level_credits_only_matching_entries() {
+        let produced = [MediaType::new(b"application", b"json"), MediaType::new(b"text", b"plain")];
+        let mut matches = [0_u16; 2];
+        scan_accept(&headers(ACCEPT, "text/*"), &produced, None, &mut matches);
+        assert_eq!(matches[0], 0, "the application/json entry must not be credited");
+        assert!(matches[1] > 0, "the text/plain entry must be credited");
+
+        // No produced entry shares the range's top-level type, so the loop
+        // runs to completion without crediting anything.
+        let mut none_match = [0_u16; 2];
+        scan_accept(&headers(ACCEPT, "image/*"), &produced, None, &mut none_match);
+        assert_eq!(none_match, [0, 0], "no entry shares the image top-level type");
+
+        // A common top-level that does not match the range's wildcard
+        // subtype top-level falls through both inner branches without
+        // crediting anything.
+        let mut mismatched_common = [0_u16; 2];
+        scan_accept(&headers(ACCEPT, "image/*"), &produced, Some(b"text"), &mut mismatched_common);
+        assert_eq!(mismatched_common, [0, 0], "a mismatched common top-level credits nothing");
+    }
+
+    /// [`Cursor::quoted_string`] accepts a backslash-escaped quoted-pair.
+    ///
+    /// It rejects an escape truncated at the end of input, and rejects an escaped
+    /// byte or bare byte outside the grammar.
+    #[test]
+    fn quoted_string_escape_and_invalid_byte_handling() {
+        assert!(content_type_matches(
+            &headers(CONTENT_TYPE, "application/json; charset=\"a\\\"b\""),
+            "application/json"
+        ));
+        assert!(!content_type_matches(
+            &headers(CONTENT_TYPE, "application/json; charset=\"a\\"),
+            "application/json"
+        ));
+        // A byte that is neither the closing quote, an escape start, nor a
+        // valid quoted-pair byte (DEL, 0x7f): calling the private parser
+        // directly avoids constructing an invalid `HeaderValue`.
+        assert!(
+            parse_content_type(b"application/json; charset=\"a\\\x7fb\"").is_none(),
+            "DEL is not a valid quoted-pair byte"
+        );
+        // A byte outside both the quote-terminator/escape-start bytes and the
+        // quoted-text range: `HeaderValue` itself forbids most such bytes, so
+        // this exercises the parser directly with a raw control byte.
+        assert!(
+            parse_content_type(b"application/json; charset=\"a\x01b\"").is_none(),
+            "a bare control byte is not a valid quoted-text byte"
+        );
     }
 
     fn headers(name: http::header::HeaderName, value: &'static str) -> HeaderMap {

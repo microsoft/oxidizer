@@ -10,7 +10,7 @@ use super::{AcceptEncoding, cache_control};
 ///
 /// The trait is implemented for [`HeaderMap`] and is [sealed]: it exists to
 /// extend the ecosystem `HeaderMap`, not to be implemented by other types.
-/// Every method parses on each call; use [`HeaderCache`] to memoize expensive,
+/// Every method parses on each call; use [`HeaderCache`](crate::route::header::HeaderCache) to memoize expensive,
 /// repeated response date fields.
 ///
 /// [sealed]: https://rust-lang.github.io/api-guidelines/future-proofing.html
@@ -18,19 +18,16 @@ pub trait HeaderExt: sealed::Sealed {
     /// Returns the parsed `Date` field, or [`None`] if absent or malformed.
     fn date(&self) -> Option<Date>;
 
-    /// Returns the parsed `Last-Modified` field, or [`None`] if absent or
-    /// malformed.
+    /// Returns the parsed `Last-Modified` field, or [`None`] if absent or malformed.
     fn last_modified(&self) -> Option<LastModified>;
 
     /// Returns the parsed `Expires` field, or [`None`] if absent or malformed.
     fn expires(&self) -> Option<Expires>;
 
-    /// Returns the parsed `If-Modified-Since` field, or [`None`] if absent or
-    /// malformed.
+    /// Returns the parsed `If-Modified-Since` field, or [`None`] if absent or malformed.
     fn if_modified_since(&self) -> Option<IfModifiedSince>;
 
-    /// Returns the parsed `If-Unmodified-Since` field, or [`None`] if absent or
-    /// malformed.
+    /// Returns the parsed `If-Unmodified-Since` field, or [`None`] if absent or malformed.
     fn if_unmodified_since(&self) -> Option<IfUnmodifiedSince>;
 
     /// Returns the parsed `Cache-Control` field, or [`None`] if absent.
@@ -41,8 +38,9 @@ pub trait HeaderExt: sealed::Sealed {
     /// directives that can.
     fn cache_control(&self) -> Option<CacheControl>;
 
-    /// Returns the resolved `Accept-Encoding` decision, combining repeated
-    /// field lines, or [`None`] if absent or malformed.
+    /// Returns the resolved `Accept-Encoding` decision, or [`None`] if absent or malformed.
+    ///
+    /// Repeated field lines are combined.
     ///
     /// A coding that appears more than once keeps the quality of its last
     /// entry, so a client can narrow an offer it made earlier.

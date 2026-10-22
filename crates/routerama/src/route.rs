@@ -22,6 +22,27 @@
 //! an explicit const-generic limit. The `json` and `form` features add bounded
 //! typed extractors.
 //!
+//! # Body limits
+//!
+//! Every buffering extractor states its limit as a const generic on the
+//! handler parameter, so the bound is visible at the point of use and an
+//! unbounded buffer cannot appear without a source change. There is
+//! deliberately no default limit and no service-wide limit policy: either
+//! would let a handler silently inherit a bound its own signature does not
+//! show. An application that wants one number in one place gives that number a
+//! type alias and uses it throughout:
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(feature = "route")] {
+//! use routerama::route::BytesBody;
+//!
+//! type Upload = BytesBody<{ 4 * 1024 * 1024 }>;
+//! # let _ = core::marker::PhantomData::<Upload>;
+//! # }
+//! # }
+//! ```
+//!
 //! Bare `#[router]` keeps shared state generic. `#[router(state = T)]` fixes
 //! the state contract and validates state-dependent extraction where the
 //! service is defined. [`State`] uses [`FromRef`] for projections.
@@ -75,15 +96,19 @@ mod predicate;
 #[cfg(feature = "tower")]
 pub mod tower;
 
+#[doc(inline)]
 pub use extract::{
     BodyFrameLimitError, BodyRejection, BodySizeLimitError, BodyStateWitness, BodyTransportError, BytesBody, ClonedExtension, ExtensionRef,
     FromRef, FromRequestBody, FromRequestParts, InvalidUtf8Error, MissingExtension, RawBody, State, TextBody, Utf8Body,
 };
 #[cfg(feature = "query")]
+#[doc(inline)]
 pub use extract::{Query, QueryRejection};
+#[doc(inline)]
 pub use failure::RouteFailure;
 pub use http::request::Parts as RequestParts;
 pub use http::{Extensions, HeaderMap, Method, Request, StatusCode, Uri, Version};
+#[doc(inline)]
 pub use interceptor::{AfterContext, Before, BeforeContext, BodyConsumed, BodyTransform, SelectedContext};
 /// Generates static and runtime-configured routing for an inherent impl.
 ///

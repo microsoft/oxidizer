@@ -13,7 +13,7 @@ use std::{env, fs};
 
 use http_path_template::{Grammar, PathTemplate};
 use rest_over_grpc::build::{DescriptorOptions, Generator, HttpRule, OpenApiInfo, ServiceDefinition, compile_fds, generate_router};
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 include!("bench_routes.rs");
 

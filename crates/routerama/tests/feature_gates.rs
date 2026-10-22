@@ -135,3 +135,16 @@ fn tower_feature_exposes_the_route_service() {
     let _ = service.send_boxed_body();
     let _ = Api::tower_service::<Body, (), _, _>(Api, ());
 }
+
+/// A verbatim slot cannot be rendered into an HTML template.
+///
+/// This is the type-level half of the escaping guarantee: `html_view_template!`
+/// fixes the template's kind to `Html`, and `unescaped_text` implements
+/// `SlotFor<Plain>` only, so the unsafe combination never compiles.
+#[cfg(all(feature = "response", feature = "bytesbuf-std"))]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn an_unescaped_slot_cannot_be_rendered_into_html() {
+    let tests = trybuild::TestCases::new();
+    tests.compile_fail("tests/ui/unescaped_text_in_html.rs");
+}

@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Bounded JSON request-body extraction.
+//! Bounded JSON request-body extraction and JSON response bodies.
+//!
+//! [`Json`] decodes a request body up to an explicit limit. [`JsonBody`]
+//! serializes a value for a response.
 //!
 //! This module is available with the additive `json` feature. That feature
 //! implies `route`; `route`, `query`, and `resolve` do not enable JSON support.
@@ -11,9 +14,10 @@ use core::ops::Deref;
 
 use bytes::Bytes;
 use http::StatusCode;
-use http::header::HeaderValue;
+use http::header::{CONTENT_TYPE, HeaderValue};
 use http::request::Parts;
 use http_body::Body as HttpBody;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::extract::{BodyStateWitnessBody, collect_body};
@@ -184,6 +188,126 @@ impl<E> IntoResponse for JsonRejection<E> {
             Self::Body(error) => error.into_response(),
             Self::Malformed(_) => StatusCode::BAD_REQUEST.into_response(),
         }
+    }
+}
+
+/// A serialized JSON response body.
+///
+/// Serialization happens in [`JsonBody::new`], so converting the value into a
+/// response cannot fail and no encoding policy is baked into this type. A
+/// handler that returns `Result<JsonBody, JsonEncodeError>` composes through
+/// the [`IntoResponse`] implementation for `Result`, which turns an encoding
+/// failure into `500 Internal Server Error`. A handler that wants a different
+/// outcome maps the error to its own type instead.
+///
+/// # Examples
+///
+/// ```
+/// use routerama::response::IntoResponse;
+/// use routerama::route::json::JsonBody;
+/// use serde::Serialize;
+///
+/// #[derive(Serialize)]
+/// struct Reply {
+///     id: u32,
+/// }
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let body = JsonBody::new(&Reply { id: 7 })?;
+/// assert_eq!(body.as_bytes(), &b"{\"id\":7}"[..]);
+///
+/// let response = body.into_response();
+/// assert_eq!(response.headers()["content-type"], "application/json");
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JsonBody {
+    bytes: Bytes,
+}
+
+impl JsonBody {
+    /// Serializes `value` as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value`'s [`Serialize`] implementation fails.
+    /// `serde_json` reports non-string map keys and non-finite floating-point
+    /// values this way, as does any user implementation that returns an error.
+    pub fn new<T>(value: &T) -> Result<Self, JsonEncodeError>
+    where
+        T: Serialize + ?Sized,
+    {
+        match serde_json::to_vec(value) {
+            Ok(bytes) => Ok(Self { bytes: Bytes::from(bytes) }),
+            Err(error) => Err(JsonEncodeError { error }),
+        }
+    }
+
+    /// Returns the serialized JSON.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &Bytes {
+        &self.bytes
+    }
+
+    /// Consumes the wrapper and returns the serialized JSON.
+    #[must_use]
+    pub fn into_bytes(self) -> Bytes {
+        self.bytes
+    }
+}
+
+impl IntoResponse for JsonBody {
+    type Body = Body;
+
+    fn into_response(self) -> Response<Body> {
+        let mut response = Response::new(Body::from_bytes(self.bytes));
+        _ = response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        response
+    }
+}
+
+/// A JSON serialization failure.
+///
+/// Becomes `500 Internal Server Error` with an empty body.
+#[derive(Debug)]
+pub struct JsonEncodeError {
+    error: serde_json::Error,
+}
+
+impl JsonEncodeError {
+    /// Returns the concrete `serde_json` error.
+    #[must_use]
+    pub const fn error(&self) -> &serde_json::Error {
+        &self.error
+    }
+
+    /// Consumes the wrapper and returns the concrete `serde_json` error.
+    #[must_use]
+    pub fn into_inner(self) -> serde_json::Error {
+        self.error
+    }
+}
+
+impl fmt::Display for JsonEncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "response value could not be serialized as JSON: {}", self.error)
+    }
+}
+
+impl core::error::Error for JsonEncodeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl IntoResponse for JsonEncodeError {
+    type Body = Body;
+
+    fn into_response(self) -> Response<Body> {
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
 

@@ -84,7 +84,7 @@ impl Orders {
     #[before]
     async fn authenticate(&self, ctx: &mut BeforeContext<'_>) -> Before<StatusCode> {
         let correlation = ctx
-            .get_extension::<CorrelationId>()
+            .extension::<CorrelationId>()
             .copied()
             .unwrap_or_else(|| CorrelationId(NEXT_CORRELATION.fetch_add(1, Ordering::Relaxed)));
 

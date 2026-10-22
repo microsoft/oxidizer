@@ -5,6 +5,7 @@
 
 use std::cell::Cell;
 use std::collections::VecDeque;
+use std::error::Error as _;
 use std::fmt;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -446,4 +447,88 @@ where
         .await
         .expect("the generated response body succeeds")
         .to_bytes()
+}
+
+/// Extracts a `ScalarForm` and returns the rejection it produces.
+#[expect(
+    clippy::future_not_send,
+    reason = "`TestBody` is deliberately single-threaded and only ever awaited on the test thread"
+)]
+async fn scalar_rejection(content_types: &[&str], body: TestBody) -> FormRejection<TestBodyError> {
+    let mut request = Request::post("/");
+    for content_type in content_types {
+        request = request.header(CONTENT_TYPE, *content_type);
+    }
+    let (parts, ()) = request.body(()).expect("the test request uses valid static metadata").into_parts();
+    <Form<ScalarForm, 32> as FromRequestBody<(), TestBody>>::from_request_body(&parts, body, &())
+        .await
+        .expect_err("the extraction is set up to fail")
+}
+
+fn scalar_body() -> TestBody {
+    TestBody::from_chunks(vec![Bytes::from_static(b"value=x")])
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn every_content_type_error_renders_a_distinct_message() {
+    let form = "application/x-www-form-urlencoded";
+    let cases: [(&[&str], &str); 4] = [
+        (&[], "form request body requires a Content-Type header"),
+        (&[form, form], "form request body requires one Content-Type header, but received 2"),
+        (
+            &[r"application/x-www-form-urlencoded; charset"],
+            r#"form request body received malformed Content-Type "application/x-www-form-urlencoded; charset""#,
+        ),
+        (&["text/plain"], r#"form request body does not support Content-Type "text/plain""#),
+    ];
+
+    for (content_types, expected) in cases {
+        let rejection = scalar_rejection(content_types, scalar_body()).await;
+        let FormRejection::UnsupportedMediaType(error) = &rejection else {
+            panic!("expected an unsupported media type rejection for {content_types:?}");
+        };
+        assert_eq!(error.to_string(), expected);
+        // The rejection delegates both `Display` and `source` to the inner error.
+        assert_eq!(rejection.to_string(), expected);
+        assert!(rejection.source().is_some());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn decode_utf8_and_transport_rejections_render_and_expose_their_source() {
+    let form = "application/x-www-form-urlencoded";
+
+    let malformed = scalar_rejection(&[form], TestBody::from_chunks(vec![Bytes::from_static(b"value=%GG")])).await;
+    assert!(matches!(malformed, FormRejection::Malformed(_)));
+    assert!(
+        malformed.to_string().starts_with("request body contains a malformed form: "),
+        "unexpected message: {malformed}"
+    );
+    assert!(malformed.source().is_some());
+
+    let invalid_utf8 = scalar_rejection(&[form], TestBody::from_chunks(vec![Bytes::from_static(b"value=\xff")])).await;
+    assert!(matches!(invalid_utf8, FormRejection::InvalidUtf8(_)));
+    assert!(!invalid_utf8.to_string().is_empty());
+    assert!(invalid_utf8.source().is_some());
+
+    let transport = scalar_rejection(&[form], TestBody::failed("diagnostic")).await;
+    assert!(matches!(transport, FormRejection::Body(_)));
+    assert!(transport.to_string().contains("diagnostic"), "unexpected message: {transport}");
+    assert!(transport.source().is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn form_decode_error_reports_the_underlying_query_failure() {
+    let form = "application/x-www-form-urlencoded";
+    let rejection = scalar_rejection(&[form], TestBody::from_chunks(vec![Bytes::from_static(b"value=%GG")])).await;
+    let FormRejection::Malformed(error) = rejection else {
+        panic!("expected a query-codec rejection");
+    };
+
+    assert_eq!(
+        error.to_string(),
+        format!("request body contains a malformed form: {}", error.error())
+    );
+    assert!(error.source().is_some());
+    assert_eq!(error.into_inner().kind(), ErrorKind::InvalidEncoding);
 }

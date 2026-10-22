@@ -8,7 +8,7 @@ use super::{DataEitherBody, Response};
 ///
 /// Ordinary `Result<T, E>` keeps one shared frame-data type and remains the
 /// zero-overhead default. This wrapper maps differing success and error data
-/// into [`EitherData`].
+/// into [`EitherData`](crate::response::EitherData).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeterogeneousResult<T, E>(pub Result<T, E>);
 

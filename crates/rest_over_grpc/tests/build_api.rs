@@ -9,7 +9,7 @@
 
 use http_path_template::{Grammar, PathTemplate};
 use rest_over_grpc::build::{Binding, Generator, HttpRule, ResponseBody, ServiceDefinition, generate_router};
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 fn rule(rpc: &str, method: HttpMethod, pattern: &str) -> HttpRule {
     HttpRule::new(
@@ -287,7 +287,7 @@ mod descriptor {
     #[test]
     fn generate_exposes_the_openapi_spec_per_service() {
         use rest_over_grpc::build::{HttpRule, OpenApiInfo};
-        use routerama::HttpMethod;
+        use routerama::resolve::HttpMethod;
 
         let descriptor = descriptor_set(PROTO);
 
