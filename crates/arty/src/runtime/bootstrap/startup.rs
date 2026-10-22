@@ -397,17 +397,30 @@ mod tests {
             stopped: StdArc::new(AtomicUsize::new(0)),
         };
         let per_thread = Arc::<AtomicUsize, PerThread>::new_with(AtomicUsize::default);
-        let tasks = scheduler.spawn_everywhere(
-            (builtins, counts.clone(), per_thread, HardwareProbe(hardware)),
-            |(builtins, counts, value, hardware)| async move {
-                let thread = thread::current().id();
-                assert_eq!(builtins.thread().id(), thread);
-                let _context = builtins.io().context::<TestContext>(&counts);
-                let local_calls = WORKER_LOCAL_CALLS.with(|calls| calls.fetch_add(1, Ordering::SeqCst));
-                let per_thread_calls = value.fetch_add(1, Ordering::SeqCst);
-                (thread, hardware.0.current_processor_id(), local_calls, per_thread_calls)
-            },
-        );
+        let tasks: Vec<_> = builtins
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| {
+                scheduler.spawn_at(
+                    worker,
+                    (
+                        builtins.clone(),
+                        counts.clone(),
+                        per_thread.clone(),
+                        HardwareProbe(hardware.clone()),
+                    ),
+                    |(builtins, counts, value, hardware)| async move {
+                        let thread = thread::current().id();
+                        assert_eq!(builtins.thread().id(), thread);
+                        let _context = builtins.io().context::<TestContext>(&counts);
+                        let local_calls = WORKER_LOCAL_CALLS.with(|calls| calls.fetch_add(1, Ordering::SeqCst));
+                        let per_thread_calls = value.fetch_add(1, Ordering::SeqCst);
+                        (thread, hardware.0.current_processor_id(), local_calls, per_thread_calls)
+                    },
+                )
+            })
+            .collect();
         assert_eq!(tasks.len(), WORKERS);
         let outcomes: Vec<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
 
@@ -440,9 +453,18 @@ mod tests {
 
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(WorkersPolicy::at_most(16), &hardware.processors());
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let tasks = scheduler.spawn_everywhere((), |()| async move { thread::current().id() });
-        let workers: HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
+        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let workers: HashSet<_> = builtins
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| {
+                builtins
+                    .scheduler()
+                    .spawn_at(worker, (), |()| async move { thread::current().id() })
+            })
+            .map(|task| task.join().unwrap())
+            .collect();
 
         assert_eq!(workers.len(), PROCESSORS);
         runtime.stop().unwrap();
