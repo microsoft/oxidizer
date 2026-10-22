@@ -237,7 +237,9 @@ impl Executor {
             if self.shared.is_shutting_down() {
                 task.abort();
                 self.shared.decrement_task_count(1);
-                drop(self.pending.remove(pointer));
+                // SAFETY: The active owner keeps `pointer` live; a linked active task belongs to
+                // this executor's pending list, and this code runs on the task owner thread.
+                drop(unsafe { self.pending.remove(pointer) });
                 completed_count = completed_count.saturating_add(1);
                 self.active.pop_front();
                 continue;
@@ -248,7 +250,9 @@ impl Executor {
             match outcome {
                 task::Poll::Ready(()) => {
                     if linked {
-                        drop(self.pending.remove(pointer));
+                        // SAFETY: `linked` was read from the live active task, whose list ownership
+                        // belongs to this executor and is accessed on the task owner thread.
+                        drop(unsafe { self.pending.remove(pointer) });
                     }
                     self.shared.decrement_task_count(1);
                     completed_count = completed_count.saturating_add(1);
@@ -279,7 +283,9 @@ impl Executor {
         self.shared.close_remote_wakes();
         executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_handle in &self.active {
-            drop(self.pending.remove(task_handle.as_ptr()));
+            // SAFETY: Each active owner keeps its task live; any linked task belongs to this
+            // executor's pending list, and shutdown preparation runs on the owner thread.
+            drop(unsafe { self.pending.remove(task_handle.as_ptr()) });
         }
         self.shared.drain_new_tasks(&mut self.active);
         while let Some(task_handle) = self.pending.pop_front() {

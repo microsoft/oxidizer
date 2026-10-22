@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::marker::PhantomData;
+use std::rc::Rc;
+
 use crate::{TaskHandle, TaskPtr};
 
 /// Intrusive owner-thread inventory of all pending tasks.
@@ -8,6 +11,7 @@ use crate::{TaskHandle, TaskPtr};
 pub(crate) struct TaskList {
     head: Option<TaskPtr>,
     tail: Option<TaskPtr>,
+    _owner_thread: PhantomData<Rc<()>>,
 }
 
 impl TaskList {
@@ -32,9 +36,12 @@ impl TaskList {
         pointer
     }
 
-    pub(crate) fn remove(&mut self, pointer: TaskPtr) -> Option<TaskHandle> {
-        // SAFETY: Callers provide either a runnable strong reference or a pointer owned by this
-        // list, so the allocation is live and accessed on its owner thread.
+    /// # Safety
+    ///
+    /// The caller must keep `pointer` live on the task's owner thread. If the task is linked,
+    /// it must belong to this list.
+    pub(crate) unsafe fn remove(&mut self, pointer: TaskPtr) -> Option<TaskHandle> {
+        // SAFETY: The caller guarantees that the pointer is live and accessed on its owner thread.
         let links = unsafe { pointer.as_task() }.get_ref().links();
         if !links.linked.replace(false) {
             return None;
@@ -60,7 +67,8 @@ impl TaskList {
     }
 
     pub(crate) fn pop_front(&mut self) -> Option<TaskHandle> {
-        self.head.and_then(|head| self.remove(head))
+        // SAFETY: The head is a live strong reference owned by this list on its owner thread.
+        self.head.and_then(|head| unsafe { self.remove(head) })
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -81,14 +89,21 @@ impl Drop for TaskList {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use plurality::MultiPool;
+    use static_assertions::assert_not_impl_any;
 
     use super::*;
     use crate::allocate_test_task_in;
 
     fn task(pool: &MultiPool) -> TaskHandle {
         allocate_test_task_in(pool)
+    }
+
+    #[test]
+    fn task_list_is_thread_affine() {
+        assert_not_impl_any!(TaskList: Send, Sync);
     }
 
     #[test]
@@ -105,7 +120,8 @@ mod tests {
         assert!(!list.is_empty());
         assert_eq!(format!("{list:?}"), "TaskList { .. }");
 
-        let removed = list.remove(first_pointer).unwrap();
+        // SAFETY: `first_pointer` is live and belongs to `list`.
+        let removed = unsafe { list.remove(first_pointer) }.unwrap();
         assert_eq!(removed.as_ptr(), first_pointer);
         drop(removed);
 
