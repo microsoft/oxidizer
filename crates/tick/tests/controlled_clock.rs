@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::FutureExt as _;
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
-use tick::{Clock, ClockControl, Delay, FutureExt as _, PeriodicTimer, SimpleClock};
+use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Timer};
 
 #[derive(Debug)]
 struct WakeCounter(AtomicUsize);
@@ -279,7 +279,7 @@ fn manual_advance_then_evaluates_enabled_automatic_timer_advance() {
 fn periodic_timer_ignores_real_time_until_controlled_time_advances() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
 
     assert!(poll_timer(&mut timer).is_pending());
     control.advance(Duration::from_millis(2));
@@ -294,7 +294,7 @@ fn periodic_timer_ignores_real_time_until_controlled_time_advances() {
 fn periodic_timer_fires_at_its_exact_controlled_deadline() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
     assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_millis(1));
@@ -309,7 +309,7 @@ fn periodic_timer_fires_at_its_exact_controlled_deadline() {
 fn zero_period_is_clamped_to_exactly_one_millisecond() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::ZERO);
+    let mut timer = Timer::new(&clock, Duration::ZERO);
     assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_micros(999));
@@ -578,7 +578,7 @@ async fn timeout_and_periodic_timer_cover_both_tokio_outcomes() {
     .unwrap();
     assert_eq!(value, 10);
 
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
     let first = timer.next().await;
     let second = timer.next().await;
     assert!(second.observed_at() >= first.observed_at());
@@ -589,7 +589,7 @@ fn poll_delay(delay: &mut Delay) -> Poll<()> {
     std::pin::pin!(delay).poll(&mut context)
 }
 
-fn poll_timer(timer: &mut PeriodicTimer) -> Poll<tick::TimerTick> {
+fn poll_timer(timer: &mut Timer) -> Poll<tick::TimerTick> {
     let mut context = Context::from_waker(Waker::noop());
     std::pin::pin!(timer.next()).poll(&mut context)
 }

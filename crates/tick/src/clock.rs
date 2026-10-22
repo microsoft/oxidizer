@@ -20,7 +20,7 @@ use crate::timers::TimerKey;
 ///
 /// - Get the current absolute time in UTC.
 /// - Create a [`Stopwatch`][super::Stopwatch] for elapsed time.
-/// - Create a [`PeriodicTimer`][super::PeriodicTimer] or [`Delay`][super::Delay].
+/// - Create a [`Timer`][super::Timer] or [`Delay`][super::Delay].
 ///
 /// # Relative and absolute time
 ///
@@ -155,10 +155,10 @@ use crate::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, PeriodicTimer};
+/// use tick::{Clock, Timer};
 ///
 /// # async fn timer_example(clock: &Clock) {
-/// let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(10));
+/// let mut timer = Timer::new(&clock, Duration::from_millis(10));
 ///
 /// loop {
 ///     timer.next().await;

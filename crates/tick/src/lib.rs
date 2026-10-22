@@ -79,7 +79,7 @@
 //! - [`ClockControl`] controls test time. Enable `test-util` to use it.
 //! - [`Stopwatch`] measures elapsed time.
 //! - [`Delay`] completes after a duration.
-//! - [`PeriodicTimer`] produces periodic ticks.
+//! - [`Timer`] produces periodic ticks.
 //! - [`Error`] reports failures and provides limited error inspection.
 //! - [`fmt`] parses and displays `SystemTime`. Enable `fmt` to use it.
 //! - [`runtime`] connects clocks to async runtimes.
@@ -218,18 +218,18 @@
 //! # }
 //! ```
 //!
-//! ## Use `Clock` to create a `PeriodicTimer`
+//! ## Use `Clock` to create a `Timer`
 //!
 //! ```
 //! use std::time::Duration;
 //!
-//! use tick::{Clock, PeriodicTimer};
+//! use tick::{Clock, Timer};
 //!
 //! # async fn periodic_timer_example(clock: &Clock) {
 //! // Wait 10 milliseconds before the first timer starts.
 //! clock.delay(Duration::from_millis(10)).await;
 //!
-//! let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+//! let mut timer = Timer::new(clock, Duration::from_millis(1));
 //!
 //! for _ in 0..3 {
 //!     timer.next().await;
@@ -304,12 +304,12 @@ mod fast_instant;
 pub mod fmt;
 
 mod future_ext;
-mod periodic_timer;
 mod simple_clock;
 mod state;
 mod stopwatch;
 #[cfg(any(feature = "fmt", test))]
 mod system_time_ext;
+mod timer;
 mod timers;
 #[cfg(any(feature = "tokio", test))]
 mod tokio;
@@ -320,14 +320,14 @@ pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
 pub use clock_control::ClockControl;
 pub use delay::Delay;
-pub use error::{Error, Result};
+pub use error::Error;
 pub use future_ext::FutureExt;
-pub use periodic_timer::{PeriodicTimer, TimerTick};
 pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
 #[cfg(any(feature = "fmt", test))]
 pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
+pub use timer::{Timer, TimerTick};
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that need no
 /// special relocation work.

@@ -11,7 +11,7 @@ use crate::timers::TIMER_RESOLUTION;
 
 /// A timer that periodically ticks.
 ///
-/// A periodic timer can be created using the [`PeriodicTimer::new()`] constructor,
+/// A periodic timer can be created using the [`Timer::new()`] constructor,
 /// which requires a reference to a [`Clock`].
 ///
 /// # Precision
@@ -34,10 +34,10 @@ use crate::timers::TIMER_RESOLUTION;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, PeriodicTimer, Stopwatch};
+/// use tick::{Clock, Stopwatch, Timer};
 ///
 /// # async fn periodic_timer_example(clock: &Clock) {
-/// let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let mut timer = Timer::new(clock, Duration::from_millis(1));
 ///
 /// for _ in 0..3 {
 ///     let tick = timer.next().await;
@@ -51,13 +51,13 @@ use crate::timers::TIMER_RESOLUTION;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, PeriodicTimer};
+/// use tick::{Clock, Timer};
 ///
 /// # async fn periodic_timer_example(clock: &Clock) {
 /// // Delay for 10ms before the timer starts ticking
 /// clock.delay(Duration::from_millis(10)).await;
 ///
-/// let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let mut timer = Timer::new(clock, Duration::from_millis(1));
 ///
 /// for _ in 0..3 {
 ///     timer.next().await;
@@ -75,9 +75,9 @@ use crate::timers::TIMER_RESOLUTION;
 /// use std::time::Duration;
 ///
 /// use futures::{Stream, stream};
-/// use tick::{Clock, PeriodicTimer, TimerTick};
+/// use tick::{Clock, Timer, TimerTick};
 ///
-/// fn into_stream(timer: PeriodicTimer) -> impl Stream<Item = TimerTick> {
+/// fn into_stream(timer: Timer) -> impl Stream<Item = TimerTick> {
 ///     stream::unfold(timer, |mut timer| async move {
 ///         let tick = timer.next().await;
 ///         Some((tick, timer))
@@ -85,7 +85,7 @@ use crate::timers::TIMER_RESOLUTION;
 /// }
 ///
 /// # fn example(clock: &Clock) {
-/// let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let timer = Timer::new(clock, Duration::from_millis(1));
 /// let ticks = into_stream(timer);
 /// # let _ = ticks;
 /// # }
@@ -95,7 +95,7 @@ use crate::timers::TIMER_RESOLUTION;
 /// `futures-core` as a dependency of `tick`.
 #[derive(Debug)]
 #[must_use = "periodic timers do nothing unless `next` is awaited"]
-pub struct PeriodicTimer {
+pub struct Timer {
     period: Duration,
     clock: Clock,
     // Currently scheduled timer. This value is not initialized until the first `next` call.
@@ -103,7 +103,7 @@ pub struct PeriodicTimer {
     current_waker: Option<Waker>,
 }
 
-/// Information recorded when a [`PeriodicTimer`] fires.
+/// Information recorded when a [`Timer`] fires.
 #[derive(Debug)]
 #[must_use]
 pub struct TimerTick {
@@ -118,7 +118,7 @@ impl TimerTick {
     }
 }
 
-impl PeriodicTimer {
+impl Timer {
     /// Creates a timer that fires periodically.
     ///
     /// The minimum period is 1 millisecond. A shorter period is increased to
@@ -200,7 +200,7 @@ impl PeriodicTimer {
     }
 }
 
-impl Drop for PeriodicTimer {
+impl Drop for Timer {
     fn drop(&mut self) {
         if let Some(key) = self.current_timer {
             self.clock.unregister_timer(key);
@@ -228,7 +228,7 @@ mod tests {
         }
 
         let clock = ClockControl::new().to_clock();
-        let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+        let mut timer = Timer::new(&clock, Duration::from_millis(1));
         let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
         let first_context = Context::from_waker(&first_waker);
         assert!(timer.poll_next_tick(&first_context).is_pending());

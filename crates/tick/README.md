@@ -71,7 +71,7 @@ If `test-util` is disabled, its support adds no runtime overhead.
 * [`ClockControl`][__link6] controls test time. Enable `test-util` to use it.
 * [`Stopwatch`][__link7] measures elapsed time.
 * [`Delay`][__link8] completes after a duration.
-* [`PeriodicTimer`][__link9] produces periodic ticks.
+* [`Timer`][__link9] produces periodic ticks.
 * [`Error`][__link10] reports failures and provides limited error inspection.
 * [`fmt`][__link11] parses and displays `SystemTime`. Enable `fmt` to use it.
 * [`runtime`][__link12] connects clocks to async runtimes.
@@ -200,17 +200,17 @@ let stopwatch = clock.stopwatch();
 stopwatch.elapsed()
 ```
 
-### Use `Clock` to create a `PeriodicTimer`
+### Use `Clock` to create a `Timer`
 
 ```rust
 use std::time::Duration;
 
-use tick::{Clock, PeriodicTimer};
+use tick::{Clock, Timer};
 
 // Wait 10 milliseconds before the first timer starts.
 clock.delay(Duration::from_millis(10)).await;
 
-let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+let mut timer = Timer::new(clock, Duration::from_millis(1));
 
 for _ in 0..3 {
     timer.next().await;
@@ -273,7 +273,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbuXhAOveQWEwbyLS0ttfY6EsbD6cKwMMAdIEbvSgdmnhkEeRhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbCO8Y53CitZwbOMU0vkTeJdMbvs6eKZq5BxYbgWMTBb-sUqphZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
  [__link0]: https://docs.rs/tick/0.8.0/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.8.0/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.8.0/tick/?search=Error
@@ -319,4 +319,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link6]: https://docs.rs/tick/0.8.0/tick/?search=ClockControl
  [__link7]: https://docs.rs/tick/0.8.0/tick/?search=Stopwatch
  [__link8]: https://docs.rs/tick/0.8.0/tick/?search=Delay
- [__link9]: https://docs.rs/tick/0.8.0/tick/?search=PeriodicTimer
+ [__link9]: https://docs.rs/tick/0.8.0/tick/?search=Timer

@@ -5,20 +5,6 @@ use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fmt;
 use std::time::SystemTimeError;
 
-/// The result type for operations that can fail.
-///
-/// # Examples
-///
-/// ```
-/// fn operation() -> tick::Result<()> {
-///     Ok(())
-/// }
-///
-/// operation()?;
-/// # Ok::<(), tick::Error>(())
-/// ```
-pub type Result<T> = std::result::Result<T, Error>;
-
 /// An error from the `tick` crate.
 ///
 /// Overflow is the most common cause. Other causes include:

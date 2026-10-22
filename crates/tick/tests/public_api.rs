@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use tick::runtime::{ClockDriver, InactiveClock, Isolated, Shared};
-use tick::{Clock, Delay, Error, PeriodicTimer, SimpleClock, Stopwatch, TimerTick};
+use tick::{Clock, Delay, Error, SimpleClock, Stopwatch, Timer, TimerTick};
 
 #[test]
 fn public_types_have_their_threading_and_clone_contracts() {
@@ -20,7 +20,7 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(InactiveClock: Send, Sync, Clone);
     static_assertions::assert_impl_all!(InactiveClock<Shared>: Send, Sync);
     static_assertions::assert_not_impl_any!(InactiveClock<Shared>: Clone);
-    static_assertions::assert_impl_all!(PeriodicTimer: Send, Sync);
+    static_assertions::assert_impl_all!(Timer: Send, Sync);
     static_assertions::assert_impl_all!(TimerTick: Send, Sync);
     static_assertions::assert_not_impl_any!(TimerTick: Clone, Copy);
     static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
@@ -34,7 +34,7 @@ fn public_types_have_their_threading_and_clone_contracts() {
 #[test]
 fn system_clock_reads_current_system_time() {
     let before = SystemTime::now();
-    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, _driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
 
     assert!(clock.system_time() >= before);
 }
@@ -174,7 +174,7 @@ fn completing_a_delay_removes_its_public_driver_deadline() {
 #[test]
 fn periodic_timer_is_lazy_and_first_poll_is_pending() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
     let now = Instant::now();
     assert_eq!(driver.advance_timers(now).unwrap(), None);
 
@@ -188,7 +188,7 @@ fn periodic_timer_is_lazy_and_first_poll_is_pending() {
 #[test]
 fn registered_periodic_timer_remains_pending_before_its_deadline() {
     let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
     let waker = Waker::noop().clone();
     let mut context = Context::from_waker(&waker);
 
@@ -199,7 +199,7 @@ fn registered_periodic_timer_remains_pending_before_its_deadline() {
 #[test]
 fn near_maximum_period_never_registers_a_deadline() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
-    let mut timer = PeriodicTimer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
+    let mut timer = Timer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
     assert!(poll_timer(&mut timer).is_pending());
     assert!(poll_timer(&mut timer).is_pending());
@@ -209,7 +209,7 @@ fn near_maximum_period_never_registers_a_deadline() {
 #[test]
 fn dropping_a_periodic_timer_removes_its_public_driver_deadline() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
     assert!(poll_timer(&mut timer).is_pending());
     assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
 
@@ -224,7 +224,7 @@ fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let period = Duration::from_millis(1);
     let before_registration = Instant::now();
-    let mut timer = PeriodicTimer::new(&clock, period);
+    let mut timer = Timer::new(&clock, period);
     assert!(poll_timer(&mut timer).is_pending());
     let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
 
@@ -280,7 +280,7 @@ fn poll_delay(delay: &mut Delay) -> Poll<()> {
     std::pin::pin!(delay).poll(&mut context)
 }
 
-fn poll_timer(timer: &mut PeriodicTimer) -> Poll<TimerTick> {
+fn poll_timer(timer: &mut Timer) -> Poll<TimerTick> {
     let mut context = Context::from_waker(Waker::noop());
     std::pin::pin!(timer.next()).poll(&mut context)
 }
