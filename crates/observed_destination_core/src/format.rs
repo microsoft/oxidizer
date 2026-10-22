@@ -148,7 +148,7 @@ pub(crate) fn print_resource(w: &mut (impl Write + ?Sized), resource: &Resource)
 /// and flushing.
 ///
 /// # Errors
-/// 
+///
 /// Returns an [`OTelSdkError::InternalFailure`] with the reason for the underlying failure,
 /// if writing to the provided writer fails.
 pub fn print_log_record(
