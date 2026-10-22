@@ -330,6 +330,10 @@ impl SystemClockStorage {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
+        // A Vec would allocate on the timer hot path. A bounded stack batch handles ordinary timer
+        // bursts with one lock acquisition and loops for larger bursts without imposing a limit.
+        const READY_BATCH_SIZE: usize = 8;
+
         let mut first = [None];
         let (count, next) = self.with_timers(|timers| timers.pop_ready_into(now, &mut first));
         if count == 0 {
@@ -344,9 +348,6 @@ impl SystemClockStorage {
             return next;
         }
 
-        // A Vec would allocate on the timer hot path. A bounded stack batch handles ordinary timer
-        // bursts with one lock acquisition and loops for larger bursts without imposing a limit.
-        const READY_BATCH_SIZE: usize = 8;
         let mut ready: [Option<Waker>; READY_BATCH_SIZE] = std::array::from_fn(|_| None);
 
         loop {
