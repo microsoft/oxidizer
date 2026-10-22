@@ -40,6 +40,11 @@ impl ResourceHeader {
     }
 
     /// Prints the resource header followed by a newline if it hasn't been printed yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`OTelSdkError::InternalFailure`] with the reason for the underlying failure,
+    /// if writing to the provided writer fails.
     pub fn print_once(&self, w: &mut (impl Write + ?Sized)) -> OTelSdkResult {
         if self
             .emitted

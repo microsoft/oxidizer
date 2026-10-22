@@ -44,6 +44,12 @@ pub type DestinationResult<T> = Result<T, Box<dyn std::error::Error + Send + Syn
 /// `OTel` [`opentelemetry_sdk::logs::LoggerProviderBuilder`].
 pub trait LogDestination: std::fmt::Debug {
     /// Adds this destination to a logger provider builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination cannot be registered with the builder.
+    /// Specific errors depend on the destination implementation and may include
+    /// configuration issues, conflicts, or other conditions.
     fn register(
         self,
         builder: opentelemetry_sdk::logs::LoggerProviderBuilder,
@@ -56,6 +62,12 @@ pub trait LogDestination: std::fmt::Debug {
 /// `OTel` [`opentelemetry_sdk::metrics::MeterProviderBuilder`].
 pub trait MetricDestination: std::fmt::Debug {
     /// Adds this destination to a meter provider builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination cannot be registered with the builder.
+    /// Specific errors depend on the destination implementation and may include
+    /// configuration issues, conflicts, or other conditions.
     fn register(
         self,
         builder: opentelemetry_sdk::metrics::MeterProviderBuilder,

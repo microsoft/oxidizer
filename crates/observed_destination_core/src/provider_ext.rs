@@ -37,6 +37,12 @@ use crate::{DestinationResult, IntoLogDestination, IntoMetricDestination, LogDes
 /// ```
 pub trait LoggerProviderBuilderExt {
     /// Registers a log destination on this logger provider builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination cannot be registered with the builder.
+    /// Specific errors depend on the destination implementation and may include
+    /// configuration issues, conflicts, or other conditions.
     fn register(self, dest: impl IntoLogDestination) -> DestinationResult<LoggerProviderBuilder>;
 }
 
@@ -74,6 +80,12 @@ impl LoggerProviderBuilderExt for LoggerProviderBuilder {
 /// ```
 pub trait MeterProviderBuilderExt {
     /// Registers a metric destination on this meter provider builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination cannot be registered with the builder.
+    /// Specific errors depend on the destination implementation and may include
+    /// configuration issues, conflicts, or other conditions.
     fn register(self, dest: impl IntoMetricDestination) -> DestinationResult<MeterProviderBuilder>;
 }
 

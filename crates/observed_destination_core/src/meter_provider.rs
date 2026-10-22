@@ -23,6 +23,10 @@ pub trait FlushableMetricsProvider: MeterProvider + Debug + Send + Sync {
     /// Flushes the provider's pipeline without terminating it.
     ///
     /// Uses the destination error contract, independently of the provider's SDK.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider has been shut down or if flushing fails.
     fn force_flush(&self) -> DestinationResult<()>;
 }
 

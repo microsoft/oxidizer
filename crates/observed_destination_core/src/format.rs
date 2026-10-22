@@ -146,6 +146,11 @@ pub(crate) fn print_resource(w: &mut (impl Write + ?Sized), resource: &Resource)
 /// Use when exporting SDK log records to a text destination, passing its writer
 /// and formatting configuration. Appends a newline; the caller controls buffering
 /// and flushing.
+///
+/// # Errors
+/// 
+/// Returns an [`OTelSdkError::InternalFailure`] with the reason for the underlying failure,
+/// if writing to the provided writer fails.
 pub fn print_log_record(
     w: &mut (impl Write + ?Sized),
     record: &opentelemetry_sdk::logs::SdkLogRecord,
