@@ -4,6 +4,8 @@
 //! Public join-handle and executor-lifecycle contracts.
 
 use std::cell::{Cell, RefCell};
+use std::error::Error as _;
+use std::fmt;
 use std::future::{Ready, pending, poll_fn, ready};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -12,7 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{
+    CycleOutcome, Executor, JoinError, JoinHandle, ShutdownCause, ShutdownError, TaskOptions, TaskPlacement, TaskSet,
+};
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
@@ -101,6 +105,46 @@ impl EventProcessor for OwnerDropProcessor {
 
 fn poll_once<R: 'static>(handle: &mut JoinHandle<R>) -> Poll<Result<R, JoinError>> {
     Pin::new(handle).poll(&mut Context::from_waker(Waker::noop()))
+}
+
+#[expect(clippy::panic, reason = "test helper reports an unexpected pending or successful result")]
+fn ready_error<T, E>(poll: Poll<Result<T, E>>) -> E {
+    let Poll::Ready(Err(error)) = poll else {
+        panic!("join handle must be immediately ready with an error");
+    };
+    error
+}
+
+fn poll_error<R: 'static>(handle: &mut JoinHandle<R>) -> JoinError {
+    ready_error(poll_once(handle))
+}
+
+#[derive(Debug)]
+struct TestShutdownError(&'static str);
+
+impl fmt::Display for TestShutdownError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for TestShutdownError {}
+
+fn shutdown_cause(message: &'static str) -> (ShutdownCause, ShutdownError) {
+    let error = ShutdownError::new(TestShutdownError(message));
+    (ShutdownCause::from_error(error.clone()), error)
+}
+
+fn assert_same_shutdown_source(actual: &ShutdownError, expected: &ShutdownError) {
+    let actual = actual
+        .inner()
+        .downcast_ref::<TestShutdownError>()
+        .expect("test shutdown cause uses TestShutdownError");
+    let expected = expected
+        .inner()
+        .downcast_ref::<TestShutdownError>()
+        .expect("test shutdown cause uses TestShutdownError");
+    assert!(std::ptr::eq(actual, expected));
 }
 
 fn enrichment_keys(sink: &Sink) -> Vec<String> {
@@ -206,12 +250,80 @@ fn retained_handle_reports_shutdown_without_delaying_shutdown() {
     let mut executor = Executor::builder().build();
     let mut handle = executor.tasks().add(pending::<()>(), TaskOptions::default());
 
-    executor.begin_shutdown();
+    executor.begin_shutdown(ShutdownCause::default());
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     assert!(!executor.has_tasks());
     drop(executor);
     assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+}
+
+#[test]
+fn caused_shutdown_is_attached_to_cancelled_and_rejected_tasks() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let mut pending = tasks.add(pending::<()>(), TaskOptions::default());
+    let (cause, expected) = shutdown_cause("executor failed");
+
+    executor.begin_shutdown(cause);
+    let mut rejected = tasks.add(async {}, TaskOptions::default());
+
+    for error in [poll_error(&mut pending), poll_error(&mut rejected)] {
+        let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
+        assert_same_shutdown_source(source, &expected);
+    }
+}
+
+#[test]
+fn remote_task_cancellation_carries_the_shutdown_cause() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let (result_tx, remote_join) = RemotePool::new().channel::<usize>();
+    tasks.add_with_remote_result(pending::<usize>(), TaskOptions::default(), result_tx);
+    let (cause, expected) = shutdown_cause("remote executor failed");
+
+    executor.begin_shutdown(cause);
+    let (rejected_tx, rejected_join) = RemotePool::new().channel::<usize>();
+    tasks.add_with_remote_result(async { 42 }, TaskOptions::default(), rejected_tx);
+
+    for mut join in [remote_join, rejected_join] {
+        let error = ready_error(Pin::new(&mut join).poll(&mut Context::from_waker(Waker::noop())));
+        let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
+        assert_same_shutdown_source(source, &expected);
+    }
+}
+
+#[test]
+fn first_shutdown_cause_remains_authoritative() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+
+    executor.begin_shutdown(ShutdownCause::default());
+    executor.begin_shutdown(shutdown_cause("later failure").0);
+    let mut rejected = tasks.add(async {}, TaskOptions::default());
+
+    assert!(poll_error(&mut rejected).source().is_none());
+}
+
+#[test]
+fn retained_task_set_preserves_the_shutdown_cause_after_executor_drop() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let (cause, expected) = shutdown_cause("owner failed");
+    executor.begin_shutdown(cause);
+    drop(executor);
+
+    let mut local = tasks.add(async {}, TaskOptions::default());
+    let (remote_tx, remote) = RemotePool::new().channel::<usize>();
+    tasks.add_with_remote_result(async { 42 }, TaskOptions::default(), remote_tx);
+
+    let local = poll_error(&mut local);
+    let mut remote = std::pin::pin!(remote);
+    let remote = ready_error(remote.as_mut().poll(&mut Context::from_waker(Waker::noop())));
+    for error in [local, remote] {
+        let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
+        assert_same_shutdown_source(source, &expected);
+    }
 }
 
 #[test]
@@ -283,7 +395,7 @@ impl IntoFuture for IntoFutureProbe {
 fn rejected_submission_does_not_convert_the_future() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    executor.begin_shutdown();
+    executor.begin_shutdown(ShutdownCause::default());
     let converted = Arc::new(AtomicBool::new(false));
 
     let mut handle = tasks.add(IntoFutureProbe(Arc::clone(&converted)), TaskOptions::default());
@@ -325,7 +437,7 @@ fn disconnected_remote_submission_contains_panicking_join_notification() {
 fn submission_during_shutdown_returns_shutdown_error() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    executor.begin_shutdown();
+    executor.begin_shutdown(ShutdownCause::default());
 
     let mut handle = tasks.add(async { 42 }, TaskOptions::default());
 
@@ -524,7 +636,7 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
     );
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
-    executor.begin_shutdown();
+    executor.begin_shutdown(ShutdownCause::default());
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     let mut submitted_handle = submitted.borrow_mut().take().expect("future destructor submitted a task");
@@ -559,7 +671,7 @@ fn shutdown_retires_a_batch_of_queued_tasks() {
         waker.wake_by_ref();
     }
 
-    executor.begin_shutdown();
+    executor.begin_shutdown(ShutdownCause::default());
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     for mut handle in handles {

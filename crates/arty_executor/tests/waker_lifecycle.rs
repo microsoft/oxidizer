@@ -138,7 +138,7 @@ fn retained_waker_is_noop_after_shutdown() {
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     let retained = retained.borrow_mut().take().unwrap();
     drop(task);
-    executor.begin_shutdown();
+    executor.begin_shutdown(arty_executor::ShutdownCause::default());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     drop(executor);
 
@@ -181,7 +181,7 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
 
     assert!(catch_unwind(AssertUnwindSafe(|| retained.wake())).is_err());
     drop(task);
-    executor.begin_shutdown();
+    executor.begin_shutdown(arty_executor::ShutdownCause::default());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
 

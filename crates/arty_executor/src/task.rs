@@ -21,7 +21,8 @@ use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
 use crate::{
-    TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal, discard_task_panic_payload,
+    ShutdownCause, TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
+    discard_task_panic_payload,
 };
 
 #[derive(Debug, Default)]
@@ -235,7 +236,7 @@ where
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
-    fn abort(self: Pin<&Self>) {
+    fn abort(self: Pin<&Self>, cause: ShutdownCause) {
         if let Some(wake_signal) = self.wake_signal.get() {
             wake_signal.retire();
         }
@@ -246,7 +247,7 @@ where
         let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
         self.options
-            .with_context(|| self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled));
+            .with_context(|| self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled(cause)));
     }
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
@@ -342,7 +343,7 @@ where
 
     fn finish_terminal(self: Pin<&Self>, maybe_payload: &mut Option<Payload<F, R, T>>, outcome: TerminalOutcome<R>) {
         let Some(payload) = maybe_payload.as_mut() else {
-            debug_assert!(matches!(outcome, TerminalOutcome::Cancelled));
+            debug_assert!(matches!(outcome, TerminalOutcome::Cancelled(_)));
             return;
         };
         let result_target = payload
@@ -383,11 +384,11 @@ where
                 }
                 self.options.report_panicked(&self.sink, self.poll_count.get());
             }
-            TerminalOutcome::Cancelled => {
+            TerminalOutcome::Cancelled(cause) => {
                 if future_panic.is_some() {
                     self.options.report_panicked(&self.sink, self.poll_count.get());
                 }
-                let result_panic = catch_unwind(AssertUnwindSafe(|| drop(result_target))).err();
+                let result_panic = result_target.cancelled(cause).err();
                 for panic in [future_panic, result_panic].into_iter().flatten() {
                     if remote {
                         discard_task_panic_payload(panic);
@@ -439,7 +440,7 @@ where
 enum TerminalOutcome<R> {
     Succeeded(R),
     Panicked(TaskPanicPayload),
-    Cancelled,
+    Cancelled(ShutdownCause),
 }
 
 /// Inline result-delivery policy owned by a task.
@@ -457,6 +458,9 @@ pub(crate) trait TaskResultTarget<R>: Debug + 'static {
 
     /// Publishes a captured task panic, returning a distinct panic raised by delivery.
     fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload>;
+
+    /// Publishes task cancellation caused by executor shutdown.
+    fn cancelled(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload>;
 }
 
 impl<R: 'static> TaskResultTarget<R> for PooledLocalSender<R> {
@@ -471,6 +475,10 @@ impl<R: 'static> TaskResultTarget<R> for PooledLocalSender<R> {
     fn panicked(self, _panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         unreachable!("local task panics terminate the process")
     }
+
+    fn cancelled(self, _cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
+        catch_unwind(AssertUnwindSafe(|| drop(self)))
+    }
 }
 
 impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
@@ -484,6 +492,10 @@ impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
 
     fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.panicked(panic)
+    }
+
+    fn cancelled(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
+        self.shutdown(cause)
     }
 }
 
@@ -573,7 +585,7 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     /// and any future-specific state is dropped.
     ///
     /// Retained wakers keep the empty task allocation alive but become inert.
-    fn abort(self: Pin<&Self>);
+    fn abort(self: Pin<&Self>, cause: ShutdownCause);
 
     /// Initializes the task, providing it the wake signal that it needs to enable polling
     ///
@@ -665,7 +677,7 @@ mod tests {
             assert!(result.is_ready());
         } else {
             assert!(result.is_pending());
-            task.abort();
+            task.abort(ShutdownCause::default());
         }
         assert!(dropped.get());
         assert!(!task.has_payload());
@@ -691,7 +703,7 @@ mod tests {
         assert_panic!(task.initialize(fake_wake_signal(&wake_owner)));
 
         assert!(task.wake_signal.get().is_some());
-        task.abort();
+        task.abort(ShutdownCause::default());
     }
 
     #[test]
@@ -728,7 +740,7 @@ mod tests {
 
         assert!(!signal.has_queued_notification());
         drop(waker);
-        task.abort();
+        task.abort(ShutdownCause::default());
     }
 
     #[test]
@@ -966,8 +978,8 @@ mod tests {
         task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
-        task.abort();
-        task.abort();
+        task.abort(ShutdownCause::default());
+        task.abort(ShutdownCause::default());
 
         let events = processor.events();
         assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
@@ -998,7 +1010,7 @@ mod tests {
         task.initialize(fake_wake_signal(&wake_owner));
         task.created_reporter().unwrap().report();
 
-        task.abort();
+        task.abort(ShutdownCause::default());
 
         let events = processor.events();
         assert!(events.iter().any(|event| event.name() == "arty.rt.task.spawned"));
@@ -1129,7 +1141,7 @@ mod tests {
         assert_eq!(inspected_waker_count, stashed_wakers.borrow().len());
 
         // Drop the task payload and the diagnostic wakers it retained.
-        task.abort();
+        task.abort(ShutdownCause::default());
         drop(stashed_wakers);
 
         assert!(!task.has_payload());
@@ -1151,7 +1163,7 @@ mod tests {
 
         task.initialize(fake_wake_signal(&wake_owner));
 
-        task.abort();
+        task.abort(ShutdownCause::default());
 
         // The state held by the task must have been dropped.
         assert!(shared_state_weak.upgrade().is_none());
@@ -1214,7 +1226,7 @@ mod tests {
 
         task.initialize(fake_wake_signal(&wake_owner));
 
-        assert_panic!(task.abort());
+        assert_panic!(task.abort(ShutdownCause::default()));
 
         let mut cx = task::Context::from_waker(Waker::noop());
         let event_result = Pin::new(&mut rx).poll(&mut cx);

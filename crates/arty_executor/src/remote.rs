@@ -15,11 +15,12 @@ use std::task;
 
 use events_once::{EventLake, PooledReceiver, PooledSender};
 
-use crate::{JoinError, TaskPanicPayload, discard_task_panic_payload};
+use crate::{JoinError, ShutdownCause, TaskPanicPayload, discard_task_panic_payload};
 
 enum TaskResult<R> {
     Completed(R),
     Panicked(TaskPanicPayload),
+    Shutdown(ShutdownCause),
 }
 
 impl<R> Debug for TaskResult<R> {
@@ -27,6 +28,7 @@ impl<R> Debug for TaskResult<R> {
         match self {
             Self::Completed(_) => f.write_str("Completed(..)"),
             Self::Panicked(_) => f.write_str("Panicked(..)"),
+            Self::Shutdown(_) => f.write_str("Shutdown(..)"),
         }
     }
 }
@@ -82,7 +84,8 @@ impl<R: Send + 'static> Future for JoinHandle<R> {
         Pin::new(&mut self.get_mut().rx).poll(cx).map(|result| match result {
             Ok(TaskResult::Completed(value)) => Ok(value),
             Ok(TaskResult::Panicked(panic)) => Err(JoinError::panicked(panic)),
-            Err(_) => Err(JoinError::shutdown()),
+            Ok(TaskResult::Shutdown(cause)) => Err(JoinError::shutdown(cause)),
+            Err(_) => Err(JoinError::shutdown(ShutdownCause::default())),
         })
     }
 }
@@ -120,6 +123,10 @@ impl<R: Send + 'static> Sender<R> {
     /// Returns a panic payload if notifying the result receiver panics.
     pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Panicked(panic))
+    }
+
+    pub(crate) fn shutdown(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
+        self.send(TaskResult::Shutdown(cause))
     }
 }
 
@@ -191,6 +198,10 @@ mod tests {
 
         assert_eq!(format!("{:?}", TaskResult::Completed(1)), "Completed(..)");
         assert_eq!(format!("{:?}", TaskResult::<u8>::Panicked(Box::new("panic"))), "Panicked(..)");
+        assert_eq!(
+            format!("{:?}", TaskResult::<u8>::Shutdown(ShutdownCause::default())),
+            "Shutdown(..)"
+        );
         assert!(format!("{pool:?}").starts_with("Pool"));
         assert!(format!("{sender:?}").starts_with(std::any::type_name::<Sender<u8>>()));
         assert!(format!("{handle:?}").starts_with("JoinHandle"));

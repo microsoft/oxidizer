@@ -4,22 +4,24 @@
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::pin::Pin;
-use std::sync::Mutex;
+use std::rc::Rc;
+use std::sync::{Mutex, OnceLock};
 use std::task;
 
 use events_once::{LocalEventLake, PooledLocalReceiver};
 
-use crate::TaskPanicPayload;
+use crate::{ShutdownCause, ShutdownError, TaskPanicPayload};
 
 /// A task failed to return its result.
 ///
-/// This error intentionally stores the classification and optional panic payload directly.
-/// Shutdown has no underlying cause, and a panic payload need not implement [`Error`], so an error
-/// source chain would not preserve additional typed diagnostic information.
+/// A shutdown error is available through [`Error::source`] when shutdown started
+/// because of an error. A panic payload need not implement [`Error`], so use
+/// [`into_panic`](Self::into_panic) to inspect it.
 pub struct JoinError {
     // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
     // thread-safe error while preserving the original payload for `into_panic`.
     panic: Option<Mutex<TaskPanicPayload>>,
+    shutdown_error: Option<ShutdownError>,
 }
 
 impl PartialEq for JoinError {
@@ -32,13 +34,17 @@ impl Eq for JoinError {}
 
 impl JoinError {
     #[must_use]
-    pub(crate) const fn shutdown() -> Self {
-        Self { panic: None }
+    pub(crate) fn shutdown(cause: ShutdownCause) -> Self {
+        Self {
+            panic: None,
+            shutdown_error: cause.into_error(),
+        }
     }
 
     pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
         Self {
             panic: Some(Mutex::new(panic)),
+            shutdown_error: None,
         }
     }
 
@@ -63,6 +69,18 @@ impl JoinError {
             panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
         })
     }
+
+    /// Returns the error that caused shutdown, if one was recorded.
+    #[must_use]
+    pub const fn shutdown_error(&self) -> Option<&ShutdownError> {
+        self.shutdown_error.as_ref()
+    }
+
+    /// Returns the error that caused shutdown, if one was recorded.
+    #[must_use]
+    pub fn into_shutdown_error(self) -> Option<ShutdownError> {
+        self.shutdown_error
+    }
 }
 
 impl Display for JoinError {
@@ -80,11 +98,16 @@ impl Debug for JoinError {
         f.debug_struct(std::any::type_name::<Self>())
             .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
-            .finish()
+            .field("has_shutdown_error", &self.shutdown_error.is_some())
+            .finish_non_exhaustive()
     }
 }
 
-impl Error for JoinError {}
+impl Error for JoinError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.shutdown_error.as_ref().map(|error| error as &(dyn Error + 'static))
+    }
+}
 
 /// A handle that can be used to await the completion of a task and to receive its result `R`.
 ///
@@ -99,17 +122,18 @@ impl Error for JoinError {}
 #[derive(Debug)]
 pub struct JoinHandle<R: 'static> {
     rx: PooledLocalReceiver<R>,
+    shutdown_cause: Rc<OnceLock<ShutdownCause>>,
 }
 
 impl<R: 'static> JoinHandle<R> {
-    pub(crate) fn new(rx: PooledLocalReceiver<R>) -> Self {
-        Self { rx }
+    pub(crate) fn new(rx: PooledLocalReceiver<R>, shutdown_cause: Rc<OnceLock<ShutdownCause>>) -> Self {
+        Self { rx, shutdown_cause }
     }
 
-    pub(crate) fn disconnected(events: &LocalEventLake) -> Self {
+    pub(crate) fn disconnected(events: &LocalEventLake, shutdown_cause: Rc<OnceLock<ShutdownCause>>) -> Self {
         let (tx, rx) = events.rent();
         drop(tx);
-        Self::new(rx)
+        Self::new(rx, shutdown_cause)
     }
 }
 
@@ -117,9 +141,13 @@ impl<R: 'static> Future for JoinHandle<R> {
     type Output = Result<R, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().rx)
-            .poll(cx)
-            .map(|result| result.map_err(|_disconnected| JoinError::shutdown()))
+        let this = self.get_mut();
+        Pin::new(&mut this.rx).poll(cx).map(|result| {
+            result.map_err(|_disconnected| {
+                let cause = this.shutdown_cause.get().cloned().unwrap_or_default();
+                JoinError::shutdown(cause)
+            })
+        })
     }
 }
 
@@ -136,13 +164,13 @@ mod tests {
     assert_not_impl_any!(JoinHandle<u8>: Send, Sync);
 
     // We do not expect there to be anything that requires pinning the join handle.
-    assert_impl_all!(JoinHandle<u8>: Unpin);
+    assert_impl_all!(JoinHandle<u8>: RefUnwindSafe, Unpin, UnwindSafe);
 
     #[test]
     fn shutdown_error_contract() {
         assert_impl_all!(JoinError: Error, Send, Sync, UnwindSafe, RefUnwindSafe);
 
-        let error = JoinError::shutdown();
+        let error = JoinError::shutdown(ShutdownCause::default());
 
         assert!(error.is_shutdown());
         assert!(!error.is_panic());
@@ -163,8 +191,8 @@ mod tests {
 
     #[test]
     fn join_errors_compare_by_failure_kind() {
-        let shutdown = JoinError::shutdown();
-        let another_shutdown = JoinError::shutdown();
+        let shutdown = JoinError::shutdown(ShutdownCause::default());
+        let another_shutdown = JoinError::shutdown(ShutdownCause::default());
         let panic = JoinError::panicked(Box::new("first panic"));
         let another_panic = JoinError::panicked(Box::new("different panic"));
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::remote::Sender as RemoteSender;
-use crate::{ExecutorShared, JoinHandle, TaskOptions};
+use crate::{ExecutorShared, JoinHandle, ShutdownCause, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -50,9 +50,17 @@ impl TaskSet {
         self.shared.add_remote_task(future, options, result_tx);
     }
 
-    /// Begins executor shutdown without borrowing executor-owned polling state.
+    /// Begins executor shutdown without an error cause.
     pub fn begin_shutdown(&self) {
-        self.shared.request_shutdown();
+        self.begin_shutdown_with_cause(ShutdownCause::default());
+    }
+
+    /// Begins executor shutdown with a cause without borrowing executor-owned polling state.
+    ///
+    /// The first shutdown cause remains authoritative.
+    #[doc(hidden)]
+    pub fn begin_shutdown_with_cause(&self, cause: ShutdownCause) {
+        self.shared.request_shutdown(cause);
     }
 
     #[cfg(test)]
