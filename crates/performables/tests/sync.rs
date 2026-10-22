@@ -678,6 +678,21 @@ fn barrier_supports_async_and_blocking_waiters() {
 }
 
 #[test]
+fn blocking_barrier_leaders_release_async_waiters_once_per_generation() {
+    let barrier = Barrier::new(2);
+    let mut context = Context::from_waker(Waker::noop());
+    for _ in 0..8 {
+        let mut wait = pin!(barrier.wait_async());
+        assert!(wait.as_mut().poll(&mut context).is_pending());
+        assert!(barrier.wait().is_leader());
+        assert_eq!(
+            wait.as_mut().poll(&mut context).map(barrier::BarrierWaitOutcome::is_leader),
+            Poll::Ready(false)
+        );
+    }
+}
+
+#[test]
 fn dropping_a_released_barrier_waiter_observes_the_new_generation() {
     let barrier = Barrier::new(2);
     let counter = StdArc::new(WakeCounter::default());

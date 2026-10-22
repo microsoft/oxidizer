@@ -18,6 +18,7 @@ use crate::Error;
 
 /// Reusable participant barriers.
 pub mod barrier;
+mod broadcast;
 /// Queue, oneshot, and latest-value channels.
 pub mod channel;
 /// Condition-variable synchronization.
@@ -26,8 +27,12 @@ pub mod condition;
 pub mod lock;
 /// Mutual-exclusion synchronization.
 pub mod mutex;
+/// Retained, coalescing notifications.
+pub mod notify;
 /// One-time and lazy initialization.
 pub mod once;
+mod raw_mutex;
+mod slot_list;
 mod wait_queue;
 
 /// Compact native synchronization with blocking and non-blocking operations.
@@ -72,6 +77,12 @@ pub trait Mode: sealed::Sealed {
     /// Internal barrier state selected at compile time.
     #[doc(hidden)]
     type BarrierState: Send + std::marker::Sync + std::fmt::Debug;
+    /// Internal retained notification storage.
+    #[doc(hidden)]
+    type NotifyState: Send + std::marker::Sync + std::fmt::Debug;
+    /// Initial notification state without a permit.
+    #[doc(hidden)]
+    const NOTIFY_INIT: Self::NotifyState;
 }
 
 #[expect(
@@ -79,16 +90,18 @@ pub trait Mode: sealed::Sealed {
     reason = "each use creates independent, initially unlocked ownership state"
 )]
 impl Mode for Sync {
-    type MutexState = std::sync::Mutex<()>;
-    type MutexGuard<'a> = Option<std::sync::MutexGuard<'a, ()>>;
-    const MUTEX_INIT: Self::MutexState = std::sync::Mutex::new(());
-    type RwLockState = std::sync::RwLock<()>;
-    type RwLockReadGuard<'a> = Option<std::sync::RwLockReadGuard<'a, ()>>;
-    type RwLockWriteGuard<'a> = Option<std::sync::RwLockWriteGuard<'a, ()>>;
-    const RWLOCK_INIT: Self::RwLockState = std::sync::RwLock::new(());
-    type CondvarState = std::sync::Condvar;
-    const CONDVAR_INIT: Self::CondvarState = std::sync::Condvar::new();
+    type MutexState = mutex::StateSync;
+    type MutexGuard<'a> = mutex::GuardSync<'a>;
+    const MUTEX_INIT: Self::MutexState = mutex::StateSync::new();
+    type RwLockState = lock::StateSync;
+    type RwLockReadGuard<'a> = lock::ReadGuardSync<'a>;
+    type RwLockWriteGuard<'a> = lock::WriteGuardSync<'a>;
+    const RWLOCK_INIT: Self::RwLockState = lock::StateSync::new();
+    type CondvarState = condition::StateSync;
+    const CONDVAR_INIT: Self::CondvarState = condition::StateSync::new();
     type BarrierState = barrier::StateSync;
+    type NotifyState = notify::State;
+    const NOTIFY_INIT: Self::NotifyState = notify::State::new();
 }
 
 #[expect(
@@ -106,6 +119,8 @@ impl Mode for Async {
     type CondvarState = condition::StateAsync;
     const CONDVAR_INIT: Self::CondvarState = condition::StateAsync::new();
     type BarrierState = barrier::StateAsync;
+    type NotifyState = notify::State;
+    const NOTIFY_INIT: Self::NotifyState = notify::State::new();
 }
 
 #[cold]
@@ -143,6 +158,9 @@ mod sealed {
         reason = "poison errors retain the same mode-specific guard as successful acquisition"
     )]
     pub trait Sealed: Sized {
+        fn notify_state(state: &<Self as Mode>::NotifyState) -> &notify::State
+        where
+            Self: Mode;
         fn mutex_lock<T: ?Sized>(
             mutex: &mutex::Mutex<T, Self>,
         ) -> Result<mutex::MutexGuard<'_, T, Self>, Error<mutex::MutexGuard<'_, T, Self>>>
@@ -202,6 +220,9 @@ mod sealed {
     }
 
     impl Sealed for Sync {
+        fn notify_state(state: &<Self as Mode>::NotifyState) -> &notify::State {
+            state
+        }
         fn mutex_lock<T: ?Sized>(
             mutex: &mutex::Mutex<T, Self>,
         ) -> Result<mutex::MutexGuard<'_, T, Self>, Error<mutex::MutexGuard<'_, T, Self>>> {
@@ -272,6 +293,9 @@ mod sealed {
     }
 
     impl Sealed for Async {
+        fn notify_state(state: &<Self as Mode>::NotifyState) -> &notify::State {
+            state
+        }
         fn mutex_lock<T: ?Sized>(
             mutex: &mutex::Mutex<T, Self>,
         ) -> Result<mutex::MutexGuard<'_, T, Self>, Error<mutex::MutexGuard<'_, T, Self>>> {

@@ -192,6 +192,10 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
 fn concurrent_worker_initialization_failure_is_reported_consistently() {
     const CONCURRENT_WORKERS: usize = 3;
 
+    // One worker owns the context while two others initialize it concurrently.
+    if many_cpus::SystemHardware::current().processors().len() < CONCURRENT_WORKERS {
+        return;
+    }
     let runtime = runtime(CONCURRENT_WORKERS);
     let workers = worker_schedulers(&runtime, CONCURRENT_WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);

@@ -2,6 +2,13 @@
 // Licensed under the MIT License.
 
 //! Uncontended ownership and lock benchmarks.
+//!
+//! With `seismograph` enabled, recording stays disabled. The configuration
+//! crosses an optimization barrier so runtime-enabled recording remains
+//! reachable in the compiled workloads.
+//! Both lock implementations panic on poison.
+//! Tokio cases measure already-ready futures without entering an executor.
+//! Tokio guards do not poison and have different contention/fairness guarantees.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -13,7 +20,6 @@
 
 use std::hint::black_box;
 use std::pin::pin;
-use std::sync::PoisonError;
 use std::task::{Context, Poll, Waker};
 
 use criterion::Criterion;
@@ -21,6 +27,8 @@ use performables::arc::Arc;
 use performables::sync;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
+#[cfg(feature = "seismograph")]
+use seismograph::recorder::Configuration;
 
 const ARC_NEW_DROP: &str = "performables_uncontended/arc_new_drop";
 const ARC_DEREF: &str = "performables_uncontended/arc_deref";
@@ -66,7 +74,7 @@ fn arc_clone_performables(value: &Arc<u64>) -> Arc<u64> {
 #[metabench::benchmark(MUTEX_LOCK_STD, MUTEX_LOCK, "std")]
 #[bench::lock(&std::sync::Mutex::new(7_u64))]
 fn mutex_lock_std(lock: &std::sync::Mutex<u64>) -> u64 {
-    let guard = black_box(lock).lock().unwrap_or_else(PoisonError::into_inner);
+    let guard = black_box(lock).lock().expect("the benchmark has no panicking lock holder");
     black_box(*guard)
 }
 
@@ -106,10 +114,33 @@ fn mutex_lock_performables_async(input: &mut AsyncMutexInput) -> u64 {
     black_box(*guard)
 }
 
+#[metabench::benchmark(MUTEX_LOCK_TOKIO, MUTEX_LOCK, "tokio")]
+#[bench::lock(&mut tokio_mutex_input())]
+fn mutex_lock_tokio(input: &mut TokioMutexInput) -> u64 {
+    // Stack-pin to avoid allocator noise on the measured path.
+    let mut future = pin!(input.lock.lock());
+    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+        unreachable!("the benchmark has no competing lock holder");
+    };
+    black_box(*guard)
+}
+
+struct TokioMutexInput {
+    lock: tokio::sync::Mutex<u64>,
+    context: Context<'static>,
+}
+
+fn tokio_mutex_input() -> TokioMutexInput {
+    TokioMutexInput {
+        lock: tokio::sync::Mutex::new(7),
+        context: Context::from_waker(Waker::noop()),
+    }
+}
+
 #[metabench::benchmark(RW_LOCK_READ_STD, RW_LOCK_READ, "std")]
 #[bench::lock(&std::sync::RwLock::new(7_u64))]
 fn rw_lock_read_std(lock: &std::sync::RwLock<u64>) -> u64 {
-    let guard = black_box(lock).read().unwrap_or_else(PoisonError::into_inner);
+    let guard = black_box(lock).read().expect("the benchmark has no panicking lock holder");
     black_box(*guard)
 }
 
@@ -151,10 +182,33 @@ fn rw_lock_read_performables_async(input: &mut AsyncRwLockInput) -> u64 {
     black_box(*guard)
 }
 
+#[metabench::benchmark(RW_LOCK_READ_TOKIO, RW_LOCK_READ, "tokio")]
+#[bench::lock(&mut tokio_rwlock_input())]
+fn rw_lock_read_tokio(input: &mut TokioRwLockInput) -> u64 {
+    // Stack-pin to avoid allocator noise on the measured path.
+    let mut future = pin!(input.lock.read());
+    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+        unreachable!("the benchmark has no competing lock holder");
+    };
+    black_box(*guard)
+}
+
+struct TokioRwLockInput {
+    lock: tokio::sync::RwLock<u64>,
+    context: Context<'static>,
+}
+
+fn tokio_rwlock_input() -> TokioRwLockInput {
+    TokioRwLockInput {
+        lock: tokio::sync::RwLock::new(7),
+        context: Context::from_waker(Waker::noop()),
+    }
+}
+
 #[metabench::benchmark(RW_LOCK_WRITE_STD, RW_LOCK_WRITE, "std")]
 #[bench::lock(&std::sync::RwLock::new(7_u64))]
 fn rw_lock_write_std(lock: &std::sync::RwLock<u64>) -> u64 {
-    let mut guard = black_box(lock).write().unwrap_or_else(PoisonError::into_inner);
+    let mut guard = black_box(lock).write().expect("the benchmark has no panicking lock holder");
     *guard = black_box(*guard);
     black_box(*guard)
 }
@@ -178,7 +232,22 @@ fn rw_lock_write_performables_async(input: &mut AsyncRwLockInput) -> u64 {
     black_box(*guard)
 }
 
+#[metabench::benchmark(RW_LOCK_WRITE_TOKIO, RW_LOCK_WRITE, "tokio")]
+#[bench::lock(&mut tokio_rwlock_input())]
+fn rw_lock_write_tokio(input: &mut TokioRwLockInput) -> u64 {
+    // Stack-pin to avoid allocator noise on the measured path.
+    let mut future = pin!(input.lock.write());
+    let Poll::Ready(mut guard) = future.as_mut().poll(&mut input.context) else {
+        unreachable!("the benchmark has no competing lock holder");
+    };
+    *guard = black_box(*guard);
+    black_box(*guard)
+}
+
 fn criterion_benchmarks(criterion: &mut Criterion) {
+    #[cfg(feature = "seismograph")]
+    seismograph::recorder(black_box(Configuration::default()));
+
     let mut group = criterion.benchmark_group(ARC_NEW_DROP);
 
     group.bench_function(ARC_NEW_STD.benchmark_name(), |bencher| bencher.iter(arc_new_std));
@@ -229,6 +298,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     group.bench_function(MUTEX_LOCK_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
         bencher.iter(|| mutex_lock_performables_async(&mut asynchronous));
     });
+    let mut tokio = tokio_mutex_input();
+    group.bench_function(MUTEX_LOCK_TOKIO.benchmark_name(), |bencher| {
+        bencher.iter(|| mutex_lock_tokio(&mut tokio));
+    });
     group.finish();
 
     let mut read_group = criterion.benchmark_group(RW_LOCK_READ);
@@ -249,6 +322,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     read_group.bench_function(RW_LOCK_READ_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
         bencher.iter(|| rw_lock_read_performables_async(&mut asynchronous));
     });
+    let mut tokio = tokio_rwlock_input();
+    read_group.bench_function(RW_LOCK_READ_TOKIO.benchmark_name(), |bencher| {
+        bencher.iter(|| rw_lock_read_tokio(&mut tokio));
+    });
     read_group.finish();
 
     let mut write_group = criterion.benchmark_group(RW_LOCK_WRITE);
@@ -260,6 +337,9 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     });
     write_group.bench_function(RW_LOCK_WRITE_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
         bencher.iter(|| rw_lock_write_performables_async(&mut asynchronous));
+    });
+    write_group.bench_function(RW_LOCK_WRITE_TOKIO.benchmark_name(), |bencher| {
+        bencher.iter(|| rw_lock_write_tokio(&mut tokio));
     });
     write_group.finish();
 }
@@ -277,12 +357,15 @@ metabench::main!(
         MUTEX_LOCK_PERFORMABLES_SYNC,
         MUTEX_LOCK_PERFORMABLES_ASYNC_BLOCKING,
         MUTEX_LOCK_PERFORMABLES_ASYNC,
+        MUTEX_LOCK_TOKIO,
         RW_LOCK_READ_STD,
         RW_LOCK_READ_PERFORMABLES_TRY,
         RW_LOCK_READ_PERFORMABLES_SYNC,
         RW_LOCK_READ_PERFORMABLES_ASYNC,
+        RW_LOCK_READ_TOKIO,
         RW_LOCK_WRITE_STD,
         RW_LOCK_WRITE_PERFORMABLES_SYNC,
         RW_LOCK_WRITE_PERFORMABLES_ASYNC,
+        RW_LOCK_WRITE_TOKIO,
     ],
 );
