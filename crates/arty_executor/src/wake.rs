@@ -153,8 +153,9 @@ impl WakeSignal {
             drop(error.into_inner());
             return;
         }
-        self.shared.inner.remote_wakes_pending.store(true, atomic::Ordering::Release);
-        self.shared.inner.parent_waker.wake_by_ref();
+        if !self.shared.inner.remote_wakes_pending.swap(true, atomic::Ordering::Release) {
+            self.shared.inner.parent_waker.wake_by_ref();
+        }
     }
 
     fn schedule_local(&self) {
@@ -173,11 +174,15 @@ impl WakeSignal {
 
     fn begin_notification(&self, remote: bool) -> bool {
         let notification_state = if remote { TASK_ACTIVE_REMOTE } else { TASK_ACTIVE_LOCAL };
-        self.schedule_state
-            .try_update(atomic::Ordering::AcqRel, atomic::Ordering::Acquire, |state| {
-                (state == TASK_ACTIVE).then_some(notification_state)
-            })
-            .is_ok()
+        matches!(
+            self.schedule_state
+                .fetch_update(atomic::Ordering::AcqRel, atomic::Ordering::Acquire, |state| match state {
+                    TASK_ACTIVE => Some(notification_state),
+                    TASK_ACTIVE_LOCAL | TASK_ACTIVE_REMOTE => Some(state),
+                    _ => None,
+                }),
+            Ok(TASK_ACTIVE)
+        )
     }
 
     pub(crate) fn promote_remote_notification(&self) -> bool {
@@ -282,9 +287,10 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::UnsafeCell;
     use std::future::pending;
     use std::pin::pin;
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
     use events_once::LocalEventPool;
@@ -311,6 +317,73 @@ mod tests {
         assert_eq!(queued.len(), 1);
         assert!(parent.awakened.load(Ordering::Relaxed));
         drop(owned);
+    }
+
+    #[test]
+    fn duplicate_remote_wake_publishes_prior_writes() {
+        struct Published(UnsafeCell<bool>);
+
+        // SAFETY: The test uses the wake-state Release/Acquire protocol to order all access.
+        unsafe impl Sync for Published {}
+
+        let task_handle = crate::testing::new_test_task_handle();
+        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
+        let signal = pin!(WakeSignal::new(shared, task_handle.as_ptr()));
+        // SAFETY: The clone retains task ownership, and the signal remains pinned through the scope.
+        let waker = unsafe { signal.as_ref().waker_ref() }.clone();
+        let published = Arc::new(Published(UnsafeCell::new(false)));
+        let duplicate_complete = Arc::new(AtomicBool::new(false));
+
+        thread::scope(|scope| {
+            let producer_published = Arc::clone(&published);
+            let producer_complete = Arc::clone(&duplicate_complete);
+            scope.spawn(move || {
+                waker.wake_by_ref();
+                // SAFETY: The duplicate wake below publishes this write to notification clearing.
+                unsafe { *producer_published.0.get() = true };
+                waker.wake_by_ref();
+                producer_complete.store(true, Ordering::Relaxed);
+            });
+
+            while !duplicate_complete.load(Ordering::Relaxed) {
+                thread::yield_now();
+            }
+            signal.clear_notification();
+            // SAFETY: Clearing acquired the duplicate wake's Release RMW before this read.
+            assert!(unsafe { *published.0.get() });
+        });
+    }
+
+    #[test]
+    fn remote_wake_burst_notifies_owner_once() {
+        struct CountingWake(AtomicUsize);
+
+        impl std::task::Wake for CountingWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let parent = Arc::new(CountingWake(AtomicUsize::new(0)));
+        let (shared, remote_wakes) = WakeShared::new(Waker::from(Arc::clone(&parent)), thread::current().id());
+        let first_handle = crate::testing::new_test_task_handle();
+        let second_handle = crate::testing::new_test_task_handle();
+        let first = pin!(WakeSignal::new(shared.clone(), first_handle.as_ptr()));
+        let second = pin!(WakeSignal::new(shared, second_handle.as_ptr()));
+
+        assert!(first.begin_notification(true));
+        first.schedule_remote();
+        assert!(second.begin_notification(true));
+        second.schedule_remote();
+
+        assert_eq!(parent.0.load(Ordering::Relaxed), 1);
+        assert!(remote_wakes.try_recv().is_ok());
+        assert!(remote_wakes.try_recv().is_ok());
+        assert!(remote_wakes.try_recv().unwrap_err().is_empty());
     }
 
     #[test]
