@@ -28,7 +28,7 @@ impl From<usize> for SystemMetricCount {
     }
 }
 
-/// Dense index of a worker in the runtime's selected processor set.
+/// Dense index of a worker in runtime startup order.
 ///
 /// This is a runtime-local ordinal, not a hardware processor ID.
 #[classified(SYSTEM_METADATA)]
