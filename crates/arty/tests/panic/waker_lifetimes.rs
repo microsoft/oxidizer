@@ -3,9 +3,6 @@
 
 //! Safe task wakers outlive pinned task storage after success, panic, or shutdown.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -19,8 +16,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::{self, JoinHandleExt as _};
-
-testing_aids::init_tracing!();
 
 #[derive(Clone, Copy, Debug)]
 enum Finish {

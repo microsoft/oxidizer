@@ -154,7 +154,7 @@ fn secondaries_execute_before_the_primary() {
 #[test]
 fn primary_wait_is_interrupted_by_new_runtime_work() {
     let runtime = runtime(1);
-    let control = runtime_control(&runtime);
+    let control = support::runtime_control(&runtime);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_primary.store(true, Ordering::SeqCst);

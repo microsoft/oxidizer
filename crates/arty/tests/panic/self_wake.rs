@@ -3,9 +3,6 @@
 
 //! Self-wake notifications queued before a panic cannot repoll a completed future.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,8 +11,6 @@ use std::task::{Context, Poll};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use thread_aware::Unaware;
-
-testing_aids::init_tracing!();
 
 struct SelfWakePanic {
     polls: Arc<AtomicUsize>,

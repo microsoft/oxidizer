@@ -3,9 +3,6 @@
 
 //! Secondary opaque panic payloads must not escape abandoned-result containment.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::panic::panic_any;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -15,8 +12,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct DropChain {
     depth: u32,

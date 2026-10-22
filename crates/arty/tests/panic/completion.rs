@@ -3,9 +3,6 @@
 
 //! A completed task's destructor is still part of task panic containment.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,8 +13,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct ReadyDropPanic {
     drops: Arc<AtomicUsize>,

@@ -8,6 +8,9 @@
 
 testing_aids::init_tracing!();
 
+#[path = "../support/mod.rs"]
+mod support;
+
 use std::collections::HashSet;
 use std::error::Error as _;
 use std::marker::PhantomData;
@@ -21,7 +24,7 @@ use std::{fmt, thread};
 
 use arty::core::{Thread, ThreadAware};
 use arty::io::Io;
-use arty::runtime::{Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
+use arty::runtime::{Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
@@ -559,10 +562,6 @@ impl<M: Marker> Driver for TestDriver<M> {
 
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
-}
-
-fn runtime_control(runtime: &Runtime) -> RuntimeControl {
-    runtime.scheduler().block_on(async |builtins| builtins.control().clone()).unwrap()
 }
 
 fn runtime_with_telemetry(workers: usize) -> (Runtime, MockProcessor) {

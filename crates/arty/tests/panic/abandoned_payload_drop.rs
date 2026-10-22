@@ -3,9 +3,6 @@
 
 //! Runtime-owned opaque panic payloads can panic when an abandoned join discards them.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::panic::panic_any;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -14,8 +11,6 @@ use testing_aids::TEST_TIMEOUT;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct Payload {
     drops: Arc<AtomicUsize>,

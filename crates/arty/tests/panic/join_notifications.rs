@@ -3,9 +3,6 @@
 
 //! A safe receiver waker may panic while a task publishes its successful result.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -15,8 +12,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::{self, JoinHandleExt as _};
-
-testing_aids::init_tracing!();
 
 struct PanicWake {
     notified: Arc<AtomicBool>,

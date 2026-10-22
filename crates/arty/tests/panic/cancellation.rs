@@ -3,9 +3,6 @@
 
 //! Shutdown must finish task destruction despite a sole cancellation Drop panic.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -19,8 +16,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct PendingDropPanic {
     started: Cell<Option<mpsc::Sender<()>>>,

@@ -3,9 +3,6 @@
 
 //! Abandoned joins dispose of original task panics without resuming them.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::cell::Cell;
 use std::panic::panic_any;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,8 +13,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct Payload {
     value: Cell<u32>,

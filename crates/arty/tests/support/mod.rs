@@ -29,3 +29,5 @@ where
         futures::executor::block_on(self)
     }
 }
+
+const _: fn(JoinHandle<()>) -> Result<(), JoinError> = <JoinHandle<()> as JoinHandleExt>::join;

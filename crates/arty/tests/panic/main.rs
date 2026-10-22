@@ -4,6 +4,7 @@
 //! Root-task panics propagate through the runtime test entry point.
 
 #![cfg(feature = "rt")]
+#![cfg(test)]
 
 testing_aids::init_tracing!();
 

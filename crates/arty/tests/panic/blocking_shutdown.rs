@@ -3,9 +3,6 @@
 
 //! Blocking shutdown must join running work and discard queued captures safely.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -13,8 +10,6 @@ use testing_aids::TEST_TIMEOUT;
 
 use crate::runtime_support::runtime;
 use crate::support::{self, JoinHandleExt as _};
-
-testing_aids::init_tracing!();
 
 struct CaptureDropPanic {
     drops: Arc<AtomicUsize>,

@@ -3,9 +3,6 @@
 
 //! Runtime owner destruction during a task unwind must not join or panic on that task's thread.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::cell::RefCell;
 use std::sync::mpsc;
 
@@ -14,8 +11,6 @@ use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct Exited(mpsc::Sender<()>);
 

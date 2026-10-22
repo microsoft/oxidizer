@@ -3,9 +3,6 @@
 
 //! Safe input relocation panics fail the task before invoking its factory.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,8 +10,6 @@ use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 #[derive(Clone)]
 struct PanicRelocation {

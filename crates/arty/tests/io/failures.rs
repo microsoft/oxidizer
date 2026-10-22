@@ -117,7 +117,7 @@ fn worker_driver_construction_failure_stops_an_already_registered_context() {
 #[test]
 fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
     let runtime = runtime(1);
-    let control = runtime_control(&runtime);
+    let control = support::runtime_control(&runtime);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
@@ -149,7 +149,7 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
 #[test]
 fn shutdown_during_late_initialization_is_observed_by_the_request() {
     let runtime = runtime(WORKERS);
-    let control = runtime_control(&runtime);
+    let control = support::runtime_control(&runtime);
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(2, Ordering::SeqCst);
@@ -290,7 +290,7 @@ fn concurrent_failures_preserve_the_first_shutdown_cause() {
 #[test]
 fn shutdown_does_not_couple_independent_worker_initialization() {
     let runtime = runtime(WORKERS);
-    let control = runtime_control(&runtime);
+    let control = support::runtime_control(&runtime);
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);

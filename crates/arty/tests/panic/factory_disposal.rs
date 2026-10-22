@@ -3,16 +3,11 @@
 
 //! Accepted factories remain task-owned until invocation or shutdown disposal.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::runtime_support::runtime;
 use crate::support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
 
 struct CaptureDropPanic(Arc<AtomicUsize>);
 

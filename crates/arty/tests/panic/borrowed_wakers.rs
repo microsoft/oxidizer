@@ -3,9 +3,6 @@
 
 //! Completed scoped-task wakers cannot retain caller borrows after the root returns.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -17,8 +14,6 @@ use std::task::{Context, Poll, Waker};
 use testing_aids::TEST_TIMEOUT;
 
 use crate::runtime_support::runtime;
-
-testing_aids::init_tracing!();
 
 struct Borrowed<'a> {
     text: &'a str,
