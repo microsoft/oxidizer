@@ -3923,6 +3923,8 @@ dependencies = [
  "thread_local",
  "tick",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
