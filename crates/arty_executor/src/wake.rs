@@ -381,8 +381,8 @@ mod tests {
         second.schedule_remote();
 
         assert_eq!(parent.0.load(Ordering::Relaxed), 1);
-        assert!(remote_wakes.try_recv().is_ok());
-        assert!(remote_wakes.try_recv().is_ok());
+        remote_wakes.try_recv().unwrap();
+        remote_wakes.try_recv().unwrap();
         assert!(remote_wakes.try_recv().unwrap_err().is_empty());
     }
 
