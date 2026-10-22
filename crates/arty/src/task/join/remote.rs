@@ -30,10 +30,10 @@ struct ResultRelocation<R> {
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
-/// A result from [`Scheduler::spawn_anywhere`] is relocated to the joining
-/// Arty worker before it is returned. Joining from outside an Arty worker
-/// leaves its association unchanged. Other submission methods do not relocate
-/// their results.
+/// A result from [`Scheduler::spawn_anywhere`] or [`Scheduler::spawn_at`] is
+/// relocated to the joining Arty worker before it is returned. Joining from
+/// outside an Arty worker leaves its association unchanged. Other submission
+/// methods do not relocate their results.
 ///
 /// # Panics
 ///
