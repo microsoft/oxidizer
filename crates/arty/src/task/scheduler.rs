@@ -293,8 +293,15 @@ impl Scheduler {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    /// let destination = cx.control().workers().into_iter().next().unwrap();
+    /// # async fn main(
+    /// #     cx: arty::task::Builtins,
+    /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// let destination = cx
+    ///     .control()
+    ///     .workers()
+    ///     .into_iter()
+    ///     .next()
+    ///     .ok_or_else(|| std::io::Error::other("runtime has no workers"))?;
     /// let task = cx
     ///     .scheduler()
     ///     .spawn_at(destination, cx.clone(), |worker| async move {
@@ -312,13 +319,21 @@ impl Scheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly;
-    /// let runtime = Runtime::new().unwrap();
-    /// let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    /// let destination = runtime
-    ///     .scheduler()
-    ///     .block_on(async |cx| cx.control().workers().into_iter().next().unwrap().clone())
-    ///     .unwrap();
-    /// scheduler.spawn_at(&destination, (), |()| async { SendOnly });
+    ///
+    /// fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ///     let runtime = Runtime::new()?;
+    ///     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone())?;
+    ///     let destination = runtime.scheduler().block_on(async |cx| {
+    ///         cx.control()
+    ///             .workers()
+    ///             .into_iter()
+    ///             .next()
+    ///             .cloned()
+    ///             .ok_or_else(|| std::io::Error::other("runtime has no workers"))
+    ///     })??;
+    ///     scheduler.spawn_at(&destination, (), |()| async { SendOnly });
+    ///     Ok(())
+    /// }
     /// ```
     pub fn spawn_at<D, F, R>(&self, destination: &Thread, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where

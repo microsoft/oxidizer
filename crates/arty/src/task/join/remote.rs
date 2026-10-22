@@ -74,13 +74,9 @@ where
     }
 
     pub(crate) fn invalid_destination(pool: &RemotePool) -> Self {
-        let (sender, inner) = pool.channel();
-        drop(sender);
         Self {
-            inner,
             invalid_destination: true,
-            blocking_pool: None,
-            completed: false,
+            ..Self::shutdown(pool)
         }
     }
 
