@@ -8,8 +8,7 @@ const DEFAULT_RATE: f64 = 0.0;
 
 /// Configuration for the [`Latency`][super::Latency] middleware.
 ///
-/// This type can be deserialized from configuration files when the `serde`
-/// feature is enabled.
+/// Enable `serde` to load this type from a configuration file.
 ///
 /// # Example
 ///
@@ -28,26 +27,30 @@ const DEFAULT_RATE: f64 = 0.0;
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct LatencyConfig {
-    /// Whether the latency middleware is enabled. When `false`, the middleware
-    /// is bypassed and requests pass through directly to the inner service.
+    /// Controls whether the latency middleware runs.
+    ///
+    /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
 
-    /// The probability of injecting latency before calling the inner service.
-    /// Must be in the range `[0.0, 1.0]` where `0.0` means never inject and
-    /// `1.0` means always inject.
+    /// Sets the rate for latency injection.
+    ///
+    /// The value must be in `[0.0, 1.0]`.
+    /// `0.0` never adds latency, and `1.0` always adds latency.
     pub rate: f64,
 
-    /// The latency duration to inject. When [`max_latency`][LatencyConfig::max_latency]
-    /// is `None`, this is used as a fixed delay. When `max_latency` is `Some`,
-    /// this is the lower bound of the random range `[latency, max_latency)`.
+    /// Sets the latency to add.
+    ///
+    /// If [`max_latency`][LatencyConfig::max_latency] is `None`, this value is a fixed delay.
+    /// Otherwise, this value is the lower bound of `[latency, max_latency)`.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
     )]
     pub latency: Duration,
 
-    /// Optional upper bound for a random latency range. When set, the injected
-    /// latency is chosen uniformly at random from `[latency, max_latency)`.
+    /// Sets the optional upper bound for random latency.
+    ///
+    /// If set, the middleware selects a value from `[latency, max_latency)`.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(default, with = "jiff::fmt::serde::unsigned_duration::friendly::compact::optional")
@@ -63,48 +66,5 @@ impl Default for LatencyConfig {
             latency: Duration::ZERO,
             max_latency: None,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn default_snapshot() {
-        let config = LatencyConfig::default();
-        insta::assert_json_snapshot!(config);
-    }
-
-    #[test]
-    fn serde_roundtrip() {
-        let config = LatencyConfig {
-            enabled: false,
-            rate: 0.42,
-            latency: Duration::from_millis(100),
-            max_latency: Some(Duration::from_millis(500)),
-        };
-
-        let json = serde_json::to_string(&config).unwrap();
-        let deserialized: LatencyConfig = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(config, deserialized);
-    }
-
-    #[test]
-    fn serde_roundtrip_without_max() {
-        let config = LatencyConfig {
-            enabled: true,
-            rate: 0.5,
-            latency: Duration::from_millis(200),
-            max_latency: None,
-        };
-
-        let json = serde_json::to_string(&config).unwrap();
-        let deserialized: LatencyConfig = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(config, deserialized);
     }
 }

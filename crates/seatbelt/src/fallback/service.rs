@@ -16,20 +16,15 @@ use crate::fallback::*;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Provides a replacement output when the inner service output is not considered valid.
+/// Replaces invalid output from an inner service.
 ///
-/// `Fallback` wraps an inner [`Service`] and inspects its output via a
-/// user-supplied predicate ([`should_fallback`][FallbackLayer::should_fallback]).
-/// When the predicate returns `true` the original output is forwarded to a
-/// fallback action ([`fallback`][FallbackLayer::fallback] /
-/// [`fallback_async`][FallbackLayer::fallback_async]) that produces the
-/// replacement value.
+/// `Fallback` uses [`should_fallback`][FallbackLayer::should_fallback] to inspect output.
+/// If the predicate returns `true`, a fallback action creates replacement output.
 ///
-/// Fallback is configured by calling [`Fallback::layer`] and using the builder
-/// methods on the returned [`FallbackLayer`] instance.
+/// Call [`Fallback::layer`] to create a [`FallbackLayer`].
+/// Use its builder methods to configure the fallback.
 ///
-/// For comprehensive examples and usage patterns, see the [fallback module]
-/// documentation.
+/// See the [fallback module] for examples.
 ///
 /// [fallback module]: crate::fallback
 #[derive(Debug)]
@@ -40,7 +35,7 @@ pub struct Fallback<In, Out, S> {
 
 /// Shared configuration for [`Fallback`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct FallbackShared<In, Out> {
     pub(crate) enable_if: EnableIf<In>,
@@ -60,17 +55,15 @@ impl<In, Out, S: Clone> Clone for Fallback<In, Out, S> {
 }
 
 impl<In, Out> Fallback<In, Out, ()> {
-    /// Creates a [`FallbackLayer`] used to configure the fallback resilience middleware.
+    /// Creates a [`FallbackLayer`] that configures fallback middleware.
     ///
-    /// The instance returned by this call is a builder and cannot be used to
-    /// build a service until the required properties are set:
+    /// Set these required properties before you build a service:
     /// [`should_fallback`][FallbackLayer::should_fallback] and one of
     /// [`fallback`][FallbackLayer::fallback] /
     /// [`fallback_async`][FallbackLayer::fallback_async].
     ///
-    /// The `name` identifies the fallback strategy in telemetry, while
-    /// `context` provides configuration shared across multiple resilience
-    /// middleware.
+    /// The `name` identifies the fallback strategy in telemetry.
+    /// The `context` provides configuration that middleware can share.
     ///
     /// # Example
     ///
@@ -87,7 +80,7 @@ impl<In, Out> Fallback<In, Out, ()> {
     /// # }
     /// ```
     ///
-    /// For comprehensive examples, see the [fallback module] documentation.
+    /// See the [fallback module] for more examples.
     ///
     /// [fallback module]: crate::fallback
     pub fn layer(name: impl Into<Cow<'static, str>>, context: &ResilienceContext<In, Out>) -> FallbackLayer<In, Out, NotSet, NotSet> {

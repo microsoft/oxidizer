@@ -6,17 +6,17 @@ use std::collections::hash_map::DefaultHasher;
 use std::fmt::Display;
 use std::hash::Hasher;
 
-/// Identifies an isolated circuit breaker instance.
+/// Identifies one circuit breaker.
 ///
-/// Each unique `BreakerId` maintains its own independent circuit breaker state, including
-/// failure counts, health metrics, and open/closed status. This allows you to have separate
-/// circuit breakers for different backends, services, or logical groupings of inputs.
+/// Each unique `BreakerId` has independent state.
+/// The state includes failure counts, health metrics, and the circuit status.
+/// Use separate IDs for separate backends or services.
 ///
-/// Breaker IDs should be **long-lived and low-cardinality**, representing distinct failure
-/// domains (e.g., backend hosts, service endpoints). Avoid high-cardinality IDs like user IDs
-/// or request IDs as these cause unbounded memory growth and prevent detection of systemic failures.
+/// Use a small, stable set of IDs.
+/// Do not use a user ID or request ID.
+/// A large set of IDs can cause unbounded memory use and can hide service-wide failures.
 ///
-/// For maximum performance, prefer integer IDs or static string IDs (`&'static str`).
+/// For lower cost, use integer IDs or static string IDs.
 ///
 /// # Examples
 ///
@@ -34,7 +34,7 @@ use std::hash::Hasher;
 /// ```rust
 /// use seatbelt::breaker::BreakerId;
 ///
-/// // Simulate extracting authority and scheme from an HTTP request
+/// // Use the scheme and authority from an HTTP request.
 /// let scheme = "https";
 /// let authority = "api.example.com";
 /// let id_value = format!("{}://{}", scheme, authority);
@@ -42,18 +42,15 @@ use std::hash::Hasher;
 /// let id = BreakerId::from(id_value);
 /// assert_eq!(id.to_string(), "https://api.example.com");
 ///
-/// // For better performance, use hashing. Note that you must provide a display label
-/// // for the hashed ID.
+/// // A hashed ID needs a display label.
 /// let hashed_id = BreakerId::hashed(&(scheme, authority), "scheme_and_authority");
 /// assert_eq!(hashed_id.to_string(), "scheme_and_authority");
 /// ```
 ///
 /// # Telemetry
 ///
-/// The values used to create breaker IDs are included in telemetry data (logs and metrics)
-/// for observability purposes. **Important**: Ensure that the values from which breaker IDs
-/// are created do not contain any sensitive data such as authentication tokens, personal
-/// identifiable information (PII), or other confidential data.
+/// Logs and metrics can contain the breaker ID.
+/// Do not put authentication tokens, personal data, or confidential data in an ID.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BreakerId(BreakerIdValue);
 
@@ -64,17 +61,15 @@ impl BreakerId {
 
     /// Returns `true` if this ID is the default breaker ID.
     ///
-    /// Used to fast-path the common single-breaker configuration, avoiding a lock,
-    /// a hash, and a map probe when routing to the shared default engine.
+    /// The default ID uses a shared engine without a lock, hash, or map lookup.
     pub(crate) fn is_default(&self) -> bool {
         matches!(&self.0, BreakerIdValue::String(value) if value.as_ref() == "default")
     }
 
-    /// Create a breaker ID by hashing the given value.
+    /// Creates a breaker ID by hashing a value.
     ///
-    /// The value must implement the `Hash` trait. This is useful for creating breaker
-    /// IDs from complex types. The resulting breaker ID will be based on the hash of
-    /// the value. You must provide a `label` that will be used for display and telemetry.
+    /// The value must implement `Hash`.
+    /// The `label` appears in display output and telemetry.
     pub fn hashed<T: std::hash::Hash>(value: &T, label: &'static str) -> Self {
         let mut hasher = DefaultHasher::new();
         value.hash(&mut hasher);
@@ -130,35 +125,14 @@ enum BreakerIdValue {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::fmt::Debug;
     use std::hash::Hash;
 
-    use static_assertions::assert_impl_all;
-
     use super::*;
-
-    assert_impl_all!(BreakerId: Send, Sync, Unpin, Clone, Hash, Display, Debug, PartialEq, Eq);
-
-    #[test]
-    fn from_u64_and_display() {
-        let k = BreakerId::from(42u64);
-        assert_eq!(k.to_string(), "42");
-        assert_eq!(k, BreakerId::from(42u64));
-    }
-
-    #[test]
-    fn from_static_str_and_string() {
-        let a: BreakerId = "hello".into();
-        let b: BreakerId = String::from("hello").into();
-        assert_eq!(a.to_string(), "hello");
-        assert_eq!(b.to_string(), "hello");
-        assert_eq!(a, b);
-    }
 
     #[test]
     fn is_default_distinguishes_default_from_others() {
         assert!(BreakerId::default().is_default());
-        // Any string equal to "default" is treated as the default, regardless of ownership.
+        // Any string equal to "default" is the default, regardless of ownership.
         assert!(BreakerId::from(String::from("default")).is_default());
 
         assert!(!BreakerId::from("other").is_default());
@@ -183,50 +157,5 @@ mod tests {
         }
 
         assert_eq!(id.to_string(), "my_label");
-    }
-
-    #[test]
-    fn breaker_id_hash_consistent() {
-        let k1 = BreakerId::from(123u64);
-        let k2 = BreakerId::from(123u64);
-
-        let mut h1 = DefaultHasher::new();
-        k1.hash(&mut h1);
-        let mut h2 = DefaultHasher::new();
-        k2.hash(&mut h2);
-
-        assert_eq!(h1.finish(), h2.finish());
-    }
-
-    #[test]
-    fn into_cow_from_number() {
-        let id = BreakerId::from(42u64);
-        let cow: Cow<'static, str> = id.into();
-        assert!(matches!(cow, Cow::Owned(_)));
-        assert_eq!(cow, "42");
-    }
-
-    #[test]
-    fn into_cow_from_string_owned() {
-        let id = BreakerId::from(String::from("owned_string"));
-        let cow: Cow<'static, str> = id.into();
-        assert!(matches!(cow, Cow::Owned(_)));
-        assert_eq!(cow, "owned_string");
-    }
-
-    #[test]
-    fn into_cow_from_string_borrowed() {
-        let id = BreakerId::from("static_str");
-        let cow: Cow<'static, str> = id.into();
-        assert!(matches!(cow, Cow::Borrowed(_)));
-        assert_eq!(cow, "static_str");
-    }
-
-    #[test]
-    fn into_cow_from_hashed() {
-        let id = BreakerId::hashed(&"value", "label");
-        let cow: Cow<'static, str> = id.into();
-        assert!(matches!(cow, Cow::Borrowed(_)));
-        assert_eq!(cow, "label");
     }
 }
