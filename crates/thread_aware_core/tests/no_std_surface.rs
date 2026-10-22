@@ -41,6 +41,10 @@ assert_not_impl_any!(Arc<i32>: ThreadAware);
 assert_not_impl_any!(HashSet<i32>: ThreadAware);
 #[cfg(feature = "std")]
 assert_impl_all!(SocketAddr: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddrV4: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddrV6: ThreadAware);
 
 fn hash_of<T>(value: &T) -> u64
 where
@@ -60,6 +64,18 @@ fn sample_threads() -> [Thread; 2] {
         new_thread(owner.clone(), id, new_numa_node(0)),
         new_thread(owner, id, new_numa_node(1)),
     ]
+}
+
+#[cfg(feature = "std")]
+fn assert_relocation_is_noop<T>(mut value: T, source: &Thread, destination: &Thread)
+where
+    T: ThreadAware + Clone + PartialEq + std::fmt::Debug,
+{
+    let original = value.clone();
+
+    value.relocate(Some(source), destination);
+
+    assert_eq!(value, original);
 }
 
 #[test]
@@ -123,24 +139,15 @@ fn with_std_every_component_takes_part_in_equality() {
 
 #[cfg(feature = "std")]
 #[test]
-fn ipv4_socket_address_is_unchanged_by_relocation() {
+fn socket_address_types_are_unchanged_by_relocation() {
     let threads = sample_threads();
-    let original = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443));
-    let mut address = original;
+    let source = &threads[0];
+    let destination = &threads[1];
+    let ipv4 = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443);
+    let ipv6 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 7, 11);
 
-    address.relocate(Some(&threads[0]), &threads[1]);
-
-    assert_eq!(address, original);
-}
-
-#[cfg(feature = "std")]
-#[test]
-fn ipv6_socket_address_is_unchanged_by_relocation() {
-    let threads = sample_threads();
-    let original = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 7, 11));
-    let mut address = original;
-
-    address.relocate(Some(&threads[0]), &threads[1]);
-
-    assert_eq!(address, original);
+    assert_relocation_is_noop(ipv4, source, destination);
+    assert_relocation_is_noop(SocketAddr::V4(ipv4), source, destination);
+    assert_relocation_is_noop(ipv6, source, destination);
+    assert_relocation_is_noop(SocketAddr::V6(ipv6), source, destination);
 }
