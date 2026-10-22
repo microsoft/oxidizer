@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-mod panic_support;
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -16,8 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
 
-use panic_support::runtime;
 use testing_aids::TEST_TIMEOUT;
+
+use crate::runtime_support::runtime;
 
 testing_aids::init_tracing!();
 

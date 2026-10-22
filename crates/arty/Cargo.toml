@@ -111,6 +111,10 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync"]
 name = "io"
 path = "tests/io/main.rs"
 
+[[test]]
+name = "panic"
+path = "tests/panic/main.rs"
+
 [[bench]]
 name = "arty_scheduling"
 harness = false

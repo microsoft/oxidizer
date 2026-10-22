@@ -6,10 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-mod panic_support;
-
-mod support;
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,10 +14,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
+
+use crate::runtime_support::runtime;
+use crate::support::{self, JoinHandleExt as _};
 
 testing_aids::init_tracing!();
 
@@ -184,7 +181,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         }
 
         let runtime = runtime();
-        let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
+        let operations = support::runtime_operations(&runtime);
         let (started, received) = mpsc::channel();
         let finish = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));

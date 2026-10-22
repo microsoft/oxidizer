@@ -6,16 +6,13 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-mod panic_support;
-
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use thread_aware::{Thread, ThreadAware};
+
+use crate::runtime_support::runtime;
+use crate::support::JoinHandleExt as _;
 
 testing_aids::init_tracing!();
 

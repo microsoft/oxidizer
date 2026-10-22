@@ -6,10 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-mod panic_support;
-
-mod support;
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,10 +14,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
+
+use crate::runtime_support::runtime;
+use crate::support::{self, JoinHandleExt as _};
 
 testing_aids::init_tracing!();
 
@@ -64,7 +61,7 @@ fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
     let repetitions = if cfg!(miri) { 2 } else { 24 };
     for _ in 0..repetitions {
         let runtime = runtime();
-        let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
+        let operations = support::runtime_operations(&runtime);
         let (first, received) = mpsc::channel();
         let ready = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));

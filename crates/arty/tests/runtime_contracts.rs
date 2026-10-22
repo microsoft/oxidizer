@@ -360,7 +360,7 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
-    let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
+    let operations = support::runtime_operations(&runtime);
     operations.request_stop();
     operations.request_stop();
     runtime.stop().unwrap();
