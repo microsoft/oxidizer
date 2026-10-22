@@ -407,7 +407,7 @@ mod tests {
     fn exit_when_closed_with_insufficient_failures_remains_unchanged() {
         let engine = create_test_engine();
 
-        // Record some failures but not enough to exceed a threshold (need at least 10 requests)
+        // Record some failures but not enough to reach a threshold (need at least 10 requests)
         for _ in 0..5 {
             engine.enter();
             engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);

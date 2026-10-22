@@ -38,7 +38,7 @@ async fn main() -> Result<(), AppError> {
     Ok(())
 }
 
-// Return a temporary error for 20% of calls.
+// Return a temporary error for 10% of calls.
 async fn execute_operation(input: String) -> Result<String, Error> {
     if fastrand::i16(0..10) > 8 {
         Err(Error::other("transient execution error"))

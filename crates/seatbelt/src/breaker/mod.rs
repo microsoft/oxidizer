@@ -69,7 +69,7 @@
 //! - Half-open: The breaker sends a limited number of probes to test the service.
 //!
 //! ```text
-//! ┌────────┐      Failure threshold exceeded      ┌──────────┐
+//! ┌────────┐       Failure threshold reached      ┌──────────┐
 //! │ Closed │ ────────────────────────────────────▶│   Open   │
 //! └────────┘                                      └──────────┘
 //!      ▲                                                 │
@@ -140,7 +140,7 @@
 //!
 //! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
-//! | Failure threshold | `0.1` (10%) | Circuit opens when failure rate exceeds this percentage | [`failure_threshold`][BreakerLayer::failure_threshold] |
+//! | Failure threshold | `0.1` (10%) | Circuit opens when failure rate reaches this percentage | [`failure_threshold`][BreakerLayer::failure_threshold] |
 //! | Minimum throughput | `100` executions | Minimum number of results before the circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
 //! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
@@ -159,7 +159,7 @@
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Breaker::layer`]
 //!   - `resilience.event.name`: One of:
-//!     - `circuit_opened`: When the circuit transitions to open state due to failure threshold being exceeded
+//!     - `circuit_opened`: When the circuit opens because the failure rate reached the threshold
 //!     - `circuit_closed`: When the circuit transitions to closed state after successful probing
 //!     - `circuit_rejected`: When an input is rejected due to the circuit being in open state
 //!     - `circuit_probe`: When a probe is executed in half-open state
@@ -235,7 +235,7 @@
 //!         })
 //!         // Provide output while the circuit is open.
 //!         .rejected_input_error(|_input, _args| {
-//!             "service temporarily unavailable due to exceeding failure threshold".to_string()
+//!             "service temporarily unavailable because the failure rate reached the threshold".to_string()
 //!         })
 //!         // Set optional configuration.
 //!         .half_open_mode(HalfOpenMode::progressive(None)) // close the circuit gradually (default)

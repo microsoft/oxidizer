@@ -74,7 +74,7 @@ async fn main() -> Result<(), AppError> {
     Ok(())
 }
 
-// Succeed for 20% of calls. Most failures cause a retry.
+// Succeed for 30% of calls. Most failures cause a retry.
 async fn send_request(input: Request<String>) -> Result<Response<String>, Error> {
     if fastrand::i16(0..10) > 2 {
         Err(Error::other("transient execution error"))

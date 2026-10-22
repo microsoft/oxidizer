@@ -60,7 +60,7 @@
 //! The middleware selects a retry delay in this order:
 //!
 //! 1. Recovery delay override: If [`RetryLayer::recovery_with`] returns
-//!    [`RecoveryInfo::retry().delay()`][crate::RecoveryInfo::delay] or [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] with a specific duration, this delay
+//!    [`RecoveryInfo::retry().delay()`][crate::RecoveryInfo::delay] or [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] with a specific duration,
 //!    the middleware uses this delay.
 //!
 //! 2. Backoff strategy: If recovery does not set a delay, the middleware uses the configured backoff.
