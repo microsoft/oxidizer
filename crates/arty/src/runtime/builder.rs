@@ -43,7 +43,8 @@ pub struct RuntimeBuilder {
 impl RuntimeBuilder {
     /// Sets the worker-count policy.
     ///
-    /// The runtime starts one async worker per selected processor.
+    /// The runtime assigns each async worker to one available processor.
+    /// Exact policies can assign multiple worker threads to one processor.
     /// The default is [`WorkersPolicy::default`]. This does not set blocking-pool
     /// limits; use [`blocking_pool`](Self::blocking_pool) for those.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
@@ -181,8 +182,7 @@ impl RuntimeBuilder {
     /// # Errors
     ///
     /// Returns [`Error`] if the worker count or shared blocking-pool limit is
-    /// zero, or if the worker policy cannot be satisfied, such as an
-    /// [`exactly`](WorkersPolicy::exactly) request exceeding available processors.
+    /// zero.
     ///
     /// # Panics
     ///

@@ -158,16 +158,19 @@ use arty_io_core as _;
 /// Without options, the attribute uses
 /// [`Runtime::new`](crate::runtime::Runtime::new). The optional configuration is:
 ///
-/// - `workers = N` caps the number of async workers. Use an integer literal
+/// - `workers = N` starts exactly `N` async workers. Use an integer literal
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
-///   are available, Arty starts fewer workers; zero fails at construction.
+///   are available, multiple worker threads share each processor. Zero fails at
+///   construction.
 ///
-/// A worker limit does not limit blocking-pool threads. Without a limit, the
+/// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// Each worker uses an operating-system thread and its configured stack.
+/// Large counts can exceed operating-system thread or memory limits.
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an exact/all-workers policy must be configured.
+/// or an at-most/all-workers policy must be configured.
 ///
 /// # Panics
 ///
@@ -196,7 +199,7 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
-/// Cap the async worker count:
+/// Set the async worker count:
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]

@@ -9,8 +9,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// Owns an Arty runtime's workers and their shutdown.
 ///
 /// Use this type to run async work from synchronous code. Construction
-/// starts one async worker per selected processor. A task stays on its
-/// worker until it finishes or is cancelled.
+/// assigns each async worker to an available processor. Exact worker policies
+/// can assign multiple workers to one processor. A task stays on its worker
+/// until it finishes or is cancelled.
 ///
 /// Borrow its [`RuntimeScheduler`] through
 /// [`scheduler`](Self::scheduler) to submit work or block on

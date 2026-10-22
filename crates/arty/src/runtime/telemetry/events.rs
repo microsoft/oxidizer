@@ -90,7 +90,7 @@ pub(crate) struct RuntimeStarted {
     /// Processors available on the system.
     #[dimension(log = "processors.available", metric = "processors.available")]
     pub processors_available: SystemMetricCount,
-    /// Processors actually used (one async worker each).
+    /// Distinct processors assigned to async workers.
     #[dimension(log = "processors.used", metric = "processors.used")]
     pub processors_used: SystemMetricCount,
     #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]

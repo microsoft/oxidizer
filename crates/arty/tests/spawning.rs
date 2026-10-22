@@ -198,11 +198,7 @@ impl ThreadAware for DestinationProbe {
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
 async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Builtins) {
-    let expected_workers = if cfg!(miri) {
-        2
-    } else {
-        many_cpus::SystemHardware::current().processors().len().min(2)
-    };
+    let expected_workers = 2;
     let home = cx.thread().id();
     let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();
     let tasks: Vec<_> = cx
