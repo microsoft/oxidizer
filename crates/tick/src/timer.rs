@@ -99,7 +99,7 @@ pub struct Timer {
     period: Duration,
     clock: Clock,
     // Currently scheduled timer. This value is not initialized until the first `next` call.
-    current_timer: Option<TimerKey>,
+    current: Option<TimerKey>,
     current_waker: Option<Waker>,
 }
 
@@ -129,7 +129,7 @@ impl Timer {
 
         Self {
             // The timer is not registered yet; it will be registered by the first `next` call.
-            current_timer: None,
+            current: None,
             current_waker: None,
             period,
             clock: clock.clone(),
@@ -146,7 +146,7 @@ impl Timer {
 
     fn register_timer(&mut self, waker: &Waker) {
         if let Some(when) = self.clock.timer_instant().checked_add(self.period) {
-            self.current_timer = Some(self.clock.register_timer(when, waker.clone()));
+            self.current = Some(self.clock.register_timer(when, waker.clone()));
             self.current_waker = Some(waker.clone());
         } else {
             // The timer would tick so far in the future that we can assume
@@ -162,11 +162,11 @@ impl Timer {
             return Poll::Pending;
         }
 
-        if let Some(key) = self.current_timer {
+        if let Some(key) = self.current {
             let observed_at = self.clock.timer_instant();
             if key.tick() <= observed_at {
                 // Reset the timer. It will be registered again on the next poll.
-                self.current_timer = None;
+                self.current = None;
                 self.current_waker = None;
 
                 // Unregister the timer, just in case this call was explicit and not due to
@@ -183,7 +183,7 @@ impl Timer {
                 self.current_waker = Some(cx.waker().clone());
                 Poll::Pending
             } else {
-                self.current_timer = None;
+                self.current = None;
                 self.current_waker = None;
                 Poll::Ready(TimerTick {
                     observed_at: self.clock.timer_instant(),
@@ -202,7 +202,7 @@ impl Timer {
 
 impl Drop for Timer {
     fn drop(&mut self) {
-        if let Some(key) = self.current_timer {
+        if let Some(key) = self.current {
             self.clock.unregister_timer(key);
         }
     }
@@ -232,7 +232,7 @@ mod tests {
         let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
         let first_context = Context::from_waker(&first_waker);
         assert!(timer.poll_next_tick(&first_context).is_pending());
-        clock.unregister_timer(timer.current_timer.unwrap());
+        clock.unregister_timer(timer.current.unwrap());
 
         let second_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
         let second_context = Context::from_waker(&second_waker);

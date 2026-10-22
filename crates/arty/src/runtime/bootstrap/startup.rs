@@ -494,7 +494,7 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
             },
-            &InactiveClock::default(),
+            &InactiveClock::new_isolated(),
             sink,
             &ThreadBuilder::default(),
             processors,
