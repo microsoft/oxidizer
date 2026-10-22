@@ -455,10 +455,10 @@ pub(crate) fn field_predicates(ty: &syn::Type, redaction: &FieldRedaction, param
     match redaction {
         // At most two predicates are needed, so keep them inline instead of
         // allocating a Vec for each generic field.
-        FieldRedaction::Unredacted => smallvec![
+        FieldRedaction::Unredacted => SmallVec::from_buf([
             syn::parse_quote!(#owned: ::core::clone::Clone),
             syn::parse_quote!(::observed::Value: ::core::convert::From<#owned>),
-        ],
+        ]),
         FieldRedaction::DataClass(_) => {
             // The value is borrowed, not cloned, so the bound is `Display` on
             // the pointee: `Sensitive<T>: RedactedDisplay` holds when
