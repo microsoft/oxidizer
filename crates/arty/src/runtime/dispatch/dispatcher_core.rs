@@ -176,11 +176,7 @@ impl DispatcherCore {
         self.spawn_relocating_on_worker(worker_index, TaskPlacement::Any, future_factory)
     }
 
-    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(
-        &self,
-        worker_index: WorkerIndex,
-        future_factory: FF,
-    ) -> JoinHandle<R>
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
@@ -262,29 +258,14 @@ impl DispatcherCore {
         self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
     }
 
-    pub(crate) fn spawn_at_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
-    where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.enqueue(worker_index, TaskPlacement::SpecificThread, future_factory)
-    }
-
-    fn spawn_relocating_on_worker<FF, F, R>(
-        &self,
-        worker_index: WorkerIndex,
-        placement: TaskPlacement,
-        future_factory: FF,
-    ) -> JoinHandle<R>
+    fn spawn_relocating_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        self.enqueue(worker_index, placement, future_factory)
-            .relocate_result_from(source)
+        self.enqueue(worker_index, placement, future_factory).relocate_result_from(source)
     }
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
