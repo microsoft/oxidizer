@@ -52,7 +52,7 @@ use crate::timers::TimerKey;
 /// # Testing
 ///
 /// Real waits make tests slow and nondeterministic. Enable `test-util` and use
-/// [`ClockControl`] to advance time without waiting.
+/// [`ClockControl`][crate::ClockControl] to advance time without waiting.
 ///
 /// # Cloning and shared state
 ///
