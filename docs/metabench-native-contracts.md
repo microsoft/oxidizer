@@ -8,8 +8,13 @@ contracts and is required by the stable **Required repository checks** fan-in.
 The report contract runs Callgrind and checks that schema-v7 summaries produce
 JSON and Markdown reports with instruction counts. It selects `--gungraun`
 without Cargo's `--bench` argument so explicit measurement intent is covered
-independently of Cargo's invocation. These are correctness checks, not timed
-performance measurements.
+independently of Cargo's invocation. It also covers forwarded `--test=false`.
+Smoke contracts cover forwarded `--test=true` and top-level `--test` priority.
+Each report run uses its own output directory to avoid reading an earlier result.
+These are correctness checks, not timed performance measurements.
+
+The job has a 30-minute limit, including tool installation and compilation.
+The report cases use the small checksum workload in `metabench_basic`.
 
 To run the same required tier locally on Linux:
 

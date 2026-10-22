@@ -6,6 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use std::{env, mem};
 
+use clap::builder::{BoolishValueParser, TypedValueParser as _};
+
 use crate::error::Error;
 use crate::mode::Mode;
 use crate::report::DEFAULT_REGRESSION_THRESHOLD;
@@ -110,6 +112,8 @@ impl Arguments {
         if !self.native_args.vtune.is_empty() && !modes.contains(&Mode::Vtune) {
             return Err(Error::ArgumentsForUnselectedEngine(Mode::Vtune.as_str()));
         }
+        let force_smoke = self.smoke();
+        normalize_gungraun_test_arguments(&mut self.native_args.gungraun, force_smoke)?;
         if modes.contains(&Mode::Criterion)
             || modes.contains(&Mode::Allocations)
             || modes.contains(&Mode::Perf)
@@ -387,6 +391,24 @@ fn push_argument_unique(arguments: &mut Vec<OsString>, argument: &str) {
     }
 }
 
+fn normalize_gungraun_test_arguments(arguments: &mut [OsString], force_smoke: bool) -> Result<(), Error> {
+    for argument in arguments {
+        if !argument.as_encoded_bytes().starts_with(b"--test=") {
+            continue;
+        }
+        let value = argument
+            .to_str()
+            .and_then(|argument| argument.strip_prefix("--test="))
+            .ok_or_else(|| Error::InvalidGungraunTestArgument(argument.clone()))?;
+        // Use the same boolean parser as Gungraun.
+        let smoke = BoolishValueParser::new()
+            .parse_ref(&clap::Command::new("gungraun"), None, OsStr::new(value))
+            .map_err(|_error| Error::InvalidGungraunTestArgument(argument.clone()))?;
+        *argument = if force_smoke || smoke { "--test" } else { "--test=false" }.into();
+    }
+    Ok(())
+}
+
 fn parse_threshold(value: &OsStr) -> Result<f64, Error> {
     let text = value.to_string_lossy();
     let threshold = text
@@ -478,15 +500,128 @@ mod tests {
             (&["--gungraun", "--bench", "--test"][..], &["--test"][..]),
             (&["--gungraun", "--gungraun-arg=--bench"][..], &["--bench"][..]),
             (&["--gungraun", "--gungraun-arg=--test"][..], &["--test"][..]),
+            (&["--gungraun", "--gungraun-arg=--test=true"][..], &["--test"][..]),
+            (&["--gungraun", "--gungraun-arg=--test=false"][..], &["--test=false", "--bench"][..]),
+            (&["--gungraun", "--gungraun-arg", "--test=true"][..], &["--test"][..]),
             (&["--gungraun", "--", "--bench"][..], &["--bench"][..]),
             (&["--gungraun", "--", "--test"][..], &["--test"][..]),
+            (&["--gungraun", "--", "--test=true"][..], &["--test"][..]),
+            (&["--gungraun", "--", "--test=false"][..], &["--test=false", "--bench"][..]),
             (&["--gungraun", "--list"][..], &["--bench", "--list"][..]),
+            (
+                &["--gungraun", "--list", "--gungraun-arg=--test=true"][..],
+                &["--test", "--list"][..],
+            ),
+            (
+                &["--gungraun", "--list", "--gungraun-arg=--test=false"][..],
+                &["--test=false", "--bench", "--list"][..],
+            ),
             (&["--gungraun", "--test", "--list"][..], &["--test", "--list"][..]),
         ] {
             let mut arguments = parse(options, None).unwrap();
             arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
             assert_eq!(arguments.args_for(Mode::Gungraun), expected);
         }
+    }
+
+    #[test]
+    fn gungraun_test_values_match_native_boolean_spellings() {
+        for (values, smoke, expected) in [
+            (&["y", "yes", "t", "true", "on", "1", "TRUE", "YeS"][..], true, &["--test"][..]),
+            (
+                &["n", "no", "f", "false", "off", "0", "FALSE", "oFf"][..],
+                false,
+                &["--test=false", "--bench"][..],
+            ),
+        ] {
+            for value in values {
+                let option = format!("--gungraun-arg=--test={value}");
+                let mut arguments = parse(&["--gungraun", &option], None).unwrap();
+                arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
+                assert_eq!(arguments.smoke(), smoke, "{value}");
+                assert_eq!(arguments.args_for(Mode::Gungraun), expected, "{value}");
+                assert_eq!(arguments.criterion_args(), &[] as &[OsString]);
+            }
+        }
+    }
+
+    #[test]
+    fn gungraun_test_values_follow_shared_smoke_intent() {
+        for (options, criterion) in [
+            (&["--gungraun", "--test", "--gungraun-arg=--test=false"][..], &[][..]),
+            (&["--gungraun", "--gungraun-arg=--test=off", "--test"][..], &[][..]),
+            (&["--gungraun", "--test", "--", "--test=0"][..], &[][..]),
+            (&["--criterion", "--gungraun", "--gungraun-arg=--test=yes"][..], &["--test"][..]),
+            (
+                &["--criterion", "--gungraun", "--criterion-arg=--test", "--gungraun-arg=--test=false"][..],
+                &["--test"][..],
+            ),
+        ] {
+            let mut arguments = parse(options, None).unwrap();
+            arguments.finalize_native_args(&arguments.modes.clone()).unwrap();
+            assert!(arguments.smoke());
+            assert_eq!(arguments.args_for(Mode::Gungraun), ["--test"]);
+            assert_eq!(arguments.criterion_args(), criterion);
+        }
+    }
+
+    #[test]
+    fn gungraun_test_normalization_preserves_other_arguments_and_is_repeatable() {
+        for (value, expected) in [
+            ("Yes", &["--baseline=before", "--test", "checksum", "--list"][..]),
+            ("off", &["--baseline=before", "--test=false", "checksum", "--bench", "--list"][..]),
+        ] {
+            let option = format!("--gungraun-arg=--test={value}");
+            let mut arguments = parse(
+                &[
+                    "--gungraun",
+                    "--gungraun-arg=--baseline=before",
+                    &option,
+                    "--gungraun-arg=checksum",
+                    "--list",
+                ],
+                None,
+            )
+            .unwrap();
+            for _ in 0..2 {
+                arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
+                assert_eq!(arguments.args_for(Mode::Gungraun), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_gungraun_test_values_fail_before_worker_launch() {
+        for value in ["", "maybe", "2", "true=false", " true", "false "] {
+            let native_argument = format!("--test={value}");
+            let mut arguments = parse(&["--gungraun", "--test", "--gungraun-arg", &native_argument], None).unwrap();
+            assert!(matches!(
+                arguments.finalize_native_args(&[Mode::Gungraun]).unwrap_err(),
+                Error::InvalidGungraunTestArgument(actual) if actual == OsStr::new(&native_argument)
+            ));
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn non_unicode_gungraun_test_values_are_rejected() {
+        #[cfg(unix)]
+        let native_argument = {
+            use std::os::unix::ffi::OsStringExt as _;
+            OsString::from_vec(b"--test=\xff".to_vec())
+        };
+        #[cfg(windows)]
+        let native_argument = {
+            use std::os::windows::ffi::OsStringExt as _;
+            let mut value: Vec<u16> = "--test=".encode_utf16().collect();
+            value.push(0xd800);
+            OsString::from_wide(&value)
+        };
+        let mut arguments = Arguments::parse_from(["--gungraun".into(), "--gungraun-arg".into(), native_argument.clone()], None).unwrap();
+        assert!(matches!(
+            arguments.finalize_native_args(&[Mode::Gungraun]).unwrap_err(),
+            Error::InvalidGungraunTestArgument(actual) if actual == native_argument
+        ));
     }
 
     #[test]

@@ -3490,6 +3490,7 @@ version = "0.2.1"
 dependencies = [
  "alloc_tracker",
  "bolero",
+ "clap",
  "command-group",
  "criterion",
  "either-or-both",

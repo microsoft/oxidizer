@@ -639,12 +639,11 @@ fn gungraun_measurements_write_report() {
         return;
     }
 
-    let directory = tempfile::tempdir().unwrap();
-    let json = directory.path().join("report.json");
-    let markdown = directory.path().join("report.md");
-    let output = run_target(
-        "metabench_basic",
-        &[
+    for test_option in [None, Some("--gungraun-arg=--test=false")] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        let markdown = directory.path().join("report.md");
+        let mut arguments: Vec<&std::ffi::OsStr> = vec![
             "--gungraun".as_ref(),
             "--show-engine-output".as_ref(),
             "--no-baseline".as_ref(),
@@ -652,22 +651,26 @@ fn gungraun_measurements_write_report() {
             json.as_os_str(),
             "--export-md".as_ref(),
             markdown.as_os_str(),
-        ],
-    );
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
-    let entries = report["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["identity"], "basic/checksum/rolling");
-    let result = &entries[0]["results"]["gungraun.callgrind"];
-    assert!(result["metrics"]["Ir"]["value"].as_u64().is_some_and(|value| value > 0));
-    assert!(!result["raw_artifacts"].as_array().unwrap().is_empty());
-    assert!(std::fs::read_to_string(&markdown).unwrap().contains("basic/checksum/rolling"));
+        ];
+        if let Some(option) = test_option {
+            arguments.push(option.as_ref());
+        }
+        let output = run_target("metabench_basic", &arguments);
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        let entries = report["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["identity"], "basic/checksum/rolling");
+        let result = &entries[0]["results"]["gungraun.callgrind"];
+        assert!(result["metrics"]["Ir"]["value"].as_u64().is_some_and(|value| value > 0));
+        assert!(!result["raw_artifacts"].as_array().unwrap().is_empty());
+        assert!(std::fs::read_to_string(&markdown).unwrap().contains("basic/checksum/rolling"));
+    }
 }
 
 #[test]
@@ -1381,16 +1384,21 @@ fn default_engine_smoke_checks_do_not_publish_measurements() {
     if !gungraun_runner_available() {
         return;
     }
-    let directory = tempfile::tempdir().unwrap();
-    let json = directory.path().join("report.json");
-    std::fs::write(&json, b"existing baseline").unwrap();
-    let output = run_target(
-        "measurement_boundaries",
-        &["--test".as_ref(), "--export-json".as_ref(), json.as_os_str()],
-    );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    for options in [
+        &["--test"][..],
+        &["--gungraun", "--gungraun-arg=--test=true"][..],
+        &["--gungraun", "--test", "--gungraun-arg=--test=false"][..],
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        std::fs::write(&json, b"existing baseline").unwrap();
+        let mut arguments: Vec<&std::ffi::OsStr> = options.iter().map(std::ffi::OsStr::new).collect();
+        arguments.extend(["--export-json".as_ref(), json.as_os_str()]);
+        let output = run_target("measurement_boundaries", &arguments);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    }
     with_cargo_lock(|| {
         let root = cargo_target().join("metabench/measurement_boundaries");
         let reports = ["report.json", "report.md"].map(|name| ReportSnapshot::new(root.join(name)));
