@@ -88,10 +88,10 @@ a spurious wake.
 The [ready benchmarks](../benches/performables_ready.rs) separate setup and
 teardown from measured operations. The
 [watch benchmarks](../benches/performables_watch.rs) retain workers between
-samples and include dispatch barriers equally for every control. A driver-free
-Tick clock measures that interval. The standard watch control is a mutex-backed
-fixture, not a watch primitive provided by `std`; its semantics and cancellation
-cost must remain explicit when interpreting comparisons.
+samples and include dispatch barriers equally for every control.
+`std::time::Instant` measures that interval. The standard watch control is a
+mutex-backed fixture, not a watch primitive provided by `std`. Its semantics and
+cancellation cost must remain explicit when interpreting comparisons.
 
 ## Mutation watchdogs
 
