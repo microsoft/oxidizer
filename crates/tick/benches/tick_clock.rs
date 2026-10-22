@@ -21,7 +21,7 @@ struct ClockState {
 }
 
 fn clock_state() -> ClockState {
-    let (clock, driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     ClockState { clock, driver }
 }
 
@@ -33,7 +33,7 @@ struct AdvanceState {
 }
 
 fn advance_state(timer_count: usize, ready: bool) -> AdvanceState {
-    let (clock, driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     let now = Instant::now();
     let duration = Duration::from_secs(if ready { 1 } else { 60 });
     let mut delays = Vec::with_capacity(timer_count);

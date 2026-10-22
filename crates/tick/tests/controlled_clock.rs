@@ -421,7 +421,7 @@ fn timeout_reports_error_with_controlled_time() {
 
 #[test]
 fn isolated_relocation_keeps_timer_deadlines_independent() {
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let mut inactive_1 = root.clone();
     let mut inactive_2 = root;
     let builder = ThreadBuilder::default();
