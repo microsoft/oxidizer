@@ -138,7 +138,7 @@ fn gungraun_runner_available() -> bool {
         assert!(available, "required native contracts need the matching gungraun-runner on PATH");
         assert_eq!(
             String::from_utf8_lossy(&version.unwrap().stdout).trim(),
-            "gungraun-runner 0.19.4",
+            "gungraun-runner 0.20.0",
             "required native contracts must match the workspace Gungraun version"
         );
         assert!(
@@ -172,7 +172,7 @@ edition = "2024"
 [dependencies]
 metabench = {{ path = {dependency} }}
 criterion = {{ version = "0.8.2", default-features = false }}
-gungraun = "=0.19.4"
+gungraun = "=0.20.0"
 "#
             ),
         )
@@ -628,6 +628,44 @@ fn gungraun_listing_is_forwarded() {
             .any(|line| { line.contains("_checksums") && line.contains("_rolling") })
     );
     assert!(!stdout.contains("Running gungraun benchmarks"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gungraun_measurements_write_report() {
+    if !gungraun_runner_available() {
+        eprintln!("skipping Gungraun measurements because gungraun-runner is unavailable");
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let json = directory.path().join("report.json");
+    let markdown = directory.path().join("report.md");
+    let output = run_target(
+        "metabench_basic",
+        &[
+            "--gungraun".as_ref(),
+            "--no-baseline".as_ref(),
+            "--export-json".as_ref(),
+            json.as_os_str(),
+            "--export-md".as_ref(),
+            markdown.as_os_str(),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+    let entries = report["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["identity"], "basic/checksum/rolling");
+    let result = &entries[0]["results"]["gungraun.callgrind"];
+    assert!(result["metrics"]["Ir"]["value"].as_u64().is_some_and(|value| value > 0));
+    assert!(!result["raw_artifacts"].as_array().unwrap().is_empty());
+    assert!(std::fs::read_to_string(&markdown).unwrap().contains("basic/checksum/rolling"));
 }
 
 #[test]

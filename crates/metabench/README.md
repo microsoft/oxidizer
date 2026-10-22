@@ -187,7 +187,7 @@ metabench::main!(
 ## Configure Gungraun
 
 The installed `gungraun-runner` must match the Gungraun library version
-(currently 0.19.4).
+(currently 0.20.0). Metabench reads that runner’s schema-v7 summaries.
 
 Benchmark-level `gungraun_config`, `gungraun_setup`, and
 `gungraun_teardown` options work with native `#[bench::...]` and
