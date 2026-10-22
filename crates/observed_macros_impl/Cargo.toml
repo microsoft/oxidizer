@@ -43,8 +43,14 @@ syn = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta = { workspace = true }
+metabench = { path = "../metabench" }
 testing_aids = { path = "../testing_aids" }
+
+[[bench]]
+name = "observed_event"
+harness = false
 
 # >>> anvil-managed: anvil-lints
 [lints]
