@@ -39,10 +39,10 @@ fn system_clock_reads_current_system_time() {
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
-fn simple_clock_try_system_time_as_converts_successfully() {
+fn simple_clock_system_time_as_converts_successfully() {
     let before = SystemTime::now();
     let clock = SimpleClock::new_system();
-    let converted = clock.try_system_time_as::<SystemTime>().unwrap();
+    let converted = clock.system_time_as::<SystemTime>();
     let after = SystemTime::now();
 
     assert!((before..=after).contains(&converted));
@@ -74,10 +74,10 @@ fn system_clocks_can_toggle_fast_instant_retrieval() {
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
-fn try_system_time_as_converts_to_a_supported_public_type() {
+fn system_time_as_converts_to_a_supported_public_type() {
     let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
 
-    let converted: SystemTime = clock.try_system_time_as().unwrap();
+    let converted: SystemTime = clock.system_time_as();
 
     assert!(converted <= SystemTime::now());
 }

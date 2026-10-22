@@ -60,7 +60,7 @@ impl MyApi {
         println!(
             "Work done. Elapsed: {}ms, Timestamp: {}",
             watch.elapsed().as_millis(),
-            self.clock.try_system_time_as::<Iso8601>()?
+            self.clock.system_time_as::<Iso8601>()
         );
 
         Ok(())

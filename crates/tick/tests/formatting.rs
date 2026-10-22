@@ -12,6 +12,8 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use jiff::Timestamp;
+#[cfg(feature = "test-util")]
+use tick::Clock;
 use tick::SystemTimeExt;
 use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 
@@ -21,6 +23,18 @@ fn format_types_expose_their_documented_value_traits() {
     static_assertions::assert_impl_all!(Iso8601: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
     static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
+}
+
+#[cfg(feature = "test-util")]
+#[test]
+fn system_time_as_supports_every_tick_format_for_normalized_clock_data() {
+    let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_722_980_600);
+    let clock = Clock::new_frozen_at(time);
+
+    assert_eq!(SystemTime::from(clock.system_time_as::<Iso8601>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<EcmaScript>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<Rfc2822>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<UnixSeconds>()), time);
 }
 
 #[test]

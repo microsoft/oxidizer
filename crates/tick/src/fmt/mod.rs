@@ -26,8 +26,10 @@
 //! always infallible.
 //!
 //! To retrieve the current system time in the respective format, use
-//! [`Clock::try_system_time_as`][crate::Clock::try_system_time_as]. It retrieves the current
-//! system time and performs the target type's [`TryFrom`] conversion.
+//! [`Clock::system_time_as`][crate::Clock::system_time_as]. This intentionally infallible
+//! convenience is for normalized production clock data and formats supported by `tick`.
+//! Use [`Clock::system_time`][crate::Clock::system_time] with the target type's [`TryFrom`]
+//! implementation when conversion failure is part of the caller's expected control flow.
 //!
 //! # Representable range
 //!
