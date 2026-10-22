@@ -47,9 +47,16 @@ impl Driver for ExampleDriver {
 
 #[arty::main(workers = 2)]
 async fn main(builtins: Builtins) -> Result<(), JoinError> {
-    let tasks = builtins.scheduler().spawn_everywhere(builtins.clone(), |worker| async move {
-        let _ = worker.io().context::<ExampleContext>(&());
-    });
+    let tasks: Vec<_> = builtins
+        .operations()
+        .workers()
+        .into_iter()
+        .map(|worker| {
+            builtins.scheduler().spawn_at(worker, builtins.clone(), |worker| async move {
+                let _ = worker.io().context::<ExampleContext>(&());
+            })
+        })
+        .collect();
 
     for task in tasks {
         task.await?;

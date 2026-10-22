@@ -174,7 +174,7 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker.spawn(async move |_| completed.send(()).unwrap());
     let result = completion.recv_timeout(DRIVER_PROGRESS_TIMEOUT);
     if let Err(error) = result {
-        RuntimeOperations::from(&runtime).request_stop();
+        runtime_operations(&runtime).request_stop();
         scenario.wake_driver_interrupts();
         runtime.stop().unwrap();
         panic!("new runtime work did not interrupt the primary wait: {error}");

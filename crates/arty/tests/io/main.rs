@@ -561,6 +561,13 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
+fn runtime_operations(runtime: &Runtime) -> RuntimeOperations {
+    runtime
+        .scheduler()
+        .block_on(async |builtins| builtins.operations().clone())
+        .unwrap()
+}
+
 fn runtime_with_telemetry(workers: usize) -> (Runtime, MockProcessor) {
     let (sink, processor) = test_emitter(TEST_ID);
     let runtime = Runtime::builder()
