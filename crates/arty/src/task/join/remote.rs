@@ -7,10 +7,17 @@ use std::task::{self, Poll};
 use arty_executor::ShutdownCause;
 use arty_executor::remote::JoinHandle as RemoteJoinHandle;
 use performables::arc::Arc;
+use thread_aware::{Thread, ThreadAware};
 
 use super::JoinError;
 use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
+use crate::task::Scheduler;
+
+struct ResultRelocation<R> {
+    source: Thread,
+    relocate: fn(&mut R, Option<&Thread>, &Thread),
+}
 
 /// A handle for receiving an async or blocking task's result.
 ///
@@ -23,11 +30,18 @@ use crate::runtime::blocking_worker::is_current_blocking_pool;
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
+/// A result from [`Scheduler::spawn_anywhere`] is relocated to the joining
+/// Arty worker before it is returned. Joining from outside an Arty worker
+/// leaves its association unchanged. Other submission methods do not relocate
+/// their results.
+///
 /// # Panics
 ///
 /// Panics if polled again after its result has been received. A blocking
 /// handle also panics if it is polled directly from a callback running in the
 /// same blocking pool.
+/// Result relocation also propagates a panic if its `ThreadAware`
+/// implementation violates the trait's non-panicking contract.
 ///
 /// # Examples
 ///
@@ -49,6 +63,8 @@ where
     #[debug(ignore)]
     state: State<R>,
     blocking_pool: Option<Arc<()>>,
+    #[debug(ignore)]
+    relocation: Option<ResultRelocation<R>>,
 }
 
 enum State<R>
@@ -82,6 +98,7 @@ where
         Self {
             state: State::Pending(inner),
             blocking_pool: None,
+            relocation: None,
         }
     }
 
@@ -89,6 +106,7 @@ where
         Self {
             state: State::Error(Some(ImmediateError::Shutdown(cause))),
             blocking_pool: None,
+            relocation: None,
         }
     }
 
@@ -100,11 +118,23 @@ where
         Self {
             state: State::Error(Some(ImmediateError::InvalidDestination)),
             blocking_pool: None,
+            relocation: None,
         }
     }
 
     pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
         self.blocking_pool = Some(pool);
+        self
+    }
+
+    pub(crate) fn relocate_result_from(mut self, source: Thread) -> Self
+    where
+        R: ThreadAware,
+    {
+        self.relocation = Some(ResultRelocation {
+            source,
+            relocate: R::relocate,
+        });
         self
     }
 
@@ -131,7 +161,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
-        let result = match &mut this.state {
+        let mut result = match &mut this.state {
             State::Pending(inner) => match Pin::new(inner).poll(cx) {
                 Poll::Ready(result) => Poll::Ready(result.map_err(JoinError::from_executor)),
                 Poll::Pending => Poll::Pending,
@@ -142,6 +172,12 @@ where
                 .into_join_error())),
             State::Completed => unreachable!("JoinHandle polled after completion"),
         };
+        if let Poll::Ready(Ok(value)) = &mut result
+            && let Some(relocation) = this.relocation.as_ref()
+            && let Some(destination) = Scheduler::current_thread()
+        {
+            (relocation.relocate)(value, Some(&relocation.source), &destination);
+        }
         if result.is_ready() {
             this.state = State::Completed;
         }

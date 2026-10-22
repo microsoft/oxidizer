@@ -7,6 +7,7 @@ use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
 use performables::arc::Arc;
+use thread_aware::ThreadAware;
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
@@ -109,6 +110,28 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_relocating(future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        future_factory: FF,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_at_worker_relocating(worker_index, future_factory)
     }
 
     pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {

@@ -12,7 +12,7 @@ use nonempty::NonEmpty;
 use observed::emit;
 use performables::arc::Arc;
 use performables::sync::channel;
-use thread_aware::Thread;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
@@ -166,6 +166,29 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        let worker_index = self.next_worker_index();
+        self.spawn_relocating_on_worker(worker_index, TaskPlacement::Any, future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        future_factory: FF,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.spawn_relocating_on_worker(worker_index, TaskPlacement::SpecificThread, future_factory)
+    }
+
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.worker_indices.get(&thread_id).copied()
     }
@@ -246,6 +269,22 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         self.enqueue(worker_index, TaskPlacement::SpecificThread, future_factory)
+    }
+
+    fn spawn_relocating_on_worker<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: TaskPlacement,
+        future_factory: FF,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
+        self.enqueue(worker_index, placement, future_factory)
+            .relocate_result_from(source)
     }
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
