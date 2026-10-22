@@ -276,6 +276,18 @@
 //! An invocation
 //! without arguments is also smoke mode, matching Cargo's harness-free test
 //! invocation; pass an engine selector to request measurements directly.
+//!
+//! Gungraun also accepts `--test=true` and `--test=false`.
+//! Forward these forms with `--gungraun-arg`.
+//! When only Gungraun is selected, arguments after `--` accept these forms too.
+//! The true values are `true`, `t`, `yes`, `y`, `on`, and `1`.
+//! The false values are `false`, `f`, `no`, `n`, `off`, and `0`.
+//! Letter case does not matter.
+//!
+//! A true value selects smoke mode for the whole run.
+//! A false value keeps measurement mode unless another smoke request is present.
+//! Top-level `--test` takes priority.
+//!
 //! A measurement selection matching no cases fails and preserves existing reports.
 //! Failed multi-engine runs can write separate `.partial` reports but never
 //! replace the complete rolling baseline.
