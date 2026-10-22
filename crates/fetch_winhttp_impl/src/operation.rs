@@ -28,8 +28,9 @@
 
 use std::fmt;
 use std::mem::ManuallyDrop;
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::ptr::{NonNull, with_exposed_provenance_mut};
+use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
@@ -86,6 +87,8 @@ impl ContextInstallation {
         let Self { request, context } = self;
         let context = plurality::Box::into_raw(context);
         let mut raw_owner = RawContextOwner::new(context);
+        #[cfg(test)]
+        crate::mocks::record_context(context.as_ptr());
         let context_value = context.as_ptr().expose_provenance();
         let option_value = context_bytes(context_value);
 
@@ -155,6 +158,9 @@ impl Drop for RawContextOwner {
         let Some(context) = self.context.take() else {
             return;
         };
+
+        #[cfg(test)]
+        crate::mocks::forget_context(context.as_ptr());
 
         // SAFETY: plurality::Box::from_raw requires the exact pointer returned
         // by into_raw, the same allocator type, and exactly one reconstruction.
@@ -292,7 +298,7 @@ impl RequestGuard {
             receiver: ManuallyDrop::new(receiver),
             receiver_live: true,
             request: Some(request),
-            context: self.context_value(),
+            context: AssertUnwindSafe(self.context),
             request_slot: &mut self.request,
         }
     }
@@ -321,9 +327,18 @@ pub(crate) struct OperationFuture<'guard> {
     receiver: ManuallyDrop<RawReceiver<CompletionResult>>,
     receiver_live: bool,
     request: Option<RequestHandle>,
-    context: usize,
+    // Shared observation reads only atomic cold-connect state, even after an unwind.
+    context: AssertUnwindSafe<NonNull<RequestContext>>,
     request_slot: &'guard mut Option<RequestHandle>,
 }
+
+// SAFETY: The receiver, request handle and borrowed handle slot are Send. The
+// context is Sync and is only borrowed sharedly through this pointer. The
+// future's open request handle prevents HANDLE_CLOSING from reclaiming it
+// during access; cancellation destroys the receiver before closing that
+// handle. Moving the future transfers that close authority without allowing
+// another operation through the exclusively borrowed guard.
+unsafe impl Send for OperationFuture<'_> {}
 
 impl Future for OperationFuture<'_> {
     type Output = std::result::Result<CompletionResult, Disconnected>;
@@ -370,17 +385,14 @@ impl OperationFuture<'_> {
             .request
             .as_ref()
             .expect("cold-connect state is available only while an operation is pending");
-        let context = NonNull::new(with_exposed_provenance_mut::<RequestContext>(self.context))
-            .expect("OperationFuture retains the non-null installed request context");
         // SAFETY: NonNull::as_ref requires an aligned, dereferenceable pointer
         // to an initialized value that stays live and free of exclusive
-        // references for the borrow. The address round-trips the exposed
-        // provenance of the installed context, so it carries provenance for
-        // that allocation and is aligned and initialized; the request handle
-        // checked above is still open, so the reclaiming HANDLE_CLOSING
-        // notification cannot have run. No exclusive reference to an installed
-        // context exists, and the borrow ends with this statement.
-        unsafe { context.as_ref() }.cold_connect_state()
+        // references for the borrow. The pointer is the into_raw pointer of
+        // the installed context, so it is aligned and initialized; the request
+        // handle checked above is still open, so the reclaiming HANDLE_CLOSING
+        // notification cannot have run. No exclusive reference to an
+        // installed context exists, and the borrow ends with this statement.
+        unsafe { self.context.0.as_ref() }.cold_connect_state()
     }
 }
 
@@ -421,12 +433,12 @@ mod tests {
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
     use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard};
-    use crate::context::{CompletionResult, OperationBuffer, OperationKind};
+    use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
     use crate::mocks::{
@@ -470,6 +482,10 @@ mod tests {
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 0);
+        assert!(
+            std::panic::catch_unwind(|| context_pointer(closes.context.load(Ordering::SeqCst))).is_err(),
+            "failed installation must not retain a reclaimed context pointer"
+        );
 
         drop(session);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
@@ -513,6 +529,42 @@ mod tests {
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
+        assert!(
+            std::panic::catch_unwind(|| context_pointer(closes.context.load(Ordering::SeqCst))).is_err(),
+            "HANDLE_CLOSING must remove the retained context pointer"
+        );
+    }
+
+    #[test]
+    fn pending_future_observes_context_and_cancels_on_another_thread() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        // SAFETY: installed returned the recorded, live context, and finish
+        // below is its only reclamation. This notification carries no payload,
+        // runs on this thread before submission, and overlaps no notification
+        // or exclusive borrow of the context.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        }
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+
+        thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    assert_eq!(future.cold_connect_state(), ColdConnectState::Connecting);
+                    drop(future);
+                })
+                .join()
+                .unwrap();
+        });
+        assert!(guard.request_handle_taken());
+        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+
+        // SAFETY: the context remains installed, and joining the cancellation
+        // thread above leaves no notification or exclusive borrow outstanding.
+        // Consuming the guard prevents any use after this final reclamation.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
@@ -573,9 +625,8 @@ mod tests {
                 // SAFETY: complete requires an installed, not-yet-reclaimed
                 // context, a payload matching the notification, no overlapping
                 // notification, no outstanding exclusive borrow, and no use of
-                // the context after the reclaiming notification. The value
-                // handed to the submission closure round-trips the provenance
-                // the guard exposed for the installed context, which only
+                // the context after the reclaiming notification. The harness
+                // retained the installed context pointer, which only
                 // `finish` below reclaims, and the test joins this thread
                 // before that; a headers-available completion carries no
                 // payload; this is the only notification in flight; and a

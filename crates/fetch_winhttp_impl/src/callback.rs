@@ -34,7 +34,9 @@ use crate::error::WinHttpError;
 /// - `status_info` must be null or readable for `status_info_len` initialized
 ///   bytes, and must stay valid and unmodified until this function returns. A
 ///   zero `context` places no requirement on the payload, which is then never
-///   examined.
+///   examined. `WINHTTP_CALLBACK_STATUS_READ_COMPLETE` is also exempt from
+///   readability: its payload names the read buffer and is only compared
+///   against the submitted buffer, never dereferenced.
 /// - `WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING` must be the last notification
 ///   delivered for a handle, must be delivered exactly once for a handle whose
 ///   context was installed, and must not overlap another notification for that
@@ -53,7 +55,10 @@ pub(crate) unsafe extern "system" fn status_callback(
     // publishes that provenance with `expose_provenance` before the address is
     // handed to WinHTTP, which is what makes this reconstruction address the
     // context allocation rather than carry no provenance at all.
-    let context = with_exposed_provenance_mut::<RequestContext>(context);
+    let context = match context {
+        0 => std::ptr::null_mut(),
+        value => with_exposed_provenance_mut::<RequestContext>(value),
+    };
 
     // SAFETY: dispatch_completion requires a null context or the exact
     // plurality::Box::into_raw pointer of a live context, a payload readable

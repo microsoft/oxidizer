@@ -7,7 +7,7 @@
 //! requires a fully installed request context: a mock session handle, a mock
 //! connect handle, a pooled [`RequestContext`], and a
 //! [`RequestGuard`](crate::operation::RequestGuard) whose raw context pointer
-//! can be handed to [`dispatch_completion`] exactly as `WinHTTP` would. That
+//! can be handed to [`callback::dispatch_completion`] exactly as `WinHTTP` would. That
 //! setup is identical for every test that drives a callback, but the modules
 //! that need it - [`crate::operation`] for the handoff itself,
 //! [`crate::context`] for the state a callback records, and
@@ -26,7 +26,7 @@
 //! (implementation.md section 4.3).
 //!
 //! Delivering a notification is an `unsafe` operation here, exactly as it is
-//! in [`dispatch_completion`]: the payload the caller describes and the absence
+//! in [`callback::dispatch_completion`]: the payload the caller describes and the absence
 //! of an overlapping notification are properties no harness can inspect. The
 //! harness does record which contexts are installed, so that a pointer no
 //! installation produced, or one that `HANDLE_CLOSING` already reclaimed, is a
@@ -34,7 +34,7 @@
 //! narrows the caller's obligations, it does not discharge them.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use future_assert::FutureTestExt;
@@ -45,7 +45,7 @@ use windows::Win32::Networking::WinHttp::{
 };
 
 use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
-use crate::callback::dispatch_completion;
+use crate::callback;
 use crate::context::RequestContext;
 use crate::error::{WinHttpError, WinHttpOperation};
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
@@ -160,27 +160,44 @@ pub(crate) fn installed_context_value(value: usize) -> *mut RequestContext {
     record_installed(context_pointer(value))
 }
 
-/// Rebuilds a context pointer from the address `WinHTTP` was handed.
+/// Looks up the original context pointer for the address `WinHTTP` was handed.
 ///
-/// A harness that stores what its mock bindings observed holds the context as a
-/// plain address and must reconstruct the pointer to dispatch to it. The
-/// address round-trips the provenance `RequestGuard` exposed for the context,
-/// so the result addresses that allocation rather than carrying no provenance
-/// at all.
-///
-/// This reconstruction alone does not admit a context for dispatch: it must
-/// also have been registered, which [`installed_context`] and
-/// [`installed_context_value`] do where the installation is observed.
+/// Installation retains the pointer before handing its address to the mock
+/// bindings, so this lookup preserves provenance. Looking it up alone does not
+/// admit a context for dispatch: [`installed_context`] or
+/// [`installed_context_value`] must also have observed installation.
 pub(crate) fn context_pointer(value: usize) -> *mut RequestContext {
-    std::ptr::with_exposed_provenance_mut(value)
+    let context = installed_contexts()
+        .iter()
+        .map(|record| record.pointer.load(Ordering::Relaxed))
+        .find(|pointer| pointer.addr() == value);
+    context.expect("the harness must look up a context retained by installation and not yet reclaimed")
+}
+
+/// Retains a context pointer before its address reaches the mock bindings.
+pub(crate) fn record_context(context: *mut RequestContext) {
+    installed_contexts().push(ContextRecord {
+        pointer: AtomicPtr::new(context),
+        installed: false,
+    });
+}
+
+/// Forgets the pointer when installation fails and the local owner reclaims it.
+pub(crate) fn forget_context(context: *mut RequestContext) {
+    let mut installed = installed_contexts();
+    let index = installed
+        .iter()
+        .position(|record| record.pointer.load(Ordering::Relaxed) == context)
+        .unwrap();
+    installed.swap_remove(index);
 }
 
 fn record_installed(context: *mut RequestContext) -> *mut RequestContext {
-    let mut installed = installed_contexts();
-
-    if !installed.contains(&context.addr()) {
-        installed.push(context.addr());
-    }
+    installed_contexts()
+        .iter_mut()
+        .find(|record| record.pointer.load(Ordering::Relaxed) == context)
+        .unwrap()
+        .installed = true;
 
     context
 }
@@ -225,11 +242,11 @@ pub(crate) unsafe fn finish(
 /// Delivers one status notification exactly as the `WinHTTP` callback would.
 ///
 /// The pointer is checked against the record of installed contexts before it
-/// reaches [`dispatch_completion`], so an address no installation produced, or
+/// reaches [`callback::dispatch_completion`], so an address no installation produced, or
 /// one a `HANDLE_CLOSING` notification already reclaimed, panics here instead
 /// of reconstructing the pooled box twice or reading released storage. The
-/// record holds addresses, which say nothing about provenance, so that check
-/// narrows the contract below rather than replacing it.
+/// record compares addresses, which cannot verify the caller's pointer
+/// provenance, so that check narrows the contract below rather than replacing it.
 ///
 /// # Safety
 ///
@@ -259,16 +276,17 @@ pub(crate) unsafe fn complete(context: *mut RequestContext, status: u32, info: *
          take the pointer from `installed`, `installed_context` or `installed_context_value`, and deliver `HANDLE_CLOSING` once"
     );
 
-    // SAFETY: dispatch_completion requires the exact pointer of an installed,
-    // not-yet-reclaimed context, a payload matching the notification, a final
-    // `HANDLE_CLOSING` that is delivered once and overlaps no other
-    // notification for the handle, and no exclusive borrow of the context.
-    // Every one of those is demanded of this function's own caller in the same
-    // terms, so they hold here unchanged; the claim above additionally proves
-    // that the address is one this module saw installed and has not since
-    // reclaimed.
+    // SAFETY: Both callback entry points require a live installed context,
+    // matching payload, no overlapping notification or exclusive borrow, and
+    // exactly-once final reclamation. This function demands those unchanged;
+    // claim additionally checks installation and reclamation. The native ABI
+    // receives the exposed address of the exact context pointer; strict Miri
+    // uses that pointer directly because it cannot interpret the integer ABI.
     unsafe {
-        dispatch_completion(context, status, info, len);
+        #[cfg(miri_strict_provenance)]
+        callback::dispatch_completion(context, status, info, len);
+        #[cfg(not(miri_strict_provenance))]
+        callback::status_callback(std::ptr::null_mut(), context.expose_provenance(), status, info, len);
     }
 }
 
@@ -278,7 +296,10 @@ pub(crate) unsafe fn complete(context: *mut RequestContext, status: u32, info: *
 /// yet reclaimed.
 fn claim(context: *mut RequestContext, reclaims: bool) -> bool {
     let mut installed = installed_contexts();
-    let Some(index) = installed.iter().position(|address| *address == context.addr()) else {
+    let Some(index) = installed
+        .iter()
+        .position(|record| record.installed && record.pointer.load(Ordering::Relaxed) == context)
+    else {
         return false;
     };
 
@@ -289,17 +310,24 @@ fn claim(context: *mut RequestContext, reclaims: bool) -> bool {
     true
 }
 
-/// Borrows the record of installed, not-yet-reclaimed request contexts.
+/// A retained context pointer and whether a mock observed its installation.
+struct ContextRecord {
+    pointer: AtomicPtr<RequestContext>,
+    installed: bool,
+}
+
+/// Borrows the record of retained, not-yet-reclaimed request contexts.
 ///
-/// Addresses are recorded rather than pointers because the record outlives the
-/// allocations it names, and an address is all a claim needs to compare.
-fn installed_contexts() -> MutexGuard<'static, Vec<usize>> {
+/// Entries are removed on installation failure or the final closing callback.
+/// Atomic pointers preserve provenance and permit lookup from callback threads;
+/// the mutex protects both the pointers and their installation state.
+fn installed_contexts() -> MutexGuard<'static, Vec<ContextRecord>> {
     /// The dispatch helpers cannot verify a raw context pointer, so they check
     /// it against this record and turn the misuse a test is most likely to
     /// commit into a panic. It is process-wide because a context pointer
     /// travels to callback threads and into mock bindings that hold no harness
     /// state.
-    static INSTALLED_CONTEXTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+    static INSTALLED_CONTEXTS: Mutex<Vec<ContextRecord>> = Mutex::new(Vec::new());
 
     INSTALLED_CONTEXTS
         .lock()
