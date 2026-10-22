@@ -4,13 +4,13 @@
 //! Public API contracts available without optional features.
 
 use std::error::Error as _;
+use std::future::Future as _;
 use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use futures::Stream;
 use tick::runtime::{ClockDriver, InactiveClock, Isolated, Shared};
-use tick::{Clock, Delay, Error, PeriodicTimer, SimpleClock, Stopwatch};
+use tick::{Clock, Delay, Error, PeriodicTimer, SimpleClock, Stopwatch, TimerTick};
 
 #[test]
 fn public_types_have_their_threading_and_clone_contracts() {
@@ -21,6 +21,8 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(InactiveClock<Shared>: Send, Sync);
     static_assertions::assert_not_impl_any!(InactiveClock<Shared>: Clone);
     static_assertions::assert_impl_all!(PeriodicTimer: Send, Sync);
+    static_assertions::assert_impl_all!(TimerTick: Send, Sync);
+    static_assertions::assert_not_impl_any!(TimerTick: Clone, Copy);
     static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
     static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
     static_assertions::assert_impl_all!(ClockDriver: Send, Sync);
@@ -173,12 +175,14 @@ fn completing_a_delay_removes_its_public_driver_deadline() {
 fn periodic_timer_is_lazy_and_first_poll_is_pending() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
-    assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
+    let now = Instant::now();
+    assert_eq!(driver.advance_timers(now).unwrap(), None);
 
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
+    let deadline = driver.advance_timers(now).unwrap().unwrap();
+    assert!(poll_timer(&mut timer).is_pending());
 
-    assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
+    assert_eq!(driver.advance_timers(now).unwrap(), Some(deadline));
 }
 
 #[test]
@@ -186,8 +190,8 @@ fn registered_periodic_timer_remains_pending_before_its_deadline() {
     let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
+    assert!(poll_timer(&mut timer).is_pending());
 }
 
 #[test]
@@ -195,8 +199,8 @@ fn near_maximum_period_never_registers_a_deadline() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
+    assert!(poll_timer(&mut timer).is_pending());
     assert_eq!(driver.advance_timers(Instant::now()).unwrap(), None);
 }
 
@@ -204,7 +208,7 @@ fn near_maximum_period_never_registers_a_deadline() {
 fn dropping_a_periodic_timer_removes_its_public_driver_deadline() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
     assert!(driver.advance_timers(Instant::now()).unwrap().is_some());
 
     drop(timer);
@@ -219,11 +223,14 @@ fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
     let period = Duration::from_millis(1);
     let before_registration = Instant::now();
     let mut timer = PeriodicTimer::new(&clock, period);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
     let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
 
     thread::sleep(deadline.saturating_duration_since(Instant::now()));
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    let Poll::Ready(tick) = poll_timer(&mut timer) else {
+        panic!("the periodic timer must fire after its deadline");
+    };
+    assert!(tick.observed_at() >= deadline);
 
     assert_eq!(driver.advance_timers(before_registration).unwrap(), None);
 }
@@ -271,7 +278,7 @@ fn poll_delay(delay: &mut Delay) -> Poll<()> {
     std::pin::pin!(delay).poll(&mut context)
 }
 
-fn poll_timer(timer: &mut PeriodicTimer) -> Poll<Option<()>> {
+fn poll_timer(timer: &mut PeriodicTimer) -> Poll<TimerTick> {
     let mut context = Context::from_waker(Waker::noop());
-    std::pin::pin!(timer).poll_next(&mut context)
+    std::pin::pin!(timer.next()).poll(&mut context)
 }

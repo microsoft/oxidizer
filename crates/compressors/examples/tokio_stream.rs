@@ -32,7 +32,7 @@ fn body(clock: Clock, resources: Resources) -> impl Stream<Item = Result<BytesVi
         let mut arrivals = PeriodicTimer::new(&clock, ARRIVAL_PERIOD);
 
         for event in 0..200 {
-            arrivals.next().await;
+            let _tick = arrivals.next().await;
 
             let line = format!("{{\"event\":{event},\"message\":\"a log line\"}}\n");
             let chunk = BytesView::copied_from_slice(line.as_bytes(), resources.memory());

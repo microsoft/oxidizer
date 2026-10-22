@@ -223,20 +223,17 @@ stopwatch.elapsed()
 ```rust
 use std::time::Duration;
 
-use futures::StreamExt;
 use tick::{Clock, PeriodicTimer};
 
 // Delay for 10ms before the timer starts ticking
 clock.delay(Duration::from_millis(10)).await;
 
-let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 
-timer
-    .take(3)
-    .for_each(async |()| {
-        // Do something every 1ms
-    })
-    .await;
+for _ in 0..3 {
+    timer.next().await;
+    // Do something every 1ms
+}
 ```
 
 ## Features
@@ -292,7 +289,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbMHcj2-M39M0bGZF1AwoDTC8bkzPxyqfG_lIbmyXH7Mqr0fZhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbN5Z8MV4No6cbEQAwPFn3z_Ab_zU68-bM81Qb1EIXkBfFCtZhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
  [__link0]: https://docs.rs/tick/0.8.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.8.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.8.0/tick/?search=Error

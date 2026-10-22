@@ -74,6 +74,16 @@ normalized production clock data. See [docs/tick-api-decisions.md](docs/tick-api
 **Open this when**: changing either `system_time_as` method; adding or changing a
 `tick::fmt` type; changing the normalized clock-data range or conversion behavior.
 
+## Tick periodic timer API
+
+`PeriodicTimer` uses the inherent async `next` method and returns `TimerTick`.
+Do not implement `futures_core::Stream` for it or add `futures-core` to `tick`'s
+public dependencies. Applications that need stream combinators can use the
+downstream adapter documented on `PeriodicTimer`.
+
+**Open this when**: changing `PeriodicTimer`, `TimerTick`, or timer iteration;
+adding an async-stream dependency to `tick`.
+
 ## Optional Dependencies in Test Builds
 
 Feature-dependent code is gated behind `cfg(any(test, feature = "foo"))` so that a crate's test build compiles it without enumerating features. Features must therefore be additive. Because `cfg(test)` does not activate Cargo features, every optional dependency must also be declared as a non-optional dev-dependency, carrying whatever dependency features the feature activates. See [docs/optional-deps-in-test-builds.md](docs/optional-deps-in-test-builds.md).

@@ -5960,7 +5960,6 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "futures",
- "futures-core",
  "jiff",
  "libc",
  "mutants",
