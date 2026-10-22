@@ -21,6 +21,7 @@ use arty::task::{Builtins, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
 use futures::future::join_all;
+use many_cpus::SystemHardware;
 use observed::Sink;
 use observed_testing::{TEST_ID, test_emitter};
 use support::JoinHandleExt as _;
@@ -132,8 +133,13 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_default();
+    let processors_used = if cfg!(miri) {
+        2
+    } else {
+        SystemHardware::current().processors().len().min(2)
+    };
     let dimensions = started[0].dimensions();
-    assert!(dimensions.contains(&("processors.used".into(), "2".into())));
+    assert!(dimensions.contains(&("processors.used".into(), processors_used.to_string().into())));
     assert!(dimensions.contains(&("blocking_worker_pool.mode".into(), "shared".into())));
     assert!(dimensions.contains(&("stack_size_bytes".into(), STACK.max(configured_minimum).to_string().into())));
 }

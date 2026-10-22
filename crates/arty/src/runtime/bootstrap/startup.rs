@@ -313,6 +313,7 @@ mod tests {
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use many_cpus::fake::HardwareBuilder;
+    use observed_testing::{TEST_ID, test_emitter};
     use performables::arc::PerThread;
 
     use super::*;
@@ -389,7 +390,8 @@ mod tests {
         const WORKERS: usize = 16;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(WorkersPolicy::exactly(WORKERS), &hardware.processors());
+        let (sink, processor) = test_emitter(TEST_ID);
+        let runtime = runtime_with_processors(WorkersPolicy::exactly(WORKERS), &hardware.processors(), sink);
         let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = builtins.scheduler().clone();
         let counts = DriverCounts {
@@ -445,6 +447,14 @@ mod tests {
 
         runtime.stop().unwrap();
         assert_eq!(counts.stopped.load(Ordering::SeqCst), WORKERS);
+        let started = processor
+            .events()
+            .into_iter()
+            .find(|event| event.name() == "arty.rt.started")
+            .unwrap();
+        let dimensions = started.dimensions();
+        assert!(dimensions.contains(&("processors.available".into(), PROCESSORS.to_string().into())));
+        assert!(dimensions.contains(&("processors.used".into(), PROCESSORS.to_string().into())));
     }
 
     #[test]
@@ -452,7 +462,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(WorkersPolicy::at_most(16), &hardware.processors());
+        let runtime = runtime_with_processors(WorkersPolicy::at_most(16), &hardware.processors(), Sink::noop());
         let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = builtins
             .control()
@@ -477,7 +487,7 @@ mod tests {
         ))
     }
 
-    fn runtime_with_processors(policy: WorkersPolicy, processors: &ProcessorSet) -> Runtime {
+    fn runtime_with_processors(policy: WorkersPolicy, processors: &ProcessorSet, sink: Sink) -> Runtime {
         build_with_processors(
             RuntimeConfig {
                 workers_policy: policy,
@@ -485,7 +495,7 @@ mod tests {
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
             },
             &InactiveClock::default(),
-            Sink::noop(),
+            sink,
             &ThreadBuilder::default(),
             processors,
         )
