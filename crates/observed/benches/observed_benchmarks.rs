@@ -301,33 +301,33 @@ fn processor_free_sink() -> Sink {
     Sink::builder("bench").build()
 }
 
-fn not_interested_sink(processor_count: usize) -> Sink {
+fn observed_not_interested(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, false))
         .build()
 }
 
-fn sampler_drops_sink(processor_count: usize) -> Sink {
+fn observed_sampler_drops(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, true))
         .event_sampler(DropAllSampler)
         .build()
 }
 
-fn not_interested_sampler_keeps_sink(processor_count: usize) -> Sink {
+fn observed_not_interested_sampler_keeps(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, false))
         .event_sampler(KeepAllSampler)
         .build()
 }
 
-fn interested_sink(processor_count: usize) -> Sink {
+fn observed_interested(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, true))
         .build()
 }
 
-fn interested_sampler_keeps_sink(processor_count: usize) -> Sink {
+fn observed_interested_sampler_keeps(processor_count: usize) -> Sink {
     Sink::builder("bench")
         .processors(fixed_interest_processors(processor_count, true))
         .event_sampler(KeepAllSampler)
@@ -340,29 +340,29 @@ fn fixed_interest_processors(count: usize, interested: bool) -> Vec<Arc<dyn obse
         .collect()
 }
 
-fn not_interested_subscriber(processor_count: usize) -> TracingScope {
+fn tracing_not_interested(processor_count: usize) -> TracingScope {
     tracing_scope(processor_count, FixedInterestFilter { interested: false }, None)
 }
 
-fn sampler_drops_subscriber(processor_count: usize) -> TracingScope {
+fn tracing_sampler_drops(processor_count: usize) -> TracingScope {
     let sampler = SamplerLayer {
         decision: observed::EventSamplingDecision::Drop,
     };
     tracing_scope(processor_count, FixedInterestFilter { interested: true }, Some(sampler))
 }
 
-fn not_interested_sampler_keeps_subscriber(processor_count: usize) -> TracingScope {
+fn tracing_not_interested_sampler_keeps(processor_count: usize) -> TracingScope {
     let sampler = SamplerLayer {
         decision: observed::EventSamplingDecision::Continue,
     };
     tracing_scope(processor_count, FixedInterestFilter { interested: false }, Some(sampler))
 }
 
-fn interested_subscriber(processor_count: usize) -> TracingScope {
+fn tracing_interested(processor_count: usize) -> TracingScope {
     tracing_scope(processor_count, FixedInterestFilter { interested: true }, None)
 }
 
-fn interested_sampler_keeps_subscriber(processor_count: usize) -> TracingScope {
+fn tracing_interested_sampler_keeps(processor_count: usize) -> TracingScope {
     let sampler = SamplerLayer {
         decision: observed::EventSamplingDecision::Continue,
     };
@@ -371,7 +371,7 @@ fn interested_sampler_keeps_subscriber(processor_count: usize) -> TracingScope {
 
 /// Filters out info logs the way tracing applications usually do, which tracing answers once per
 /// call site instead of on every event.
-fn level_filtered_subscriber() -> TracingScope {
+fn tracing_level_filtered() -> TracingScope {
     TracingScope::new(Registry::default().with(NoopLayer.with_filter(LevelFilter::WARN)))
 }
 
@@ -557,11 +557,11 @@ fn emit_to_noop_sink(sink: &Sink) {
 }
 
 #[metabench::benchmark(EMIT_FILTERED_OUT, EMIT_FILTERING, "emit_filtered_out")]
-#[bench::not_interested_one_processor(&not_interested_sink(1))]
-#[bench::not_interested_sampler_keeps_one_processor(&not_interested_sampler_keeps_sink(1))]
-#[bench::sampler_drops_one_processor(&sampler_drops_sink(1))]
-#[bench::not_interested_three_processors(&not_interested_sink(3))]
-#[bench::sampler_drops_three_processors(&sampler_drops_sink(3))]
+#[bench::not_interested_one_processor(&observed_not_interested(1))]
+#[bench::not_interested_sampler_keeps_one_processor(&observed_not_interested_sampler_keeps(1))]
+#[bench::sampler_drops_one_processor(&observed_sampler_drops(1))]
+#[bench::not_interested_three_processors(&observed_not_interested(3))]
+#[bench::sampler_drops_three_processors(&observed_sampler_drops(3))]
 /// Emits an info log that every processor declines, with or without a sampler that keeps it, or
 /// that a sampler drops before any processor is asked; the event is never built.
 fn emit_filtered_out(sink: &Sink) {
@@ -569,8 +569,8 @@ fn emit_filtered_out(sink: &Sink) {
 }
 
 #[metabench::benchmark(EMIT_DELIVERED, EMIT_FILTERING, "emit_delivered")]
-#[bench::interested_one_processor(&interested_sink(1))]
-#[bench::interested_sampler_keeps_one_processor(&interested_sampler_keeps_sink(1))]
+#[bench::interested_one_processor(&observed_interested(1))]
+#[bench::interested_sampler_keeps_one_processor(&observed_interested_sampler_keeps(1))]
 /// Emits an info log that a processor receives, with or without a sampler that keeps it. The
 /// processor ignores the event, so only observed's own delivery work is measured.
 fn emit_delivered(sink: &Sink) {
@@ -578,12 +578,12 @@ fn emit_delivered(sink: &Sink) {
 }
 
 #[metabench::benchmark(TRACING_FILTERED_OUT, EMIT_FILTERING, "tracing_filtered_out")]
-#[bench::not_interested_one_processor(&not_interested_subscriber(1))]
-#[bench::not_interested_sampler_keeps_one_processor(&not_interested_sampler_keeps_subscriber(1))]
-#[bench::sampler_drops_one_processor(&sampler_drops_subscriber(1))]
-#[bench::not_interested_three_processors(&not_interested_subscriber(3))]
-#[bench::sampler_drops_three_processors(&sampler_drops_subscriber(3))]
-#[bench::level_filtered_one_processor(&level_filtered_subscriber())]
+#[bench::not_interested_one_processor(&tracing_not_interested(1))]
+#[bench::not_interested_sampler_keeps_one_processor(&tracing_not_interested_sampler_keeps(1))]
+#[bench::sampler_drops_one_processor(&tracing_sampler_drops(1))]
+#[bench::not_interested_three_processors(&tracing_not_interested(3))]
+#[bench::sampler_drops_three_processors(&tracing_sampler_drops(3))]
+#[bench::level_filtered_one_processor(&tracing_level_filtered())]
 /// Emits the info log of `emit_filtered_out` through `tracing`, where per-layer filters stand in
 /// for processors and an outer layer for the sampler.
 fn tracing_filtered_out(_scope: &TracingScope) {
@@ -591,8 +591,8 @@ fn tracing_filtered_out(_scope: &TracingScope) {
 }
 
 #[metabench::benchmark(TRACING_DELIVERED, EMIT_FILTERING, "tracing_delivered")]
-#[bench::interested_one_processor(&interested_subscriber(1))]
-#[bench::interested_sampler_keeps_one_processor(&interested_sampler_keeps_subscriber(1))]
+#[bench::interested_one_processor(&tracing_interested(1))]
+#[bench::interested_sampler_keeps_one_processor(&tracing_interested_sampler_keeps(1))]
 /// Emits the info log of `emit_delivered` through `tracing`, to a layer that ignores it.
 fn tracing_delivered(_scope: &TracingScope) {
     tracing::info!(name: "bench.simple_log", status = 200_i64, retries = 0_i64);
@@ -760,19 +760,22 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 
     let mut emit_filtering = criterion.benchmark_group(EMIT_FILTERING);
     for (case, case_sink) in [
-        ("not_interested_one_processor", not_interested_sink(1)),
-        ("not_interested_sampler_keeps_one_processor", not_interested_sampler_keeps_sink(1)),
-        ("sampler_drops_one_processor", sampler_drops_sink(1)),
-        ("not_interested_three_processors", not_interested_sink(3)),
-        ("sampler_drops_three_processors", sampler_drops_sink(3)),
+        ("not_interested_one_processor", observed_not_interested(1)),
+        (
+            "not_interested_sampler_keeps_one_processor",
+            observed_not_interested_sampler_keeps(1),
+        ),
+        ("sampler_drops_one_processor", observed_sampler_drops(1)),
+        ("not_interested_three_processors", observed_not_interested(3)),
+        ("sampler_drops_three_processors", observed_sampler_drops(3)),
     ] {
         emit_filtering.bench_function(BenchmarkId::new(EMIT_FILTERED_OUT.benchmark_name(), case), |bencher| {
             bencher.iter(|| emit_filtered_out(black_box(&case_sink)));
         });
     }
     for (case, case_sink) in [
-        ("interested_one_processor", interested_sink(1)),
-        ("interested_sampler_keeps_one_processor", interested_sampler_keeps_sink(1)),
+        ("interested_one_processor", observed_interested(1)),
+        ("interested_sampler_keeps_one_processor", observed_interested_sampler_keeps(1)),
     ] {
         emit_filtering.bench_function(BenchmarkId::new(EMIT_DELIVERED.benchmark_name(), case), |bencher| {
             bencher.iter(|| emit_delivered(black_box(&case_sink)));
@@ -781,14 +784,14 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     // Each subscriber is created right before its case and dropped after it, because tracing
     // caches interest and the maximum level across every live subscriber.
     let tracing_filtered_out_cases: [TracingCase; 6] = [
-        ("not_interested_one_processor", || not_interested_subscriber(1)),
+        ("not_interested_one_processor", || tracing_not_interested(1)),
         ("not_interested_sampler_keeps_one_processor", || {
-            not_interested_sampler_keeps_subscriber(1)
+            tracing_not_interested_sampler_keeps(1)
         }),
-        ("sampler_drops_one_processor", || sampler_drops_subscriber(1)),
-        ("not_interested_three_processors", || not_interested_subscriber(3)),
-        ("sampler_drops_three_processors", || sampler_drops_subscriber(3)),
-        ("level_filtered_one_processor", level_filtered_subscriber),
+        ("sampler_drops_one_processor", || tracing_sampler_drops(1)),
+        ("not_interested_three_processors", || tracing_not_interested(3)),
+        ("sampler_drops_three_processors", || tracing_sampler_drops(3)),
+        ("level_filtered_one_processor", tracing_level_filtered),
     ];
     for (case, new_scope) in tracing_filtered_out_cases {
         let case_scope = new_scope();
@@ -797,8 +800,8 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     let tracing_delivered_cases: [TracingCase; 2] = [
-        ("interested_one_processor", || interested_subscriber(1)),
-        ("interested_sampler_keeps_one_processor", || interested_sampler_keeps_subscriber(1)),
+        ("interested_one_processor", || tracing_interested(1)),
+        ("interested_sampler_keeps_one_processor", || tracing_interested_sampler_keeps(1)),
     ];
     for (case, new_scope) in tracing_delivered_cases {
         let case_scope = new_scope();
