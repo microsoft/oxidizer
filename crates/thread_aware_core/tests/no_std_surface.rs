@@ -67,13 +67,13 @@ fn sample_threads() -> [Thread; 2] {
 }
 
 #[cfg(feature = "std")]
-fn assert_relocation_is_noop<T>(mut value: T, source: &Thread, destination: &Thread)
+fn assert_relocation_is_noop<T>(mut value: T, source: Option<&Thread>, destination: &Thread)
 where
     T: ThreadAware + Clone + PartialEq + std::fmt::Debug,
 {
     let original = value.clone();
 
-    value.relocate(Some(source), destination);
+    value.relocate(source, destination);
 
     assert_eq!(value, original);
 }
@@ -146,8 +146,8 @@ fn socket_address_types_are_unchanged_by_relocation() {
     let ipv4 = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443);
     let ipv6 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 7, 11);
 
-    assert_relocation_is_noop(ipv4, source, destination);
-    assert_relocation_is_noop(SocketAddr::V4(ipv4), source, destination);
-    assert_relocation_is_noop(ipv6, source, destination);
-    assert_relocation_is_noop(SocketAddr::V6(ipv6), source, destination);
+    assert_relocation_is_noop(ipv4, Some(source), destination);
+    assert_relocation_is_noop(SocketAddr::V4(ipv4), Some(source), destination);
+    assert_relocation_is_noop(ipv6, Some(source), destination);
+    assert_relocation_is_noop(SocketAddr::V6(ipv6), Some(source), destination);
 }

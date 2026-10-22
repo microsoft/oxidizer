@@ -318,6 +318,17 @@ mod tests {
         ]
     }
 
+    fn assert_relocation_is_noop<T>(mut value: T, source: Option<&Thread>, destination: &Thread)
+    where
+        T: ThreadAware + Clone + PartialEq + core::fmt::Debug,
+    {
+        let original = value.clone();
+
+        value.relocate(source, destination);
+
+        assert_eq!(value, original);
+    }
+
     #[test]
     fn all_nonzero_integer_types_are_thread_aware() {
         fn assert_thread_aware<T: ThreadAware>() {}
@@ -347,8 +358,7 @@ mod tests {
         assert_thread_aware::<PhantomData<MarkerOnly>>();
 
         let threads = sample_threads();
-        let mut marker = PhantomData::<MarkerOnly>;
-        marker.relocate(Some(&threads[0]), &threads[1]);
+        assert_relocation_is_noop(PhantomData::<MarkerOnly>, Some(&threads[0]), &threads[1]);
     }
 
     #[test]
@@ -357,18 +367,12 @@ mod tests {
         let source = Some(&threads[0]);
         let destination = &threads[1];
 
-        let mut value: HashMap<i32, String> = HashMap::new();
+        let mut value = HashMap::new();
         value.insert(1, "one".to_string());
         value.insert(2, "two".to_string());
 
-        value.relocate(source, destination);
-
-        assert_eq!(value.get(&1), Some(&"one".to_string()));
-        assert_eq!(value.get(&2), Some(&"two".to_string()));
-
-        let mut empty_value: HashMap<i32, String> = HashMap::new();
-        empty_value.relocate(source, destination);
-        assert!(empty_value.is_empty());
+        assert_relocation_is_noop(value, source, destination);
+        assert_relocation_is_noop(HashMap::<i32, String>::new(), source, destination);
     }
 
     #[test]
@@ -377,44 +381,14 @@ mod tests {
         let source = Some(&threads[0]);
         let destination = &threads[1];
 
-        // Test empty tuple
-        let mut empty_tuple = ();
-        empty_tuple.relocate(source, destination);
-
-        // Test single element tuple
-        let mut single = (42,);
-        single.relocate(source, destination);
-        assert_eq!(single, (42,));
-
-        // Test two element tuple
-        let mut two = (42, "hello".to_string());
-        two.relocate(source, destination);
-        assert_eq!(two, (42, "hello".to_string()));
-
-        // Test three element tuple with different types
-        let mut three = (1, "test".to_string(), 1.23);
-        three.relocate(source, destination);
-        assert_eq!(three, (1, "test".to_string(), 1.23));
-
-        // Test larger tuple (6 elements)
-        let mut six = (1, 2, 3, 4, 5, 6);
-        six.relocate(source, destination);
-        assert_eq!(six, (1, 2, 3, 4, 5, 6));
-
-        // Test tuple with nested Vec (complex type)
-        let mut nested = (vec![1, 2, 3], "data".to_string(), 100u64);
-        nested.relocate(source, destination);
-        assert_eq!(nested, (vec![1, 2, 3], "data".to_string(), 100u64));
-
-        // Test tuple with Option
-        let mut with_option = (Some(42), None::<String>, "value".to_string());
-        with_option.relocate(source, destination);
-        assert_eq!(with_option, (Some(42), None::<String>, "value".to_string()));
-
-        // Test large tuple (12 elements - maximum supported)
-        let mut twelve = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-        twelve.relocate(source, destination);
-        assert_eq!(twelve, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12));
+        assert_relocation_is_noop((), source, destination);
+        assert_relocation_is_noop((42,), source, destination);
+        assert_relocation_is_noop((42, "hello".to_string()), source, destination);
+        assert_relocation_is_noop((1, "test".to_string(), 1.23), source, destination);
+        assert_relocation_is_noop((1, 2, 3, 4, 5, 6), source, destination);
+        assert_relocation_is_noop((vec![1, 2, 3], "data".to_string(), 100u64), source, destination);
+        assert_relocation_is_noop((Some(42), None::<String>, "value".to_string()), source, destination);
+        assert_relocation_is_noop((1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), source, destination);
     }
 
     /// `impl_thread_aware_tuple!` recurses by peeling one element off the head, so the
@@ -548,24 +522,10 @@ mod tests {
         let source = Some(&threads[0]);
         let destination = &threads[1];
 
-        // Test Ok variant
-        let mut ok_value: Result<String, i32> = Ok("success".to_string());
-        ok_value.relocate(source, destination);
-        assert_eq!(ok_value, Ok("success".to_string()));
-
-        // Test Err variant
-        let mut err_value: Result<String, i32> = Err(42);
-        err_value.relocate(source, destination);
-        assert_eq!(err_value, Err(42));
-
-        // Test with complex types
-        let mut ok_vec: Result<Vec<i32>, String> = Ok(vec![1, 2, 3]);
-        ok_vec.relocate(source, destination);
-        assert_eq!(ok_vec, Ok(vec![1, 2, 3]));
-
-        let mut err_string: Result<Vec<i32>, String> = Err("error".to_string());
-        err_string.relocate(source, destination);
-        assert_eq!(err_string, Err("error".to_string()));
+        assert_relocation_is_noop(Result::<String, i32>::Ok("success".to_string()), source, destination);
+        assert_relocation_is_noop(Result::<String, i32>::Err(42), source, destination);
+        assert_relocation_is_noop(Result::<Vec<i32>, String>::Ok(vec![1, 2, 3]), source, destination);
+        assert_relocation_is_noop(Result::<Vec<i32>, String>::Err("error".to_string()), source, destination);
     }
 
     #[test]
@@ -579,9 +539,7 @@ mod tests {
     #[test]
     fn option_none_is_noop() {
         let threads = sample_threads();
-        let mut val: Option<Tracker> = None;
-        val.relocate(Some(&threads[0]), &threads[1]);
-        assert_eq!(val, None);
+        assert_relocation_is_noop::<Option<Tracker>>(None, Some(&threads[0]), &threads[1]);
     }
 
     #[test]
