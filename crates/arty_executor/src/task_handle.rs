@@ -271,7 +271,7 @@ mod tests {
         let handle = allocate_test_task_in(&pool);
         let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
 
-        assert_eq!(format!("{:?}", &**template), "TaskHandleTemplate { .. }");
+        assert_eq!(format!("{:?}", **template), "TaskHandleTemplate { .. }");
     }
 
     #[test]
