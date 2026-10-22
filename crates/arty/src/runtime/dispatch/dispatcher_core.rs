@@ -261,7 +261,7 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, TaskPlacement::Any, future_factory)
+        self.enqueue(worker_index, TaskPlacement::SpecificThread, future_factory)
     }
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>

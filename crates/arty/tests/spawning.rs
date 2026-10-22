@@ -291,8 +291,9 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     let task = scheduler.spawn_at(
         &destination,
         thread_aware::Unaware(std::sync::Arc::clone(&invoked)),
-        |thread_aware::Unaware(invoked)| async move {
+        |thread_aware::Unaware(invoked)| {
             invoked.store(true, std::sync::atomic::Ordering::SeqCst);
+            async {}
         },
     );
 
