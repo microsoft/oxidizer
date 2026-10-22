@@ -9,6 +9,7 @@ use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
+use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
 
 /// A handle for receiving an async or blocking task's result.
@@ -52,31 +53,33 @@ where
     invalid_destination: bool,
     blocking_pool: Option<Arc<()>>,
     completed: bool,
+    shutdown: Shutdown,
 }
 
 impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
+    pub(crate) fn new(inner: RemoteJoinHandle<R>, shutdown: Shutdown) -> Self {
         Self {
             inner,
             invalid_destination: false,
             blocking_pool: None,
             completed: false,
+            shutdown,
         }
     }
 
-    pub(crate) fn shutdown(pool: &RemotePool) -> Self {
+    pub(crate) fn shutdown(pool: &RemotePool, shutdown: Shutdown) -> Self {
         let (sender, inner) = pool.channel();
         drop(sender);
-        Self::new(inner)
+        Self::new(inner, shutdown)
     }
 
-    pub(crate) fn invalid_destination(pool: &RemotePool) -> Self {
+    pub(crate) fn invalid_destination(pool: &RemotePool, shutdown: Shutdown) -> Self {
         Self {
             invalid_destination: true,
-            ..Self::shutdown(pool)
+            ..Self::shutdown(pool, shutdown)
         }
     }
 
@@ -116,7 +119,7 @@ where
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;
-                Poll::Ready(result.map_err(JoinError::from_executor))
+                Poll::Ready(result.map_err(|error| JoinError::from_executor(error, this.shutdown)))
             }
             Poll::Pending => Poll::Pending,
         }

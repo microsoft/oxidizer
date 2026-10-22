@@ -8,6 +8,7 @@ use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::remote::Pool as RemotePool;
+use arty_executor::{ShutdownCause, ShutdownError};
 #[cfg(test)]
 use nonempty::NonEmpty;
 use performables::arc::Arc;
@@ -22,7 +23,7 @@ use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 #[cfg(test)]
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::{Error, Workers};
+use crate::runtime::{Error, Shutdown, Workers};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -83,8 +84,8 @@ impl DispatcherClient {
         self.core.is_shutting_down()
     }
 
-    pub(crate) fn shutdown_signal(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        self.core.shutdown_signal()
+    pub(crate) fn shutdown(&self) -> Shutdown {
+        self.core.shutdown()
     }
 
     pub(crate) fn remote_results(&self) -> &RemotePool {
@@ -124,12 +125,12 @@ impl DispatcherClient {
         self.core.spawn(future_factory)
     }
 
-    pub(crate) fn stop_with_error(&self, error: Error) {
-        self.core.stop_with_error(error);
+    pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
+        self.core.stop_with_error(error)
     }
 
-    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
-        self.core.take_shutdown_error()
+    pub(crate) fn shutdown_error(&self) -> Option<ShutdownError> {
+        self.core.shutdown_error()
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
@@ -137,8 +138,8 @@ impl DispatcherClient {
     }
 
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
-    pub(crate) fn stop(&self) {
-        self.core.stop();
+    pub(crate) fn stop(&self) -> ShutdownCause {
+        self.core.stop()
     }
 
     // Impractical to test real waiting at this API layer. We test the real waiter implementation

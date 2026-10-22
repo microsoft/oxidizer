@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -105,14 +105,14 @@ impl Scheduler {
         ACTIVE_WORKER.set(false);
     }
 
-    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient) {
+    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient, cause: ShutdownCause) {
         _ = CURRENT_WORKER.try_with(|current| {
             let current = current.borrow();
             let Some(current) = current.as_ref() else {
                 return;
             };
             if dispatcher.owns(&current.thread) {
-                current.tasks.begin_shutdown();
+                current.tasks.begin_shutdown_with_cause(cause);
             }
         });
     }
@@ -193,7 +193,7 @@ impl Scheduler {
         R: Send + 'static,
     {
         if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results());
+            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown());
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -219,11 +219,12 @@ impl Scheduler {
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = current.results.channel();
+            let shutdown = current.builtins.scheduler().dispatcher.shutdown();
             let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
-            Ok(JoinHandle::new(result_rx))
+            Ok(JoinHandle::new(result_rx, shutdown))
         })
     }
 
@@ -345,10 +346,10 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results());
+            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown());
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::invalid_destination(self.dispatcher.remote_results());
+            return JoinHandle::invalid_destination(self.dispatcher.remote_results(), self.dispatcher.shutdown());
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {
@@ -468,7 +469,7 @@ mod tests {
         let rejected = runtime
             .scheduler()
             .block_on(async |cx| {
-                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher);
+                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher, ShutdownCause::default());
                 let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
                 matches!(

@@ -4,6 +4,7 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
+use arty_executor::ShutdownError;
 use arty_io_core::DriverError;
 use performables::arc::Arc;
 
@@ -62,6 +63,14 @@ impl Error {
         Self::new(IoFailure::caused_by(SharedDriverError(error)))
     }
 
+    pub(crate) fn shutdown_failure(error: ShutdownError) -> Self {
+        Self::new(ShutdownFailure::caused_by(error))
+    }
+
+    pub(crate) fn worker_panicked() -> Self {
+        Self::new(WorkerPanicked::new())
+    }
+
     #[cfg(any(test, feature = "macros"))]
     pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
         self.source
@@ -113,6 +122,13 @@ struct RuntimeShuttingDownError;
 
 #[ohno::error]
 struct IoFailure;
+
+#[ohno::error]
+struct ShutdownFailure;
+
+#[ohno::error]
+#[display("a runtime worker panicked")]
+struct WorkerPanicked;
 
 #[derive(Debug)]
 struct SharedDriverError(Arc<DriverError>);
@@ -208,6 +224,21 @@ mod tests {
         assert!(shared.downcast_ref::<SharedDriverError>().is_some());
         assert_eq!(shared.to_string(), "driver failed");
         assert!(shared.source().unwrap().downcast_ref::<DriverError>().is_some());
+    }
+
+    #[test]
+    fn shutdown_failure_preserves_the_shared_shutdown_source() {
+        let shutdown = ShutdownError::new(io::Error::other("runtime subsystem failed"));
+        let expected = shutdown.clone();
+        let error = Error::shutdown_failure(shutdown);
+        let source = error.source().unwrap();
+
+        assert!(source.downcast_ref::<ShutdownFailure>().is_some());
+        let shutdown = source.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
+        let shutdown_source = shutdown.inner().downcast_ref::<io::Error>().unwrap();
+        let expected_source = expected.inner().downcast_ref::<io::Error>().unwrap();
+        assert!(std::ptr::eq(shutdown_source, expected_source));
+        assert_eq!(error.to_string(), "runtime subsystem failed");
     }
 
     #[test]

@@ -5,21 +5,20 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::TaskPlacement;
 use arty_executor::remote::Pool as RemotePool;
+use arty_executor::{ShutdownCause, ShutdownError, TaskPlacement};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
 use performables::arc::Arc;
 use performables::sync::channel;
-use performables::sync::mutex::Mutex;
 use thread_aware::Thread;
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
-use crate::runtime::{Error, Workers};
+use crate::runtime::{Error, Shutdown, Workers};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -57,11 +56,8 @@ impl From<WorkerIndex> for usize {
 pub(crate) struct DispatcherCore {
     wait_for_shutdown: ThreadWaiter,
 
-    /// We record whether shutdown has started, both to avoid double-shutdown and to execute
-    /// special-case logic in some situations that need special handling during shutdown.
-    shutdown_started: Arc<AtomicBool>,
+    shutdown: Shutdown,
     stopped_reported: AtomicBool,
-    shutdown_error: Mutex<Option<Error>>,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
     workers: Workers,
@@ -83,14 +79,14 @@ pub(crate) struct DispatcherCore {
 impl DispatcherCore {
     #[cfg(test)]
     pub(crate) fn new(wait_for_shutdown: ThreadWaiter, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Arc::new(AtomicBool::new(false)))
+        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Shutdown::default())
     }
 
     pub(crate) fn new_with_shutdown(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
-        shutdown_started: Arc<AtomicBool>,
+        shutdown: Shutdown,
     ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -116,9 +112,8 @@ impl DispatcherCore {
         );
         Self {
             wait_for_shutdown,
-            shutdown_started,
+            shutdown,
             stopped_reported: AtomicBool::new(false),
-            shutdown_error: Mutex::new(None),
             worker_endpoints,
             workers,
             worker_indices,
@@ -130,22 +125,23 @@ impl DispatcherCore {
 
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Removing the public stop boundary strands runtime workers before tests can assert.
-    pub(crate) fn stop(&self) {
-        self.stop_inner();
+    pub(crate) fn stop(&self) -> ShutdownCause {
+        self.stop_inner(ShutdownCause::default())
     }
 
-    pub(crate) fn stop_with_error(&self, error: Error) {
-        let mut shutdown_error = self.shutdown_error.lock();
-        _ = shutdown_error.get_or_insert(error);
-        drop(shutdown_error);
-        self.stop_inner();
+    pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
+        self.stop_inner(ShutdownError::new(error).into())
     }
 
     #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
-    fn stop_inner(&self) {
-        // If we've already started shutting down, don't do it again.
-        if self.shutdown_started.swap(true, Ordering::AcqRel) {
-            return;
+    fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
+        let started = self.shutdown.begin(cause);
+        let cause = self
+            .shutdown
+            .cause()
+            .expect("stop_inner begins shutdown before reading the authoritative cause");
+        if !started {
+            return cause;
         }
 
         emit!(&self.sink, RuntimeStopping);
@@ -157,10 +153,11 @@ impl DispatcherCore {
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
+        cause
     }
 
-    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
-        self.shutdown_error.lock().take()
+    pub(crate) fn shutdown_error(&self) -> Option<ShutdownError> {
+        self.shutdown.error()
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -192,7 +189,7 @@ impl DispatcherCore {
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
         if self.is_shutting_down() {
-            return Err(Error::runtime_shutting_down());
+            return Err(self.runtime_shutting_down_error());
         }
         let endpoint = self
             .worker_endpoints
@@ -202,15 +199,20 @@ impl DispatcherCore {
             access: QueuedIoAccess::new(access),
         });
         endpoint.waker.wake_by_ref();
-        send_result.map_err(|_error| Error::runtime_shutting_down())
+        send_result.map_err(|_error| self.runtime_shutting_down_error())
+    }
+
+    fn runtime_shutting_down_error(&self) -> Error {
+        self.shutdown_error()
+            .map_or_else(Error::runtime_shutting_down, Error::shutdown_failure)
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
-        self.shutdown_started.load(Ordering::Acquire)
+        self.shutdown.is_started()
     }
 
-    pub(crate) fn shutdown_signal(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.shutdown_started)
+    pub(crate) fn shutdown(&self) -> Shutdown {
+        self.shutdown.clone()
     }
 
     pub(crate) fn remote_results(&self) -> &RemotePool {
@@ -272,7 +274,7 @@ impl DispatcherCore {
     {
         if self.is_shutting_down() {
             drop(future_factory);
-            return JoinHandle::shutdown(&self.remote_results);
+            return JoinHandle::shutdown(&self.remote_results, self.shutdown.clone());
         }
         let endpoint = self
             .worker_endpoints
@@ -280,7 +282,13 @@ impl DispatcherCore {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, parent_task_enrichment, placement);
+        let (future_factory, join_handle) = prepare_remote(
+            &self.remote_results,
+            future_factory,
+            parent_task_enrichment,
+            placement,
+            self.shutdown.clone(),
+        );
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
@@ -308,6 +316,7 @@ impl DispatcherCore {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::error::Error as _;
     use std::pin::pin;
     use std::task;
     use std::task::Poll;
@@ -443,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_signal_is_shared_with_dispatcher_client() {
+    fn shutdown_state_is_shared_with_dispatcher_client() {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
         let core = Arc::new(DispatcherCore::new(
@@ -452,12 +461,12 @@ mod tests {
             observed::Sink::noop(),
         ));
         let client = DispatcherClient::new(Arc::clone(&core));
-        let signal = client.shutdown_signal();
+        let shutdown = client.shutdown();
 
         assert!(std::ptr::eq(core.remote_results(), std::ptr::addr_of!(core.remote_results)));
         core.stop();
 
-        assert!(signal.load(Ordering::Acquire));
+        assert!(shutdown.is_started());
     }
 
     #[test]
@@ -487,6 +496,30 @@ mod tests {
         // Rejection is synchronous and the callback publishes no other data.
         assert!(!invoked.load(Ordering::Relaxed));
         assert!(matches!(drain_rx(&rx).as_slice(), [AsyncWorkerCommand::Shutdown]));
+    }
+
+    #[test]
+    fn worker_failure_is_attached_to_rejected_task_joins() {
+        let (tx, _rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &threads[0])),
+            observed::Sink::noop(),
+        );
+        dispatcher.stop_with_error(Error::worker_panicked());
+
+        let mut join = pin!(dispatcher.spawn(|_| async {}));
+        let Poll::Ready(Err(error)) = join.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
+            panic!("shutdown rejection must be immediately ready");
+        };
+        let shutdown = error
+            .source()
+            .unwrap()
+            .downcast_ref::<ShutdownError>()
+            .expect("caused shutdown exposes ShutdownError");
+
+        assert_eq!(shutdown.to_string(), "a runtime worker panicked");
     }
 
     #[test]
