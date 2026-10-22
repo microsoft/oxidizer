@@ -311,30 +311,13 @@ pub(crate) fn parse_gungraun(root: &Path, artifact_root: &Path, identities: &[Be
             },
             error => error,
         })?;
-        if summary.version != SCHEMA_VERSION {
-            return Err(Error::ArtifactFormat {
-                path,
-                message: format!("unsupported Gungraun summary schema {}", summary.version),
-            });
-        }
-        if summary.profiles.0.is_empty() {
-            return Err(Error::ArtifactFormat {
-                path,
-                message: "Gungraun summary contains no supported measurement profiles".to_owned(),
-            });
-        }
+        validate_gungraun_summary(&path, &summary)?;
 
         let native_identity = gungraun_native_identity(&summary);
         let default_identity = gungraun_canonical_identity(&summary);
         let identity = identities.resolve_gungraun(&native_identity, default_identity);
         for profile in &summary.profiles.0 {
-            let tool = tool_name(profile.tool);
-            if !is_benchmark_tool(profile.tool) {
-                return Err(Error::ArtifactFormat {
-                    path,
-                    message: format!("Gungraun {tool} is not a supported benchmark measurement tool"),
-                });
-            }
+            let tool = validate_gungraun_tool(&path, profile.tool)?;
             let source = format!("gungraun.{tool}");
             let metrics = tool_metrics(&source, &profile.data.total.metrics).ok_or_else(|| Error::ArtifactFormat {
                 path: path.clone(),
@@ -672,6 +655,34 @@ fn tool_name(tool: Tool) -> &'static str {
 
 const fn is_benchmark_tool(tool: Tool) -> bool {
     matches!(tool, Tool::Callgrind | Tool::Cachegrind | Tool::DHAT)
+}
+
+fn validate_gungraun_summary(path: &Path, summary: &BenchmarkSummary) -> Result<(), Error> {
+    if summary.version != SCHEMA_VERSION {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("unsupported Gungraun summary schema {}", summary.version),
+        });
+    }
+    if summary.profiles.0.is_empty() {
+        return Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: "Gungraun summary contains no supported measurement profiles".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_gungraun_tool(path: &Path, tool: Tool) -> Result<&'static str, Error> {
+    let name = tool_name(tool);
+    if is_benchmark_tool(tool) {
+        Ok(name)
+    } else {
+        Err(Error::ArtifactFormat {
+            path: path.to_owned(),
+            message: format!("Gungraun {name} is not a supported benchmark measurement tool"),
+        })
+    }
 }
 
 fn tool_metrics(source: &str, summary: &ToolMetricResults) -> Option<BTreeMap<String, Metric>> {
@@ -1026,6 +1037,8 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     use super::*;
+
+    const GUNGRAUN_SUMMARY_FIXTURE: &str = include_str!("../tests/fixtures/artifacts/gungraun/minimal/summary.json");
 
     #[test]
     fn private_run_creation_creates_parents_and_rejects_existing_paths() {
@@ -1500,17 +1513,15 @@ mod tests {
 
     #[test]
     fn gungraun_preserves_current_metric_types_and_ignores_old_values() {
-        let mut summary: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        let mut summary: serde_json::Value = serde_json::from_str(GUNGRAUN_SUMMARY_FIXTURE).unwrap();
         summary["profiles"][0]["data"]["total"]["metrics"] = serde_json::json!({
             "Ir": {"values": {"new": u64::MAX, "old": 1}},
             "L1HitRate": {"values": {"new": 99.5}},
             "RamHits": {"values": {"old": 5}},
         });
-        let directory = tempfile::tempdir().unwrap();
-        write_json(&directory.path().join("summary.json"), &summary).unwrap();
+        let summary: BenchmarkSummary = serde_json::from_value(summary).unwrap();
 
-        let results = parse_gungraun(directory.path(), directory.path(), &[]).unwrap();
-        let metrics = &results[0].metrics;
+        let metrics = tool_metrics("gungraun.callgrind", &summary.profiles.0[0].data.total.metrics).unwrap();
         assert_eq!(metrics.len(), 2);
         assert_eq!(metrics["Ir"].value, crate::report::MetricValue::Integer(u64::MAX));
         assert_eq!(metrics["L1HitRate"].value, crate::report::MetricValue::Float(99.5));
@@ -1520,40 +1531,44 @@ mod tests {
 
     #[test]
     fn gungraun_rejects_other_schema_versions_and_missing_profiles() {
-        let source: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
-        let directory = tempfile::tempdir().unwrap();
+        let source: serde_json::Value = serde_json::from_str(GUNGRAUN_SUMMARY_FIXTURE).unwrap();
+        let path = Path::new("summary.json");
         for version in ["6", "8"] {
             let mut summary = source.clone();
             summary["version"] = version.into();
-            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            let summary: BenchmarkSummary = serde_json::from_value(summary).unwrap();
             assert!(matches!(
-                parse_gungraun(directory.path(), directory.path(), &[]),
-                Err(Error::ArtifactFormat { message, .. }) if message == format!("unsupported Gungraun summary schema {version}")
+                validate_gungraun_summary(path, &summary).unwrap_err(),
+                Error::ArtifactFormat { path: actual_path, message }
+                    if actual_path == path && message == format!("unsupported Gungraun summary schema {version}")
             ));
         }
         for profiles in [serde_json::json!([]), serde_json::json!([{"tool": "FutureTool"}])] {
             let mut summary = source.clone();
             summary["profiles"] = profiles;
-            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            let summary: BenchmarkSummary = serde_json::from_value(summary).unwrap();
             assert!(matches!(
-                parse_gungraun(directory.path(), directory.path(), &[]),
-                Err(Error::ArtifactFormat { message, .. }) if message.contains("no supported measurement profiles")
+                validate_gungraun_summary(path, &summary).unwrap_err(),
+                Error::ArtifactFormat { path: actual_path, message }
+                    if actual_path == path && message == "Gungraun summary contains no supported measurement profiles"
             ));
         }
     }
 
     #[test]
     fn gungraun_rejects_unsupported_measurement_tools() {
-        let source: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
-        let directory = tempfile::tempdir().unwrap();
+        let source: serde_json::Value = serde_json::from_str(GUNGRAUN_SUMMARY_FIXTURE).unwrap();
+        let path = Path::new("summary.json");
         for tool in ["Memcheck", "Helgrind", "DRD", "Massif", "BBV", "Perf"] {
             let mut summary = source.clone();
             summary["profiles"][0]["tool"] = tool.into();
             summary["profiles"][0]["data"]["total"]["metrics"] = serde_json::json!({});
-            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            let summary: BenchmarkSummary = serde_json::from_value(summary).unwrap();
             assert!(matches!(
-                parse_gungraun(directory.path(), directory.path(), &[]),
-                Err(Error::ArtifactFormat { message, .. }) if message.contains("not a supported benchmark measurement tool")
+                validate_gungraun_tool(path, summary.profiles.0[0].tool).unwrap_err(),
+                Error::ArtifactFormat { path: actual_path, message }
+                    if actual_path == path
+                        && message == format!("Gungraun {} is not a supported benchmark measurement tool", tool.to_ascii_lowercase())
             ));
         }
     }
