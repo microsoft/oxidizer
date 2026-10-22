@@ -6,7 +6,7 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::ClockState;
-use crate::timers::{ReadyTimers, TimerKey, Timers};
+use crate::timers::{ReadyWakers, TimerKey, Timers};
 use crate::{Clock, thread_aware_move};
 
 /// Controls the passage of time in tests.
@@ -42,9 +42,8 @@ use crate::{Clock, thread_aware_move};
 /// ```
 /// # use std::time::Duration;
 /// # use tick::{Clock, ClockControl};
-/// let clock = ClockControl::builder()
+/// let clock = ClockControl::new()
 ///     .auto_advance(Duration::from_secs(1))
-///     .build()
 ///     .to_clock();
 ///
 /// let now = clock.system_time();
@@ -93,37 +92,6 @@ impl std::fmt::Debug for ClockControl {
 
 thread_aware_move!(ClockControl);
 
-/// Configures and creates a [`ClockControl`].
-///
-/// Use [`ClockControl::builder`] when controlled time needs automatic advancement,
-/// an advancement limit, or a non-default initial time.
-///
-/// # Examples
-///
-/// ```
-/// use std::time::{Duration, SystemTime};
-///
-/// use tick::ClockControl;
-///
-/// let control = ClockControl::builder()
-///     .time(SystemTime::UNIX_EPOCH + Duration::from_secs(10))
-///     .auto_advance(Duration::from_secs(1))
-///     .build();
-///
-/// let clock = control.to_clock();
-/// assert_eq!(
-///     clock.system_time(),
-///     SystemTime::UNIX_EPOCH + Duration::from_secs(10)
-/// );
-/// ```
-#[derive(Debug, Clone)]
-pub struct ClockControlBuilder {
-    time: SystemTime,
-    auto_advance: Duration,
-    auto_advance_total_max: Option<Duration>,
-    auto_advance_timers: bool,
-}
-
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
     ///
@@ -135,9 +103,8 @@ impl ClockControl {
     ///
     /// use tick::ClockControl;
     ///
-    /// let clock = ClockControl::builder()
+    /// let clock = ClockControl::new()
     ///     .auto_advance(Duration::from_secs(1))
-    ///     .build()
     ///     .to_clock();
     ///
     /// let time1 = clock.system_time();
@@ -149,27 +116,9 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a builder for a configured `ClockControl`.
-    #[must_use]
-    pub fn builder() -> ClockControlBuilder {
-        ClockControlBuilder {
-            time: SystemTime::UNIX_EPOCH,
-            auto_advance: Duration::ZERO,
-            auto_advance_total_max: None,
-            auto_advance_timers: false,
+        Self {
+            state: Arc::new(Mutex::new(State::default())),
         }
-    }
-
-    /// Creates a clock control that automatically advances pending timers.
-    ///
-    /// This is a shortcut for
-    /// `ClockControl::builder().auto_advance_timers().build()`.
-    #[must_use]
-    pub fn new_auto_advancing() -> Self {
-        Self::builder().auto_advance_timers().build()
     }
 
     /// Creates a new `ClockControl` instance at the specified time.
@@ -189,7 +138,9 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn new_at(time: impl Into<SystemTime>) -> Self {
-        Self::builder().time(time).build()
+        let this = Self::new();
+        this.set_time(time.into());
+        this
     }
 
     /// Converts this `ClockControl` into a `Clock` instance.
@@ -476,8 +427,8 @@ impl ClockControl {
         })
     }
 
-    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) {
-        self.with_state(|state| state.timers.update_waker(key, waker));
+    pub(super) fn update_timer_waker(&self, key: TimerKey, replacement: Waker) -> (bool, Waker) {
+        self.with_state(|state| state.timers.update_waker(key, replacement))
     }
 
     pub(super) fn unregister_timer(&self, key: TimerKey) {
@@ -497,9 +448,9 @@ impl ClockControl {
 
     fn with_state_and_wake<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut State, &mut ReadyTimers) -> R,
+        F: FnOnce(&mut State, &mut ReadyWakers) -> R,
     {
-        let mut ready = ReadyTimers::new();
+        let mut ready = ReadyWakers::new();
         let result = self.with_state(|state| f(state, &mut ready));
 
         // A wake may synchronously re-enter clock control, so invoke it after releasing the lock.
@@ -512,64 +463,6 @@ impl ClockControl {
 
     pub(crate) fn is_unique(&self) -> bool {
         Arc::strong_count(&self.state) == 1
-    }
-}
-
-impl ClockControlBuilder {
-    /// Sets the initial system time.
-    ///
-    /// The default is [`SystemTime::UNIX_EPOCH`].
-    #[must_use]
-    pub fn time(mut self, time: impl Into<SystemTime>) -> Self {
-        self.time = time.into();
-        self
-    }
-
-    /// Sets the duration advanced whenever the current time is read.
-    #[must_use]
-    pub fn auto_advance(mut self, duration: Duration) -> Self {
-        self.auto_advance = duration;
-        self
-    }
-
-    /// Limits the total duration consumed by automatic advancement.
-    ///
-    /// The limit applies to both read-based auto-advance and timer auto-advance.
-    #[must_use]
-    pub fn auto_advance_limit(mut self, limit: Duration) -> Self {
-        self.auto_advance_total_max = Some(limit);
-        self
-    }
-
-    /// Enables automatic advancement to pending timer deadlines.
-    ///
-    /// Timers are fired eagerly, one at a time, as they are scheduled. This does not simulate
-    /// concurrent timers; use [`ClockControl::advance`] when timer ordering matters.
-    #[must_use]
-    pub fn auto_advance_timers(mut self) -> Self {
-        self.auto_advance_timers = true;
-        self
-    }
-
-    /// Builds the configured [`ClockControl`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the initial time is outside the range supported by the platform's
-    /// [`SystemTime`] or [`Instant`].
-    #[must_use]
-    pub fn build(self) -> ClockControl {
-        let mut state = State::default();
-        let mut ready = ReadyTimers::new();
-        state.set_time(self.time, &mut ready);
-        debug_assert!(ready.is_empty(), "a newly created clock has no timers to wake");
-        state.auto_advance = self.auto_advance;
-        state.auto_advance_total_max = self.auto_advance_total_max;
-        state.auto_advance_timers = self.auto_advance_timers;
-
-        ClockControl {
-            state: Arc::new(Mutex::new(state)),
-        }
     }
 }
 
@@ -623,14 +516,14 @@ impl Default for State {
 }
 
 impl State {
-    fn set_time(&mut self, timestamp: SystemTime, ready: &mut ReadyTimers) {
+    fn set_time(&mut self, timestamp: SystemTime, ready: &mut ReadyWakers) {
         match timestamp.duration_since(self.system_time) {
             Ok(duration) => self.advance(duration, TimeFlow::Forward, ready),
             Err(error) => self.advance(error.duration(), TimeFlow::Backward, ready),
         }
     }
 
-    fn auto_advance(&mut self, duration: Option<Duration>, ready: &mut ReadyTimers) {
+    fn auto_advance(&mut self, duration: Option<Duration>, ready: &mut ReadyWakers) {
         let auto_advance = self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
         self.auto_advance_total = self.auto_advance_total.saturating_add(auto_advance);
         self.advance(auto_advance, TimeFlow::Forward, ready);
@@ -646,12 +539,12 @@ impl State {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut ReadyTimers) {
+    fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut ReadyWakers) {
         self.advance_time(duration, flow);
         self.evaluate_timers(ready);
     }
 
-    fn evaluate_timers(&mut self, ready: &mut ReadyTimers) {
+    fn evaluate_timers(&mut self, ready: &mut ReadyWakers) {
         self.timers.advance_timers(self.instant, ready);
 
         if !self.auto_advance_timers {
@@ -699,13 +592,13 @@ impl State {
         }
     }
 
-    fn now(&mut self, ready: &mut ReadyTimers) -> SystemTime {
+    fn now(&mut self, ready: &mut ReadyWakers) -> SystemTime {
         let time = self.system_time;
         self.auto_advance(None, ready);
         time
     }
 
-    fn instant_now(&mut self, ready: &mut ReadyTimers) -> Instant {
+    fn instant_now(&mut self, ready: &mut ReadyWakers) -> Instant {
         let time = self.instant;
         self.auto_advance(None, ready);
         time
@@ -754,5 +647,67 @@ mod tests {
 
         assert_eq!(clock.instant().saturating_duration_since(start_instant), Duration::from_secs(100));
         assert_eq!(control.timers_len(), 0);
+    }
+
+    #[test]
+    fn timer_wakers_run_after_releasing_state_lock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let lock_was_available = Arc::new(AtomicBool::new(false));
+        let waker = Waker::from(Arc::new(ReentrantWaker {
+            control: control.clone(),
+            lock_was_available: Arc::clone(&lock_was_available),
+        }));
+
+        control.register_timer(clock.instant() + Duration::from_secs(1), waker);
+        control.advance(Duration::from_secs(1));
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn displaced_wakers_are_dropped_after_releasing_state_lock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let lock_was_available = Arc::new(AtomicBool::new(false));
+        let waker = Waker::from(Arc::new(ReentrantDropWaker {
+            control,
+            lock_was_available: Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(clock.instant() + Duration::from_secs(1), waker);
+
+        assert!(clock.update_timer_waker(key, Waker::noop()));
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    struct ReentrantWaker {
+        control: ClockControl,
+        lock_was_available: Arc<AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantWaker {
+        fn wake(self: Arc<Self>) {
+            self.lock_was_available
+                .store(self.control.state.try_lock().is_ok(), Ordering::Relaxed);
+        }
+    }
+
+    struct ReentrantDropWaker {
+        control: ClockControl,
+        lock_was_available: Arc<AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantDropWaker {
+        fn wake(self: Arc<Self>) {
+            self.lock_was_available
+                .store(self.control.state.try_lock().is_ok(), Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for ReentrantDropWaker {
+        fn drop(&mut self) {
+            self.lock_was_available
+                .store(self.control.state.try_lock().is_ok(), Ordering::Relaxed);
+        }
     }
 }

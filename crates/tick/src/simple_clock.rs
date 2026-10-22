@@ -18,9 +18,9 @@ use crate::thread_aware_move;
 /// - [`Clock`][crate::Clock] implements [`AsRef<SimpleClock>`] and exposes
 ///   [`Clock::simple_clock`][crate::Clock::simple_clock], so a timer-capable clock can be used
 ///   anywhere a `SimpleClock` is expected.
-/// - With the `test-util` feature, [`ClockControl::to_simple_clock`]
+/// - With the `test-util` feature, [`ClockControl::to_simple_clock`][crate::ClockControl::to_simple_clock]
 ///   creates a controlled `SimpleClock` whose time is driven by the same
-///   [`ClockControl`].
+///   [`ClockControl`][crate::ClockControl].
 ///
 /// This makes APIs that only need to read time — such as [`Stopwatch`][crate::Stopwatch] —
 /// seamlessly accept either kind of clock.
@@ -37,9 +37,6 @@ use crate::thread_aware_move;
 ///
 /// assert!(second >= first);
 /// ```
-///
-/// [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
-/// [`ClockControl::to_simple_clock`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html#method.to_simple_clock
 #[derive(Debug, Clone)]
 pub struct SimpleClock(TimeKind);
 

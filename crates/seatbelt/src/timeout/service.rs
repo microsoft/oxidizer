@@ -249,10 +249,9 @@ mod tests {
         let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
-        let clock = ClockControl::builder()
+        let clock = ClockControl::default()
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
-            .build()
             .to_clock();
         let context = ResilienceContext::new(clock.clone()).use_logs().name("log_test_pipeline");
 
@@ -287,10 +286,9 @@ mod tests {
         use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
         let metrics = MetricTester::new();
-        let clock = ClockControl::builder()
+        let clock = ClockControl::default()
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
-            .build()
             .to_clock();
         let context = ResilienceContext::new(clock.clone())
             .use_metrics(metrics.meter_provider())

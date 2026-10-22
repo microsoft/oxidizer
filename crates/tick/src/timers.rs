@@ -34,7 +34,7 @@ impl TimerKey {
 /// timer checks, while setting it too high would reduce timer precision.
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
-pub(crate) type ReadyTimers = BTreeMap<TimerKey, Waker>;
+pub(crate) type ReadyWakers = BTreeMap<TimerKey, Waker>;
 
 /// Management of one-shot timers, inspired by the [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
 ///
@@ -89,14 +89,18 @@ impl Timers {
     }
 
     /// Replaces the waker for an existing timer when the awaiting task changes.
-    pub(crate) fn update_waker(&mut self, id: TimerKey, waker: &Waker) {
+    ///
+    /// The returned waker must be dropped after releasing the timer lock.
+    pub(crate) fn update_waker(&mut self, id: TimerKey, replacement: Waker) -> (bool, Waker) {
         let Some(current) = self.wakers.get_mut(&id) else {
-            return;
+            return (false, replacement);
         };
 
-        if !current.will_wake(waker) {
-            current.clone_from(waker);
+        if current.will_wake(&replacement) {
+            return (true, replacement);
         }
+
+        (true, mem::replace(current, replacement))
     }
 
     /// Returns the instant when the next timer will fire, or `None` if no timers are registered.
@@ -111,7 +115,7 @@ impl Timers {
     /// In the future, the signature of this method can be easily expanded to return more
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyTimers) -> Option<Instant> {
+    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyWakers) -> Option<Instant> {
         self.alive = true;
 
         // Check if there are any timers that are ready to be woken.
@@ -184,9 +188,11 @@ mod tests {
             let now = Instant::now();
             let next = now + Duration::from_nanos(1);
             let key = timers.register(next, Waker::noop().clone());
+            let mut ready = ReadyWakers::new();
 
-            assert_eq!(timers.advance_timers(now), Some(next));
+            assert_eq!(timers.advance_timers(now, &mut ready), Some(next));
             assert!(timers.contains(key));
+            assert!(ready.is_empty());
         }
     }
 
@@ -278,7 +284,7 @@ mod tests {
     }
 
     fn advance_and_wake(timers: &mut Timers, now: Instant) -> Option<Instant> {
-        let mut ready = ReadyTimers::new();
+        let mut ready = ReadyWakers::new();
         let next = timers.advance_timers(now, &mut ready);
 
         for waker in ready.into_values() {

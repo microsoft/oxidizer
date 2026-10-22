@@ -79,9 +79,10 @@ enum ErrorKind {
     Jiff(jiff::Error),
     #[cfg(any(feature = "fmt", test))]
     OutOfRange(std::borrow::Cow<'static, str>),
+    #[cfg(any(feature = "fmt", test))]
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
     SystemTimeError(SystemTimeError),
-    Timeout,
+    Timeout(std::io::Error),
 }
 
 impl Error {
@@ -102,12 +103,16 @@ impl Error {
         Self::from_kind(ErrorKind::Jiff(error))
     }
 
+    #[cfg(any(feature = "fmt", test))]
     pub(super) fn other(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::from_kind(ErrorKind::Other(Box::new(error)))
     }
 
     pub(super) fn timeout() -> Self {
-        Self::from_kind(ErrorKind::Timeout)
+        Self::from_kind(ErrorKind::Timeout(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "future timed out",
+        )))
     }
 
     /// Returns whether this error reports a future timeout.
@@ -122,7 +127,7 @@ impl Error {
     /// use tick::{ClockControl, FutureExt};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let clock = ClockControl::new_auto_advancing().to_clock();
+    /// let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     /// let error = clock
     ///     .delay(Duration::from_secs(2))
     ///     .timeout(&clock, Duration::from_secs(1))
@@ -137,7 +142,7 @@ impl Error {
     /// ```
     #[must_use]
     pub const fn is_timeout(&self) -> bool {
-        matches!(&self.kind, ErrorKind::Timeout)
+        matches!(&self.kind, ErrorKind::Timeout(_))
     }
 
     /// Returns whether this error reports a value outside a supported range.
@@ -173,9 +178,10 @@ impl fmt::Display for Error {
             ErrorKind::Jiff(err) => err.fmt(f),
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(msg) => write!(f, "{msg}"),
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::Other(err) => err.fmt(f),
             ErrorKind::SystemTimeError(err) => err.fmt(f),
-            ErrorKind::Timeout => f.write_str("future timed out"),
+            ErrorKind::Timeout(err) => err.fmt(f),
         }
     }
 }
@@ -187,9 +193,10 @@ impl std::error::Error for Error {
             ErrorKind::Jiff(err) => Some(err),
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(_) => None,
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::Other(err) => Some(err.as_ref()),
             ErrorKind::SystemTimeError(err) => Some(err),
-            ErrorKind::Timeout => None,
+            ErrorKind::Timeout(err) => Some(err),
         }
     }
 }
@@ -197,12 +204,6 @@ impl std::error::Error for Error {
 impl From<SystemTimeError> for Error {
     fn from(err: SystemTimeError) -> Self {
         Self::from_kind(ErrorKind::SystemTimeError(err))
-    }
-}
-
-impl From<std::num::ParseIntError> for Error {
-    fn from(error: std::num::ParseIntError) -> Self {
-        Self::other(error)
     }
 }
 

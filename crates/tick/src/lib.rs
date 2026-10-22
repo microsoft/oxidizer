@@ -3,6 +3,10 @@
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
+    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
+)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(
@@ -50,7 +54,7 @@
 //!     #[tokio::test]
 //!     async fn test_produce_value() {
 //!         // Automatically advance timers for instant, deterministic testing
-//!         let clock: Clock = ClockControl::new_auto_advancing().to_clock();
+//!         let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
 //!         assert_eq!(produce_value(&clock).await, 123);
 //!     }
 //! }
@@ -305,12 +309,6 @@
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
 //! contain additional examples of how to use the time primitives.
-//!
-//! [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
-//! [`ClockControl::to_simple_clock`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html#method.to_simple_clock
-//! [`Clock::new_tokio`]: https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio
-//! [`fmt`]: https://docs.rs/tick/latest/tick/fmt/index.html
-//! [`SystemTimeExt`]: https://docs.rs/tick/latest/tick/trait.SystemTimeExt.html
 
 mod clock;
 #[cfg(any(feature = "test-util", test))]
@@ -338,7 +336,7 @@ pub mod runtime;
 pub(crate) mod timeout;
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-pub use clock_control::{ClockControl, ClockControlBuilder};
+pub use clock_control::ClockControl;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;

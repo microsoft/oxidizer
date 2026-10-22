@@ -170,7 +170,7 @@ impl TryFrom<SystemTime> for EcmaScript {
     type Error = Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
+        let timestamp = Timestamp::try_from(value).map_err(|error| Error::out_of_range(error.to_string()))?;
         Self::new_checked(timestamp)
     }
 }

@@ -265,7 +265,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_rustls_propagates_connector_error() {
-        let clock = tick::ClockControl::new_auto_advancing().to_clock();
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_connect_failure(TestError::new("fail-rustls"), clock);
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             rustls_backend(),

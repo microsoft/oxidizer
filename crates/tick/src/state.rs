@@ -10,7 +10,7 @@ use performables::arc::{Arc, PerThread};
 use performables::sync::mutex::Mutex;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::timers::{ReadyTimers, Timers};
+use crate::timers::{ReadyWakers, Timers};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ClockState {
@@ -327,7 +327,7 @@ impl SystemClockStorage {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        let mut ready = ReadyTimers::new();
+        let mut ready = ReadyWakers::new();
         let next = self.with_timers(|timers| timers.advance_timers(now, &mut ready));
 
         // A wake may synchronously re-enter timer code, so invoke it after releasing the lock.
@@ -350,6 +350,37 @@ mod tests {
     impl std::task::Wake for CountingWake {
         fn wake(self: std::sync::Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    struct ReentrantWake {
+        storage: SystemClockStorage,
+        lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
+        }
+    }
+
+    struct ReentrantDropWake {
+        storage: SystemClockStorage,
+        lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantDropWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for ReentrantDropWake {
+        fn drop(&mut self) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
         }
     }
 
@@ -387,6 +418,37 @@ mod tests {
 
         _ = storage.register_timer(now + std::time::Duration::from_secs(1), Waker::noop().clone());
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn timer_wakers_run_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantWake {
+            storage: storage.clone(),
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let now = Instant::now();
+        _ = storage.register_timer(now, waker);
+
+        storage.try_advance_timers(now);
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn displaced_wakers_are_dropped_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let clock = crate::Clock::new(ClockState::System(SystemClockState::new(storage.clone())));
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantDropWake {
+            storage,
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(Instant::now() + std::time::Duration::from_secs(1), waker);
+
+        assert!(clock.update_timer_waker(key, Waker::noop()));
+        assert!(lock_was_available.load(Ordering::Relaxed));
     }
 
     #[test]
