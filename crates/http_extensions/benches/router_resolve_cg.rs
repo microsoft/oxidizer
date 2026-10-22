@@ -48,7 +48,7 @@ mod linux {
         (router, request)
     }
 
-    // A fixed endpoint with a root base path returns the cached path directly.
+    // A fixed endpoint with a root base path returns the cached path directly without re-validation.
     #[library_benchmark]
     #[bench::root(setup("https://api.example.com"))]
     fn resolve_root(input: (Router, HttpRequest)) -> HttpRequest {

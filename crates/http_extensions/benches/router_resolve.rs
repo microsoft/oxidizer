@@ -32,7 +32,7 @@ fn built_request(path: &'static str) -> HttpRequest {
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("router_resolve");
 
-    // A fixed endpoint with a root base path returns the cached path directly.
+    // A fixed endpoint with a root base path returns the cached path directly without re-validation.
     let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
     let mut request = built_request("/users/42/posts/hello-world?active=true");
 
