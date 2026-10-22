@@ -58,7 +58,6 @@ pub(crate) struct Arguments {
     pub(crate) timeout: Option<Duration>,
     native_args: EngineArguments,
     trailing: Vec<OsString>,
-    cargo_bench: bool,
     cargo_test: bool,
 }
 
@@ -127,7 +126,7 @@ impl Arguments {
             }
         }
         if modes.contains(&Mode::Gungraun) {
-            if self.cargo_bench && !self.smoke() {
+            if !self.smoke() {
                 push_argument_unique(&mut self.native_args.gungraun, "--bench");
             }
             if self.smoke() {
@@ -158,7 +157,6 @@ impl Arguments {
         let mut timeout = None;
         let mut engine_arguments = EngineArguments::default();
         let mut trailing = Vec::new();
-        let mut cargo_bench = false;
         let mut cargo_test = false;
         let mut arguments = arguments.into_iter().peekable();
         if arguments.peek().is_none() {
@@ -190,7 +188,8 @@ impl Arguments {
                     no_output = true;
                 }
                 Some("--no-baseline") => automatic_baseline = false,
-                Some("--bench") => cargo_bench = true,
+                // Native benchmark flags are added when finalizing non-smoke invocations.
+                Some("--bench") => {}
                 Some("--test") => cargo_test = true,
                 Some("--criterion-arg") => engine_arguments
                     .criterion
@@ -298,7 +297,6 @@ impl Arguments {
             timeout,
             native_args: engine_arguments,
             trailing,
-            cargo_bench,
             cargo_test,
         })
     }
@@ -471,17 +469,31 @@ mod tests {
     }
 
     #[test]
-    fn gungraun_bench_flag_requires_cargo_bench_and_non_smoke_mode() {
+    fn gungraun_bench_flag_follows_measurement_intent() {
         for (options, expected) in [
-            (&["--gungraun"][..], &[][..]),
+            (&[][..], &["--test"][..]),
+            (&["--gungraun"][..], &["--bench"][..]),
             (&["--gungraun", "--bench"][..], &["--bench"][..]),
             (&["--gungraun", "--test"][..], &["--test"][..]),
             (&["--gungraun", "--bench", "--test"][..], &["--test"][..]),
+            (&["--gungraun", "--gungraun-arg=--bench"][..], &["--bench"][..]),
+            (&["--gungraun", "--gungraun-arg=--test"][..], &["--test"][..]),
+            (&["--gungraun", "--", "--bench"][..], &["--bench"][..]),
+            (&["--gungraun", "--", "--test"][..], &["--test"][..]),
+            (&["--gungraun", "--list"][..], &["--bench", "--list"][..]),
+            (&["--gungraun", "--test", "--list"][..], &["--test", "--list"][..]),
         ] {
             let mut arguments = parse(options, None).unwrap();
             arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
             assert_eq!(arguments.args_for(Mode::Gungraun), expected);
         }
+    }
+
+    #[test]
+    fn environment_selected_gungraun_measurements_enable_bench_mode() {
+        let mut arguments = parse(&["--no-output"], Some("gungraun")).unwrap();
+        arguments.finalize_native_args(&[Mode::Gungraun]).unwrap();
+        assert_eq!(arguments.args_for(Mode::Gungraun), ["--bench"]);
     }
 
     #[test]

@@ -6,8 +6,10 @@ matching the workspace's Gungraun version (currently 0.20.0).
 It runs the native listing, default-engine smoke, and report-generation
 contracts and is required by the stable **Required repository checks** fan-in.
 The report contract runs Callgrind and checks that schema-v7 summaries produce
-JSON and Markdown reports with instruction counts. These are correctness
-checks, not timed performance measurements.
+JSON and Markdown reports with instruction counts. It selects `--gungraun`
+without Cargo's `--bench` argument so explicit measurement intent is covered
+independently of Cargo's invocation. These are correctness checks, not timed
+performance measurements.
 
 To run the same required tier locally on Linux:
 
@@ -27,8 +29,9 @@ cargo test --package metabench --test spawned_benchmark --locked -- --exact --no
 
 `METABENCH_REQUIRE_NATIVE_CONTRACTS` makes missing prerequisites a test failure,
 not a successful skip. Without this setting, ordinary local test runs retain
-the optional skip when `gungraun-runner` is unavailable. The Linux smoke and report
-contracts are not compiled on Windows; Windows' unsupported native-mode behavior is
+the optional skip when `gungraun-runner` is unavailable. The report contract also
+skips when Valgrind is unavailable. The Linux smoke and report contracts are
+not compiled on Windows; Windows' unsupported native-mode behavior is
 unchanged. Test output reports each executed contract by name.
 
 Unit regressions also check collector activation, report boundary values,
