@@ -21,8 +21,16 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_de
 all-features = true
 
 [dependencies]
+# 3rd-party
+jiff = { workspace = true, default-features = false, features = ["std"] }
+log = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs", "metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics"] }
 
 [dev-dependencies]
+insta = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+performables = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]
