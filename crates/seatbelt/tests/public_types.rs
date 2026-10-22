@@ -3,10 +3,9 @@
 
 #![allow(missing_docs, reason = "This is a test module")]
 
-use std::fmt::{Debug, Display};
-
 #[cfg(feature = "breaker")]
 use std::borrow::Cow;
+use std::fmt::{Debug, Display};
 
 use seatbelt::{Attempt, ResilienceContext};
 use static_assertions::assert_impl_all;
