@@ -9,9 +9,8 @@ mod support;
 
 use std::marker::PhantomPinned;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
