@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_tokio"
+description = "Tokio compatibility for tasks running on the Arty runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime", "tokio"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty::task::builtins::Builtins",
+    "tokio::runtime::handle::Handle",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+arty = { workspace = true, features = ["rt"] }
+ohno = { workspace = true }
+performables = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+arty = { path = "../arty", features = ["macros", "rt"] }
+futures = { workspace = true, features = ["executor"] }
+ohno = { path = "../ohno", features = ["app-err"] }
+static_assertions = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync"] }
+
+[[example]]
+name = "default_runtime"
+
+[[example]]
+name = "external_runtime"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

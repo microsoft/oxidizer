@@ -352,6 +352,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arty_tokio"
+version = "0.1.0"
+dependencies = [
+ "arty",
+ "futures",
+ "ohno",
+ "performables",
+ "static_assertions",
+ "tokio",
+]
+
+[[package]]
 name = "asn1-rs"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
