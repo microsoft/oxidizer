@@ -284,6 +284,22 @@ mod tests {
     }
 
     #[test]
+    fn pop_ready_into_stops_at_output_capacity() {
+        let mut timers = Timers::default();
+        let now = Instant::now();
+        let _ = timers.register(now, Waker::noop().clone());
+        let _ = timers.register(now, Waker::noop().clone());
+        let mut ready = [None];
+
+        let (count, next) = timers.pop_ready_into(now, &mut ready);
+
+        assert_eq!(count, ready.len());
+        assert!(ready[0].is_some());
+        assert_eq!(next, Some(now));
+        assert_eq!(timers.len(), 1);
+    }
+
+    #[test]
     fn advance_timers_ensure_correct_result() {
         let mut timers = Timers::default();
         let now = Instant::now();
