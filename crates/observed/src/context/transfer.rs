@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{Enrichment, EnrichmentTransfer};
+use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -111,8 +111,12 @@ impl Transfer {
         ThreadBoundGuard::new(self.enrichment.apply_owned())
     }
 
-    pub(crate) fn apply_current_thread_borrowed(&self) -> impl Sized + '_ {
-        ThreadBoundGuard::new(self.enrichment.apply())
+    pub(crate) fn apply_state(&self) -> ApplyState {
+        self.enrichment.apply_state()
+    }
+
+    pub(crate) fn apply_current_thread_borrowed<'a>(&'a self, state: &'a mut ApplyState) -> impl Sized + 'a {
+        ThreadBoundGuard::new(self.enrichment.apply(state))
     }
 }
 

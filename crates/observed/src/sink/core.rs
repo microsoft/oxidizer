@@ -11,7 +11,7 @@ use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
-use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
+use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, PushState, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
@@ -339,6 +339,14 @@ impl Sink {
         }
     }
 
+    pub(crate) fn enrichment_push_state(&self, entries: PerformableArc<[EnrichmentEntry]>) -> PushState {
+        match &*self.inner {
+            SinkInner::Single(state) => PushState::new(entries, [state.enrichment.clone()]),
+            SinkInner::Composite { children } => PushState::new(entries, children.iter().map(|child| child.enrichment.clone())),
+            SinkInner::Noop => PushState::new(entries, std::iter::empty()),
+        }
+    }
+
     /// Dispatches the event that `build` returns to the processors that want
     /// it, unless an attached [`EventSampler`] drops it. `build` runs only if
     /// at least one processor receives the event.
@@ -354,19 +362,32 @@ impl Sink {
     ///
     /// It's automatically called by the `emit!` macro expansion, and can be called directly for
     /// [`DynEvent`s](DynEvent)
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "sink construction limits the processor count to the 64-bit dispatch mask"
+    )]
     pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
-        if self.is_noop() {
-            return;
-        }
+        let sinks = match &*self.inner {
+            SinkInner::Single(sink) if !sink.processors.is_empty() => slice::from_ref(sink),
+            SinkInner::Composite { children } if children.iter().any(|sink| !sink.processors.is_empty()) => children.as_slice(),
+            SinkInner::Single(_) | SinkInner::Composite { .. } | SinkInner::Noop => return,
+        };
 
         let description = state.description();
         let bitmask = {
             let Some(_guard) = super::try_acquire_reentrancy_guard() else {
                 return;
             };
-            self.sinks_with_shift().fold(0, |bitmask, (sink, shift)| {
-                bitmask | sink.sample_and_ask_processors(&description) << shift
-            })
+            let mut bitmask = 0;
+            let mut shift = 0;
+            for sink in sinks {
+                if sink.processors.is_empty() {
+                    continue;
+                }
+                bitmask |= sink.sample_and_ask_processors(&description) << shift;
+                shift += sink.processors.len();
+            }
+            bitmask
         };
         if bitmask == 0 {
             return;
@@ -375,8 +396,13 @@ impl Sink {
         let event = state.evaluate();
 
         let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot should be free again once the event is built");
-        for (sink, shift) in self.sinks_with_shift() {
-            sink.dispatch(&event, bitmask >> shift);
+        let mut remaining_bitmask = bitmask;
+        for sink in sinks {
+            if sink.processors.is_empty() {
+                continue;
+            }
+            sink.dispatch(&event, remaining_bitmask);
+            remaining_bitmask = remaining_bitmask.checked_shr(sink.processors.len() as u32).unwrap_or(0);
         }
     }
 
@@ -543,6 +569,17 @@ mod tests {
         assert!(sink.is_noop());
         assert!(sink.current_enrichments().is_empty());
         drop(transfer.apply_current_thread());
+    }
+
+    #[test]
+    fn noop_sink_enrichment_push_state_applies_nothing() {
+        let sink = Sink::noop();
+        let entries = PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]);
+        let mut state = sink.enrichment_push_state(entries);
+
+        let _guard = state.apply();
+
+        assert!(sink.current_enrichments().is_empty());
     }
 
     struct DummyDyn;
