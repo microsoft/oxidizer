@@ -6,7 +6,9 @@ coordination invariants behind Arty's public runtime behavior.
 ## Bootstrap and readiness
 
 [`runtime/bootstrap/startup.rs`](../src/runtime/bootstrap/startup.rs) starts
-workers in stable processor order. Each worker first publishes a
+workers in a stable placement order. An exact count that exceeds processor
+capacity repeats the available processors in processor-ID order. Each worker
+still owns a separate OS thread and first publishes a
 `WorkerEndpoint`: its command sender, wake handle, thread coordinate, and
 blocking worker. Bootstrap collects every endpoint before constructing the
 dispatcher, then distributes a `DispatcherClient` back to every worker through
