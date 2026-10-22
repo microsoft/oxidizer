@@ -250,4 +250,30 @@ mod tests {
         assert_eq!(error.to_string(), "dummy");
         assert_eq!(error.source().unwrap().to_string(), "dummy");
     }
+
+    #[test]
+    fn captured_backtrace_is_available_from_the_error() {
+        let backtrace = MaybeBacktrace::from_backtrace(Backtrace::force_capture());
+        assert_eq!(backtrace.get().unwrap().status(), BacktraceStatus::Captured);
+
+        let error = Error {
+            kind: ErrorKind::Timeout(std::io::Error::new(std::io::ErrorKind::TimedOut, "future timed out")),
+            backtrace,
+        };
+
+        assert_eq!(error.backtrace().unwrap().status(), BacktraceStatus::Captured);
+    }
+
+    #[test]
+    fn disabled_backtrace_is_not_available_from_the_error() {
+        let backtrace = MaybeBacktrace::from_backtrace(Backtrace::disabled());
+        assert!(backtrace.get().is_none());
+
+        let error = Error {
+            kind: ErrorKind::Timeout(std::io::Error::new(std::io::ErrorKind::TimedOut, "future timed out")),
+            backtrace,
+        };
+
+        assert!(error.backtrace().is_none());
+    }
 }

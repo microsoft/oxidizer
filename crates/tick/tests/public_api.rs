@@ -189,9 +189,11 @@ fn periodic_timer_is_lazy_and_first_poll_is_pending() {
 fn registered_periodic_timer_remains_pending_before_its_deadline() {
     let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    let waker = Waker::noop().clone();
+    let mut context = Context::from_waker(&waker);
 
-    assert!(poll_timer(&mut timer).is_pending());
-    assert!(poll_timer(&mut timer).is_pending());
+    assert!(std::pin::pin!(timer.next()).poll(&mut context).is_pending());
+    assert!(std::pin::pin!(timer.next()).poll(&mut context).is_pending());
 }
 
 #[test]
