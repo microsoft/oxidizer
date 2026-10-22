@@ -143,8 +143,8 @@ immutable process-lifetime labels cannot dangle and carry no referent state to r
 
 * **`std`** *(default)* - Adds runtime construction support and [`Thread::id`][__link32], which need
   [`ThreadId`][__link33], and implements [`ThreadAware`][__link34] for standard library
-  types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs only
-  `alloc` and pointer-width atomics.
+  types such as `HashMap`, `Path`, `PathBuf` and `SocketAddr`. Turn it off for `no_std`,
+  which needs only `alloc` and pointer-width atomics.
 
 
 <hr/>
@@ -152,7 +152,7 @@ immutable process-lifetime labels cannot dangle and carry no referent state to r
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb02KPCr_dauobWtqourwGm6IbktohTIJUrMYbofBgvlnEBolhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbPrJXG6oeg4gbxuVuhX7taXwbLzgXzDzhBpEbG4tsc8DozCNhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4y
  [__link0]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=ThreadAware::relocate
  [__link10]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=NumaNode

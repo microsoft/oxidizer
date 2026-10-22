@@ -14,6 +14,8 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+#[cfg(feature = "std")]
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
 #[cfg(feature = "std")]
@@ -37,6 +39,8 @@ assert_not_impl_any!(Cow<'static, str>: ThreadAware);
 assert_not_impl_any!(Arc<i32>: ThreadAware);
 #[cfg(feature = "std")]
 assert_not_impl_any!(HashSet<i32>: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddr: ThreadAware);
 
 fn hash_of<T>(value: &T) -> u64
 where
@@ -45,6 +49,17 @@ where
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
     hasher.finish()
+}
+
+#[cfg(feature = "std")]
+fn sample_threads() -> [Thread; 2] {
+    let owner = new_owner();
+    let id = thread::current().id();
+
+    [
+        new_thread(owner.clone(), id, new_numa_node(0)),
+        new_thread(owner, id, new_numa_node(1)),
+    ]
 }
 
 #[test]
@@ -104,4 +119,28 @@ fn with_std_every_component_takes_part_in_equality() {
         .unwrap();
 
     assert_ne!(mine, elsewhere, "the thread id counts");
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn ipv4_socket_address_is_unchanged_by_relocation() {
+    let threads = sample_threads();
+    let original = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443));
+    let mut address = original;
+
+    address.relocate(Some(&threads[0]), &threads[1]);
+
+    assert_eq!(address, original);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn ipv6_socket_address_is_unchanged_by_relocation() {
+    let threads = sample_threads();
+    let original = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 7, 11));
+    let mut address = original;
+
+    address.relocate(Some(&threads[0]), &threads[1]);
+
+    assert_eq!(address, original);
 }

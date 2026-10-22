@@ -72,6 +72,8 @@ impl_thread_aware!(PathBuf);
 impl_thread_aware!(Duration);
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(Path);
+// Both socket-address variants contain only address, port, flow-info, and scope-id values;
+// none of their fields carry thread-local or shared state that relocation could re-home.
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(SocketAddr);
 
