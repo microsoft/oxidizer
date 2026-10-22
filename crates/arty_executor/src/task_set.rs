@@ -54,6 +54,11 @@ impl TaskSet {
     pub fn begin_shutdown(&self) {
         self.shared.request_shutdown();
     }
+
+    #[cfg(test)]
+    pub(crate) fn task_storage_is_empty(&self) -> bool {
+        self.shared.task_storage_is_empty()
+    }
 }
 
 #[cfg(test)]

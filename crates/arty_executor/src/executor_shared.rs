@@ -61,6 +61,10 @@ impl ExecutorShared {
         self.inner.wake.drain_remote_wakes(&self.inner.remote_wakes);
     }
 
+    pub(crate) fn close_remote_wakes(&self) {
+        self.inner.wake.close_remote_wakes(&self.inner.remote_wakes);
+    }
+
     pub(crate) fn is_shutting_down(&self) -> bool {
         self.inner.shutting_down.get()
     }
@@ -169,6 +173,11 @@ impl ExecutorShared {
 
     pub(crate) fn has_tasks(&self) -> bool {
         self.inner.task_count.get() != 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn task_storage_is_empty(&self) -> bool {
+        self.inner.task_storage.is_empty()
     }
 }
 

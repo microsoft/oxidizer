@@ -69,6 +69,23 @@ impl WakeShared {
         }
     }
 
+    pub(crate) fn close_remote_wakes(&self, remote_wakes: &channel::Receiver<RemoteWake>) {
+        _ = remote_wakes.close();
+        loop {
+            match remote_wakes.try_recv() {
+                Ok(notification) => drop(notification),
+                Err(error) => {
+                    debug_assert!(
+                        error.is_empty() || error.is_closed(),
+                        "closed remote wake channel reports only empty or closed: {error}"
+                    );
+                    break;
+                }
+            }
+        }
+        self.inner.remote_wakes_pending.store(false, atomic::Ordering::Release);
+    }
+
     pub(crate) fn has_remote_wakes(&self) -> bool {
         self.inner.remote_wakes_pending.load(atomic::Ordering::Relaxed)
     }

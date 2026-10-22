@@ -276,6 +276,7 @@ impl Executor {
     }
 
     fn prepare_task_abort(&mut self) -> usize {
+        self.shared.close_remote_wakes();
         executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_handle in &self.active {
             drop(self.pending.remove(task_handle.as_ptr()));
@@ -917,6 +918,29 @@ mod tests {
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
         assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+    }
+
+    #[test]
+    fn direct_drop_drains_remote_wakes_while_task_set_is_retained() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let retained = Rc::new(RefCell::new(None));
+        tasks.add_test(poll_fn({
+            let retained = Rc::clone(&retained);
+            move |cx| {
+                *retained.borrow_mut() = Some(cx.waker().clone());
+                Poll::<()>::Pending
+            }
+        }));
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+        let waker = retained.borrow_mut().take().unwrap();
+        std::thread::spawn(move || waker.wake()).join().unwrap();
+        assert!(executor.shared.wake().has_remote_wakes());
+
+        drop(executor);
+
+        assert!(tasks.task_storage_is_empty());
     }
 
     #[test]
