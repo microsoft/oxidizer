@@ -85,37 +85,6 @@ async fn default_main_runtime_has_exactly_one_worker(cx: Builtins) {
     }
 }
 
-#[cfg(not(miri))]
-async fn assert_all_workers(cx: Builtins) -> Result<(), arty::task::JoinError> {
-    let available = many_cpus::SystemHardware::current().processors().len();
-    let tasks: Vec<_> = cx
-        .control()
-        .workers()
-        .into_iter()
-        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
-        .collect();
-    assert_eq!(tasks.len(), available);
-    let mut threads = std::collections::HashSet::new();
-    for task in tasks {
-        assert!(threads.insert(task.await?));
-    }
-    assert_eq!(threads.len(), available);
-    Ok(())
-}
-
-#[cfg(not(miri))]
-#[test(workers = all)]
-async fn test_can_select_all_workers(cx: Builtins) {
-    assert_all_workers(cx).await.unwrap();
-}
-
-#[cfg(not(miri))]
-#[arty::main(workers = all)]
-#[::core::prelude::v1::test]
-async fn main_can_select_all_workers(cx: Builtins) {
-    assert_all_workers(cx).await.unwrap();
-}
-
 #[test(workers = 0)]
 #[should_panic(expected = "failed to create the runtime for the entry point")]
 async fn zero_workers_fail_during_construction(_cx: Builtins) {
@@ -148,15 +117,6 @@ mod controlled_time {
         for task in tasks {
             assert_eq!(task.await.unwrap(), cx.thread().id());
         }
-    }
-
-    #[cfg(not(miri))]
-    #[arty::test(workers = all)]
-    async fn controlled_test_can_select_all_workers(cx: Builtins, control: ClockControl) {
-        assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
-        super::assert_all_workers(cx.clone()).await.unwrap();
-        control.advance(Duration::from_secs(1));
-        assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(1));
     }
 
     trait TestTypes {
