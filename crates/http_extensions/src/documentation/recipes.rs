@@ -85,7 +85,8 @@
 //!
 //! Use [`HeaderValue::from_static`] for static values.
 //! Use [`HeaderValueExt::from_shared`] for values that can be large.
-//! It accepts `impl Into<Bytes>` from several source types and shares the data without copying it.
+//! It accepts `impl Into<Bytes>` from several source types.
+//! The conversion can share one contiguous buffer without copying it.
 //!
 //! If you have a [`BytesView`](bytesbuf::BytesView), convert it with
 //! [`HeaderValueExt::from_shared`].
