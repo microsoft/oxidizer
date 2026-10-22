@@ -10,7 +10,7 @@ use performables::arc::{Arc, PerThread};
 use performables::sync::mutex::Mutex;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::timers::{ReadyWakers, Timers};
+use crate::timers::Timers;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ClockState {
@@ -330,15 +330,37 @@ impl SystemClockStorage {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        let mut ready = ReadyWakers::new();
-        let next = self.with_timers(|timers| timers.advance_timers(now, &mut ready));
-
-        // A wake may synchronously re-enter timer code, so invoke it after releasing the lock.
-        for waker in ready.into_values() {
-            waker.wake();
+        let mut first = [None];
+        let (count, next) = self.with_timers(|timers| timers.pop_ready_into(now, &mut first));
+        if count == 0 {
+            return next;
         }
 
-        next
+        first[0]
+            .take()
+            .expect("filled by pop_ready_into when one ready timer is reported")
+            .wake();
+        if next.is_none_or(|next| next > now) {
+            return next;
+        }
+
+        // A Vec would allocate on the timer hot path. A bounded stack batch handles ordinary timer
+        // bursts with one lock acquisition and loops for larger bursts without imposing a limit.
+        const READY_BATCH_SIZE: usize = 8;
+        let mut ready: [Option<Waker>; READY_BATCH_SIZE] = std::array::from_fn(|_| None);
+
+        loop {
+            let (count, next) = self.with_timers(|timers| timers.pop_ready_into(now, &mut ready));
+
+            // A wake may synchronously re-enter timer code, so invoke each after releasing the lock.
+            for waker in &mut ready[..count] {
+                waker.take().expect("filled by pop_ready_into for every counted slot").wake();
+            }
+
+            if count < READY_BATCH_SIZE || next.is_none_or(|next| next > now) {
+                return next;
+            }
+        }
     }
 }
 

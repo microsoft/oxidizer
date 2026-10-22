@@ -8,7 +8,7 @@ use std::time::Duration;
 use futures::executor::block_on;
 use tick::ClockControl;
 
-fn main() -> Result<(), std::time::SystemTimeError> {
+fn main() -> Result<(), ohno::AppError> {
     let control = ClockControl::new().auto_advance_timers(true);
     let clock = control.to_clock();
 
