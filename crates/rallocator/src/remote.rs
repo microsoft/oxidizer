@@ -525,10 +525,13 @@ mod tests {
             seen[index] = true;
             true
         };
-        while completed.load(Ordering::Acquire) != PRODUCERS {
+        // Drain at least once even if every producer finishes before this thread resumes.
+        let mut keep_draining = true;
+        while keep_draining {
             // SAFETY: This test thread is the single queue consumer.
             unsafe { queue.drain(&mut accept) };
             std::thread::yield_now();
+            keep_draining = completed.load(Ordering::Acquire) != PRODUCERS;
         }
         for worker in workers {
             worker.join().unwrap();

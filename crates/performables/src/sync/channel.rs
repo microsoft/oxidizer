@@ -7,16 +7,18 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, PoisonError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-// Channel state is already heap-shared; another lazy sidecar would not shrink
-// the endpoint handles and would add work to their notification path.
-use super::wait_queue::{EagerWaitQueue as WaitQueue, Waiter, block_on, block_on_timeout};
 use crate::Error;
 use crate::error::ErrorKind;
+use crate::sync::broadcast::{Broadcast, Registration as BroadcastRegistration};
+// Channel state is already heap-shared; another lazy sidecar would not shrink
+// the endpoint handles and would add work to their notification path.
+use crate::sync::raw_mutex::{RawMutex as StateMutex, RawMutexGuard as StateGuard};
+use crate::sync::wait_queue::{EagerWaitQueue as WaitQueue, Timeout, Waiter, block_on, block_on_until};
 use crate::telemetry::{self, EventKind};
 
 const ERROR_FULL: ErrorKind = ErrorKind::Full;
@@ -44,7 +46,7 @@ pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
 fn queue<T>(capacity: Option<usize>) -> (Sender<T>, Receiver<T>) {
     let values = capacity.map_or_else(VecDeque::new, VecDeque::with_capacity);
     let shared = Arc::new(QueueShared {
-        state: StdMutex::new(QueueState {
+        state: StateMutex::new(QueueState {
             values,
             capacity,
             senders: 1,
@@ -89,14 +91,14 @@ impl<T> QueueState<T> {
 
 #[derive(Debug)]
 struct QueueShared<T> {
-    state: StdMutex<QueueState<T>>,
+    state: StateMutex<QueueState<T>>,
     send_waiters: WaitQueue,
     receive_waiters: WaitQueue,
 }
 
 impl<T> QueueShared<T> {
-    fn state(&self) -> StdMutexGuard<'_, QueueState<T>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    fn state(&self) -> StateGuard<'_, QueueState<T>> {
+        self.state.lock()
     }
 
     fn record(&self, kind: EventKind) {
@@ -175,6 +177,7 @@ pub struct Sender<T> {
     shared: Arc<QueueShared<T>>,
 }
 
+/// Prevents duplicate contention events when a readiness probe hands off to waiting.
 #[derive(Clone, Copy)]
 enum ContentionRecording {
     Pending,
@@ -192,10 +195,13 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub async fn send_async(&self, value: T) -> Result<(), Error<T>> {
+        self.send_with_recording_async(value, ContentionRecording::Pending).await
+    }
+
+    async fn send_with_recording_async(&self, value: T, mut contention_recording: ContentionRecording) -> Result<(), Error<T>> {
         let mut value = value;
-        let mut contention_recording = ContentionRecording::Pending;
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "queue send must make progress");
@@ -224,7 +230,15 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub fn send(&self, value: T) -> Result<(), Error<T>> {
-        block_on(self.send_async(value))
+        match self.shared.try_send(value) {
+            Ok(()) => Ok(()),
+            Err((ERROR_CLOSED, value)) => Err(Error::with_value(ERROR_CLOSED, value)),
+            Err((code, value)) => {
+                debug_assert_eq!(code, ERROR_FULL, "queue send reports only full or closed");
+                self.shared.record(EventKind::ChannelSendContention);
+                block_on(self.send_with_recording_async(value, ContentionRecording::Recorded))
+            }
+        }
     }
 
     /// Attempts to send `value` without waiting.
@@ -325,9 +339,12 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub async fn recv_async(&self) -> Result<T, Error> {
-        let mut contention_recording = ContentionRecording::Pending;
+        self.recv_with_recording_async(ContentionRecording::Pending).await
+    }
+
+    async fn recv_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<T, Error> {
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "queue receive must make progress");
@@ -358,7 +375,10 @@ impl<T> Receiver<T> {
     /// Returns [`Error`] after the channel closes and all buffered values
     /// have been received.
     pub fn recv(&self) -> Result<T, Error> {
-        block_on(self.recv_async())
+        match self.try_recv() {
+            Err(error) if error.is_empty() => block_on(self.recv_with_recording_async(ContentionRecording::Recorded)),
+            result => result,
+        }
     }
 
     /// Receives the next value, blocking for at most `timeout`.
@@ -368,7 +388,13 @@ impl<T> Receiver<T> {
     /// Returns an error if the deadline expires or the channel closes while
     /// drained.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, Error> {
-        match block_on_timeout(self.recv_async(), timeout) {
+        let deadline = Timeout::new(timeout);
+        match self.try_recv() {
+            Err(error) if error.is_empty() => {}
+            result => return result,
+        }
+        // Preserve both the original timeout budget and the first contention event.
+        match block_on_until(self.recv_with_recording_async(ContentionRecording::Recorded), deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -543,7 +569,7 @@ impl<T> Drop for QueueWait<'_, T> {
 /// Creates a channel that transfers at most one value.
 pub fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     let shared = Arc::new(OneshotShared {
-        state: StdMutex::new(OneshotState {
+        state: StateMutex::new(OneshotState {
             value: None,
             sender_alive: true,
             receiver_alive: true,
@@ -573,13 +599,13 @@ struct OneshotState<T> {
 
 #[derive(Debug)]
 struct OneshotShared<T> {
-    state: StdMutex<OneshotState<T>>,
+    state: StateMutex<OneshotState<T>>,
     receiver_waiters: WaitQueue,
 }
 
 impl<T> OneshotShared<T> {
-    fn state(&self) -> StdMutexGuard<'_, OneshotState<T>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    fn state(&self) -> StateGuard<'_, OneshotState<T>> {
+        self.state.lock()
     }
 
     fn receiver_ready(&self) -> bool {
@@ -659,6 +685,9 @@ impl<T> OneshotReceiver<T> {
     ///
     /// Returns [`Error`] if the sender is dropped without sending.
     pub fn recv(mut self) -> Result<T, Error> {
+        if let Some(result) = self.take_result() {
+            return result;
+        }
         block_on(&mut self)
     }
 
@@ -669,7 +698,11 @@ impl<T> OneshotReceiver<T> {
     /// Returns an error if the deadline expires or the sender drops without
     /// sending.
     pub fn recv_timeout(mut self, timeout: Duration) -> Result<T, Error> {
-        match block_on_timeout(&mut self, timeout) {
+        let deadline = Timeout::new(timeout);
+        if let Some(result) = self.take_result() {
+            return result;
+        }
+        match block_on_until(&mut self, deadline) {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(error),
             None => Err(Error::without_value(ERROR_TIMEOUT)),
@@ -790,16 +823,18 @@ impl<T> fmt::Debug for OneshotReceiver<T> {
 }
 
 /// Creates a latest-value channel initialized with `initial`.
+///
+/// Endpoints support cross-thread use when `T: Send`. Value borrows are
+/// exclusive, including between readers; keep borrowed guards short. Endpoint
+/// cloning, subscription and change checks do not acquire the value lock.
 #[must_use]
 pub fn watch<T>(initial: T) -> (WatchSender<T>, WatchReceiver<T>) {
     let shared = Arc::new(WatchShared {
-        state: StdMutex::new(WatchState {
-            value: initial,
-            version: 0,
-            senders: 1,
-            receivers: 1,
-        }),
-        receiver_waiters: WaitQueue::new(),
+        state: StateMutex::new(WatchState { value: initial }),
+        status: WatchAtomic(AtomicU64::new(0)),
+        senders: WatchAtomic(AtomicUsize::new(1)),
+        receivers: WatchAtomic(AtomicUsize::new(1)),
+        receiver_waiters: Broadcast::new(),
     });
     (
         WatchSender {
@@ -815,20 +850,48 @@ pub fn watch<T>(initial: T) -> (WatchSender<T>, WatchReceiver<T>) {
 #[derive(Debug)]
 struct WatchState<T> {
     value: T,
-    version: u64,
-    senders: usize,
-    receivers: usize,
 }
 
+const WATCH_CLOSED: u64 = 1;
+const WATCH_CHANGED: u64 = 2;
+
+// Keep read-mostly publication separate from endpoint-count RMW traffic.
+// The measured Windows/Linux hosts have 64-byte cache lines.
 #[derive(Debug)]
+#[repr(align(64))]
+struct WatchAtomic<T>(T);
+
+#[derive(Debug)]
+// The value mutex owns access to T; release status updates publish completed
+// replacements and acquire status reads observe them before borrowing. The final
+// sender's AcqRel decrement joins earlier sender drops before publishing closure
+// in that same status word, so closure cannot hide the last value.
+//
+// Endpoint increments only count an already-owned Arc and can be relaxed. Their
+// AcqRel decrements order final-endpoint observations; they do not protect T.
+// Each receiver's observed-version AcqRel CAS claims a version once across shared
+// polls; acquire failure reads adopt the winning claim. Value access still locks.
 struct WatchShared<T> {
-    state: StdMutex<WatchState<T>>,
-    receiver_waiters: WaitQueue,
+    state: StateMutex<WatchState<T>>,
+    status: WatchAtomic<AtomicU64>,
+    senders: WatchAtomic<AtomicUsize>,
+    receivers: WatchAtomic<AtomicUsize>,
+    receiver_waiters: Broadcast,
 }
 
 impl<T> WatchShared<T> {
-    fn state(&self) -> StdMutexGuard<'_, WatchState<T>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    fn state(&self) -> StateGuard<'_, WatchState<T>> {
+        self.state.lock()
+    }
+
+    fn status(&self) -> u64 {
+        self.status.0.load(Ordering::Acquire)
+    }
+
+    fn publish(&self) {
+        // The low bit records closure; adding two wraps the version without
+        // changing that bit. Writers still serialize the generic value.
+        self.status.0.fetch_add(WATCH_CHANGED, Ordering::Release);
     }
 }
 
@@ -845,11 +908,11 @@ impl<T> WatchSender<T> {
     /// Returns [`Error`] with `value` when no receivers remain.
     pub fn send(&self, value: T) -> Result<(), Error<T>> {
         let mut state = self.shared.state();
-        if state.receivers == 0 {
+        if self.shared.receivers.0.load(Ordering::Acquire) == 0 {
             return Err(Error::with_value(ERROR_CLOSED, value));
         }
         let previous = std::mem::replace(&mut state.value, value);
-        state.version = state.version.wrapping_add(1);
+        self.shared.publish();
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all();
@@ -861,7 +924,7 @@ impl<T> WatchSender<T> {
     pub fn send_replace(&self, value: T) -> T {
         let mut state = self.shared.state();
         let previous = std::mem::replace(&mut state.value, value);
-        state.version = state.version.wrapping_add(1);
+        self.shared.publish();
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all();
@@ -875,7 +938,7 @@ impl<T> WatchSender<T> {
     pub fn send_modify(&self, modify: impl FnOnce(&mut T)) {
         let mut state = self.shared.state();
         modify(&mut state.value);
-        state.version = state.version.wrapping_add(1);
+        self.shared.publish();
         drop(state);
         telemetry::record(EventKind::ChannelSend, std::ptr::from_ref(&*self.shared).cast::<()>());
         self.shared.receiver_waiters.wake_all();
@@ -883,7 +946,7 @@ impl<T> WatchSender<T> {
 
     /// Borrows the latest value.
     ///
-    /// Holding the returned guard blocks sender updates.
+    /// Holding the returned guard blocks other value borrows and sender updates.
     #[must_use]
     pub fn borrow(&self) -> WatchRef<'_, T> {
         telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
@@ -895,13 +958,12 @@ impl<T> WatchSender<T> {
     /// Creates a receiver that initially considers the current value observed.
     #[must_use]
     pub fn subscribe(&self) -> WatchReceiver<T> {
-        let version = {
-            let mut state = self.shared.state();
-            state.receivers += 1;
-            state.version
-        };
+        // Clone Arc first: its overflow guard bounds the logical endpoint count.
+        let shared = Arc::clone(&self.shared);
+        shared.receivers.0.fetch_add(1, Ordering::Relaxed);
+        let version = shared.status() & !WATCH_CLOSED;
         WatchReceiver {
-            shared: Arc::clone(&self.shared),
+            shared,
             observed: AtomicU64::new(version),
         }
     }
@@ -909,27 +971,24 @@ impl<T> WatchSender<T> {
     /// Returns whether all receivers have been dropped.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.shared.state().receivers == 0
+        self.shared.receivers.0.load(Ordering::Acquire) == 0
     }
 }
 
 impl<T> Clone for WatchSender<T> {
     fn clone(&self) -> Self {
-        self.shared.state().senders += 1;
-        Self {
-            shared: Arc::clone(&self.shared),
-        }
+        let shared = Arc::clone(&self.shared);
+        shared.senders.0.fetch_add(1, Ordering::Relaxed);
+        Self { shared }
     }
 }
 
 impl<T> Drop for WatchSender<T> {
     fn drop(&mut self) {
-        let final_sender = {
-            let mut state = self.shared.state();
-            state.senders -= 1;
-            state.senders == 0
-        };
-        if final_sender {
+        if self.shared.senders.0.fetch_sub(1, Ordering::AcqRel) == 1 {
+            // Version and closure share one snapshot, so closure cannot hide
+            // the final unobserved value published by a preceding sender.
+            self.shared.status.0.fetch_or(WATCH_CLOSED, Ordering::Release);
             telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>());
             self.shared.receiver_waiters.wake_all();
         }
@@ -962,7 +1021,7 @@ enum WatchChange {
 impl<T> WatchReceiver<T> {
     /// Borrows the latest value without marking its version observed.
     ///
-    /// Holding the returned guard blocks sender updates.
+    /// Holding the returned guard blocks other value borrows and sender updates.
     pub fn borrow(&self) -> WatchRef<'_, T> {
         telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
         WatchRef {
@@ -972,10 +1031,10 @@ impl<T> WatchReceiver<T> {
 
     /// Borrows the latest value and marks its version observed.
     ///
-    /// Holding the returned guard blocks sender updates.
+    /// Holding the returned guard blocks other value borrows and sender updates.
     pub fn borrow_and_update(&self) -> WatchRef<'_, T> {
         let guard = self.shared.state();
-        self.observed.store(guard.version, Ordering::Release);
+        self.observed.store(self.shared.status() & !WATCH_CLOSED, Ordering::Release);
         telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
         WatchRef { guard }
     }
@@ -1003,19 +1062,17 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub async fn changed_async(&self) -> Result<(), Error> {
-        let mut contention_recording = ContentionRecording::Pending;
+        self.changed_with_recording_async(ContentionRecording::Pending).await
+    }
+
+    async fn changed_with_recording_async(&self, mut contention_recording: ContentionRecording) -> Result<(), Error> {
         #[cfg(test)]
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = test_channel_deadline();
         loop {
             #[cfg(test)]
             assert_test_channel_progress(deadline, "watch receive must make progress");
-            match self.observe_change() {
-                WatchChange::Version(_) => {
-                    telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
-                    return Ok(());
-                }
-                WatchChange::Closed => return Err(Error::without_value(ERROR_CLOSED)),
-                WatchChange::Pending => {}
+            if let Some(result) = self.try_changed() {
+                return result;
             }
             if matches!(contention_recording, ContentionRecording::Pending) {
                 telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
@@ -1023,7 +1080,7 @@ impl<T> WatchReceiver<T> {
             }
             WatchChanged {
                 receiver: self,
-                waiter: None,
+                registration: None,
             }
             .await;
         }
@@ -1043,12 +1100,13 @@ impl<T> WatchReceiver<T> {
         loop {
             {
                 let state = self.shared.state();
-                self.observed.store(state.version, Ordering::Release);
+                let status = self.shared.status();
+                self.observed.store(status & !WATCH_CLOSED, Ordering::Release);
                 if predicate(&state.value) {
                     telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
                     return Ok(WatchRef { guard: state });
                 }
-                if state.senders == 0 {
+                if status & WATCH_CLOSED != 0 {
                     return Err(Error::without_value(ERROR_CLOSED));
                 }
             }
@@ -1063,13 +1121,28 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub fn changed(&self) -> Result<(), Error> {
-        block_on(self.changed_async())
+        if let Some(result) = self.try_changed() {
+            return result;
+        }
+        telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+        block_on(self.changed_with_recording_async(ContentionRecording::Recorded))
+    }
+
+    fn try_changed(&self) -> Option<Result<(), Error>> {
+        match self.observe_change() {
+            WatchChange::Version(_) => {
+                telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
+                Some(Ok(()))
+            }
+            WatchChange::Closed => Some(Err(Error::without_value(ERROR_CLOSED))),
+            WatchChange::Pending => None,
+        }
     }
 
     /// Returns whether all senders have been dropped.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.shared.state().senders == 0
+        self.shared.status() & WATCH_CLOSED != 0
     }
 
     fn change_ready(&self) -> bool {
@@ -1077,33 +1150,46 @@ impl<T> WatchReceiver<T> {
     }
 
     fn change_status(&self) -> WatchChange {
-        let state = self.shared.state();
-        match (state.version == self.observed.load(Ordering::Acquire), state.senders) {
-            (false, _) => WatchChange::Version(state.version),
-            (true, 0) => WatchChange::Closed,
+        let status = self.shared.status();
+        let version = status & !WATCH_CLOSED;
+        match (version == self.observed.load(Ordering::Acquire), status & WATCH_CLOSED) {
+            (false, _) => WatchChange::Version(version),
+            (true, WATCH_CLOSED) => WatchChange::Closed,
             (true, _) => WatchChange::Pending,
         }
     }
 
     fn observe_change(&self) -> WatchChange {
-        let state = self.shared.state();
-        let change = match (state.version == self.observed.load(Ordering::Acquire), state.senders) {
-            (false, _) => WatchChange::Version(state.version),
-            (true, 0) => WatchChange::Closed,
-            (true, _) => WatchChange::Pending,
-        };
-        if let WatchChange::Version(version) = change {
-            self.observed.store(version, Ordering::Release);
+        let mut observed = self.observed.load(Ordering::Acquire);
+        loop {
+            let status = self.shared.status();
+            let version = status & !WATCH_CLOSED;
+            if version == observed {
+                return if status & WATCH_CLOSED != 0 {
+                    WatchChange::Closed
+                } else {
+                    WatchChange::Pending
+                };
+            }
+            // One shared receiver may be polled from multiple threads. Claim
+            // its version once without overwriting another observer's progress.
+            match self
+                .observed
+                .compare_exchange_weak(observed, version, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return WatchChange::Version(version),
+                Err(current) => observed = current,
+            }
         }
-        change
     }
 }
 
 impl<T> Clone for WatchReceiver<T> {
     fn clone(&self) -> Self {
-        self.shared.state().receivers += 1;
+        let shared = Arc::clone(&self.shared);
+        shared.receivers.0.fetch_add(1, Ordering::Relaxed);
         Self {
-            shared: Arc::clone(&self.shared),
+            shared,
             observed: AtomicU64::new(self.observed.load(Ordering::Acquire)),
         }
     }
@@ -1111,11 +1197,7 @@ impl<T> Clone for WatchReceiver<T> {
 
 impl<T> Drop for WatchReceiver<T> {
     fn drop(&mut self) {
-        let remaining_receivers = {
-            let mut state = self.shared.state();
-            state.receivers -= 1;
-            state.receivers
-        };
+        let remaining_receivers = self.shared.receivers.0.fetch_sub(1, Ordering::AcqRel) - 1;
         #[expect(clippy::single_match, reason = "only the transition to zero emits channel-close telemetry")]
         match remaining_receivers {
             0 => telemetry::record(EventKind::ChannelClose, std::ptr::from_ref(&*self.shared).cast::<()>()),
@@ -1136,7 +1218,7 @@ impl<T> fmt::Debug for WatchReceiver<T> {
 #[derive(Debug)]
 struct WatchChanged<'a, T> {
     receiver: &'a WatchReceiver<T>,
-    waiter: Option<Arc<Waiter>>,
+    registration: Option<BroadcastRegistration>,
 }
 
 impl<T> Future for WatchChanged<'_, T> {
@@ -1146,15 +1228,12 @@ impl<T> Future for WatchChanged<'_, T> {
         if self.receiver.change_ready() {
             return Poll::Ready(());
         }
-        let waiter = Arc::clone(self.waiter.get_or_insert_with(|| Arc::new(Waiter::new())));
-        waiter.register(cx.waker());
-        if self
-            .receiver
+        let receiver = self.receiver;
+        if receiver
             .shared
             .receiver_waiters
-            .enqueue_if_needed(&waiter, || self.receiver.change_ready())
+            .register(&mut self.registration, cx.waker(), || receiver.change_ready())
         {
-            self.waiter.take();
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -1164,23 +1243,32 @@ impl<T> Future for WatchChanged<'_, T> {
 
 impl<T> Drop for WatchChanged<'_, T> {
     fn drop(&mut self) {
-        if let Some(waiter) = &self.waiter {
-            self.receiver.shared.receiver_waiters.cancel(waiter);
+        if let Some(registration) = self.registration.take() {
+            self.receiver.shared.receiver_waiters.cancel(registration);
         }
     }
 }
 
 #[cfg(test)]
-fn assert_test_channel_progress(deadline: std::time::Instant, message: &str) {
-    assert!(std::time::Instant::now() < deadline, "{message}");
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn test_channel_deadline() -> Option<std::time::Instant> {
+    (!testing_aids::is_mutation_testing()).then(|| std::time::Instant::now() + Duration::from_secs(2))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn assert_test_channel_progress(deadline: Option<std::time::Instant>, message: &str) {
+    if let Some(deadline) = deadline {
+        assert!(std::time::Instant::now() < deadline, "{message}");
+    }
     std::thread::yield_now();
 }
 
 /// Guard that borrows the current value of a watch channel.
 ///
-/// Holding this guard blocks updates through [`WatchSender`].
+/// Holding this guard blocks other value borrows and updates through [`WatchSender`].
 pub struct WatchRef<'a, T> {
-    guard: StdMutexGuard<'a, WatchState<T>>,
+    guard: StateGuard<'a, WatchState<T>>,
 }
 
 impl<T> Deref for WatchRef<'_, T> {
@@ -1204,11 +1292,13 @@ impl<T: fmt::Display> fmt::Display for WatchRef<'_, T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
+    use std::time::{Duration, Instant};
 
     use super::{
         ERROR_CLOSED, ERROR_EMPTY, ERROR_FULL, ERROR_TIMEOUT, Error, OneshotShared, OneshotState, QueueState, QueueWait, WaitQueue,
@@ -1221,6 +1311,114 @@ mod tests {
     impl Wake for WakeCounter {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn wait_for_waiter<T>(has_waiters: impl Fn() -> bool, worker: &std::thread::JoinHandle<T>) {
+        let deadline =
+            (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }));
+        while !has_waiters() {
+            assert!(!worker.is_finished(), "the blocking operation must await its counterpart");
+            if let Some(deadline) = deadline {
+                assert!(
+                    Instant::now() < deadline,
+                    "the blocking operation must register before the deadline"
+                );
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn blocking_queue_send_waits_for_capacity() {
+        let (sender, receiver) = bounded(1);
+        sender.try_send(7).unwrap();
+        let shared = Arc::clone(&sender.shared);
+        let worker = std::thread::spawn(move || sender.send(11));
+        wait_for_waiter(|| shared.send_waiters.has_waiters(), &worker);
+        assert_eq!(receiver.try_recv(), Ok(7));
+        assert_eq!(worker.join().unwrap(), Ok(()));
+        assert_eq!(receiver.try_recv(), Ok(11));
+    }
+
+    #[test]
+    fn blocking_queue_receive_waits_for_a_value() {
+        let (sender, receiver) = bounded(1);
+        let worker = std::thread::spawn(move || receiver.recv());
+        wait_for_waiter(|| sender.shared.receive_waiters.has_waiters(), &worker);
+        sender.try_send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn timed_queue_receive_waits_for_value_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = bounded(1);
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::from_mins(2)));
+            wait_for_waiter(|| shared.receive_waiters.has_waiters(), &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.try_send(17).unwrap();
+            }
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(17) });
+        }
+    }
+
+    #[test]
+    fn overflowing_queue_deadline_waits_for_a_value() {
+        let (sender, receiver) = bounded(1);
+        let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::MAX));
+        wait_for_waiter(|| sender.shared.receive_waiters.has_waiters(), &worker);
+        sender.try_send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn blocking_oneshot_receive_waits_for_a_value() {
+        let (sender, receiver) = oneshot();
+        let worker = std::thread::spawn(move || receiver.recv());
+        wait_for_waiter(|| sender.shared.receiver_waiters.has_waiters(), &worker);
+        sender.send(17).unwrap();
+
+        assert_eq!(worker.join().unwrap(), Ok(17));
+    }
+
+    #[test]
+    fn timed_oneshot_receive_waits_for_value_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = oneshot();
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.recv_timeout(Duration::from_mins(2)));
+            wait_for_waiter(|| shared.receiver_waiters.has_waiters(), &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.send(17).unwrap();
+            }
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(17) });
+        }
+    }
+
+    #[test]
+    fn blocking_watch_change_waits_for_update_and_close() {
+        for close in [false, true] {
+            let (sender, receiver) = watch(0);
+            let shared = Arc::clone(&sender.shared);
+            let worker = std::thread::spawn(move || receiver.changed());
+            wait_for_waiter(|| shared.receiver_waiters.has_waiters(), &worker);
+            if close {
+                drop(sender);
+            } else {
+                sender.send(17).unwrap();
+            }
+            let result = worker.join().unwrap().map_err(|error| error.is_closed());
+            assert_eq!(result, if close { Err(true) } else { Ok(()) });
         }
     }
 
@@ -1417,7 +1615,7 @@ mod tests {
     #[test]
     fn oneshot_readiness_tracks_both_value_and_sender_lifetime() {
         let shared = OneshotShared {
-            state: std::sync::Mutex::new(OneshotState {
+            state: super::StateMutex::new(OneshotState {
                 value: Some(7),
                 sender_alive: true,
                 receiver_alive: true,
@@ -1469,7 +1667,7 @@ mod tests {
         assert!(!receiver.change_ready());
         sender.send(2).unwrap();
         assert!(receiver.change_ready());
-        receiver.observed.store(1, Ordering::Release);
+        receiver.observed.store(2, Ordering::Release);
         assert!(!receiver.change_ready());
         drop(sender);
         assert!(receiver.change_ready());
@@ -1480,19 +1678,19 @@ mod tests {
         let (sender, receiver) = watch(1);
         assert_eq!(receiver.change_status(), WatchChange::Pending);
         sender.send(2).unwrap();
-        assert_eq!(receiver.change_status(), WatchChange::Version(1));
-        receiver.observed.store(1, Ordering::Release);
+        assert_eq!(receiver.change_status(), WatchChange::Version(2));
+        receiver.observed.store(2, Ordering::Release);
         drop(sender);
         assert_eq!(receiver.change_status(), WatchChange::Closed);
     }
 
     #[test]
-    fn observing_a_watch_change_updates_the_version_while_state_is_locked() {
+    fn observing_a_watch_change_updates_the_atomic_observed_version() {
         let (sender, receiver) = watch(1);
         sender.send(2).unwrap();
 
-        assert_eq!(receiver.observe_change(), WatchChange::Version(1));
-        assert_eq!(receiver.observed.load(Ordering::Acquire), 1);
+        assert_eq!(receiver.observe_change(), WatchChange::Version(2));
+        assert_eq!(receiver.observed.load(Ordering::Acquire), 2);
         assert_eq!(receiver.observe_change(), WatchChange::Pending);
     }
 
@@ -1541,7 +1739,7 @@ mod tests {
             let mut context = Context::from_waker(&waker);
             let mut changed = Box::pin(WatchChanged {
                 receiver: &receiver,
-                waiter: None,
+                registration: None,
             });
             assert!(changed.as_mut().poll(&mut context).is_pending());
         }

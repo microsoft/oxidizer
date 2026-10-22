@@ -92,6 +92,11 @@ impl Barrier<Sync> {
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Mutating barrier progress conditions turns tests into unbounded scheduler waits.
     pub fn wait(&self) -> BarrierWaitOutcome {
+        if self.raw.parties == 1 {
+            self.record(EventKind::BarrierAccess);
+            self.record(EventKind::BarrierRelease);
+            return BarrierWaitOutcome { leader: true };
+        }
         // std::sync::Barrier only identifies the final arrival after waiting.
         // A native mutex/condvar pair lets telemetry mark actual contention
         // before blocking, rather than incorrectly measuring only its return.
@@ -128,8 +133,21 @@ impl Barrier<Async> {
     }
 
     /// Blocks the current thread until all participants reach the barrier.
+    ///
+    /// This method must not run on an executor thread required to make progress
+    /// on another participant. Inside an async task, await [`Self::wait_async`]
+    /// instead so the executor can run the remaining participants.
     pub fn wait(&self) -> BarrierWaitOutcome {
-        block_on(self.wait_async())
+        match self.arrive() {
+            Arrival::Leader => BarrierWaitOutcome { leader: true },
+            // Arrival is already counted; the future must retain its generation.
+            Arrival::Waiting(generation) => block_on(BarrierWait {
+                barrier: self,
+                generation: Some(generation),
+                waiter: None,
+                completed: false,
+            }),
+        }
     }
 
     fn generation(&self) -> u32 {
@@ -142,6 +160,12 @@ impl Barrier<Async> {
     }
 
     fn arrive(&self) -> Arrival {
+        // With one participant no other arrival can require publication or a wake.
+        if self.raw.parties == 1 {
+            self.record(EventKind::BarrierAccess);
+            self.record(EventKind::BarrierRelease);
+            return Arrival::Leader;
+        }
         let state = self
             .raw
             .state
@@ -271,8 +295,11 @@ impl BarrierWaitOutcome {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::pin::pin;
     use std::task::Waker;
+    use std::time::Duration;
 
     use super::*;
 
@@ -309,6 +336,42 @@ mod tests {
 
         assert!(matches!(barrier.arrive(), Arrival::Leader));
         assert_eq!(barrier.raw.state.load(Ordering::Relaxed), 8_u64 << 32);
+    }
+
+    #[test]
+    fn blocking_leader_releases_async_waiters_once_per_generation() {
+        let barrier = Barrier::<Async>::new(2);
+        let mut context = Context::from_waker(Waker::noop());
+        for generation in 1..=3 {
+            let mut wait = pin!(barrier.wait_async());
+            assert!(wait.as_mut().poll(&mut context).is_pending());
+            assert!(barrier.wait().is_leader());
+            assert_eq!(wait.as_mut().poll(&mut context), Poll::Ready(BarrierWaitOutcome { leader: false }));
+            assert_eq!(barrier.raw.state.load(Ordering::Relaxed), generation << 32);
+        }
+    }
+
+    #[test]
+    fn blocking_waiter_retains_its_first_arrival() {
+        let barrier = Arc::new(Barrier::<Async>::new(2));
+        let worker = std::thread::spawn({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        });
+        let deadline = (!testing_aids::is_mutation_testing())
+            .then(|| std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }));
+        while Barrier::<Async>::count(barrier.raw.state.load(Ordering::Acquire)) == 0 {
+            if let Some(deadline) = deadline {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "blocking participant must arrive before the deadline"
+                );
+            }
+            std::thread::yield_now();
+        }
+        assert!(block_on(barrier.wait_async()).is_leader());
+        assert!(!worker.join().unwrap().is_leader());
+        assert_eq!(barrier.raw.state.load(Ordering::Relaxed), 1_u64 << 32);
     }
 
     #[test]
