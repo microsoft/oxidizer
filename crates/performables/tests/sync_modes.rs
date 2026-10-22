@@ -15,7 +15,7 @@ use performables::sync;
 use performables::sync::barrier::Barrier;
 use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
-use performables::sync::mutex::Mutex;
+use performables::sync::mutex::{Mutex, MutexGuard};
 use testing_aids::is_mutation_testing;
 
 #[cfg(miri)]
@@ -404,6 +404,38 @@ fn synchronous_condition_timeout_returns_the_guard() {
     drop(guard);
 
     assert_eq!(*mutex.lock(), 8);
+}
+
+#[test]
+fn synchronous_condition_timeout_preserves_original_unwind_state() {
+    struct WaitOnDrop<'a> {
+        mutex: &'a Mutex<u64>,
+        condition: &'a Condvar<sync::Sync>,
+        guard: Option<MutexGuard<'a, u64>>,
+    }
+
+    impl Drop for WaitOnDrop<'_> {
+        fn drop(&mut self) {
+            let guard = self.guard.take().unwrap_or_else(|| self.mutex.lock());
+            drop(self.condition.wait_timeout(guard, Duration::ZERO));
+        }
+    }
+
+    for acquired_before_panic in [true, false] {
+        let mutex = Mutex::<u64>::new(7);
+        let condition = Condvar::<sync::Sync>::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            let _wait = WaitOnDrop {
+                mutex: &mutex,
+                condition: &condition,
+                guard: acquired_before_panic.then(|| mutex.lock()),
+            };
+            panic!("test a condition wait during unwinding");
+        }))
+        .unwrap_err();
+
+        assert_eq!(mutex.is_poisoned(), acquired_before_panic);
+    }
 }
 
 #[test]

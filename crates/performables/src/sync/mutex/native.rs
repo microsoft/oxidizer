@@ -15,25 +15,29 @@ impl<T: ?Sized> Mutex<T, Sync> {
             self.record(EventKind::MutexContention);
             self.raw.inner.lock()
         };
-        self.acquired_native(raw)
+        self.acquired_native(raw, std::thread::panicking())
     }
 
     pub(in crate::sync) fn try_lock_result_native(&self) -> Result<Option<MutexGuard<'_, T>>, Error<MutexGuard<'_, T>>> {
         if let Some(raw) = self.raw.inner.try_lock() {
-            self.acquired_native(raw).map(Some)
+            self.acquired_native(raw, std::thread::panicking()).map(Some)
         } else {
             self.record(EventKind::MutexContention);
             Ok(None)
         }
     }
 
-    pub(in crate::sync) fn acquired_native<'a>(&'a self, raw: hal::Guard<'a>) -> Result<MutexGuard<'a, T>, Error<MutexGuard<'a, T>>> {
+    pub(in crate::sync) fn acquired_native<'a>(
+        &'a self,
+        raw: hal::Guard<'a>,
+        panicking_at_acquisition: bool,
+    ) -> Result<MutexGuard<'a, T>, Error<MutexGuard<'a, T>>> {
         let guard = MutexGuard {
             mutex: self,
             raw: GuardSync {
                 inner: ManuallyDrop::new(raw),
             },
-            panicking_at_acquisition: std::thread::panicking(),
+            panicking_at_acquisition,
             marker: PhantomData,
         };
         self.record(EventKind::MutexAccess);
@@ -66,9 +70,11 @@ impl<T: ?Sized> Mutex<T, Sync> {
 }
 
 impl<'a, T: ?Sized> MutexGuard<'a, T, Sync> {
-    pub(in crate::sync) fn into_native(self) -> hal::Guard<'a> {
+    pub(in crate::sync) fn into_native(self) -> (hal::Guard<'a>, bool) {
         let mut this = ManuallyDrop::new(self);
         let mutex = this.mutex;
+        // A condition wait must retain the original guard's unwind baseline.
+        let panicking_at_acquisition = this.panicking_at_acquisition;
         // SAFETY: consuming self suppresses its destructor, and transfers this
         // field exactly once to the wait operation's ownership evidence.
         let raw = unsafe { ManuallyDrop::take(&mut this.raw.inner) };
@@ -76,7 +82,7 @@ impl<'a, T: ?Sized> MutexGuard<'a, T, Sync> {
         // The HAL orders unlock against notification after capturing the wait
         // generation. Preserve logical release before handing it ownership.
         mutex.record(EventKind::MutexRelease);
-        unlock.into_guard()
+        (unlock.into_guard(), panicking_at_acquisition)
     }
 
     pub(in crate::sync) fn release_native(&mut self) {

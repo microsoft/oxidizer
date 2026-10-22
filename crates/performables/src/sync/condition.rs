@@ -83,8 +83,9 @@ impl Condvar<Sync> {
     pub fn wait<'mutex, T: ?Sized>(&self, guard: MutexGuard<'mutex, T>) -> MutexGuard<'mutex, T> {
         let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
-        let (raw, _) = self.raw.inner.wait(mutex.native_state(), guard.into_native(), None);
-        let guard = match mutex.acquired_native(raw) {
+        let (raw, panicking_at_acquisition) = guard.into_native();
+        let (raw, _) = self.raw.inner.wait(mutex.native_state(), raw, None);
+        let guard = match mutex.acquired_native(raw, panicking_at_acquisition) {
             Ok(guard) => guard,
             Err(error) => panic_poisoned(&error),
         };
@@ -123,8 +124,9 @@ impl Condvar<Sync> {
     ) -> (MutexGuard<'mutex, T>, WaitTimeoutOutcome) {
         let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
-        let (raw, timed_out) = self.raw.inner.wait(mutex.native_state(), guard.into_native(), Some(timeout));
-        let guard = match mutex.acquired_native(raw) {
+        let (raw, panicking_at_acquisition) = guard.into_native();
+        let (raw, timed_out) = self.raw.inner.wait(mutex.native_state(), raw, Some(timeout));
+        let guard = match mutex.acquired_native(raw, panicking_at_acquisition) {
             Ok(guard) => guard,
             Err(error) => panic_poisoned(&error),
         };
@@ -338,10 +340,9 @@ mod tests {
     fn synchronous_state_reacquires_ownership_after_timeout() {
         let state = StateSync::new();
         let mutex = Mutex::<u64>::new(7);
-        let (raw, timed_out) = state
-            .inner
-            .wait(mutex.native_state(), mutex.lock().into_native(), Some(Duration::ZERO));
-        let mut guard = mutex.acquired_native(raw).unwrap();
+        let (raw, panicking_at_acquisition) = mutex.lock().into_native();
+        let (raw, timed_out) = state.inner.wait(mutex.native_state(), raw, Some(Duration::ZERO));
+        let mut guard = mutex.acquired_native(raw, panicking_at_acquisition).unwrap();
         *guard += 1;
         drop(guard);
         assert_eq!((timed_out, *mutex.lock()), (true, 8));
