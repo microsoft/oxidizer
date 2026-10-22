@@ -69,8 +69,9 @@
 //! `test` uses one worker.
 //!
 //! Use `workers = N` to set the exact worker count. Build the runtime explicitly
-//! for custom clocks, telemetry, blocking pools, stack sizes, or a worker count
-//! that must not exceed available processors.
+//! for custom clocks, telemetry, blocking pools, stack sizes, or an
+//! [`at_most`](crate::runtime::WorkersPolicy::at_most) or
+//! [`all`](crate::runtime::WorkersPolicy::all) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
 //! signature and worker option. Build the runtime yourself if you need to

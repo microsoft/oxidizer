@@ -14,6 +14,10 @@ Each runtime owns its workers and shutdown. There is no process-global runtime.
 Stopping one does not request shutdown of another, but application data can
 still be shared. This is scheduling isolation, not a security boundary.
 
+Each worker owns a separate OS thread. An exact worker count can exceed the
+available processor count. In that case, multiple worker threads share each
+processor, and the operating system schedules their execution.
+
 An async task stays on the worker that creates its future, including across
 awaits. Arty does not move running tasks to balance load. This lets futures
 keep thread-local and non-`Send` state.
