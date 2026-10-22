@@ -110,11 +110,13 @@ impl TaskPtr {
     /// The caller must transfer exactly one owned strong reference to a live, pinned task.
     pub(crate) unsafe fn into_handle(self) -> TaskHandle {
         // SAFETY: The transferred strong reference keeps the immutable template alive for this
-        // read. The copy receives that reference, not an additional reference, and no borrow into
-        // the allocation is created before the returned owner can reclaim it.
+        // read.
+        let template = unsafe { self.template.as_ref() };
+        // SAFETY: The copy receives the transferred reference, not an additional reference, and
+        // no borrow into the allocation exists before the returned owner can reclaim it.
+        let inner = unsafe { ptr::read(&raw const template.inner) };
         TaskHandle {
-            // SAFETY: The raw reference being transferred keeps the immutable template live.
-            inner: unsafe { ptr::read(&raw const self.template.as_ref().inner) },
+            inner,
             _owner_thread: PhantomData,
         }
     }
@@ -135,8 +137,9 @@ impl TaskPtr {
     /// An existing strong reference must keep the initialized task alive throughout this call.
     pub(crate) unsafe fn retain(self) -> TaskHandle {
         // SAFETY: The caller keeps the immutable template alive while cloning its handle.
+        let template = unsafe { self.template.as_ref() };
         TaskHandle {
-            inner: unsafe { self.template.as_ref() }.inner.clone(),
+            inner: template.inner.clone(),
             _owner_thread: PhantomData,
         }
     }
@@ -146,8 +149,9 @@ impl TaskPtr {
     /// An existing strong reference must keep the initialized task alive throughout this call.
     pub(crate) unsafe fn retain_remote(self) -> RemoteTaskHandle {
         // SAFETY: The caller keeps the immutable template alive while cloning its handle.
+        let template = unsafe { self.template.as_ref() };
         RemoteTaskHandle {
-            inner: unsafe { self.template.as_ref() }.inner.clone(),
+            inner: template.inner.clone(),
         }
     }
 
@@ -155,10 +159,11 @@ impl TaskPtr {
     ///
     /// The caller must transfer exactly one owned strong reference to a live, pinned task.
     pub(crate) unsafe fn into_remote(self) -> RemoteTaskHandle {
-        RemoteTaskHandle {
-            // SAFETY: The transferred reference keeps the immutable template live.
-            inner: unsafe { ptr::read(&raw const self.template.as_ref().inner) },
-        }
+        // SAFETY: The transferred reference keeps the immutable template live for this read.
+        let template = unsafe { self.template.as_ref() };
+        // SAFETY: The copy receives the transferred reference rather than adding a reference.
+        let inner = unsafe { ptr::read(&raw const template.inner) };
+        RemoteTaskHandle { inner }
     }
 }
 
