@@ -147,14 +147,18 @@ fn mutex_lock_performables_async<S: std::borrow::BorrowMut<AsyncMutexInput>>(mut
 }
 
 #[metabench::benchmark(MUTEX_LOCK_TOKIO, MUTEX_LOCK, "tokio")]
-#[bench::lock(&mut tokio_mutex_input())]
-fn mutex_lock_tokio(input: &mut TokioMutexInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.lock());
-    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_mutex_input()))]
+fn mutex_lock_tokio<S: std::borrow::BorrowMut<TokioMutexInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.lock());
+        let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 struct TokioMutexInput {
@@ -231,14 +235,18 @@ fn rw_lock_read_performables_async<S: std::borrow::BorrowMut<AsyncRwLockInput>>(
 }
 
 #[metabench::benchmark(RW_LOCK_READ_TOKIO, RW_LOCK_READ, "tokio")]
-#[bench::lock(&mut tokio_rwlock_input())]
-fn rw_lock_read_tokio(input: &mut TokioRwLockInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.read());
-    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_rwlock_input()))]
+fn rw_lock_read_tokio<S: std::borrow::BorrowMut<TokioRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.read());
+        let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 struct TokioRwLockInput {
@@ -293,15 +301,19 @@ fn rw_lock_write_performables_async<S: std::borrow::BorrowMut<AsyncRwLockInput>>
 }
 
 #[metabench::benchmark(RW_LOCK_WRITE_TOKIO, RW_LOCK_WRITE, "tokio")]
-#[bench::lock(&mut tokio_rwlock_input())]
-fn rw_lock_write_tokio(input: &mut TokioRwLockInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.write());
-    let Poll::Ready(mut guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_rwlock_input()))]
+fn rw_lock_write_tokio<S: std::borrow::BorrowMut<TokioRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.write());
+        let Poll::Ready(mut guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        *guard = black_box(*guard);
+        black_box(*guard)
     };
-    *guard = black_box(*guard);
-    black_box(*guard)
+    (result, owned_input)
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -360,7 +372,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     });
     let mut tokio = tokio_mutex_input();
     group.bench_function(MUTEX_LOCK_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_tokio(&mut tokio));
+        bencher.iter(|| mutex_lock_tokio(&mut tokio).0);
     });
     group.finish();
 
@@ -384,7 +396,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     });
     let mut tokio = tokio_rwlock_input();
     read_group.bench_function(RW_LOCK_READ_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_tokio(&mut tokio));
+        bencher.iter(|| rw_lock_read_tokio(&mut tokio).0);
     });
     read_group.finish();
 
@@ -399,7 +411,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         bencher.iter(|| rw_lock_write_performables_async(&mut asynchronous).0);
     });
     write_group.bench_function(RW_LOCK_WRITE_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_write_tokio(&mut tokio));
+        bencher.iter(|| rw_lock_write_tokio(&mut tokio).0);
     });
     write_group.finish();
 }
