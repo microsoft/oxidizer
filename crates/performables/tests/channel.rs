@@ -705,6 +705,8 @@ fn channel_operations_share_runtime_telemetry_identity() {
         event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
     });
 
+    // Keep the watch allocation live so recycled addresses cannot satisfy its telemetry assertions.
+    let (watch_sender, watch_receiver) = watch(1);
     let (bounded_sender, bounded_receiver) = bounded(1);
     bounded_sender.try_send(1).unwrap();
     assert!(bounded_sender.try_send(2).is_err());
@@ -718,7 +720,6 @@ fn channel_operations_share_runtime_telemetry_identity() {
     sender.try_send(4).unwrap();
     drop((bounded_sender, bounded_receiver, sender, receiver));
 
-    let (watch_sender, watch_receiver) = watch(1);
     watch_sender.send(2).unwrap();
     drop(watch_receiver);
 
@@ -731,11 +732,14 @@ fn channel_operations_share_runtime_telemetry_identity() {
         .find(|event| event.thread_id == thread_id && event.kind == EventKind::ChannelSend)
         .and_then(seismograph::recorder::event::Event::object_id)
         .unwrap();
-    assert!(
+    assert_eq!(
         snapshot
             .events
             .iter()
-            .any(|event| event.object_id() == Some(watch_id) && event.kind == EventKind::ChannelClose)
+            .filter(|event| event.thread_id == thread_id)
+            .filter(|event| event.object_id() == Some(watch_id) && event.kind == EventKind::ChannelClose)
+            .count(),
+        1
     );
     let channel_ids = snapshot
         .events

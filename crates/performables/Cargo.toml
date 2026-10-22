@@ -66,7 +66,6 @@ serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-tick = { path = "../tick", default-features = false }
 tokio = { workspace = true, features = ["sync"] }
 trybuild.workspace = true
 

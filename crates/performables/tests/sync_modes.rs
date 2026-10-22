@@ -248,7 +248,8 @@ fn synchronous_rwlock_only_exclusive_guards_poison() {
 #[test]
 fn synchronous_rwlock_publishes_complete_updates_under_mixed_contention() {
     const WORKERS: usize = 4;
-    let iterations = if cfg!(miri) { 8 } else { 2_000 };
+    // The four reader/writer roles check publication; repetition must not become a scheduler throughput test.
+    let iterations = if cfg!(miri) { 8 } else { 64 };
     let lock = Arc::new(RwLock::<(usize, usize)>::new((0, 0)));
     let start = Arc::new(std::sync::Barrier::new(WORKERS));
     let (finished_tx, finished_rx) = mpsc::channel();

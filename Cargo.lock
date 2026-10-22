@@ -4223,7 +4223,6 @@ dependencies = [
  "testing_aids",
  "thread_aware",
  "thread_aware_core",
- "tick",
  "tokio",
  "trybuild",
  "windows-sys 0.61.2",

@@ -28,14 +28,13 @@ use std::pin::{Pin, pin};
 use std::sync::{Arc, Barrier, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, Bencher, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
 use performables::sync::channel;
 #[cfg(feature = "seismograph")]
 use seismograph::recorder::Configuration;
-use tick::{SimpleClock, Stopwatch};
 
 // Doubling through eight workers exposes early contention; 32 is a larger-host
 // point, 172 is the requested VM workload, and 176 uses that VM's full core count.
@@ -57,7 +56,6 @@ struct Threadpool {
     commands: Vec<mpsc::Sender<Option<u64>>>,
     workers: Vec<thread::JoinHandle<()>>,
     boundary: Arc<Barrier>,
-    clock: SimpleClock,
 }
 
 impl Threadpool {
@@ -102,7 +100,6 @@ impl Threadpool {
             commands,
             workers: handles,
             boundary,
-            clock: SimpleClock::new_system(),
         }
     }
 
@@ -113,7 +110,8 @@ impl Threadpool {
                 .expect("benchmark workers remain alive until teardown");
         }
         // Include dispatch barriers equally for every control, amortized over the sample.
-        let started = Stopwatch::new(&self.clock);
+        // Tick depends on Performables, so benchmark timing uses the standard monotonic clock.
+        let started = Instant::now();
         self.boundary.wait();
         self.boundary.wait();
         started.elapsed()
