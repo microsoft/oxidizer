@@ -21,7 +21,7 @@ use std::sync::Arc;
 #[cfg(feature = "std")]
 use std::thread;
 
-use static_assertions::{assert_impl_all, assert_not_impl_any};
+use static_assertions::{assert_impl_all, assert_not_impl_any, assert_obj_safe};
 #[cfg(feature = "std")]
 use thread_aware_core::__private::v1::new_thread;
 use thread_aware_core::__private::v1::{new_numa_node, new_owner};
@@ -29,9 +29,10 @@ use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 
 assert_impl_all!(Thread: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(Thread: Copy);
-assert_impl_all!(Owner: Clone, Eq, Send, Sync);
-assert_impl_all!(NumaNode: Clone, Eq, Send, Sync);
+assert_impl_all!(Owner: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+assert_impl_all!(NumaNode: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(NumaNode: Copy);
+assert_obj_safe!(ThreadAware);
 assert_impl_all!(&'static str: ThreadAware);
 assert_not_impl_any!(&'static i32: ThreadAware);
 assert_not_impl_any!(BTreeSet<i32>: ThreadAware);
@@ -85,6 +86,7 @@ fn owners_keep_their_identity() {
 
     assert_ne!(first, second, "each owner takes its own identity");
     assert_eq!(first, first, "an owner equals itself");
+    assert_eq!(first, first.clone(), "a clone keeps the same identity");
     assert_ne!(hash_of(&first), hash_of(&second), "distinct owners must hash apart");
 }
 
@@ -124,6 +126,10 @@ fn with_std_every_component_takes_part_in_equality() {
     let numa_node = new_numa_node(0);
     let mine = new_thread(owner.clone(), id, numa_node.clone());
 
+    assert_eq!(mine.owner(), &owner);
+    assert_eq!(mine.id(), id);
+    assert_eq!(mine.numa_node(), &numa_node);
+    assert_eq!(mine.clone(), mine);
     assert_eq!(mine, new_thread(owner.clone(), id, numa_node.clone()));
     assert_eq!(hash_of(&mine), hash_of(&new_thread(owner.clone(), id, numa_node.clone())));
 
