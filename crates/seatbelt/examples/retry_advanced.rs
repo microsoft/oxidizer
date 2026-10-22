@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Advanced retry middleware demonstrating custom input cloning and attempt info forwarding.
+//! This example uses custom input cloning and passes attempt data through the pipeline.
 //!
-//! Shows how to inject attempt metadata into requests via `.clone_input()`, access it
-//! in the service function, and forward it through to the final output.
+//! It adds attempt data to requests with `.clone_input()`.
+//! The service reads the data and adds it to the final output.
 
 use std::io::Error;
 use std::time::Duration;
@@ -27,10 +27,10 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock).name("retry_advanced").use_metrics(&meter_provider);
 
-    // Define stack with retry layer
+    // Define a stack with a retry layer.
     let stack = (
         Retry::layer("my_retry", &context)
-            // Custom input cloning - inject attempt info into request extensions
+            // Clone the input and add attempt data to the request extensions.
             .clone_input_with(|input: &mut Request<String>, args| {
                 let mut cloned = input.clone();
                 cloned.extensions_mut().insert(args.attempt());
@@ -43,7 +43,7 @@ async fn main() -> Result<(), AppError> {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            // Register a callback called just before the next retry
+            // Run a callback before the next retry.
             .on_retry(|_output, args| {
                 println!(
                     "retrying, attempt {}, delay: {}s",
@@ -54,35 +54,35 @@ async fn main() -> Result<(), AppError> {
         Execute::new(send_request),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
     let request = Request::builder().uri("https://example.com").body("value".to_string())?;
 
     match service.execute(request).await {
         Ok(output) => {
-            // Extract attempt info that was forwarded through the pipeline
+            // Read the attempt data from the pipeline.
             let attempts = output.extensions().get::<Attempt>().map_or(0, |a| a.index());
             println!("execution succeeded, result: {}, attempts: {}", output.body(), attempts);
         }
         Err(e) => println!("execution failed, error: {e}"),
     }
 
-    // Flush metrics to stdout before exiting
+    // Flush metrics to standard output before the program exits.
     meter_provider.force_flush()?;
 
     Ok(())
 }
 
-// Only 20% chance of success, retries will be attempted with a high probability
+// Succeed for 20% of calls. Most failures cause a retry.
 async fn send_request(input: Request<String>) -> Result<Response<String>, Error> {
     if fastrand::i16(0..10) > 2 {
         Err(Error::other("transient execution error"))
     } else {
-        // Extract attempt info that was injected during custom cloning
+        // Read the attempt data that the clone callback added.
         let attempt = input.extensions().get::<Attempt>().copied().unwrap_or_default();
 
-        // Forward attempt info to output via response extensions
+        // Add the attempt data to the response extensions.
         Response::builder()
             .extension(attempt)
             .body("success".to_string())
@@ -91,7 +91,7 @@ async fn send_request(input: Request<String>) -> Result<Response<String>, Error>
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "This is a test module")]
+#![expect(clippy::float_cmp, reason = "public defaults are exact constants")]
 
 #[cfg(any(
     feature = "breaker",

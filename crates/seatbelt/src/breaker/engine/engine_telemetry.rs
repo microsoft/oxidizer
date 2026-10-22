@@ -12,7 +12,7 @@ use crate::utils::TelemetryHelper;
 #[cfg(any(feature = "metrics", test))]
 use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-/// Wrapper around a circuit engine to add telemetry capabilities.
+/// Adds telemetry to a circuit engine.
 #[derive(Debug)]
 pub(crate) struct EngineTelemetry<T> {
     inner: T,

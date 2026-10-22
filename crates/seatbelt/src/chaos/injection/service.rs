@@ -17,21 +17,16 @@ use crate::rnd::Rnd;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Injects a user-provided output with a configurable probability instead of
-/// calling the inner service.
+/// Returns injected output at a configured rate instead of calling the inner service.
 ///
-/// `Injection` wraps an inner [`Service`] and, on each request, rolls a random
-/// number against the configured [`rate`][InjectionLayer::rate] (or the
-/// dynamically computed rate from [`rate_with`][InjectionLayer::rate_with]).
-/// When the roll triggers, the inner service is skipped entirely and the
-/// configured output factory ([`output_with`][InjectionLayer::output_with] /
-/// [`output`][InjectionLayer::output]) produces the response.
+/// `Injection` compares a random number with the configured [`rate`][InjectionLayer::rate].
+/// [`rate_with`][InjectionLayer::rate_with] can calculate the rate for each request.
+/// When injection occurs, the output function returns output without calling the inner service.
 ///
-/// Injection is configured by calling [`Injection::layer`] and using the builder
-/// methods on the returned [`InjectionLayer`] instance.
+/// Call [`Injection::layer`] to create an [`InjectionLayer`].
+/// Use its builder methods to configure injection.
 ///
-/// For comprehensive examples and usage patterns, see the [injection module]
-/// documentation.
+/// See the [injection module] for examples.
 ///
 /// [injection module]: crate::chaos::injection
 #[derive(Debug)]
@@ -42,7 +37,7 @@ pub struct Injection<In, Out, S> {
 
 /// Shared configuration for [`Injection`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct InjectionShared<In, Out> {
     pub(crate) rate: InjectionRate<In>,
@@ -63,10 +58,9 @@ impl<In, Out, S: Clone> Clone for Injection<In, Out, S> {
 }
 
 impl<In, Out> Injection<In, Out, ()> {
-    /// Creates an [`InjectionLayer`] used to configure the chaos injection middleware.
+    /// Creates an [`InjectionLayer`] that configures output injection.
     ///
-    /// The instance returned by this call is a builder and cannot be used to
-    /// build a service until the required properties are set:
+    /// Set these required properties before you build a service:
     /// [`rate`][InjectionLayer::rate] / [`rate_with`][InjectionLayer::rate_with]
     /// and one of
     /// [`output_with`][InjectionLayer::output_with] /
@@ -74,9 +68,8 @@ impl<In, Out> Injection<In, Out, ()> {
     /// [`output_error_with`][InjectionLayer::output_error_with] /
     /// [`output_error`][InjectionLayer::output_error].
     ///
-    /// The `name` identifies the injection strategy in telemetry, while
-    /// `context` provides configuration shared across multiple resilience
-    /// middleware.
+    /// The `name` identifies the injection strategy in telemetry.
+    /// The `context` provides configuration that middleware can share.
     ///
     /// # Example
     ///
@@ -93,7 +86,7 @@ impl<In, Out> Injection<In, Out, ()> {
     /// # }
     /// ```
     ///
-    /// For comprehensive examples, see the [injection module] documentation.
+    /// See the [injection module] for more examples.
     ///
     /// [injection module]: crate::chaos::injection
     pub fn layer(name: impl Into<Cow<'static, str>>, context: &ResilienceContext<In, Out>) -> InjectionLayer<In, Out, NotSet, NotSet> {

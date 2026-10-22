@@ -65,28 +65,23 @@ impl AbandonedPolicy {
         Self { inner: Mode::AsFailures }
     }
 
-    /// Returns `true` if abandoned executions are unconditionally treated as failures.
+    /// Returns `true` when all abandoned executions count as failures.
     ///
-    /// Used by the single-probe recovery gate, which has no statistical sample to apply the
-    /// abandon-rate heuristic to: a lone abandoned probe is only conclusive evidence of failure under
-    /// the [`as_failures`][AbandonedPolicy::as_failures] policy.
+    /// A single probe does not provide a statistical sample.
+    /// Only [`as_failures`][AbandonedPolicy::as_failures] treats one abandoned probe as a failure.
     pub(crate) fn counts_abandoned_as_failure(&self) -> bool {
         matches!(self.inner, Mode::AsFailures)
     }
 
-    /// Returns the policy's abandoned-handling [`Mode`] for the centralized health evaluator.
-    ///
-    /// The `(failures, total)` derivation lives in [`HealthEvaluator`][super::HealthEvaluator], so
-    /// this exposes the policy purely as configuration data.
+    /// Returns the [`Mode`] for [`HealthEvaluator`][super::HealthEvaluator].
     pub(crate) fn mode(&self) -> Mode {
         self.inner
     }
 }
 
-/// How abandoned executions are folded into the health decision.
+/// Defines how abandoned executions affect the health decision.
 ///
-/// This doubles as the serialization form of [`AbandonedPolicy`] and as the input the
-/// [`HealthEvaluator`][super::HealthEvaluator] matches on when deriving a verdict.
+/// This is also the serialized form of [`AbandonedPolicy`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
@@ -107,13 +102,11 @@ impl Default for Mode {
     }
 }
 
-/// Coerces a deserialized abandon-rate threshold into the valid `(0.0, 1.0]` range.
+/// Limits a deserialized abandon-rate threshold to `(0.0, 1.0]`.
 ///
-/// Hand-written or generated configuration can carry an out-of-range threshold that the
-/// [`rate_threshold`][AbandonedPolicy::rate_threshold] constructor would reject.
-/// Rather than failing to deserialize, the value is clamped into the valid range: values above
-/// `1.0` collapse to `1.0`, and values at or below `0.0` collapse to the smallest positive `f32`
-/// so the exclusive lower bound is preserved.
+/// Configuration can contain a value that the constructor rejects.
+/// Values above `1.0` become `1.0`.
+/// Values at or below `0.0` become the smallest positive `f32`.
 #[cfg(any(feature = "serde", test))]
 fn coerce_rate_threshold<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where

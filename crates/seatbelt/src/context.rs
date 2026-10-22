@@ -49,7 +49,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         }
     }
 
-    /// Get the configured clock for timing operations.
+    /// Returns the clock for timing operations.
     #[must_use]
     #[cfg(any(
         feature = "retry",
@@ -160,7 +160,7 @@ mod tests {
         let ctx = ResilienceContext::<(), ()>::new(clock);
         let telemetry = ctx.create_telemetry("test".into());
         assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_CONTEXT_NAME);
-        // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
+        // Make sure that the clock is accessible. Relative timestamps do not need to be monotonic.
         let _ = ctx.get_clock().system_time();
     }
 

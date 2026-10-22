@@ -24,7 +24,7 @@ use crate::hedging::constants::{DEFAULT_HEDGING_DELAY, DEFAULT_MAX_HEDGED_ATTEMP
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct HedgingConfig {
-    /// Controls if the hedging middleware runs.
+    /// Controls whether the hedging middleware runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
@@ -39,7 +39,7 @@ pub struct HedgingConfig {
     /// Sets the maximum number of hedged attempts after the original call.
     pub max_hedged_attempts: u8,
 
-    /// Controls if [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] permits more hedged attempts.
+    /// Controls whether [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] permits more hedged attempts.
     ///
     /// If this value is `false`, the middleware returns unavailable output immediately.
     pub handle_unavailable: bool,

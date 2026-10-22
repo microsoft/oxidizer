@@ -61,8 +61,7 @@ impl BreakerId {
 
     /// Returns `true` if this ID is the default breaker ID.
     ///
-    /// Used to fast-path the common single-breaker configuration, avoiding a lock,
-    /// a hash, and a map probe when routing to the shared default engine.
+    /// The default ID uses a shared engine without a lock, hash, or map lookup.
     pub(crate) fn is_default(&self) -> bool {
         matches!(&self.0, BreakerIdValue::String(value) if value.as_ref() == "default")
     }
@@ -133,7 +132,7 @@ mod tests {
     #[test]
     fn is_default_distinguishes_default_from_others() {
         assert!(BreakerId::default().is_default());
-        // Any string equal to "default" is treated as the default, regardless of ownership.
+        // Any string equal to "default" is the default, regardless of ownership.
         assert!(BreakerId::from(String::from("default")).is_default());
 
         assert!(!BreakerId::from("other").is_default());

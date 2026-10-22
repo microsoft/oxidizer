@@ -27,7 +27,7 @@ const DEFAULT_RATE: f64 = 0.0;
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct LatencyConfig {
-    /// Controls if the latency middleware runs.
+    /// Controls whether the latency middleware runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
