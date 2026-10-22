@@ -24,5 +24,7 @@ all-features = true
 
 [dev-dependencies]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

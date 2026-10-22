@@ -1,6 +1,6 @@
 version = 1
 tool = "anvil"
-tool_version = "0.14.1"
+tool_version = "0.15.0"
 catalog_checksum = "sha256:93bf80dda986944e92b4b6c31bd3095e0973b4dab644552cbb4f69618b376df9"
 
 [[file]]
@@ -345,6 +345,11 @@ id = "anvil-lints"
 checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
 
 [[region]]
+host = "crates/arty_io_host/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
 host = "crates/arty_macros/Cargo.toml"
 id = "anvil-lints"
 checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
@@ -571,6 +576,11 @@ checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103a
 
 [[region]]
 host = "crates/observed/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/observed_destination_core/Cargo.toml"
 id = "anvil-lints"
 checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
 
