@@ -306,7 +306,9 @@ fn publication_from_a_waker_clone_cannot_be_lost_or_deadlock_registration() {
 struct PublishOnDrop(WatchSender<u64>);
 
 impl Wake for PublishOnDrop {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        unreachable!("the test replaces or cancels this waker before its drop publishes");
+    }
 }
 
 impl Drop for PublishOnDrop {
