@@ -1,0 +1,28 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_destination_core"
+description = "Contains shared components for defining various destinations for Observed pipeline."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "observed", "telemetry", "tracing", "logging", "metrics"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_core"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

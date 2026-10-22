@@ -67,6 +67,7 @@ alloc_tracker = { version = "0.7.1", default-features = false }
 
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.2.0" }
+observed_destination_core = { path = "crates/observed_destination_core", default-features = false, version = "0.1.0" }
 allocator-api2 = { version = "0.4.0", default-features = false }
 # hashbrown 0.17 uses this allocator trait version for system-backed tables.
 allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
