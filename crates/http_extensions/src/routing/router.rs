@@ -215,7 +215,10 @@ impl Router {
     /// Returns [`HttpError::validation`] when:
     /// - The target [`Uri`] has no [`BaseUri`], and routing does not produce one.
     /// - The policy is [`BaseUriConflict::Fail`], and both sources provide a [`BaseUri`].
-    #[expect(clippy::needless_pass_by_value, reason = "a future implementation can consume the context")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "while not consuming the context, we might do it at some point"
+    )]
     pub fn resolve_uri(&self, context: RouterContext, uri: Uri) -> Result<Uri, HttpError> {
         let (original, path) = uri.into_parts();
         let routed = self.resolve_base_uri(&context);
@@ -704,7 +707,7 @@ mod tests {
                 // Sanity: build attached a cached rendering that the reuse path will consume.
                 assert!(
                     request.extensions().get::<RenderedPath>().is_some(),
-                    "build attaches a RenderedPath for {path_str:?}"
+                    "build should cache a RenderedPath for {path_str:?}"
                 );
 
                 router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();

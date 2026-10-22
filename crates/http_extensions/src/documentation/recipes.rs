@@ -55,8 +55,7 @@
 //! # Prefer `HeaderMap` over `HashMap<String, String>`
 //!
 //! [`http::HeaderMap`] is designed for HTTP headers.
-//! Unlike `HashMap<String, String>`, it can represent many headers without allocation.
-//! It stores about 90 standard names as enum variants.
+//! It stores about 90 standard names as enum variants instead of separate name strings.
 //! [`HeaderName::from_static`] and [`HeaderValue::from_static`] wrap static strings.
 //! `TryFrom` reuses owned `String` and `Vec<u8>` values without copying them.
 //!
@@ -262,10 +261,10 @@
 //!
 //! Rebuild the [`HeaderValue`] only when the token is refreshed.
 
-#[expect(unused_imports, reason = "keeps the examples concise")]
+#[expect(unused_imports, reason = "simplifies the docs")]
 use ::http::*;
-#[expect(unused_imports, reason = "keeps the examples concise")]
+#[expect(unused_imports, reason = "simplifies the docs")]
 use templated_uri::*;
 
-#[expect(unused_imports, reason = "keeps the examples concise")]
+#[expect(unused_imports, reason = "simplifies the docs")]
 use crate::*;

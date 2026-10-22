@@ -580,7 +580,7 @@ impl Body for HttpBody {
 
 #[expect(
     clippy::large_enum_variant,
-    reason = "BytesView is intentionally large, but a future optimization can reduce its size"
+    reason = "BytesView is intentionally large, though future optimizations may decrease size"
 )]
 #[pin_project(project = BodyInnerProj)]
 enum Kind {

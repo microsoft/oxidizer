@@ -779,10 +779,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let id = response
-            .extensions()
-            .get::<RequestId>()
-            .expect("the response builder attaches the request ID extension");
+        let id = response.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
     }
 

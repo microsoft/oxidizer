@@ -326,7 +326,7 @@ impl HttpBodyBuilder {
     /// # }
     /// # }
     /// ```
-    #[expect(clippy::unused_self, reason = "the builder can add data in a future implementation")]
+    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
         HttpBody::from_bytes(b.into())
     }
@@ -335,7 +335,7 @@ impl HttpBodyBuilder {
     ///
     /// Use this for HTTP methods that do not need a body, such as GET and HEAD.
     /// You can also use it for responses that contain only status codes or headers.
-    #[expect(clippy::unused_self, reason = "the builder can add data in a future implementation")]
+    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
     pub fn empty(&self) -> HttpBody {
         HttpBody::empty()
     }

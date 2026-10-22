@@ -1819,10 +1819,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let label = request
-            .extensions()
-            .get::<UriTemplateLabel>()
-            .expect("the request builder attaches the URI template label extension");
+        let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
         assert_eq!(label.as_str(), "/api/users/{id}");
     }
 
@@ -1840,9 +1837,9 @@ mod tests {
         let uris = request
             .extensions()
             .get::<RequestUris>()
-            .expect("the request builder attaches the RequestUris extension");
+            .expect("RequestUris extension should be present");
         assert_eq!(uris.original().to_string().declassify_ref(), "https://example.com/api/users/123");
-        assert!(uris.routed().is_none(), "routed is empty before a router runs");
+        assert!(uris.routed().is_none(), "routed should be None before any router runs");
     }
 
     #[test]
@@ -1856,10 +1853,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let id = request
-            .extensions()
-            .get::<RequestId>()
-            .expect("the request builder attaches the request ID extension");
+        let id = request.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
     }
 
@@ -1878,13 +1872,13 @@ mod tests {
         let response_timeout = request
             .extensions()
             .get::<ResponseTimeout>()
-            .expect("the request builder attaches the response timeout extension");
+            .expect("response timeout extension should be present");
         assert_eq!(response_timeout.duration(), Duration::from_secs(30));
 
         let body_timeout = request
             .extensions()
             .get::<BodyTimeout>()
-            .expect("the request builder attaches the body timeout extension");
+            .expect("body timeout extension should be present");
         assert_eq!(body_timeout.duration(), Duration::from_secs(30));
     }
 
@@ -1903,7 +1897,7 @@ mod tests {
         let timeout = request
             .extensions()
             .get::<ResponseTimeout>()
-            .expect("the request builder attaches the response timeout extension");
+            .expect("response timeout extension should be present");
         assert_eq!(timeout.duration(), Duration::from_secs(15));
     }
 
@@ -1922,7 +1916,7 @@ mod tests {
         let timeout = request
             .extensions()
             .get::<BodyTimeout>()
-            .expect("the request builder attaches the body timeout extension");
+            .expect("body timeout extension should be present");
         assert_eq!(timeout.duration(), Duration::from_mins(1));
     }
 

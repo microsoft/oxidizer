@@ -16,7 +16,7 @@
 Shared HTTP types and extension traits for clients and servers.
 
 This crate provides common HTTP features that build on the [`http`][__link0] crate.
-It includes body handling, one error type, and extension traits for HTTP requests
+It includes body handling, error types, and extension traits for HTTP requests
 and responses.
 
 ## Core Types
@@ -25,7 +25,7 @@ and responses.
 * [`HttpRequestBuilder`][__link4] constructs HTTP requests with chained method calls.
 * [`HttpResponseBuilder`][__link5] constructs HTTP responses with chained method calls.
 * [`HttpBody`][__link6] supports text, binary, JSON, and streaming content.
-* [`HttpBodyBuilder`][__link7] creates HTTP bodies that use pooled memory.
+* [`HttpBodyBuilder`][__link7] creates HTTP bodies with a configurable memory provider.
 * [`HttpError`][__link8] provides backtraces and recovery information.
 * [`RequestHandler`][__link9] defines HTTP middleware and request pipelines.
 
@@ -159,8 +159,8 @@ Use it to test code that depends on HTTP clients.
 
 ## Memory Management
 
-Bodies created through [`HttpBodyBuilder`][__link33] use memory pools from [`bytesbuf`][__link34].
-The pool reuses memory after the body data is consumed.
+Bodies created through [`HttpBodyBuilder`][__link33] use its configured [`bytesbuf`][__link34] memory provider.
+A pooled provider can reuse memory after the body data is consumed.
 
 
 <hr/>
@@ -168,7 +168,7 @@ The pool reuses memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbMKDXaZ5RzyUbZV9zZtAfpyEbOSBSRgmAocMbhddQ4laL4pVhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJJho48er8n8bB9RTi-mwTRUbnPdnuKE6hF4b_jsesCPD4pZhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt

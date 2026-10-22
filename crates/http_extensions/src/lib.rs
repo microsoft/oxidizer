@@ -11,7 +11,7 @@
 //! Shared HTTP types and extension traits for clients and servers.
 //!
 //! This crate provides common HTTP features that build on the [`http`] crate.
-//! It includes body handling, one error type, and extension traits for HTTP requests
+//! It includes body handling, error types, and extension traits for HTTP requests
 //! and responses.
 //!
 //! # Core Types
@@ -20,7 +20,7 @@
 //! - [`HttpRequestBuilder`] constructs HTTP requests with chained method calls.
 //! - [`HttpResponseBuilder`] constructs HTTP responses with chained method calls.
 //! - [`HttpBody`] supports text, binary, JSON, and streaming content.
-//! - [`HttpBodyBuilder`] creates HTTP bodies that use pooled memory.
+//! - [`HttpBodyBuilder`] creates HTTP bodies with a configurable memory provider.
 //! - [`HttpError`] provides backtraces and recovery information.
 //! - [`RequestHandler`] defines HTTP middleware and request pipelines.
 //!
@@ -189,8 +189,8 @@
 //!
 //! # Memory Management
 //!
-//! Bodies created through [`HttpBodyBuilder`] use memory pools from [`bytesbuf`].
-//! The pool reuses memory after the body data is consumed.
+//! Bodies created through [`HttpBodyBuilder`] use its configured [`bytesbuf`] memory provider.
+//! A pooled provider can reuse memory after the body data is consumed.
 
 use http::{Request, Response};
 
