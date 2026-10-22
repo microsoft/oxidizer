@@ -48,7 +48,7 @@
 //! In particular,
 //! [`RecoveryKind::Unavailable`](recoverable::RecoveryKind::Unavailable)
 //! means that the endpoint does not serve traffic.
-//! Examples include an open circuit breaker and a `503 Service Unavailable` response.
+//! An open circuit breaker is one example.
 //! [`Router::fallback`] uses this value to select another endpoint for the next attempt.
 //!
 //! [`BaseUri`]: templated_uri::BaseUri

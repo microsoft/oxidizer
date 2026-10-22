@@ -68,7 +68,7 @@ let response = handler
     .fetch()
     .await?;
 
-// Return an error if the response has a `4xx` or `5xx` status code.
+// Return an error if the response does not have a `2xx` status code.
 let validated_response = response.ensure_success()?;
 
 println!("response status: {}", validated_response.status());
@@ -168,7 +168,7 @@ A pooled provider can reuse memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJJho48er8n8bB9RTi-mwTRUbnPdnuKE6hF4b_jsesCPD4pZhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbF_Ys-IWPd3Mb95DN669vGMMbQkuWKbGRVSAbEWiMqJ1wpiRhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt

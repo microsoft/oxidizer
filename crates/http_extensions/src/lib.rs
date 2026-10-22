@@ -72,7 +72,7 @@
 //!     .fetch()
 //!     .await?;
 //!
-//! // Return an error if the response has a `4xx` or `5xx` status code.
+//! // Return an error if the response does not have a `2xx` status code.
 //! let validated_response = response.ensure_success()?;
 //!
 //! println!("response status: {}", validated_response.status());

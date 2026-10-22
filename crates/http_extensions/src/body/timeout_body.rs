@@ -18,7 +18,7 @@ pub(crate) struct TimeoutBody<B> {
     /// The inner body, or `None` after the idle timeout fires.
     ///
     /// A timeout drops the inner body.
-    /// Each later poll returns `None`, which matches [`is_end_stream`].
+    /// Each later poll returns `None`, which matches [`Body::is_end_stream`].
     #[pin]
     inner: Option<B>,
     timeout: Duration,

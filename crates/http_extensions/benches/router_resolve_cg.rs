@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Callgrind benchmarks for [`Router::resolve_request_uri`], the per-request routing step.
+//! Callgrind benchmarks for `Router::resolve_request_uri`, the per-request routing step.
 //!
-//! The router selects the [`BaseUri`] and creates the request `http::Uri` for each attempt.
+//! The router selects the `BaseUri` and creates the request `http::Uri` for each attempt.
 //! This benchmark isolates that operation for root and prefixed base paths.
-//! [`HttpRequestBuilder`] creates the request and caches its rendered path.
+//! `HttpRequestBuilder` creates the request and caches its rendered path.
 //!
 //! `router_resolve.rs` measures the same operation with Criterion wall-clock timing.
 

@@ -42,22 +42,22 @@
 //! | Type | Represents |
 //! |------|-----------|
 //! | [`HttpBody`] | An HTTP body with text, binary, JSON, or streaming content |
-//! | [`BytesView`](bytesbuf::BytesView) | A non-contiguous byte buffer with pooled memory and slices that do not copy data |
+//! | [`BytesView`](bytesbuf::BytesView) | A non-contiguous byte buffer backed by a memory provider, with slices that do not copy data |
 //!
 //! `http_extensions` uses [`HttpBody`] for request and response bodies.
 //! [`HttpBodyBuilder`] creates a body.
 //! You can convert the body into a [`BytesView`](bytesbuf::BytesView) without copying its data.
 //!
 //! Use [`BytesView`](bytesbuf::BytesView) to pass raw data outside the HTTP layer.
-//! It stores non-contiguous chunks in a memory pool.
-//! The pool reuses each buffer instead of allocating and freeing it separately.
+//! It stores non-contiguous chunks through a configured memory provider.
+//! A pooled provider can reuse buffers instead of allocating and freeing each one.
 //!
 //! # Prefer `HeaderMap` over `HashMap<String, String>`
 //!
 //! [`http::HeaderMap`] is designed for HTTP headers.
 //! It stores about 90 standard names as enum variants instead of separate name strings.
 //! [`HeaderName::from_static`] and [`HeaderValue::from_static`] wrap static strings.
-//! `TryFrom` reuses owned `String` and `Vec<u8>` values without copying them.
+//! `HeaderValue::try_from` reuses owned `String` and `Vec<u8>` values without copying them.
 //!
 //! ```
 //! use http::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -219,7 +219,7 @@
 //! Templated paths are relative.
 //! Set a base URI on the client to create the complete request URL.
 //!
-//! > [!NOTE]
+//! > Note:
 //! > HTTP clients that implement [`RequestHandler`] use the same pattern.
 //! > [`HttpRequestBuilderExt::request_builder`] returns a builder that can send requests.
 //! > The builder provides methods such as `.get()`, `.post()`, and `.fetch()`.

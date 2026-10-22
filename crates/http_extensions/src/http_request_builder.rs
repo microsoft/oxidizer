@@ -729,7 +729,8 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// Returns an error if:
     /// - Request construction failed
     /// - The network request failed
-    /// - The response body is not valid UTF-8
+    ///
+    /// [`Json::read`][crate::Json::read] returns JSON and UTF-8 parsing errors later.
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_ref<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
         self.fetch().and_then(|response| {
@@ -939,7 +940,8 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - Request construction failed
     /// - The network request failed
     /// - The response status is not in the `2xx` success range
-    /// - The response body is not valid UTF-8
+    ///
+    /// [`Json::read`][crate::Json::read] returns JSON and UTF-8 parsing errors later.
     // Chained and_then keeps the returned future Send without J: Send.
     // into_json_ref returns Json<J> as its final value and does not store it across an await point.
     #[cfg(any(feature = "json", test))]

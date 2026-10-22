@@ -74,7 +74,7 @@ where
     ///
     /// The following status codes permit recovery:
     ///
-    /// - A code in the `5xx` range.
+    /// - A supported code from 500 through 999.
     /// - `429 Too Many Requests`.
     /// - `408 Request Timeout`.
     ///

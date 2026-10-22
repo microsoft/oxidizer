@@ -70,11 +70,12 @@ pub(crate) mod timeout_body;
 /// 1. Data arrives in individual [`http_body::Frame`] values.
 ///    You do not have to wait for the complete response.
 /// 2. Each chunk is a [`bytesbuf::BytesView`].
-///    The memory pool reuses its memory after the chunk is consumed.
+///    Its backing memory follows the provider that created it.
+///    A pooled provider can reuse memory after the chunk is consumed.
 /// 3. [`bytesbuf::BytesView`] avoids data copies when possible.
 ///
 /// [`HttpBody::poll_frame`] returns a [`Poll`] value when data is available.
-/// After you consume data from a [`BytesView`], the memory returns to the pool.
+/// After you consume data from a [`BytesView`], its memory returns to its provider.
 ///
 /// # Buffering
 ///
@@ -134,7 +135,7 @@ pub(crate) mod timeout_body;
 /// `HttpBody` into a [`Stream`][futures::Stream].
 /// You can then use the extension methods for [`Stream`][futures::Stream].
 ///
-/// > [!NOTE]
+/// > Note:
 /// > The example uses [`futures`] for stream processing.
 /// > It uses [`http_body_util`] to convert the body into a data stream.
 ///

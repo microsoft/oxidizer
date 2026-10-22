@@ -16,7 +16,7 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse,
 /// Methods on `HttpResponseBuilder` can be chained.
 /// They set headers, status codes, and body types.
 ///
-/// > [!NOTE]
+/// > Note:
 /// > Application code can use this builder.
 /// > Its main purpose is to test HTTP handlers and middleware.
 /// > [`HttpResponseBuilder::new_fake`] creates responses without an HTTP context.
