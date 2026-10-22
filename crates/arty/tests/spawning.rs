@@ -210,11 +210,7 @@ impl ThreadAware for EverywhereProbe {
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
 async fn spawn_everywhere_relocates_one_clone_to_each_worker_despite_interleaving(cx: Builtins) {
-    let expected_workers = if cfg!(miri) {
-        2
-    } else {
-        many_cpus::SystemHardware::current().processors().len().min(2)
-    };
+    let expected_workers = 2;
     let home = cx.thread().id();
     let probe = EverywhereProbe {
         scheduler: cx.scheduler().clone(),

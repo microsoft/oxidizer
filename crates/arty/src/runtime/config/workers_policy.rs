@@ -10,12 +10,13 @@ use crate::runtime::error::Error;
 
 /// A worker-count policy for the async runtime.
 ///
-/// The runtime starts one async worker per selected processor. Pass a
-/// policy to
+/// The runtime assigns each async worker to one available processor. More than
+/// one worker can share a processor when an exact count exceeds the available
+/// processor count. Pass a policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
 /// [`Default`] lets Arty choose the count. Use [`at_most`](Self::at_most) for
-/// an upper bound, [`exactly`](Self::exactly) when fewer workers would be an
-/// error, or [`all`](Self::all) to require all available processors.
+/// an upper bound, [`exactly`](Self::exactly) for a fixed worker count, or
+/// [`all`](Self::all) to use all available processors.
 ///
 /// Counts are validated when the runtime is built. Both `at_most(0)` and
 /// `exactly(0)` produce a construction error.
@@ -33,10 +34,16 @@ pub struct WorkersPolicy(WorkersPolicyKind);
 impl WorkersPolicy {
     /// Creates a policy requiring exactly `count` workers.
     ///
+    /// Each worker is a separate operating-system thread. If `count` exceeds
+    /// the available processor count, Arty assigns workers to processors in
+    /// repeated processor-ID order. The operating system schedules the workers
+    /// that share each processor.
+    ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
-    /// [`Error`] if `count` is zero or fewer processors are available. Creating
-    /// the policy does not validate the count. Use [`at_most`](Self::at_most) if
-    /// the application can work with fewer workers.
+    /// [`Error`] if `count` is zero. Creating the policy does not validate the
+    /// count. Large counts can consume substantial thread and stack resources.
+    /// Use [`at_most`](Self::at_most) if the application can work with fewer
+    /// workers.
     ///
     /// # Examples
     ///
@@ -86,24 +93,72 @@ impl WorkersPolicy {
         Self(WorkersPolicyKind::All)
     }
 
-    pub(crate) fn select(&self, available: &ProcessorSet) -> Result<ProcessorSet, Error> {
-        let count = match self.0 {
-            WorkersPolicyKind::Exactly(0) | WorkersPolicyKind::AtMost(0) => {
-                return Err(Error::invalid_worker_count());
-            }
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "available processor sets are nonempty, so the round-robin divisor is nonzero"
+    )]
+    pub(crate) fn select(&self, available: &ProcessorSet) -> Result<WorkerPlacements, Error> {
+        match self.0 {
+            WorkersPolicyKind::Exactly(0) | WorkersPolicyKind::AtMost(0) => Err(Error::invalid_worker_count()),
             WorkersPolicyKind::Exactly(count) if count > available.len() => {
-                return Err(Error::insufficient_processors(count, available.len()));
+                let processors = sorted_singletons(available);
+                let workers = (0..count)
+                    .map(|worker_index| processors[worker_index % processors.len()].clone())
+                    .collect();
+                Ok(WorkerPlacements {
+                    workers,
+                    processors_used: processors.len(),
+                })
             }
-            WorkersPolicyKind::Exactly(count) | WorkersPolicyKind::AtMost(count) => count.min(available.len()),
-            WorkersPolicyKind::Auto | WorkersPolicyKind::All => {
-                return Ok(available.to_builder().take_all().expect("available processor sets are nonempty"));
+            WorkersPolicyKind::Exactly(count) | WorkersPolicyKind::AtMost(count) => {
+                let count = count.min(available.len());
+                let count = NonZero::new(count).expect("zero counts were rejected above and available processor sets are nonempty");
+                let selected = available
+                    .to_builder()
+                    .take(count)
+                    .expect("the requested count fits in the available processor set");
+                Ok(WorkerPlacements::from_selected(&selected))
             }
-        };
-        let count = NonZero::new(count).expect("zero counts were rejected above and available processor sets are nonempty");
-        Ok(available
-            .to_builder()
-            .take(count)
-            .expect("the requested count fits in the available processor set"))
+            WorkersPolicyKind::Auto | WorkersPolicyKind::All => Ok(WorkerPlacements::from_selected(available)),
+        }
+    }
+}
+
+fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
+    let mut processors: Vec<_> = processors.decompose().into_iter().collect();
+    processors.sort_by_key(|processor| processor.processors().first().id());
+    processors
+}
+
+#[derive(Debug)]
+pub(crate) struct WorkerPlacements {
+    workers: Vec<ProcessorSet>,
+    processors_used: usize,
+}
+
+impl WorkerPlacements {
+    fn from_selected(processors: &ProcessorSet) -> Self {
+        Self {
+            workers: sorted_singletons(processors),
+            processors_used: processors.len(),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.workers.len()
+    }
+
+    pub(crate) const fn processors_used(&self) -> usize {
+        self.processors_used
+    }
+}
+
+impl IntoIterator for WorkerPlacements {
+    type Item = ProcessorSet;
+    type IntoIter = std::vec::IntoIter<ProcessorSet>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.workers.into_iter()
     }
 }
 
@@ -139,8 +194,8 @@ impl Default for RuntimeConfig {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    #[cfg(not(miri))]
     use many_cpus::SystemHardware;
+    use many_cpus::fake::HardwareBuilder;
 
     use super::*;
 
@@ -149,60 +204,86 @@ mod tests {
         assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn exact_count_selects_requested_processors() {
-        const COUNT: WorkersPolicy = WorkersPolicy::exactly(1);
-        let available = SystemHardware::current().processors();
-        let selected = COUNT.select(&available).unwrap();
-        assert_eq!(selected.len(), 1);
+    fn exact_count_assigns_requested_workers() {
+        let available = fake_processors(4);
+        let selected = WorkersPolicy::exactly(16).select(&available).unwrap();
+
+        assert_eq!((selected.len(), selected.processors_used()), (16, 4));
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn exact_count_accepts_all_available_processors() {
-        let available = SystemHardware::current().processors().take(NonZero::new(1).unwrap()).unwrap();
-        let selected = WorkersPolicy::exactly(available.len()).select(&available).unwrap();
+    fn exact_count_repeats_processors_in_id_order() {
+        let available = fake_processors(4);
+        let processor_ids: Vec<_> = WorkersPolicy::exactly(10)
+            .select(&available)
+            .unwrap()
+            .into_iter()
+            .map(|processor| processor.processors().first().id())
+            .collect();
 
-        assert_eq!(selected.len(), available.len());
+        assert_eq!(processor_ids, vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1]);
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn unavailable_exact_count_returns_error() {
-        let available = SystemHardware::current().processors().take(NonZero::new(1).unwrap()).unwrap();
-        WorkersPolicy::exactly(2).select(&available).unwrap_err();
+    fn exact_count_can_use_fewer_than_all_processors() {
+        let available = fake_processors(4);
+        let selected = WorkersPolicy::exactly(2).select(&available).unwrap();
+
+        assert_eq!((selected.len(), selected.processors_used()), (2, 2));
     }
 
-    #[cfg(not(miri))]
+    #[test]
+    fn exact_count_matching_capacity_keeps_one_worker_per_processor() {
+        let available = fake_processors(8);
+        let exact: Vec<_> = WorkersPolicy::exactly(8)
+            .select(&available)
+            .unwrap()
+            .into_iter()
+            .map(|processor| processor.processors().first().id())
+            .collect();
+        let maximum: Vec<_> = WorkersPolicy::at_most(8)
+            .select(&available)
+            .unwrap()
+            .into_iter()
+            .map(|processor| processor.processors().first().id())
+            .collect();
+
+        assert_eq!(exact, maximum);
+        assert_eq!(exact, (0..8).collect::<Vec<_>>());
+    }
+
     #[test]
     fn maximum_count_clamps_to_available_processors() {
-        let available = SystemHardware::current().processors();
+        let available = fake_processors(4);
         let selected = WorkersPolicy::at_most(usize::MAX).select(&available).unwrap();
-        assert_eq!(selected.len(), available.len());
+
+        assert_eq!((selected.len(), selected.processors_used()), (4, 4));
     }
 
-    #[cfg(not(miri))]
     #[test]
     fn maximum_count_caps_processor_selection() {
         const COUNT: WorkersPolicy = WorkersPolicy::at_most(1);
-        let available = SystemHardware::current().processors();
+        let available = fake_processors(4);
         let selected = COUNT.select(&available).unwrap();
-        assert_eq!(selected.len(), 1);
+
+        assert_eq!((selected.len(), selected.processors_used()), (1, 1));
     }
 
-    #[cfg(not(miri))]
     #[test]
     fn automatic_count_uses_all_available_processors() {
-        let available = SystemHardware::current().processors();
+        let available = fake_processors(4);
         assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), available.len(),);
     }
 
-    #[cfg(not(miri))]
     #[test]
     fn all_processors_uses_all_available_processors() {
         const COUNT: WorkersPolicy = WorkersPolicy::all();
-        let available = SystemHardware::current().processors();
+        let available = fake_processors(4);
         assert_eq!(COUNT.select(&available).unwrap().len(), available.len());
+    }
+
+    fn fake_processors(count: usize) -> ProcessorSet {
+        SystemHardware::fake(HardwareBuilder::from_counts(NonZero::new(count).unwrap(), NonZero::new(1).unwrap())).processors()
     }
 }

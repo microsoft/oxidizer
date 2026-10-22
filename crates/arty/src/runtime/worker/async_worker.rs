@@ -32,9 +32,10 @@ fn can_suspend(cycle_outcome: CycleOutcome, batch_exhausted: bool) -> bool {
     matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted
 }
 
-/// The async worker has exclusive use of a runtime thread, one per processor selected by
-/// the configured processor-count policy. The worker executes async tasks that are
-/// woken by local or remote futures, incoming commands, and timers.
+/// The async worker has exclusive use of one runtime thread. Multiple worker
+/// threads can share a processor when the exact worker count exceeds available
+/// processor capacity. The worker executes async tasks that are woken by local
+/// or remote futures, incoming commands, and timers.
 ///
 /// The type represents the internal state of the worker. This state is connected to other objects
 /// through messaging channels that allow components of the runtime to deliver work and signals.

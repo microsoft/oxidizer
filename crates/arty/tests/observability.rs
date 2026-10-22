@@ -20,7 +20,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-#[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
@@ -208,7 +207,12 @@ fn started_event_reports_worker_policy() {
     let started = events_named(&events, "arty.rt.started");
     assert_eq!(started.len(), 1, "exactly one runtime should start");
 
-    assert_eq!(dimension(started[0], "processors.used"), Some("2".into()));
+    let processors_used = if cfg!(miri) {
+        PROCESSORS
+    } else {
+        SystemHardware::current().processors().len().min(PROCESSORS)
+    };
+    assert_eq!(dimension(started[0], "processors.used"), Some(processors_used.to_string().into()));
     assert!(
         dimension(started[0], "processors.available").is_some(),
         "processors.available dimension should be present"

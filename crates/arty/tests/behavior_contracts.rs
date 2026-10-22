@@ -277,9 +277,8 @@ fn builtins_publish_the_same_services_on_every_worker() {
 #[cfg(all(feature = "macros", not(miri)))]
 #[arty::test(workers = 2)]
 async fn worker_services_are_ready_before_spawning(cx: Builtins) {
-    let count = many_cpus::SystemHardware::current().processors().len().min(2);
     let scheduler = cx.scheduler();
-    let tasks: Vec<_> = (0..count)
+    let tasks: Vec<_> = (0..2)
         .map(|_| {
             scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
                 worker.thread().id() == thread::current().id()
