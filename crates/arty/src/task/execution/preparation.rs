@@ -132,9 +132,18 @@ impl RemoteFutureFactory {
         let factory = move |builtins: Builtins, tasks: &TaskSet| {
             factory.take().expect("a remote factory is registered exactly once")(builtins, tasks);
         };
-        Self {
-            inner: FUTURE_FACTORIES.with(|pool| PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))),
-        }
+        let mut factory = Some(factory);
+        let inner = FUTURE_FACTORIES
+            .try_with(|pool| {
+                let factory = factory.take().expect("the pooled allocation consumes the factory once");
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))
+            })
+            .unwrap_or_else(|_| {
+                let pool = MultiPool::new();
+                let factory = factory.take().expect("the fallback allocation consumes the factory once");
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))
+            });
+        Self { inner }
     }
 
     pub(crate) fn register(self, builtins: Builtins, tasks: &TaskSet) -> RegisteredRemoteTask {
@@ -215,11 +224,12 @@ impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::cell::RefCell;
     use std::panic::panic_any;
     use std::pin::pin;
     use std::rc::Rc;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
     use std::task::{Wake, Waker};
 
     use arty_executor::{CycleOutcome, Executor};
@@ -228,6 +238,19 @@ mod tests {
 
     use super::*;
     use crate::runtime::{Runtime, WorkersPolicy};
+
+    thread_local! {
+        static FACTORY_ON_DROP: RefCell<Option<FactoryOnDrop>> = const { RefCell::new(None) };
+    }
+
+    struct FactoryOnDrop(mpsc::Sender<()>);
+
+    impl Drop for FactoryOnDrop {
+        fn drop(&mut self) {
+            drop(RemoteFutureFactory::new(|_, _| {}));
+            self.0.send(()).unwrap();
+        }
+    }
 
     fn test_builtins() -> (Runtime, Builtins) {
         let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
@@ -247,6 +270,21 @@ mod tests {
 
         assert_eq!(std::ptr::from_ref(&*second.inner).cast::<()>(), address);
         assert_eq!(FUTURE_FACTORIES.with(MultiPool::chunks_allocated), chunks);
+    }
+
+    #[test]
+    fn remote_factory_falls_back_during_thread_local_destruction() {
+        let (completed, observed) = mpsc::channel();
+        std::thread::spawn(move || {
+            FACTORY_ON_DROP.with(|slot| {
+                assert!(slot.replace(Some(FactoryOnDrop(completed))).is_none());
+            });
+            FUTURE_FACTORIES.with(|_| {});
+        })
+        .join()
+        .unwrap();
+
+        observed.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
     }
 
     #[test]

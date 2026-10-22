@@ -8,10 +8,8 @@ use scopeguard::{Always, ScopeGuard};
 
 use crate::{CycleOutcome, Executor};
 
-pub(crate) fn new_test_task() -> impl crate::TypeErasedTask {
-    let events = events_once::LocalEventPool::<()>::new();
-    let (sender, _receiver) = events.rent();
-    crate::Task::new(std::future::pending(), sender)
+pub(crate) fn new_test_task() -> impl crate::TypeErasedTask + std::fmt::Debug {
+    crate::new_test_task_value()
 }
 
 pub(crate) fn new_test_task_handle() -> crate::TaskHandle {

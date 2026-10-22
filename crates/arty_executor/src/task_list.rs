@@ -82,17 +82,13 @@ impl Drop for TaskList {
 
 #[cfg(test)]
 mod tests {
-    use std::future::pending;
-
-    use events_once::LocalEventPool;
     use plurality::MultiPool;
 
     use super::*;
-    use crate::Task;
+    use crate::testing::new_test_task;
 
     fn task(pool: &MultiPool) -> TaskHandle {
-        let (sender, _receiver) = LocalEventPool::<()>::new().rent();
-        TaskHandle::new(pool.alloc_arc_pin(Task::new(pending(), sender)))
+        TaskHandle::new(pool.alloc_arc_pin(new_test_task()))
     }
 
     #[test]

@@ -15,7 +15,7 @@ use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
 use crate::wake::RemoteWake;
-use crate::{JoinHandle, Task, TaskHandle, TaskOptions, TypeErasedTask, WakeShared, WakeSignal};
+use crate::{JoinHandle, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_remote_task, allocate_task};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -127,7 +127,13 @@ impl ExecutorShared {
             return join_handle;
         }
         let (result_tx, result_rx) = self.inner.join_events.rent();
-        self.register_task(Task::new_with_options(future, result_tx, options, self.inner.sink.clone()));
+        self.register_task(allocate_task(
+            &self.inner.task_storage,
+            future,
+            result_tx,
+            options,
+            self.inner.sink.clone(),
+        ));
         JoinHandle::new(result_rx)
     }
 
@@ -143,18 +149,20 @@ impl ExecutorShared {
         if self.is_shutting_down() {
             return;
         }
-        self.register_task(Task::new_remote(future, options, self.inner.sink.clone(), remote_result_tx));
+        self.register_task(allocate_remote_task(
+            &self.inner.task_storage,
+            future,
+            options,
+            self.inner.sink.clone(),
+            remote_result_tx,
+        ));
     }
 
     fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
         self.is_shutting_down().then(|| JoinHandle::disconnected(&self.inner.join_events))
     }
 
-    fn register_task<T>(&self, task: T)
-    where
-        T: TypeErasedTask + 'static,
-    {
-        let task_handle = TaskHandle::new(self.inner.task_storage.alloc_arc_pin(task));
+    fn register_task(&self, task_handle: TaskHandle) {
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.

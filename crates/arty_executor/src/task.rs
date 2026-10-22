@@ -15,11 +15,14 @@ use std::task;
 use events_once::PooledLocalSender;
 use observed::Sink;
 use pin_project::{pin_project, pinned_drop};
+use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{TaskCreatedReporter, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal, discard_task_panic_payload};
+use crate::{
+    TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal, discard_task_panic_payload,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct TaskLinks {
@@ -34,7 +37,7 @@ pub(crate) struct TaskLinks {
 /// The executor itself typically handles the task in obscured form, as a [`TypeErasedTask`],
 /// as it does not care about the specific type information - only the task itself does.
 #[derive(Debug)]
-pub(crate) struct Task<F, R, T = PooledLocalSender<R>>
+struct Task<F, R, T = PooledLocalSender<R>>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
@@ -106,7 +109,7 @@ where
     }
 
     #[must_use]
-    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
+    fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
         Self::new_with_target(future, result_tx, options, sink)
     }
 
@@ -124,7 +127,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteSender<R>) -> Self {
+    fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteSender<R>) -> Self {
         Self::new_with_target(future, remote_result_tx, options, sink)
     }
 }
@@ -152,6 +155,41 @@ where
             _requires_pin: PhantomPinned,
         }
     }
+}
+
+pub(crate) fn allocate_task<F, R>(
+    pool: &MultiPool,
+    future: F,
+    result_tx: PooledLocalSender<R>,
+    options: TaskOptions,
+    sink: Sink,
+) -> TaskHandle
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+{
+    TaskHandle::new(pool.alloc_arc_pin(Task::new_with_options(future, result_tx, options, sink)))
+}
+
+pub(crate) fn allocate_remote_task<F, R>(
+    pool: &MultiPool,
+    future: F,
+    options: TaskOptions,
+    sink: Sink,
+    remote_result_tx: RemoteSender<R>,
+) -> TaskHandle
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    TaskHandle::new(pool.alloc_arc_pin(Task::new_remote(future, options, sink, remote_result_tx)))
+}
+
+#[cfg(test)]
+pub(crate) fn new_test_task_value() -> impl TypeErasedTask + Debug {
+    let events = events_once::LocalEventPool::<()>::new();
+    let (sender, _receiver) = events.rent();
+    Task::new(std::future::pending(), sender)
 }
 
 impl<F, R, T> TypeErasedTask for Task<F, R, T>

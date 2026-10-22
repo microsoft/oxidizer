@@ -14,6 +14,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use arty_executor::remote::Pool as RemotePool;
 use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, TaskOptions, TaskPlacement, TaskSet};
 use observed::Sink;
+use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
@@ -26,6 +27,30 @@ thread_local! {
 
 struct ReentrantSubmissionProcessor;
 struct OwnerDropProcessor;
+
+struct ContextValue;
+
+impl data_privacy::RedactedDisplay for ContextValue {
+    fn fmt(&self, _: &dyn data_privacy::Redactor, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+struct TaskContext;
+
+impl Enrichment for TaskContext {
+    fn into_entries(self) -> Vec<EnrichmentEntry> {
+        vec![EnrichmentEntry::new("task.context", ContextValue)]
+    }
+}
+
+struct CallerContext;
+
+impl Enrichment for CallerContext {
+    fn into_entries(self) -> Vec<EnrichmentEntry> {
+        vec![EnrichmentEntry::new("caller.context", ContextValue)]
+    }
+}
 
 struct OwnerDropState {
     owner: Executor,
@@ -78,6 +103,13 @@ fn poll_once<R: 'static>(handle: &mut JoinHandle<R>) -> Poll<Result<R, JoinError
     Pin::new(handle).poll(&mut Context::from_waker(Waker::noop()))
 }
 
+fn enrichment_keys(sink: &Sink) -> Vec<String> {
+    sink.current_enrichments()
+        .into_iter()
+        .map(|entry| entry.key().as_str().to_owned())
+        .collect()
+}
+
 #[test]
 fn failed_construction_preserves_existing_executor_notifications() {
     let mut executor = Executor::builder().build();
@@ -106,6 +138,26 @@ fn failed_construction_preserves_existing_executor_notifications() {
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
+}
+
+#[test]
+fn noop_executor_applies_task_context_and_restores_caller_context() {
+    let sink = Sink::builder("arty-executor-context-restoration").build();
+    let task_context = sink.transfer_context().with_enrichment(TaskContext);
+    let caller_context = sink.transfer_context().with_enrichment(CallerContext);
+    let _caller_guard = caller_context.apply_current_thread();
+    assert_eq!(enrichment_keys(&sink), ["caller.context"]);
+
+    let mut executor = Executor::builder().build();
+    let task_sink = sink.clone();
+    let mut handle = executor.tasks().add(
+        async move { enrichment_keys(&task_sink) },
+        TaskOptions::observed(task_context, TaskPlacement::Any),
+    );
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(vec![String::from("task.context")])));
+    assert_eq!(enrichment_keys(&sink), ["caller.context"]);
 }
 
 #[test]

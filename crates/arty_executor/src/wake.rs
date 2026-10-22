@@ -304,7 +304,6 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::UnsafeCell;
     use std::future::pending;
     use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -338,17 +337,12 @@ mod tests {
 
     #[test]
     fn duplicate_remote_wake_publishes_prior_writes() {
-        struct Published(UnsafeCell<bool>);
-
-        // SAFETY: The test uses the wake-state Release/Acquire protocol to order all access.
-        unsafe impl Sync for Published {}
-
         let task_handle = crate::testing::new_test_task_handle();
         let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
         let signal = pin!(WakeSignal::new(shared, task_handle.as_ptr()));
         // SAFETY: The clone retains task ownership, and the signal remains pinned through the scope.
         let waker = unsafe { signal.as_ref().waker_ref() }.clone();
-        let published = Arc::new(Published(UnsafeCell::new(false)));
+        let published = Arc::new(AtomicBool::new(false));
         let duplicate_complete = Arc::new(AtomicBool::new(false));
 
         thread::scope(|scope| {
@@ -356,8 +350,7 @@ mod tests {
             let producer_complete = Arc::clone(&duplicate_complete);
             scope.spawn(move || {
                 waker.wake_by_ref();
-                // SAFETY: The duplicate wake below publishes this write to notification clearing.
-                unsafe { *producer_published.0.get() = true };
+                producer_published.store(true, Ordering::Relaxed);
                 waker.wake_by_ref();
                 producer_complete.store(true, Ordering::Relaxed);
             });
@@ -366,8 +359,7 @@ mod tests {
                 thread::yield_now();
             }
             signal.clear_notification();
-            // SAFETY: Clearing acquired the duplicate wake's Release RMW before this read.
-            assert!(unsafe { *published.0.get() });
+            assert!(published.load(Ordering::Relaxed));
         });
     }
 
@@ -492,8 +484,7 @@ mod tests {
     #[test]
     fn dropping_an_owned_waker_releases_its_task_reference() {
         let pool = MultiPool::new();
-        let (sender, _receiver) = LocalEventPool::<()>::new().rent();
-        let task_handle = TaskHandle::new(pool.alloc_arc_pin(crate::Task::new(pending(), sender)));
+        let task_handle = TaskHandle::new(pool.alloc_arc_pin(crate::testing::new_test_task()));
         {
             let signal = pin!(WakeSignal::new_for_test(Waker::noop().clone(), &task_handle));
             // SAFETY: The clone acquires independent task ownership before the borrow ends.

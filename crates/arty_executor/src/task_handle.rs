@@ -144,11 +144,9 @@ mod tests {
     use std::sync::Barrier;
     use std::thread;
 
-    use events_once::LocalEventPool;
     use plurality::MultiPool;
 
     use super::*;
-    use crate::Task;
     use crate::testing::new_test_task;
 
     #[test]
@@ -166,8 +164,7 @@ mod tests {
     #[test]
     fn embedded_handle_debug_stops_at_the_template_pointer() {
         let pool = MultiPool::new();
-        let (sender, _receiver) = LocalEventPool::<()>::new().rent();
-        let task = pool.alloc_arc_pin(Task::new(std::future::pending(), sender));
+        let task = pool.alloc_arc_pin(new_test_task());
         let handle = TaskHandle::new(task.clone());
 
         assert!(format!("{task:?}").contains(&format!("{handle:?}")));
