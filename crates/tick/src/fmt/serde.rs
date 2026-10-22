@@ -5,10 +5,10 @@ use std::fmt::{self, Display};
 use std::marker::PhantomData;
 use std::str::FromStr;
 
-/// Parses text slices directly instead of first deserializing an owned [`String`],
-/// avoiding its per-value allocation. The string hint preserves support for formats
-/// that stream text, while `visit_bytes` retains valid UTF-8 byte input accepted by
-/// the former owned-string visitor.
+/// Parses a text slice without first allocating an owned [`String`].
+///
+/// The string hint supports formats that stream text. `visit_bytes` also
+/// accepts valid UTF-8 byte input.
 pub(super) fn deserialize_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde_core::Deserializer<'de>,

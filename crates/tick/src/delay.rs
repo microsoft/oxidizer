@@ -12,12 +12,11 @@ use super::timers::TimerKey;
 ///
 /// # Precision
 ///
-/// The delay uses the current thread's scheduler to schedule its ticks. The precision
-/// of the delay is affected by the load on this thread. There are no guarantees about the
-/// precision of the delay other than that it will eventually complete. When the thread is healthy,
-/// the delay should be close to the specified duration.
+/// The delay uses the scheduler of the current thread. Thread load affects its
+/// precision. The delay will complete, but it does not guarantee an exact
+/// completion time. Under normal load, it completes near the requested duration.
 ///
-/// Note: `Delay` is not affected by changes in the system clock.
+/// Changes to the system clock do not affect `Delay`.
 ///
 /// # Examples
 ///
@@ -52,7 +51,7 @@ impl Delay {
     /// If the duration is [`Duration::ZERO`], the delay completes immediately.
     /// If the duration is [`Duration::MAX`], the delay never completes.
     ///
-    /// > **Note**: Consider using [`Clock::delay()`] as a shortcut for creating delays.
+    /// You can use [`Clock::delay()`] as a shorter form.
     ///
     /// # Examples
     ///

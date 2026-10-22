@@ -16,17 +16,16 @@ use crate::timers::TIMER_RESOLUTION;
 ///
 /// # Precision
 ///
-/// The timer uses the current thread's scheduler to schedule its ticks. The precision
-/// of the timer is affected by the load on this thread. There are no guarantees about the
-/// precision of the timer other than that it will eventually tick. When the thread is healthy,
-/// the timer's period should be close to the specified one.
+/// The timer uses the scheduler of the current thread. Thread load affects its
+/// precision. The timer will tick, but it does not guarantee an exact tick time.
+/// Under normal load, the interval stays near the requested period.
 ///
-/// > **Note**: The periodic timer is not affected by adjustments to the system clock.
+/// Changes to the system clock do not affect the timer.
 ///
 /// # Timer behavior
 ///
-/// Call [`next`][Self::next] to wait for each tick. A periodic timer does not terminate; callers
-/// decide how many ticks to await.
+/// Call [`next`][Self::next] to wait for a tick. The timer does not stop by
+/// itself. The caller selects how many ticks to await.
 ///
 /// # Examples
 ///
@@ -68,9 +67,9 @@ use crate::timers::TIMER_RESOLUTION;
 ///
 /// # Stream interoperability
 ///
-/// `tick` does not expose a `futures` trait in its public API. Applications that use
+/// `tick` does not expose a `futures` trait in its public API. An application that uses
 /// [`futures_core::Stream`](https://docs.rs/futures-core/latest/futures_core/stream/trait.Stream.html)
-/// can adapt a timer locally:
+/// can adapt its timer:
 ///
 /// ```
 /// use std::time::Duration;
@@ -92,8 +91,8 @@ use crate::timers::TIMER_RESOLUTION;
 /// # }
 /// ```
 ///
-/// This adapter keeps the timer as the stream state and does not require `tick` itself to depend on
-/// `futures-core`.
+/// This adapter keeps the timer in the stream state. It does not add
+/// `futures-core` as a dependency of `tick`.
 #[derive(Debug)]
 #[must_use = "periodic timers do nothing unless `next` is awaited"]
 pub struct PeriodicTimer {
@@ -104,7 +103,7 @@ pub struct PeriodicTimer {
     current_waker: Option<Waker>,
 }
 
-/// Information observed when a [`PeriodicTimer`] fires.
+/// Information recorded when a [`PeriodicTimer`] fires.
 #[derive(Debug)]
 #[must_use]
 pub struct TimerTick {
@@ -122,8 +121,8 @@ impl TimerTick {
 impl PeriodicTimer {
     /// Creates a timer that fires periodically.
     ///
-    /// > **Note**: The minimum precision of the timer is 1ms. If a smaller period is specified,
-    /// > it will be adjusted to 1ms.
+    /// The minimum period is 1 millisecond. A shorter period is increased to
+    /// 1 millisecond.
     #[must_use = "periodic timers do nothing unless `next` is awaited"]
     pub fn new(clock: &Clock, period: Duration) -> Self {
         let period = period.max(TIMER_RESOLUTION);

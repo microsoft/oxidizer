@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 pub(crate) struct TimerKey {
     tick: Instant,
 
-    /// Discriminator that ensures two timer IDs with the same instant can be created.
+    /// Distinguishes timer IDs that have the same instant.
     discriminator: u32,
 }
 
@@ -20,7 +20,7 @@ impl TimerKey {
         Self { tick, discriminator: id }
     }
 
-    /// Determines when the timer will fire.
+    /// Returns the instant when the timer will fire.
     pub(crate) const fn tick(&self) -> Instant {
         self.tick
     }
@@ -28,23 +28,23 @@ impl TimerKey {
 
 /// The minimum resolution for timers.
 ///
-/// Timers with a shorter period will be rounded up to this value. The 1ms resolution
-/// provides adequate precision for most use cases while minimizing the overhead of
-/// timer management. Setting this too low would increase CPU usage from frequent
-/// timer checks, while setting it too high would reduce timer precision.
+/// A shorter period is rounded up to this value. One millisecond balances
+/// timer precision with the cost of frequent timer checks.
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
 pub(crate) type ReadyWakers = BTreeMap<TimerKey, Waker>;
 
-/// Management of one-shot timers, inspired by the [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
+/// Stores one-shot timers.
 ///
-/// The timers managed by this collection are one-shot, meaning they will not fire again after being triggered.
+/// This design is based on the
+/// [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
+/// Each timer fires at most once.
 #[derive(Debug, Default)]
 pub(crate) struct Timers {
     /// An ordered map of registered timers.
     ///
-    /// Timers are stored in the order in which they will fire.
-    /// The [`Waker`] represents the task awaiting the timer.
+    /// Timers are stored in firing order. Each [`Waker`] belongs to the task
+    /// that waits for the timer.
     wakers: BTreeMap<TimerKey, Waker>,
     last_discriminator: u32,
 
@@ -67,7 +67,7 @@ impl Timers {
         self.wakers.contains_key(&id)
     }
 
-    /// Registers a new timer that will fire at the specified instant.
+    /// Registers a timer for the specified instant.
     ///
     /// Returns a unique [`TimerKey`] that can be used to unregister the timer.
     pub(crate) fn register(&mut self, when: Instant, waker: Waker) -> TimerKey {
@@ -103,17 +103,14 @@ impl Timers {
         (true, mem::replace(current, replacement))
     }
 
-    /// Returns the instant when the next timer will fire, or `None` if no timers are registered.
+    /// Returns the next timer instant, or `None` when no timer is registered.
     pub(crate) fn next_timer(&self) -> Option<Instant> {
         self.wakers.keys().next().map(TimerKey::tick)
     }
 
-    /// Advances timers that are ready to be woken.
+    /// Wakes each timer that is ready.
     ///
-    /// Returns the next timer instant if any timers remain, or `None` if no timers are pending.
-    ///
-    /// In the future, the signature of this method can be easily expanded to return more
-    /// information about the timers that fired and when the next timer fires.
+    /// Returns the next timer instant, or `None` when no timer remains.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyWakers) -> Option<Instant> {
         self.alive = true;

@@ -99,10 +99,10 @@ impl ClockState {
         Self::System(SystemClockState::new(SystemClockStorage::new_isolated()))
     }
 
-    /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
-    /// by a single global driver task (e.g. the Tokio-driven clock created by
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocate`] is a no-op for
-    /// this variant.
+    /// Creates system-clock state with one shared timer set.
+    ///
+    /// A single driver task uses this state. For example, [`Clock::new_tokio`]
+    /// uses it. [`ThreadAware::relocate`] does nothing for this state.
     #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_system_shared() -> Self {
         Self::System(SystemClockState::new(SystemClockStorage::new_shared()))
@@ -176,17 +176,20 @@ impl ClockState {
 //    that are ready to fire, and taking the lock is not the bottleneck.
 #[derive(Debug, Clone)]
 pub(crate) enum SystemClockStorage {
-    /// A single shared system-clock state. [`ThreadAware::relocate`] is a no-op, so all clones
-    /// observe the same timers, driver registrations, and clock-owner count regardless of thread
-    /// coordinate. Used by clocks driven by a single global driver task, such as
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio].
+    /// System-clock state with one shared timer set.
+    ///
+    /// [`ThreadAware::relocate`] does nothing. All clones use the same timers,
+    /// driver registrations, and clock-owner count on all thread coordinates.
+    /// A single driver task uses this state, such as [`Clock::new_tokio`].
     #[cfg(any(feature = "rt-shared", test))]
     Shared(std::sync::Arc<SystemClockStorageInner>),
 
-    /// Per-thread isolated system-clock state. Within one runtime owner,
-    /// [`ThreadAware::relocate`] creates fresh storage on the destination thread, enabling
-    /// thread-isolated runtimes to operate independently with no cross-thread lock contention.
-    /// A cross-owner move retains the current storage instead.
+    /// System-clock state with one timer set per thread.
+    ///
+    /// Within one runtime owner, [`ThreadAware::relocate`] creates storage on
+    /// the destination thread. Each thread can then work without timer-lock
+    /// contention from other threads. A move to another owner keeps the current
+    /// storage.
     Isolated(Arc<SystemClockStorageInner, PerThread>),
 }
 
