@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Chaos latency middleware example that injects artificial delay with a configurable probability.
+//! This example adds an artificial delay at a configured rate.
 //!
-//! This example simulates a service where 50% of requests are delayed by 200ms,
-//! demonstrating how chaos latency can be used to test resilience under degraded
-//! performance conditions.
+//! It delays 50% of requests by 200 milliseconds.
+//! This tests how the service responds to degraded performance.
 
 use std::time::Duration;
 
@@ -19,17 +18,17 @@ async fn main() {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock);
 
-    // Define stack with latency injection layer
+    // Define a stack with a latency layer.
     let stack = (
         Latency::layer("my_latency", &context)
-            // Required: probability of latency injection (50%)
+            // Set the latency injection rate to 50%.
             .rate(0.5)
-            // Required: fixed delay duration to inject
+            // Set the delay to inject.
             .latency(Duration::from_millis(200)),
         Execute::new(execute_operation),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
     for i in 0..10 {

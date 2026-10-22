@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Retry resilience middleware for services, applications, and libraries.
+//! Retry middleware for services, applications, and libraries.
 //!
-//! This module provides automatic retry capabilities with configurable backoff strategies,
-//! jitter, recovery classification, and comprehensive telemetry. The primary types are
-//! [`Retry`] and [`RetryLayer`]:
+//! This module retries operations after recoverable output.
+//! It supports backoff, jitter, recovery classification, and telemetry.
+//! It provides these main types:
 //!
-//! - [`Retry`] is the middleware that wraps an inner service and automatically retries failed operations
-//! - [`RetryLayer`] is used to configure and construct the retry middleware
+//! - [`Retry`] wraps an inner service and retries recoverable output.
+//! - [`RetryLayer`] configures and creates the retry middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -40,71 +40,68 @@
 //!
 //! # Configuration
 //!
-//! The [`RetryLayer`] uses a type state pattern to enforce that all required properties are
-//! configured before the layer can be built. This compile-time safety ensures that you cannot
-//! accidentally create a retry layer without properly specifying input cloning and recovery logic:
+//! [`RetryLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these required properties:
 //!
-//! - [`clone_input_with`][RetryLayer::clone_input_with]: Required function to clone inputs for retries (Rust ownership requirement)
-//! - [`recovery`][RetryLayer::recovery]: Required function to determine if an output should trigger a retry
+//! - [`clone_input_with`][RetryLayer::clone_input_with] provides input for each retry.
+//! - [`recovery`][RetryLayer::recovery] decides whether output permits a retry.
 //!
-//! Each retry layer requires an identifier for telemetry purposes. This identifier should use
-//! `snake_case` naming convention to maintain consistency across the codebase.
+//! Each retry layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Retry`] type is thread-safe and implements both `Send` and `Sync` as enforced by
-//! the `Service` trait it implements. This allows retry middleware to be safely shared
-//! across multiple threads and used in concurrent environments.
+//! [`Retry`] implements `Send` and `Sync` as required by its `Service` implementation.
+//! You can share the middleware across threads.
 //!
-//! # Retry Delay
+//! # Retry delay
 //!
-//! Retry delays are determined by the following priority order:
+//! The middleware selects a retry delay in this order:
 //!
-//! 1. **Recovery Delay Override**: If [`RetryLayer::recovery_with`] returns
+//! 1. Recovery delay override: If [`RetryLayer::recovery_with`] returns
 //!    [`RecoveryInfo::retry().delay()`][crate::RecoveryInfo::delay] or [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] with a specific duration, this delay
-//!    is used directly.
+//!    the middleware uses this delay.
 //!
-//! 2. **Backoff Strategy**: When no recovery delay is specified, delays are calculated using
-//!    the configured backoff strategy (Constant, Linear, or Exponential with default `10ms` base delay).
+//! 2. Backoff strategy: If recovery does not set a delay, the middleware uses the configured backoff.
+//!    The strategies are constant, linear, and exponential. The default base delay is `10ms`.
 //!
 //! # Defaults
 //!
-//! The retry middleware uses the following default values when optional configuration is not provided:
+//! The retry middleware uses these values when you do not provide optional configuration:
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
-//! | Max retry attempts | `3` (4 total) | Maximum retry attempts plus original call | [`max_retry_attempts`][RetryLayer::max_retry_attempts] |
+//! | Maximum retry attempts | `3` (4 total calls) | Retry attempts after the original call | [`max_retry_attempts`][RetryLayer::max_retry_attempts] |
 //! | Base delay | `10` milliseconds | Base delay used for backoff calculations | [`base_delay`][RetryLayer::base_delay] |
 //! | Backoff strategy | `Exponential` | Exponential backoff with base multiplier of 2 | [`backoff`][RetryLayer::backoff] |
-//! | Jitter | `Enabled` | Adds randomness to delays to prevent thundering herds | [`use_jitter`][RetryLayer::use_jitter] |
-//! | Max delay | `None` | No limit on maximum delay between retries | [`max_delay`][RetryLayer::max_delay] |
-//! | Enable condition | Always enabled | Retry protection is applied to all requests | [`enable_if`][RetryLayer::enable_if], [`enable_always`][RetryLayer::enable_always], [`disable`][RetryLayer::disable] |
+//! | Jitter | Enabled | Adds random variation to retry delays | [`use_jitter`][RetryLayer::use_jitter] |
+//! | Maximum delay | `None` | Does not limit the delay between retries | [`max_delay`][RetryLayer::max_delay] |
+//! | Enable condition | Always enabled | Applies retry middleware to all requests | [`enable_if`][RetryLayer::enable_if], [`enable_always`][RetryLayer::enable_always], [`disable`][RetryLayer::disable] |
 //!
-//! The default base delay is optimized for **service-to-service** communication where low latency
-//! is critical. For **client-to-service** scenarios (e.g., mobile apps, web frontend), consider
-//! increasing the base delay to 1-2 seconds using [`base_delay`][RetryLayer::base_delay].
+//! The default base delay is for low-latency service-to-service calls.
+//! For client-to-service calls, set a base delay of 1 to 2 seconds with [`base_delay`][RetryLayer::base_delay].
 //!
 //! # Telemetry
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted once per attempt when the recovery classifier indicates the result is
-//!   recoverable, including the final attempt when maximum retries are exhausted
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: Once for each recoverable output, including the final attempt
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Retry identifier from [`Retry::layer`]
-//!   - `resilience.event.name`: Always `retry`
+//!   - `resilience.event.name`: `retry`
 //!   - `resilience.attempt.index`: Attempt index (0-based)
-//!   - `resilience.attempt.is_last`: Boolean indicating if this is the last retry attempt
+//!   - `resilience.attempt.is_last`: Whether this is the last attempt
 //!   - `resilience.attempt.recovery.kind`: The [`RecoveryKind`][crate::RecoveryKind] that triggered
-//!     the retry (e.g., `retry` or `unavailable`)
+//!     the retry, such as `retry` or `unavailable`
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
-//! This example demonstrates the basic usage of configuring and using retry middleware.
+//! This example configures and uses retry middleware.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -113,17 +110,16 @@
 //! # use seatbelt::retry::{Retry, Backoff};
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
-//! // Define common options for resilience middleware. The clock is runtime-specific and
-//! // must be provided. See its documentation for details.
+//! // Create shared middleware configuration with a clock for the runtime.
 //! let context = ResilienceContext::new(&clock).name("example");
 //!
 //! let stack = (
 //!     Retry::layer("my_retry", &context)
-//!         // Required: how to clone inputs for retries
+//!         // Clone the input for each retry.
 //!         .clone_input()
-//!         // Required: determine if we should retry based on output
+//!         // Use the output to decide whether to retry.
 //!         .recovery_with(|output: &Result<String, String>, _args| match output {
-//!             // These are demonstrative, real code will have more meaningful recovery detection
+//!             // Replace these example rules with rules for the service.
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(msg) if msg.contains("transient") => RecoveryInfo::retry(),
 //!             Err(_) => RecoveryInfo::never(),
@@ -131,10 +127,10 @@
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
-//! // Build the service
+//! // Build the service.
 //! let service = stack.into_service();
 //!
-//! // Execute the service
+//! // Execute the service.
 //! let result = service.execute("test input".to_string()).await;
 //! # let _result = result;
 //! # Ok(())
@@ -142,10 +138,9 @@
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 //!
-//! ## Advanced Usage
+//! ## Advanced use
 //!
-//! This example demonstrates advanced usage of the retry middleware, including custom backoff
-//! strategies, delay generators, and retry callbacks.
+//! This example uses custom backoff, delay rules, and retry callbacks.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -155,7 +150,7 @@
 //! # use seatbelt::retry::{Retry, Backoff};
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
-//! // Define common options for resilience middleware.
+//! // Create shared middleware configuration.
 //! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
@@ -166,12 +161,12 @@
 //!             Err(_) => RecoveryInfo::never(),
 //!             Ok(_) => RecoveryInfo::never(),
 //!         })
-//!         // Optional configuration
+//!         // Set optional configuration.
 //!         .max_retry_attempts(5)
 //!         .base_delay(Duration::from_millis(200))
 //!         .backoff(Backoff::Exponential)
 //!         .use_jitter(true)
-//!         // Callback called just before the next retry
+//!         // Run a callback before the next retry.
 //!         .on_retry(|output, args| {
 //!             println!(
 //!                 "retrying, attempt: {}, delay: {}ms",
@@ -182,7 +177,7 @@
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
-//! // Build and execute the service
+//! // Build and execute the service.
 //! let service = stack.into_service();
 //! let result = service.execute("test_timeout".to_string()).await;
 //! # let _result = result;

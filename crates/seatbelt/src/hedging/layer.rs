@@ -16,21 +16,20 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{Recovery, RecoveryInfo, ResilienceContext};
 
-/// Builder for configuring hedging resilience middleware.
+/// Configures hedging middleware.
 ///
-/// This type is created by calling [`Hedging::layer`](crate::hedging::Hedging::layer) and uses the
-/// type-state pattern to enforce that required properties are configured before the hedging
-/// middleware can be built:
+/// [`Hedging::layer`](crate::hedging::Hedging::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
-/// - [`clone_input`][HedgingLayer::clone_input]: Required to specify how to clone inputs for hedging attempts
-/// - [`recovery`][HedgingLayer::recovery]: Required to determine if an output is acceptable
+/// - [`clone_input`][HedgingLayer::clone_input] provides input for hedged attempts.
+/// - [`recovery`][HedgingLayer::recovery] classifies output.
 ///
-/// For comprehensive examples, see the [hedging module][crate::hedging] documentation.
+/// See the [hedging module][crate::hedging] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`clone_input`][HedgingLayer::clone_input] has been set
-/// - `S2`: Tracks whether [`recovery`][HedgingLayer::recovery] has been set
+/// - `S1` records whether [`clone_input`][HedgingLayer::clone_input] is set.
+/// - `S2` records whether [`recovery`][HedgingLayer::recovery] is set.
 #[derive(Debug)]
 pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
@@ -66,11 +65,10 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
 impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// Sets the maximum number of additional hedged attempts.
     ///
-    /// This specifies the maximum number of hedged requests in addition to the original call.
-    /// For example, if `max_hedged_attempts` is 2, the operation will be attempted up to
-    /// 3 times total (1 original `+` 2 hedging attempts).
+    /// This value does not include the original call.
+    /// For example, a value of 2 permits three total attempts.
     ///
-    /// **Default**: 1 hedged attempt (2 total)
+    /// Default: 1 hedged attempt (2 total)
     #[must_use]
     pub fn max_hedged_attempts(mut self, count: u8) -> Self {
         self.max_hedged_attempts = count;
@@ -79,43 +77,34 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
 
     /// Sets a fixed delay between hedging attempts.
     ///
-    /// The original request is always sent immediately. After `delay`, the first
-    /// hedging attempt is launched. After another `delay`, the second hedging attempt
-    /// is launched, and so on.
+    /// The original request starts immediately.
+    /// Each later attempt starts after another `delay`.
     ///
-    /// The delay value controls how aggressively hedging requests are launched:
+    /// The delay controls when attempts start:
     ///
-    /// - **[`Duration::ZERO`]**: All hedging attempts launch simultaneously alongside
-    ///   the original request. This maximizes the chance of a fast response but multiplies
-    ///   load on the downstream service by the total number of attempts. Only use when
-    ///   the downstream service has sufficient spare capacity.
+    /// - [`Duration::ZERO`]: All attempts start together.
+    ///   Use this only when the downstream service has enough capacity.
     ///
-    /// - **Short to moderate delay** (e.g. 200 ms - 2 s): The typical configuration.
-    ///   Gives the original request a head-start before launching additional attempts,
-    ///   which limits extra load while still cutting tail latency.
+    /// - A delay from 200 milliseconds to 2 seconds gives the original request time to finish.
     ///
-    /// - **[`Duration::MAX`]**: The delay will never expire, so hedging attempts are
-    ///   only launched when the original (or an earlier hedge) completes with a
-    ///   recoverable result. This makes hedging behave like sequential retry - at most
-    ///   one request is in flight at a time.
+    /// - [`Duration::MAX`]: A new attempt starts only after a recoverable result.
+    ///   This permits only one in-flight request.
     ///
-    /// For per-attempt delays that depend on the input or attempt index, see
-    /// [`hedging_delay_with`][HedgingLayer::hedging_delay_with].
+    /// Use [`hedging_delay_with`][HedgingLayer::hedging_delay_with] for calculated delays.
     ///
-    /// **Default**: 500 milliseconds
+    /// Default: 500 milliseconds
     #[must_use]
     pub fn hedging_delay(mut self, delay: Duration) -> Self {
         self.delay_fn = DelayFn::new(move |_input, _args| delay);
         self
     }
 
-    /// Sets a dynamic delay function that computes the delay for each hedging attempt.
+    /// Sets a function that calculates the delay for each hedged attempt.
     ///
-    /// The `delay_fn` receives a reference to the current input and [`HedgingDelayArgs`]
-    /// containing the hedging attempt index, and should return the [`Duration`] to wait
-    /// before launching that hedging attempt.
+    /// The function receives the input and [`HedgingDelayArgs`].
+    /// It returns the delay before the attempt.
     ///
-    /// **Default**: 500 milliseconds (fixed)
+    /// Default: 500 milliseconds
     #[must_use]
     pub fn hedging_delay_with(mut self, delay_fn: impl Fn(&In, HedgingDelayArgs) -> Duration + Send + Sync + 'static) -> Self {
         self.delay_fn = DelayFn::new(delay_fn);
@@ -124,8 +113,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
 
     /// Applies all settings from a [`HedgingConfig`] to this layer.
     ///
-    /// This is a convenience method for applying configuration loaded from external sources
-    /// (e.g., configuration files) without calling individual builder methods.
+    /// Use this method to apply configuration from an external source.
     #[must_use]
     pub fn config(self, config: &HedgingConfig) -> Self {
         self.hedging_delay(config.hedging_delay)
@@ -141,15 +129,13 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
 
     /// Sets the input cloning function for hedged attempts.
     ///
-    /// Called before each attempt to produce a fresh input value. The `clone_fn`
-    /// receives a mutable reference to the input and [`CloneArgs`] containing
-    /// context about the attempt. Return `Some(cloned_input)` to proceed, or `None`
-    /// to skip that hedging attempt.
+    /// The middleware calls this function before each attempt.
+    /// It receives the input and [`CloneArgs`].
+    /// Return `Some(cloned_input)` to start the attempt.
+    /// Return `None` to skip it.
     ///
-    /// The mutable reference allows modifying the original input between hedging
-    /// attempts, for example to add tracking headers or annotate the request
-    /// with attempt metadata. On the final attempt the original input is consumed
-    /// directly, so mutations made during cloning are carried through.
+    /// You can change the input between attempts.
+    /// The final attempt consumes the original input with these changes.
     #[must_use]
     pub fn clone_input_with(
         mut self,
@@ -159,12 +145,12 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self.into_state::<Set, S2>()
     }
 
-    /// Automatically sets the input cloning function for types that implement [`Clone`].
+    /// Uses [`Clone`] to create input for hedged attempts.
     ///
     /// This is equivalent to calling [`clone_input_with`][HedgingLayer::clone_input_with] with
     /// `|input, _args| Some(input.clone())`.
     ///
-    /// # Type Requirements
+    /// # Type requirements
     ///
     /// The input type `In` must implement [`Clone`].
     #[must_use]
@@ -177,14 +163,12 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
 
     /// Sets the recovery classification function.
     ///
-    /// This function determines whether a specific output is acceptable by examining
-    /// the output and returning a [`RecoveryInfo`] classification:
+    /// The function returns a [`RecoveryInfo`] classification:
     ///
-    /// - [`RecoveryInfo::never()`]: The result is acceptable - return it immediately
-    /// - [`RecoveryInfo::retry()`]: The result is transient - continue waiting for hedging attempts
-    /// - [`RecoveryInfo::unavailable()`]: The service is unavailable - by default returned
-    ///   immediately, but treated as transient when [`handle_unavailable(true)`][HedgingLayer::handle_unavailable]
-    ///   is configured
+    /// - [`RecoveryInfo::never()`]: Return the output.
+    /// - [`RecoveryInfo::retry()`]: Wait for another attempt.
+    /// - [`RecoveryInfo::unavailable()`]: Return the output by default.
+    ///   [`handle_unavailable(true)`][HedgingLayer::handle_unavailable] makes it recoverable.
     #[must_use]
     pub fn recovery_with(
         mut self,
@@ -194,12 +178,12 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self.into_state::<S1, Set>()
     }
 
-    /// Automatically sets the recovery classification function for types that implement [`Recovery`].
+    /// Uses [`Recovery`] to classify output.
     ///
     /// This is equivalent to calling [`recovery_with`][HedgingLayer::recovery_with] with
     /// `|output, _args| output.recovery()`.
     ///
-    /// # Type Requirements
+    /// # Type requirements
     ///
     /// The output type `Out` must implement [`Recovery`].
     #[must_use]
@@ -210,57 +194,53 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self.recovery_with(|out, _args| out.recovery())
     }
 
-    /// Configures a callback invoked before each execute operation (original and hedged).
+    /// Sets a callback that runs before each attempt.
     ///
-    /// The callback receives a mutable reference to the input and [`OnExecuteArgs`] containing
-    /// attempt and delay information. This is useful for logging, metrics, input mutation,
-    /// or other observability purposes.
+    /// The callback receives the input and [`OnExecuteArgs`].
+    /// Use it for logs, metrics, or input changes.
     ///
-    /// **Default**: None
+    /// Default: `None`
     #[must_use]
     pub fn on_execute(mut self, execute_fn: impl Fn(&mut In, OnExecuteArgs) + Send + Sync + 'static) -> Self {
         self.on_execute = Some(OnExecute::new(execute_fn));
         self
     }
 
-    /// Configures whether the hedging middleware should treat unavailable services as
-    /// recoverable conditions.
+    /// Controls whether unavailable output is recoverable.
     ///
-    /// When enabled, [`RecoveryInfo::unavailable()`] classifications are treated as
-    /// recoverable - the hedging middleware will continue waiting for other in-flight requests.
-    /// When disabled (default), unavailable responses are treated as acceptable results
-    /// and returned immediately.
+    /// If enabled, the middleware waits for other attempts.
+    /// If disabled, it returns unavailable output.
     ///
-    /// **Default**: false (unavailable responses are returned immediately)
+    /// Default: `false`
     #[must_use]
     pub fn handle_unavailable(mut self, enable: bool) -> Self {
         self.handle_unavailable = enable;
         self
     }
 
-    /// Optionally enables the hedging middleware based on a condition.
+    /// Enables hedging middleware when a condition is true.
     ///
-    /// When disabled, requests pass through without hedging.
+    /// If the condition is false, the request runs without hedging.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
         self
     }
 
-    /// Enables the hedging middleware unconditionally.
+    /// Enables hedging middleware for all requests.
     ///
-    /// **Note**: This is the default behavior.
+    /// Hedging middleware is enabled by default.
     #[must_use]
     pub fn enable_always(mut self) -> Self {
         self.enable_if = EnableIf::new(true);
         self
     }
 
-    /// Disables the hedging middleware completely.
+    /// Disables hedging middleware for all requests.
     ///
-    /// All requests will pass through without hedging.
+    /// Requests run without hedging.
     #[must_use]
     pub fn disable(mut self) -> Self {
         self.enable_if = EnableIf::new(false);
@@ -331,7 +311,7 @@ mod tests {
         assert!(layer.on_execute.is_none());
         assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_hedging");
         assert!(layer.enable_if.call(&"test_input".to_string()));
-        // Default delay should be 500ms
+        // The default delay is 500 milliseconds.
         let args = HedgingDelayArgs {
             attempt: Attempt::new(1, false),
         };

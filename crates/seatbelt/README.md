@@ -175,7 +175,7 @@ Enable the features that the service needs:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb76FNbhFXOmcbO3KeC2hGgpYbPzpHUbw3RTAb0n662NGWvMdhZIWCZ2xheWVyZWRlMC4zLjiCa3JlY292ZXJhYmxlZTAuMy4wgmhzZWF0YmVsdGYwLjExLjCCZHRpY2tlMC44LjCDbXRvd2VyLXNlcnZpY2VlMC4zLjNtdG93ZXJfc2VydmljZQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwuF19kqLB1IblQtRzztp-T8bbnoMhWYIaM0btKWYfaiKgBphZIWCZ2xheWVyZWRlMC4zLjiCa3JlY292ZXJhYmxlZTAuMy4wgmhzZWF0YmVsdGYwLjExLjCCZHRpY2tlMC44LjCDbXRvd2VyLXNlcnZpY2VlMC4zLjNtdG93ZXJfc2VydmljZQ
  [__link0]: https://crates.io/crates/layered/0.3.8
  [__link1]: https://docs.rs/layered/0.3.8/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.11.0/seatbelt/hedging/index.html

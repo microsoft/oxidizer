@@ -64,7 +64,7 @@
 //! let result = service.execute("input data".to_string()).await;
 //! # }
 //! # async fn my_string_operation(input: String) -> String {
-//! #     // Simulate processing that transforms the input string
+//! #     // Transform the input string.
 //! #     format!("processed: {}", input)
 //! # }
 //! # }

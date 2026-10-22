@@ -16,19 +16,16 @@ use super::*;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Applies circuit breaker logic to prevent cascading failures.
+/// Blocks calls when an inner service fails too often.
 ///
-/// `Breaker` wraps an inner [`Service`] and monitors the success and failure rates
-/// of operations. When the failure rate exceeds a configured threshold, the circuit breaker opens
-/// and temporarily blocks inputs to give the downstream service time to recover.
+/// `Breaker` wraps an inner [`Service`] and monitors its results.
+/// The circuit opens when failures reach the configured threshold.
+/// An open circuit blocks input while the downstream service recovers.
 ///
-/// This middleware is designed to be used across services, applications, and libraries
-/// to prevent cascading failures in distributed systems.
+/// Call [`Breaker::layer`] to create a [`BreakerLayer`].
+/// Use its builder methods to configure the circuit breaker.
 ///
-/// `Breaker` is configured by calling [`Breaker::layer`] and using the
-/// builder methods on the returned [`BreakerLayer`] instance.
-///
-/// For comprehensive examples and usage patterns, see the [`breaker` module][crate::breaker] documentation.
+/// See the [`breaker` module][crate::breaker] for examples.
 #[derive(Debug)]
 pub struct Breaker<In, Out, S> {
     pub(super) shared: Arc<BreakerShared<In, Out>>,
@@ -37,7 +34,7 @@ pub struct Breaker<In, Out, S> {
 
 /// Shared configuration for [`Breaker`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct BreakerShared<In, Out> {
     pub(crate) clock: Clock,
@@ -61,10 +58,9 @@ impl<In, Out, S: Clone> Clone for Breaker<In, Out, S> {
 }
 
 impl<In, Out> Breaker<In, Out, ()> {
-    /// Creates a new circuit breaker layer with the specified name and options.
+    /// Creates a circuit breaker layer with the specified name and context.
     ///
-    /// Returns a [`BreakerLayer`] that must be configured with required parameters
-    /// before it can be used to build a circuit breaker service.
+    /// Set the required properties on the returned [`BreakerLayer`] before you build a service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::ResilienceContext<In, Out>,
@@ -166,7 +162,7 @@ where
 
         // Construct the guard BEFORE building the inner future and move it into the returned future
         // so that dropping the future before it is ever polled still records the abandonment. `enter`
-        // already ran synchronously above (inside `before_execute`), so a pre-poll drop would
+        // already ran synchronously above inside `before_execute`, so a pre-poll drop can
         // otherwise leak an accepted-but-never-exited execution. The guard owns the only handles it
         // needs, so the normal-completion `after_execute` runs through `complete`.
         let mut guard = AbandonedGuard::new(Arc::clone(&self.shared), engine, breaker_id, mode);
@@ -274,7 +270,7 @@ impl<In, Out> Drop for AbandonedGuard<In, Out> {
     #[cfg_attr(test, mutants::skip)] // The thread::panicking() guard only triggers during unwind, which is impractical to exercise in a unit test.
     fn drop(&mut self) {
         // Skip abandonment recording while the thread is already panicking: recording during an
-        // unwind is meaningless and `exit` may touch a lock poisoned by that very panic.
+        // unwind is meaningless. `exit` can touch a lock that the same panic poisoned.
         if !self.armed || std::thread::panicking() {
             return;
         }
@@ -402,7 +398,7 @@ mod tests {
             ExitCircuitResult::Unchanged,
         );
 
-        // This should not panic, indicating no callbacks were invoked
+        // This does not panic because no callback runs.
         service
             .shared
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
@@ -423,7 +419,7 @@ mod tests {
             ExitCircuitResult::Reopened,
         );
 
-        // This should not panic, indicating no callbacks were invoked
+        // This does not panic because no callback runs.
         service
             .shared
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
@@ -529,7 +525,7 @@ mod tests {
         log_capture.assert_contains("circuit_breaker.state=\"open\"");
         log_capture.assert_contains("circuit_breaker.execs.total");
 
-        // Request should be rejected (emits another open state log)
+        // Reject the request and emit another open-state log.
         let _ = service.execute("test".to_string()).await;
 
         // Advance time past break duration to allow probing

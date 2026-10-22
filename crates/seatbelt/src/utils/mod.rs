@@ -17,9 +17,9 @@ pub(crate) use telemetry_helper::TelemetryHelper;
 /// Controls whether a middleware is enabled for a given input.
 ///
 /// This enum has three modes:
-/// - `Enabled`: The middleware is always active (default).
-/// - `Disabled`: The middleware is always bypassed.
-/// - `Custom`: The middleware is conditionally active based on a user-provided predicate.
+/// - `Enabled`: The middleware is active for all input. This is the default.
+/// - `Disabled`: The middleware is not active.
+/// - `Custom`: A predicate selects the input that enables the middleware.
 #[derive(Default)]
 pub(crate) enum EnableIf<In> {
     /// The middleware is always enabled.
@@ -27,7 +27,7 @@ pub(crate) enum EnableIf<In> {
     Enabled,
     /// The middleware is always disabled.
     Disabled,
-    /// The middleware is conditionally enabled based on a predicate.
+    /// A predicate decides if the middleware is enabled.
     Custom(Arc<dyn Fn(&In) -> bool + Send + Sync>),
 }
 
@@ -37,12 +37,12 @@ impl<In> EnableIf<In> {
         if enabled { Self::Enabled } else { Self::Disabled }
     }
 
-    /// Creates a new `EnableIf` with a custom predicate.
+    /// Creates `Custom` with a predicate.
     pub(crate) fn custom(predicate: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         Self::Custom(Arc::new(predicate))
     }
 
-    /// Evaluates whether the middleware is enabled for the given input.
+    /// Returns `true` if the middleware is enabled for the input.
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub(crate) fn call(&self, input: &In) -> bool {
         match self {

@@ -28,7 +28,7 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct RetryConfig {
-    /// Controls if the retry middleware runs.
+    /// Controls whether the retry middleware runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
@@ -52,13 +52,13 @@ pub struct RetryConfig {
     )]
     pub max_delay: Option<Duration>,
 
-    /// Controls if retry delays include jitter.
+    /// Controls whether retry delays include jitter.
     pub use_jitter: bool,
 
     /// Sets the maximum number of retries after the original call.
     pub max_retry_attempts: u32,
 
-    /// Controls if [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] permits a retry.
+    /// Controls whether [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] permits a retry.
     ///
     /// If this value is `false`, the middleware returns unavailable output immediately.
     pub handle_unavailable: bool,

@@ -8,9 +8,9 @@ use tick::Clock;
 use crate::RecoveryInfo;
 use crate::attempt::Attempt;
 
-/// Arguments for the [`clone_input_with`][super::RetryLayer::clone_input_with] callback function.
+/// Provides data to the [`clone_input_with`][super::RetryLayer::clone_input_with] callback.
 ///
-/// Provides context for input cloning operations.
+/// Use this data when you clone input.
 #[derive(Debug)]
 pub struct CloneArgs {
     pub(super) attempt: Attempt,
@@ -24,16 +24,16 @@ impl CloneArgs {
         self.attempt
     }
 
-    /// Returns the recovery information from the previous attempt, if any.
+    /// Returns recovery data from the previous attempt, if it exists.
     #[must_use]
     pub fn previous_recovery(&self) -> Option<&RecoveryInfo> {
         self.previous_recovery.as_ref()
     }
 }
 
-/// Arguments for the [`recovery_with`][super::RetryLayer::recovery_with] callback function.
+/// Provides data to the [`recovery_with`][super::RetryLayer::recovery_with] callback.
 ///
-/// Provides context for recovery classification.
+/// Use this data to classify output for recovery.
 #[derive(Debug)]
 pub struct RecoveryArgs<'a> {
     pub(super) attempt: Attempt,
@@ -54,9 +54,9 @@ impl RecoveryArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_retry`][super::RetryLayer::on_retry] callback function.
+/// Provides data to the [`on_retry`][super::RetryLayer::on_retry] callback.
 ///
-/// Provides context for retry notifications.
+/// Use this data when a retry starts.
 #[derive(Debug)]
 pub struct OnRetryArgs {
     pub(super) attempt: Attempt,
@@ -84,9 +84,9 @@ impl OnRetryArgs {
     }
 }
 
-/// Arguments for the [`restore_input`][super::RetryLayer::restore_input] callback function.
+/// Provides data to the [`restore_input`][super::RetryLayer::restore_input] callback.
 ///
-/// Provides context for input restoration when cloning is unavailable.
+/// Use this data to restore input when cloning is not available.
 #[derive(Debug)]
 pub struct RestoreInputArgs {
     pub(super) attempt: Attempt,

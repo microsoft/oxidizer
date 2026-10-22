@@ -21,7 +21,7 @@ const DEFAULT_RATE: f64 = 0.0;
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct InjectionConfig {
-    /// Controls if the injection middleware runs.
+    /// Controls whether the injection middleware runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,

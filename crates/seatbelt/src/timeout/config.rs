@@ -21,7 +21,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct TimeoutConfig {
-    /// Controls if the timeout middleware runs.
+    /// Controls whether the timeout middleware runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,

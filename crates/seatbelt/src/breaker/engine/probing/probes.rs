@@ -7,7 +7,7 @@ use std::vec;
 use super::{AllowProbeResult, Probe, ProbeOperation, ProbeOptions, ProbesOptions, ProbingResult};
 use crate::breaker::ExecutionResult;
 
-/// Manages a sequence of probes.
+/// Runs a sequence of probes.
 #[derive(Debug)]
 pub(crate) struct Probes {
     probes: vec::IntoIter<ProbeOptions>,
@@ -32,16 +32,13 @@ impl Probes {
     pub(crate) fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
         match self.current.record(result, now) {
             ProbingResult::Success => {
-                // An abandoned execution (a dropped or cancelled future) is never conclusive
-                // evidence of recovery, so it must never advance probing or close the circuit. It
-                // is still recorded into the probe above -- so it counts toward the health sample
-                // and can reopen under `AbandonedPolicy::as_failures` -- but the close is deferred
-                // to the next conclusive probe.
+                // An abandoned execution does not prove that the service recovered.
+                // Record it in the health sample, but do not advance or close the circuit.
                 if result == ExecutionResult::Abandoned {
                     return ProbingResult::Pending;
                 }
 
-                // check if there are more probes to try
+                // Start the next probe if one exists.
                 match self.probes.next() {
                     Some(probe) => {
                         self.current = Probe::new(probe);

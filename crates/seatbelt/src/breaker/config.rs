@@ -28,7 +28,7 @@ use crate::breaker::{AbandonedPolicy, HalfOpenMode};
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct BreakerConfig {
-    /// Controls if the circuit breaker runs.
+    /// Controls whether the circuit breaker runs.
     ///
     /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
