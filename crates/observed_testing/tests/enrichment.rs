@@ -162,7 +162,11 @@ fn targeted_enrichment_visible_to_specific_emitter() {
 #[test]
 fn isolated_enrichment_excludes_global_context() {
     let processor = observed_testing::MockProcessor::new();
-    let sink = Sink::new_isolated("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .isolated_enrichment()
+        .build();
 
     (|| {
         emit!(sink, ProbeEvent::new(1));
@@ -283,7 +287,7 @@ fn enrichment_preserved_when_future_polled() {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    use testing_aids::FutureTestExt;
+    use future_assert::FutureTestExt;
 
     #[derive(Debug, Clone, Enrichment)]
     struct Scope {
@@ -329,8 +333,8 @@ fn enrichment_preserved_when_future_polled() {
     .enrich(&sink, Scope { scope: PublicI64(2) });
 
     // First poll: both futures pend, no events emitted yet.
-    assert!(testing_aids::poll_once(&mut fut1).is_pending());
-    assert!(testing_aids::poll_once(&mut fut2).is_pending());
+    assert!(future_assert::poll_once(&mut fut1).is_pending());
+    assert!(future_assert::poll_once(&mut fut2).is_pending());
     assert!(processor.events().is_empty());
 
     // Second poll: both futures complete and emit with their enrichment.

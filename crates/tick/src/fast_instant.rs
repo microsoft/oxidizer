@@ -86,6 +86,7 @@ pub(crate) fn now() -> Instant {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
 mod tests {
+    // Calibration and platform timestamps are private implementation details of fast instants.
     use super::*;
 
     #[test]

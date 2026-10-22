@@ -527,20 +527,23 @@ Describe 'Get-WorkspacePackages: dependency identity vs dependency name' {
     }
 }
 
-Describe 'Get-WorkspacePackages: proc-macro target classification' {
+Describe 'Get-WorkspacePackages: target kind classification' {
     BeforeAll {
         Reset-ReleaseScriptCaches
         $spec = @{
             Packages = @(
                 @{ Name = 'macros'; Version = '0.2.0'; ProcMacro = $true }
                 @{ Name = 'library'; Version = '1.0.0' }
+                @{ Name = 'cli'; Version = '0.1.0'; BinOnly = $true }
+                @{ Name = 'mixed'; Version = '0.1.0' }
             )
         }
-        $script:ProcMacroWorkspace = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'proc-macro-targets')
+        $script:TargetKindWorkspace = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'target-kinds')
+        Set-Content (Join-Path $script:TargetKindWorkspace.Path 'crates\mixed\src\main.rs') 'fn main() {}'
     }
 
     It 'identifies a proc-macro-only package from cargo metadata' {
-        $packages = Get-WorkspacePackages -repoRoot $script:ProcMacroWorkspace.Path
+        $packages = Get-WorkspacePackages -repoRoot $script:TargetKindWorkspace.Path
         $macros = $packages | Where-Object { $_.Name -eq 'macros' }
 
         $macros.IsProcMacroOnly | Should -BeTrue
@@ -548,7 +551,7 @@ Describe 'Get-WorkspacePackages: proc-macro target classification' {
     }
 
     It 'preserves ordinary library classification' {
-        $packages = Get-WorkspacePackages -repoRoot $script:ProcMacroWorkspace.Path
+        $packages = Get-WorkspacePackages -repoRoot $script:TargetKindWorkspace.Path
         $library = $packages | Where-Object { $_.Name -eq 'library' }
 
         $library.IsProcMacroOnly | Should -BeFalse
@@ -564,7 +567,7 @@ Describe 'Get-WorkspacePackages: proc-macro target classification' {
         Get-CrateRequiredChangeType `
             -Folder 'macros' `
             -CargoName 'macros' `
-            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'manual'
+            -RepoRoot $script:TargetKindWorkspace.Path | Should -Be 'manual'
 
         Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 0 -Exactly
     }
@@ -576,9 +579,56 @@ Describe 'Get-WorkspacePackages: proc-macro target classification' {
         Get-CrateRequiredChangeType `
             -Folder 'library' `
             -CargoName 'library' `
-            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'patch'
+            -RepoRoot $script:TargetKindWorkspace.Path | Should -Be 'patch'
 
         Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 1 -Exactly
+    }
+
+    It 'classifies bin-only metadata separately and requires manual CLI review' {
+        Reset-ReleaseScriptCaches
+        $cli = Get-WorkspacePackages -repoRoot $script:TargetKindWorkspace.Path |
+            Where-Object Name -eq 'cli'
+        $cli.IsBinOnly | Should -BeTrue
+        $cli.IsProcMacroOnly | Should -BeFalse
+        $cli.HasLibraryTarget | Should -BeFalse
+        $cli.CrateRoot | Should -BeNullOrEmpty
+        Mock Invoke-CrateSemverCheck { throw 'No library target exists.' }
+        Get-CrateRequiredChangeType -Folder cli -CargoName cli `
+            -RepoRoot $script:TargetKindWorkspace.Path | Should -Be 'manual'
+        Should -Invoke Invoke-CrateSemverCheck -Times 0 -Exactly
+    }
+
+    It 'does not skip a library that also ships a binary' {
+        Reset-ReleaseScriptCaches
+        $mixed = Get-WorkspacePackages -repoRoot $script:TargetKindWorkspace.Path | Where-Object Name -eq mixed
+        $mixed.HasLibraryTarget | Should -BeTrue
+        $mixed.IsBinOnly | Should -BeFalse
+        Mock Invoke-CrateSemverCheck { 'breaking' }
+        Get-CrateRequiredChangeType -Folder mixed -CargoName mixed `
+            -RepoRoot $script:TargetKindWorkspace.Path | Should -Be 'breaking'
+        Should -Invoke Invoke-CrateSemverCheck -Times 1 -Exactly
+    }
+
+    It 'does not treat a cdylib alongside a binary as bin-only' {
+        Reset-ReleaseScriptCaches
+        Mock Get-WorkspaceMetadata {
+            [pscustomobject]@{
+                packages = @(
+                    [pscustomobject]@{
+                        name = 'native'; version = '0.1.0'
+                        manifest_path = Join-Path $script:TargetKindWorkspace.Path 'crates\native\Cargo.toml'
+                        publish = $null; dependencies = @(); metadata = $null
+                        targets = @(
+                            [pscustomobject]@{ name = 'native'; kind = @('cdylib') }
+                            [pscustomobject]@{ name = 'native-cli'; kind = @('bin') }
+                        )
+                    }
+                )
+            }
+        }
+        $native = Get-WorkspacePackages -repoRoot $script:TargetKindWorkspace.Path
+        $native.HasLibraryTarget | Should -BeTrue
+        $native.IsBinOnly | Should -BeFalse
     }
 }
 

@@ -4,7 +4,7 @@
 [package]
 name = "metabench_macros"
 description = "Procedural macros for the metabench crate. You should not add this as a direct dependency; use the re-exports from metabench."
-version = "0.1.1"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["benchmark", "criterion", "gungraun", "procedural-macro"]
 categories = ["development-tools::profiling"]
@@ -16,6 +16,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench_macros"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = []

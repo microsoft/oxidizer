@@ -23,7 +23,6 @@ mod dyn_box_ops {
     use std::boxed::Box as StdBox;
     use std::hint::black_box;
 
-    use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
     use plurality::{Box as PoolBox, MultiPool, Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
@@ -56,8 +55,6 @@ mod dyn_box_ops {
         }
     }
 
-    define_pooled_dyn_cast!(Marker);
-
     #[inline]
     fn invoke_dyn(value: &dyn Marker) {
         black_box(black_box(value).tag());
@@ -89,58 +86,6 @@ mod dyn_box_ops {
         pool
     }
 
-    pub(crate) fn setup_infinity_pinned(n: usize) -> PinnedPool<Obj> {
-        let pool = PinnedPool::new();
-        pool.reserve(n);
-        let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-        drop(warm);
-        assert!(pool.capacity() >= n);
-        assert!(pool.is_empty());
-        let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-        assert_eq!(handle.tag(), 0xFF);
-        drop(handle);
-        pool
-    }
-
-    pub(crate) fn setup_infinity_local_pinned(n: usize) -> LocalPinnedPool<Obj> {
-        let pool = LocalPinnedPool::new();
-        pool.reserve(n);
-        let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-        drop(warm);
-        assert!(pool.capacity() >= n);
-        assert!(pool.is_empty());
-        let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-        assert_eq!(handle.tag(), 0xFF);
-        drop(handle);
-        pool
-    }
-
-    pub(crate) fn setup_infinity_blind(n: usize) -> BlindPool {
-        let pool = BlindPool::new();
-        pool.reserve_for::<Obj>(n);
-        let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-        drop(warm);
-        assert!(pool.capacity_for::<Obj>() >= n);
-        assert!(pool.is_empty());
-        let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-        assert_eq!(handle.tag(), 0xFF);
-        drop(handle);
-        pool
-    }
-
-    pub(crate) fn setup_infinity_local_blind(n: usize) -> LocalBlindPool {
-        let pool = LocalBlindPool::new();
-        pool.reserve_for::<Obj>(n);
-        let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-        drop(warm);
-        assert!(pool.capacity_for::<Obj>() >= n);
-        assert!(pool.is_empty());
-        let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-        assert_eq!(handle.tag(), 0xFF);
-        drop(handle);
-        pool
-    }
-
     pub(crate) fn setup_std_box(n: usize) {
         let warm: Vec<StdBox<dyn Marker>> = (0..n).map(|i| StdBox::new(Obj::new(i as u64)) as StdBox<dyn Marker>).collect();
         black_box(&warm);
@@ -162,34 +107,6 @@ mod dyn_box_ops {
     pub(crate) fn plurality_multi_box(pool: &MultiPool, i: u64) {
         let handle = pool.alloc_box(black_box(Obj::new(i)));
         let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
-        invoke_dyn(&*handle);
-        drop(black_box(handle));
-    }
-
-    #[inline]
-    pub(crate) fn infinity_pinned(pool: &PinnedPool<Obj>, i: u64) {
-        let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-        invoke_dyn(&*handle);
-        drop(black_box(handle));
-    }
-
-    #[inline]
-    pub(crate) fn infinity_local_pinned(pool: &LocalPinnedPool<Obj>, i: u64) {
-        let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-        invoke_dyn(&*handle);
-        drop(black_box(handle));
-    }
-
-    #[inline]
-    pub(crate) fn infinity_blind(pool: &BlindPool, i: u64) {
-        let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-        invoke_dyn(&*handle);
-        drop(black_box(handle));
-    }
-
-    #[inline]
-    pub(crate) fn infinity_local_blind(pool: &LocalBlindPool, i: u64) {
-        let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
         invoke_dyn(&*handle);
         drop(black_box(handle));
     }
@@ -243,10 +160,6 @@ fn assert_no_system_allocations(session: &Session, name: &str, mut f: impl FnMut
 fn dyn_box_benchmark_allocation_behavior_matches_design() {
     let plurality = dyn_box_ops::setup_plurality(dyn_box_ops::CAP);
     let plurality_multi = dyn_box_ops::setup_plurality_multi(dyn_box_ops::CAP);
-    let infinity = dyn_box_ops::setup_infinity_pinned(dyn_box_ops::CAP);
-    let infinity_local = dyn_box_ops::setup_infinity_local_pinned(dyn_box_ops::CAP);
-    let infinity_blind = dyn_box_ops::setup_infinity_blind(dyn_box_ops::CAP);
-    let infinity_local_blind = dyn_box_ops::setup_infinity_local_blind(dyn_box_ops::CAP);
     let session = quiet_session();
 
     assert_no_system_allocations(&session, "plurality_dyn_box", || {
@@ -254,18 +167,6 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
     });
     assert_no_system_allocations(&session, "plurality_multi_dyn_box", || {
         dyn_box_ops::plurality_multi_box(&plurality_multi, 0);
-    });
-    assert_no_system_allocations(&session, "infinity_pinned_dyn_box", || {
-        dyn_box_ops::infinity_pinned(&infinity, 0);
-    });
-    assert_no_system_allocations(&session, "infinity_local_pinned_dyn_box", || {
-        dyn_box_ops::infinity_local_pinned(&infinity_local, 0);
-    });
-    assert_no_system_allocations(&session, "infinity_blind_dyn_box", || {
-        dyn_box_ops::infinity_blind(&infinity_blind, 0);
-    });
-    assert_no_system_allocations(&session, "infinity_local_blind_dyn_box", || {
-        dyn_box_ops::infinity_local_blind(&infinity_local_blind, 0);
     });
 
     dyn_box_ops::setup_std_box(dyn_box_ops::CAP);

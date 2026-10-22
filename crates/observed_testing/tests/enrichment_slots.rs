@@ -16,12 +16,10 @@
 //! - Per-sink enrichment slots and targeted enrichment
 //! - Composite broadcast to every leaf
 //! - Cross-thread context transfer (`Sink::transfer_context`)
-use std::sync::Arc;
 
 use data_privacy::{DataClass, Sensitive};
 use observed::context::{Transfer, Transferred};
 use observed::enrichment::EnrichFnExt;
-use observed::processing::EventProcessor;
 use observed::{Enrichment, Sink, SinkId};
 use tick::SimpleClock;
 
@@ -40,7 +38,10 @@ fn transfer_and_transferred_are_send() {
 }
 
 const TEST_DC: DataClass = DataClass::new("test", "public");
-const EMPTY_PROCESSORS: Vec<Arc<dyn EventProcessor>> = Vec::new();
+
+fn processor_free_sink() -> Sink {
+    Sink::builder("test").clock(SimpleClock::new_frozen()).build()
+}
 
 #[derive(Enrichment)]
 struct ServiceCtx {
@@ -78,7 +79,7 @@ struct AsyncCtx {
 
 #[test]
 fn enrichments_stack_and_unwind() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         (|| {
             let e = sink.current_enrichments();
@@ -106,7 +107,7 @@ fn enrichments_stack_and_unwind() {
 
 #[test]
 fn enrich_many_adds_multiple_entries() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let e = sink.current_enrichments();
         assert_eq!(e.len(), 2);
@@ -123,13 +124,22 @@ fn enrich_many_adds_multiple_entries() {
 }
 
 #[test]
-fn emit_event_noop_without_emitters() {
-    // Noop sink -> emit_event must not panic (silent drop).
+fn noop_sink_ignores_enrichment_and_transfer() {
+    let sink = Sink::noop();
+    let transfer = (|| sink.transfer_context()).enrich(
+        &sink,
+        ServiceCtx {
+            service: Sensitive::new("ignored", TEST_DC),
+        },
+    )();
+
+    let _guard = transfer.apply_current_thread();
+    assert!(sink.current_enrichments().is_empty());
 }
 
 #[test]
 fn cross_thread_enrichment_transfer() {
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let transfer = sink.transfer_context();
 
@@ -152,10 +162,28 @@ fn cross_thread_enrichment_transfer() {
 }
 
 #[test]
+fn applied_guard_can_outlive_the_transfer() {
+    let sink = processor_free_sink();
+    let transfer = (|| sink.transfer_context()).enrich(
+        &sink,
+        ServiceCtx {
+            service: Sensitive::new("api", TEST_DC),
+        },
+    )();
+
+    let guard = transfer.apply_current_thread();
+    drop(transfer);
+    assert_eq!(sink.current_enrichments().len(), 1);
+
+    drop(guard);
+    assert!(sink.current_enrichments().is_empty());
+}
+
+#[test]
 fn enrich_for_targets_specific_emitter() {
     static FETCH: SinkId = SinkId::new("fetch");
 
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     (|| {
         let all = sink.current_enrichments();
         let fetch_entries: Vec<_> = all.iter().filter(|e| e.target() == Some(FETCH)).collect();
@@ -178,7 +206,7 @@ fn enrich_for_targets_specific_emitter() {
 async fn async_enriched_context_transfer_cross_thread() {
     use observed::enrichment::EnrichFutureExt;
 
-    let sink = Sink::noop();
+    let sink = processor_free_sink();
     let transfer = sink.transfer_context();
 
     let emitter_inner = sink.clone();
@@ -206,8 +234,8 @@ async fn async_enriched_context_transfer_cross_thread() {
 fn each_emitter_has_its_own_enrichment_slot() {
     static OTHER: SinkId = SinkId::new("ctx_test_other");
 
-    let source = Sink::noop();
-    let observer = Sink::new(OTHER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let source = processor_free_sink();
+    let observer = Sink::builder(OTHER).clock(SimpleClock::new_frozen()).build();
 
     (|| {
         let source_entries = source.current_enrichments();
@@ -233,8 +261,8 @@ fn composite_enrich_broadcasts_to_all_children() {
     static APP: SinkId = SinkId::new("ctx_test_app");
     static AUDIT: SinkId = SinkId::new("ctx_test_audit");
 
-    let app = Sink::new(APP, vec![], SimpleClock::new_frozen());
-    let audit = Sink::new(AUDIT, vec![], SimpleClock::new_frozen());
+    let app = Sink::builder(APP).clock(SimpleClock::new_frozen()).build();
+    let audit = Sink::builder(AUDIT).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([app.clone(), audit.clone()]);
 
     // Before push: both children have empty slots.
@@ -276,8 +304,8 @@ fn composite_enrich_stacks_and_unwinds() {
         request_id: Sensitive<&'static str>,
     }
 
-    let app = Sink::new(APP, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let audit = Sink::new(AUDIT, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let app = Sink::builder(APP).clock(SimpleClock::new_frozen()).build();
+    let audit = Sink::builder(AUDIT).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([app.clone(), audit.clone()]);
 
     (|| {
@@ -321,8 +349,8 @@ fn composite_transfer_round_trips_each_child() {
     static A: SinkId = SinkId::new("ctx_test_xfer_a");
     static B: SinkId = SinkId::new("ctx_test_xfer_b");
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -360,8 +388,8 @@ fn composite_transfer_preserves_divergent_children() {
     static A: SinkId = SinkId::new("ctx_test_xfer_div_a");
     static B: SinkId = SinkId::new("ctx_test_xfer_div_b");
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     // Push only on `a`. `b` stays empty.
@@ -401,7 +429,7 @@ fn empty_composite_transfer_context_is_empty() {
     let composite = Sink::composite(std::iter::empty());
     let transfer = composite.transfer_context();
 
-    let observer = Sink::new(OBSERVER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let observer = Sink::builder(OBSERVER).clock(SimpleClock::new_frozen()).build();
     let _replay = transfer.apply_current_thread();
     assert!(observer.current_enrichments().is_empty());
 }
@@ -415,9 +443,9 @@ fn nested_composite_enrich_broadcasts_to_all_leaves() {
     static B: SinkId = SinkId::new("ctx_test_nested_b");
     static C: SinkId = SinkId::new("ctx_test_nested_c");
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let c = Sink::new(C, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let c = Sink::builder(C).clock(SimpleClock::new_frozen()).build();
     let inner = Sink::composite([a.clone(), b.clone()]);
     let outer = Sink::composite([inner, c.clone()]);
 
@@ -447,9 +475,9 @@ fn nested_composite_transfer_round_trips_all_leaves() {
     static B: SinkId = SinkId::new("ctx_test_xfer_nested_b");
     static C: SinkId = SinkId::new("ctx_test_xfer_nested_c");
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let c = Sink::new(C, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let c = Sink::builder(C).clock(SimpleClock::new_frozen()).build();
     let inner = Sink::composite([a.clone(), b.clone()]);
     let outer = Sink::composite([inner, c.clone()]);
 
@@ -490,8 +518,8 @@ fn with_enrichment_broadcasts_to_each_captured_chain() {
         extra: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -546,7 +574,7 @@ fn with_enrichment_on_empty_composite_transfer_is_noop() {
 
     // Apply on a fresh single sink - its slot is not in the transfer,
     // so nothing should land.
-    let observer = Sink::new(OBSERVER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let observer = Sink::builder(OBSERVER).clock(SimpleClock::new_frozen()).build();
     let _g = transfer.apply_current_thread();
     assert!(observer.current_enrichments().is_empty());
 }
@@ -570,7 +598,7 @@ fn with_enrichment_on_empty_transfer_short_circuits_for_every_push() {
         b: Sensitive<&'static str>,
     }
 
-    let observer = Sink::new(OBSERVER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let observer = Sink::builder(OBSERVER).clock(SimpleClock::new_frozen()).build();
     let empty = Sink::composite(std::iter::empty()).transfer_context();
 
     // After one push: still empty.
@@ -610,7 +638,7 @@ fn apply_context_transfer_preserves_local_enrichment_on_target_thread() {
         local: Sensitive<&'static str>,
     }
 
-    let sink = Sink::new(E, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let sink = Sink::builder(E).clock(SimpleClock::new_frozen()).build();
 
     // Capture a transfer carrying a `service` entry while it's on the chain.
     let transfer = (|| sink.transfer_context()).enrich(
@@ -665,7 +693,7 @@ fn nested_apply_context_transfer_unwinds_lifo() {
         inner: Sensitive<&'static str>,
     }
 
-    let sink = Sink::new(E, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let sink = Sink::builder(E).clock(SimpleClock::new_frozen()).build();
 
     let outer_transfer = (|| sink.transfer_context()).enrich(
         &sink,
@@ -711,8 +739,8 @@ fn transfer_targets_captured_slots_not_apply_target() {
     static SOURCE: SinkId = SinkId::new("ctx_test_id_source");
     static OBSERVER: SinkId = SinkId::new("ctx_test_id_observer");
 
-    let source = Sink::new(SOURCE, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let observer = Sink::new(OBSERVER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let source = Sink::builder(SOURCE).clock(SimpleClock::new_frozen()).build();
+    let observer = Sink::builder(OBSERVER).clock(SimpleClock::new_frozen()).build();
 
     // Capture from `source` while it carries an entry; then apply on `observer`.
     let transfer = (|| source.transfer_context()).enrich(
@@ -752,8 +780,8 @@ fn enrich_one_child_inside_composite_scope() {
         child_only: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -802,8 +830,8 @@ fn enrich_composite_inside_child_scope() {
         child_only: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -850,8 +878,8 @@ fn enrich_composite_twice_stacks_on_each_child() {
         request_id: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -893,8 +921,8 @@ fn enrich_each_child_independently_no_crosstalk() {
         b_only: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
     // Composite exists but we don't push through it - exercises that
     // member-of-composite emitters still have independent slots.
     let _composite = Sink::composite([a.clone(), b.clone()]);
@@ -934,9 +962,9 @@ fn enrich_non_member_emitter_isolated_from_composite() {
         outside: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let outsider = Sink::new(OUTSIDER, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let outsider = Sink::builder(OUTSIDER).clock(SimpleClock::new_frozen()).build();
     let composite = Sink::composite([a.clone(), b.clone()]);
 
     (|| {
@@ -988,9 +1016,9 @@ fn enrich_two_partially_overlapping_composites_stack() {
         y: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let c = Sink::new(C, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let c = Sink::builder(C).clock(SimpleClock::new_frozen()).build();
     let outer = Sink::composite([a.clone(), b.clone()]);
     let inner = Sink::composite([b.clone(), c.clone()]);
 
@@ -1062,9 +1090,9 @@ fn enrich_composite_then_child_then_composite() {
         z: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let c = Sink::new(C, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let c = Sink::builder(C).clock(SimpleClock::new_frozen()).build();
     let outer = Sink::composite([a.clone(), b.clone()]);
     let innermost = Sink::composite([a.clone(), b.clone(), c.clone()]);
 
@@ -1153,9 +1181,9 @@ fn enrich_child_then_composite_then_overlapping_composite() {
         z: Sensitive<&'static str>,
     }
 
-    let a = Sink::new(A, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let b = Sink::new(B, EMPTY_PROCESSORS, SimpleClock::new_frozen());
-    let c = Sink::new(C, EMPTY_PROCESSORS, SimpleClock::new_frozen());
+    let a = Sink::builder(A).clock(SimpleClock::new_frozen()).build();
+    let b = Sink::builder(B).clock(SimpleClock::new_frozen()).build();
+    let c = Sink::builder(C).clock(SimpleClock::new_frozen()).build();
     let middle = Sink::composite([a.clone(), b.clone()]);
     let innermost = Sink::composite([b.clone(), c.clone()]);
 

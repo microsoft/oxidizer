@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.29.0] - 2026-10-20
+
+- The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed_macros =0.28.0 -> 0.29.0; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
+
+## [Unreleased]
+
+### Added
+
+- `EventSamplingContext::processors_interested`.
+
+### Changed
+
+- A Sink calls its event sampler before `EventProcessor::is_interested`.
+- `EventProcessor::is_interested` runs at most once per emission per Sink.
+- A Sink holds at most 64 processors, counting every leaf of a composite
+  together. `SinkBuilder::build` and `Sink::composite` panic past that.
+- `EventSamplingContext` is no longer `Sync` or `RefUnwindSafe`.
+
+### Removed
+
+- `EventSamplingContext::sink_id`.
+- `EventSamplingContext::timestamp`.
+- The public `EventSamplingContext::new`.
+
+## [0.27.0] - 2026-10-05
+
+### Changed
+
+- `Sink::with_event_sampler` takes `impl Into<Box<dyn EventSampler>>`
+  instead of `Arc<dyn EventSampler>`, so it accepts the sampler itself or a
+  `Box<dyn EventSampler>`, for example a sampler chosen at runtime. Pass the
+  sampler itself: `with_event_sampler(MySampler)` instead of
+  `with_event_sampler(Arc::new(MySampler))`. To share state between Sinks,
+  keep it behind an `Arc` in the sampler and attach a clone to each Sink.
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.0` of `performables`
+  - Now requires `0.7.1` of `tick`
+
+- 🐛 Bug Fixes
+
+  - give the observed and metabench `basic` examples unique names ([#773](https://github.com/microsoft/oxidizer/pull/773))
+
+- ⚡ Performance
+
+  - consolidate v1 and Seismograph improvements ([#764](https://github.com/microsoft/oxidizer/pull/764))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

@@ -52,6 +52,28 @@ continue to exercise the unsafe implementation or dependency path they cover.
 The native and `cargo careful` suites remain authoritative for the excluded
 stress breadth.
 
+A crate does not become dispensable merely because its own source forbids
+`unsafe`. Consumer tests remain under Miri when they provide a distinct route
+into an unsafe dependency, such as typed header parsing entering SIMD scanners.
+Exclude only duplicated breadth around that route: real production-sized
+capacity limits, exhaustive grammar products, and benchmark corpora may stay
+native while compact consumer cases retain every accelerated operation and
+important block, tail, and parser-state transition.
+
+SIMD differential matrices separate byte classification from lane placement
+under Miri: all byte values run at representative first/last and vector-boundary
+lanes across two blocks, while every lane retains byte-class and scanner-state
+boundaries. Block lengths, overlapping tails, backend selection, and state
+transitions remain covered. Repeated-fragment and case-folding checks likewise
+retain boundary/state cases rather than every pair. Native tests and
+`cargo careful` keep the exhaustive combinations. Test buffers are reused and
+assertion diagnostics are formatted only on failure to avoid interpreting
+allocation and formatting work unrelated to the scanner.
+Range-grammar sweeps retain two-specification inputs under Miri without
+repeating every digit/whitespace combination; direct grammar tests and the
+short-input sweep retain those classes. Ordering probes retain equal,
+ascending, and descending pairs around decimal-width boundaries.
+
 Safe default-constructor, preallocation, formatting, allocation-count, and
 hash-table rollback tests do not gain additional value merely by running under
 Miri. Prefer a reasoned test-level ignore for those cases while retaining a
@@ -73,12 +95,30 @@ The following package-level exclusions are intentional:
 - `rest_over_grpc` keeps its runtime transcoding tests under Miri, but omits
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
-- `rallocator` keeps its library and allocator integration suites under Miri,
-  but omits `tests/telemetry.rs` and `tests/performables_telemetry.rs`. Those
-  binaries repeatedly capture and decode process-wide snapshots or validate a
-  safe dependency graph; direct Miri tests in the library, `performables`, and
-  `seismograph` cover the unsafe internals, while native tests and
-  `cargo careful` retain the end-to-end assertions.
+- `rallocator` uses v4 backends for Windows x64/ARM64 MSVC, Linux
+  x64/AArch64 with 4-KiB kernel pages, and macOS 14.4+ on x64/native ARM64
+  with 4/16-KiB pages respectively. Darwin reclamation is lazy; zeroed
+  allocations are explicitly cleared rather than relying on recommit.
+  Its native allocator and event-bridge suites run on all three platforms,
+  including Linux
+  runtime analysis through `cargo careful`. Its manifest explicitly excludes
+  Miri because native VM reservations and CPU prefetch instructions have no
+  interpreter backend. Miri is not a supported allocator backend; the old v1
+  Miri backend and telemetry test binaries are removed.
+  `seismograph` retains its independent portable runtime-analysis coverage,
+  and the schema-3 native owner/backend inventory codec in
+  `seismograph_rallocator` is platform-independent, as is its separate
+  allocation-event projection. Neither requires the native allocator backend
+  to run under Miri.
+  Its custom-global-allocator allocation-count fixture runs natively and under
+  `cargo careful`, not Miri. The separate native-schema integration tests retain
+  borrowed encoding and error-path coverage under Miri. This avoids exercising
+  Windows `System` allocation-header bookkeeping through the counting wrapper
+  during interpreter test-harness teardown.
+  The schema truncation regression retains every byte prefix natively and under
+  `cargo careful`. Miri checks the complete wire header, each owner header, and
+  the final eight bytes before every owner boundary instead of repeating the
+  same decoder reads for every byte in the observation arrays.
 - `templated_uri` remains selected because it is a consumer-facing integration
   surface, but deterministic pseudo-fuzz breadth is reduced under Miri.
 - `internity` keeps unchecked storage and resolution paths under Miri. Native
@@ -93,7 +133,9 @@ The following package-level exclusions are intentional:
 - `seismograph` retains direct recorder and snapshot coverage. Under Miri its
   object-sampling population, repeated snapshot count, and default test event
   ring capacity are reduced while still exercising selection, capture, and
-  buffer lifecycle transitions.
+  buffer lifecycle transitions. Interpreter-only lock timeouts are shortened;
+  every timeout and recovery branch still runs, while native and `cargo
+  careful` retain the production two-second duration.
 - `fetch_winhttp_impl` retains callback, raw-context, handle, operation-buffer,
   and foreign-thread lifecycle coverage. Native tests keep exhaustive TLS,
   protocol, and port-option matrices; Miri executes representative cases.
@@ -103,8 +145,19 @@ The following package-level exclusions are intentional:
   exercise iterative teardown.
 - `multitude` retains direct Miri coverage across its unsafe allocation,
   ownership, destructor, and chunk-lifecycle paths. Tests use smaller
-  configurable oversized thresholds or bulk initialization when per-element
-  repetition does not add another unsafe state transition.
+  configurable oversized thresholds, smaller refill populations, or bulk
+  initialization when per-element repetition does not add another unsafe state
+  transition. Box/Arc, shared/local, alignment, relocation, last-reference
+  teardown, and drop-entry fallback paths remain represented.
+- `http_headers` forbids unsafe code. Its two `http::HeaderMap`
+  capacity-exhaustion tests fill the dependency's fixed 24,576-entry limit to
+  reach safe error mapping; under Miri each fill dominates the package's
+  interpreted wall time without reaching an unsafe path. They run natively and
+  under `cargo careful`. The same applies to real 64-KiB, 128-line, and
+  1,024-item source-limit stress and benchmark-corpus breadth. Compact typed
+  header cases remain interpreted and enter each token-list, range, URI, and
+  byte-class SIMD scanner; direct `http_headers_simd` tests retain the unsafe
+  lane, tail, mask, and backend invariants.
 - `compressors` cannot run all backends under Miri; its manifest records the
   backend-specific rationale.
 

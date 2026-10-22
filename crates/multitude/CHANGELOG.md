@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; multitude_macros =0.11.1 -> 0.12.0.
+
+## [0.11.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.11.0` of `bytesbuf`
+
+- ⚡ Performance
+
+  - reduce runtime analysis duration ([#767](https://github.com/microsoft/oxidizer/pull/767))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.10.0] - 2026-09-10
 
 ### Breaking

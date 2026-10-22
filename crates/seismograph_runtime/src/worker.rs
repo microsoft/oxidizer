@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use seismograph::recorder::event::{BacktraceCapture, EventKind, EventTimestamp};
+use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TransferId, WorkerId};
 
 use crate::snapshot::WorkerState;
@@ -169,7 +169,43 @@ impl WorkerHandle {
             u64::from(ready_since.is_some()),
             BacktraceCapture::Never,
         );
-        TaskPoll { task_id, started_at }
+        TaskPoll {
+            task_id,
+            started_at,
+            session: None,
+            task: None,
+        }
+    }
+
+    pub(crate) fn task_poll_started_recorded(
+        &self,
+        task_id: TaskId,
+        started_at: EventTimestamp,
+        queued_since: Option<EventTimestamp>,
+        session: Option<seismograph::recorder::RecordingSession>,
+    ) -> TaskPoll {
+        self.worker.current_task.store(task_id.get(), Ordering::Release);
+        if let Some(session) = session {
+            seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
+                Some(crate::runtime_record(
+                    started_at,
+                    self.runtime.id(),
+                    Some(self.id()),
+                    EventKind::TaskPollStarted,
+                    task_id.get(),
+                    0,
+                    queued_since.map_or(0, |queued| duration_nanos(started_at, queued)),
+                    if queued_since.is_some() { 2 } else { 0 },
+                    BacktraceCapture::Never,
+                ))
+            });
+        }
+        TaskPoll {
+            task_id,
+            started_at,
+            session,
+            task: None,
+        }
     }
 
     /// Finishes a task poll and updates aggregate poll duration.
@@ -179,11 +215,17 @@ impl WorkerHandle {
         reason = "consuming the token prevents callers from finishing one poll twice"
     )]
     pub fn task_poll_finished(&self, poll: TaskPoll) {
-        self.task_poll_finished_with_control(&poll, None);
+        self.task_poll_finished_with_control(&poll, poll.task.as_deref());
     }
 
     pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) {
-        let finished_at = EventTimestamp::now();
+        let finished_at = if let Some(task) = task
+            && poll.session.is_some()
+        {
+            task.activity.poll_finished(poll.session, poll.started_at, EventTimestamp::now)
+        } else {
+            EventTimestamp::now()
+        };
         let duration_nanos = duration_nanos(finished_at, poll.started_at);
         self.runtime.control.counters.poll_count.fetch_add(1, Ordering::Relaxed);
         self.runtime

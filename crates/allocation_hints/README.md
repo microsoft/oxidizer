@@ -51,6 +51,6 @@ assert_eq!(*value, 42);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbK5Hja7IEWwsbvmzgWdkEOlwbp2XuUELK7C4bRA7cizgT_mphZIGCcGFsbG9jYXRpb25faGludHNlMC4xLjA
- [__link0]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/fn.active_hint.html
- [__link1]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heaps::thread_heap
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbK5Hja7IEWwsbvmzgWdkEOlwbp2XuUELK7C4bRA7cizgT_mphZIGCcGFsbG9jYXRpb25faGludHNlMC4yLjA
+ [__link0]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/fn.active_hint.html
+ [__link1]: https://docs.rs/allocation_hints/0.2.0/allocation_hints/?search=heaps::thread_heap

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0] - 2026-10-20
+
+- Make timer drivers deadline-driven and require an owner `Waker` when activating an inactive clock.
+- Update local dependency requirements: performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
+## [0.7.1] - 2026-10-05
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.0` of `performables`
+
+- ⚡ Performance
+
+  - consolidate v1 and Seismograph improvements ([#764](https://github.com/microsoft/oxidizer/pull/764))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.7.0] - 2026-09-10
 
 ### Maintenance

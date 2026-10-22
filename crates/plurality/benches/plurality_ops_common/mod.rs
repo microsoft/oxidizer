@@ -20,7 +20,6 @@
 use std::boxed::Box as StdBox;
 use std::hint::black_box;
 
-use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
 use plurality::{Arc, Box as PoolBox, MultiPool, Pool, Rc, coerce};
 
 mod metadata;
@@ -58,8 +57,6 @@ impl Marker for Obj {
         self.a ^ self.b[1]
     }
 }
-
-define_pooled_dyn_cast!(Marker);
 
 #[inline]
 fn invoke_dyn(value: &dyn Marker) {
@@ -316,58 +313,6 @@ pub(crate) fn setup_plurality_multi(n: usize) -> MultiPool {
     pool
 }
 
-pub(crate) fn setup_infinity_pinned(n: usize) -> PinnedPool<Obj> {
-    let pool = PinnedPool::new();
-    pool.reserve(n);
-    let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-    drop(warm);
-    assert!(pool.capacity() >= n);
-    assert!(pool.is_empty());
-    let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-    assert_eq!(handle.tag(), 0xFF);
-    drop(handle);
-    pool
-}
-
-pub(crate) fn setup_infinity_local_pinned(n: usize) -> LocalPinnedPool<Obj> {
-    let pool = LocalPinnedPool::new();
-    pool.reserve(n);
-    let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-    drop(warm);
-    assert!(pool.capacity() >= n);
-    assert!(pool.is_empty());
-    let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-    assert_eq!(handle.tag(), 0xFF);
-    drop(handle);
-    pool
-}
-
-pub(crate) fn setup_infinity_blind(n: usize) -> BlindPool {
-    let pool = BlindPool::new();
-    pool.reserve_for::<Obj>(n);
-    let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-    drop(warm);
-    assert!(pool.capacity_for::<Obj>() >= n);
-    assert!(pool.is_empty());
-    let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-    assert_eq!(handle.tag(), 0xFF);
-    drop(handle);
-    pool
-}
-
-pub(crate) fn setup_infinity_local_blind(n: usize) -> LocalBlindPool {
-    let pool = LocalBlindPool::new();
-    pool.reserve_for::<Obj>(n);
-    let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
-    drop(warm);
-    assert!(pool.capacity_for::<Obj>() >= n);
-    assert!(pool.is_empty());
-    let handle = pool.insert(Obj::new(n as u64)).cast_marker();
-    assert_eq!(handle.tag(), 0xFF);
-    drop(handle);
-    pool
-}
-
 pub(crate) fn setup_std_box(n: usize) {
     let warm: Vec<StdBox<dyn Marker>> = (0..n).map(|i| StdBox::new(Obj::new(i as u64)) as StdBox<dyn Marker>).collect();
     black_box(&warm);
@@ -391,34 +336,6 @@ pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
 pub(crate) fn plurality_multi_box(pool: &MultiPool, i: u64) {
     let handle = pool.alloc_box(black_box(Obj::new(i)));
     let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
-    invoke_dyn(&*handle);
-    drop(black_box(handle));
-}
-
-#[inline]
-pub(crate) fn infinity_pinned(pool: &PinnedPool<Obj>, i: u64) {
-    let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-    invoke_dyn(&*handle);
-    drop(black_box(handle));
-}
-
-#[inline]
-pub(crate) fn infinity_local_pinned(pool: &LocalPinnedPool<Obj>, i: u64) {
-    let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-    invoke_dyn(&*handle);
-    drop(black_box(handle));
-}
-
-#[inline]
-pub(crate) fn infinity_blind(pool: &BlindPool, i: u64) {
-    let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
-    invoke_dyn(&*handle);
-    drop(black_box(handle));
-}
-
-#[inline]
-pub(crate) fn infinity_local_blind(pool: &LocalBlindPool, i: u64) {
-    let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
     invoke_dyn(&*handle);
     drop(black_box(handle));
 }

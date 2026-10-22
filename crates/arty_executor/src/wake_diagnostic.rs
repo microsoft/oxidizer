@@ -95,14 +95,10 @@ fn waker_clone_waker(ptr: *const ()) -> RawWaker {
 
 #[cfg_attr(test, mutants::skip)] // If tasks do not wake up, tests tend to infinite loop.
 fn waker_wake(ptr: *const ()) {
-    let waker = unwrap_diagnostic_waker(ptr);
-
-    waker.inner.wake_by_ref();
-
-    // This consumes the waker!
     // SAFETY: We only pass `Box<DiagnosticWaker>::into_raw()` into the Waker mechanisms, so it
     // must be legal to bring it back as a box of `DiagnosticWaker`.
-    drop(unsafe { Box::from_raw(ptr.cast_mut().cast::<DiagnosticWaker>()) });
+    let waker = unsafe { Box::from_raw(ptr.cast_mut().cast::<DiagnosticWaker>()) };
+    waker.inner.wake_by_ref();
 }
 
 #[cfg_attr(test, mutants::skip)] // If tasks do not wake up, tests tend to infinite loop.
@@ -152,6 +148,7 @@ impl DiagnosticWakerRegistry {
     /// Uses a closure to inspect every backtrace saved in the registry.
     ///
     /// Each backtrace is either a place where a waker was cloned.
+    #[cfg(test)]
     pub(crate) fn inspect_backtraces(&self, mut f: impl FnMut(&Backtrace)) {
         let backtraces = self.backtraces.lock().expect(ERR_POISONED_LOCK);
 

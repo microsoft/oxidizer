@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware_macros"
 description = "Macros for the thread_aware crate."
-version = "0.12.0"
+version = "0.12.1"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
 categories = ["data-structures"]
@@ -16,6 +16,9 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_macros"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.docs.rs]
 all-features = true

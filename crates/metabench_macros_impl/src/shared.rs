@@ -122,13 +122,40 @@ pub(super) fn support_ident(kind: &str, logical_name: &str) -> Ident {
     format_ident!("__metabench_{kind}_{hash:032x}", span = Span::mixed_site())
 }
 
+pub(super) fn native_ident(kind: &str, logical_name: &str) -> Ident {
+    let readable = logical_name
+        .chars()
+        .take(64)
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let hashed = support_ident(kind, logical_name);
+    format_ident!("{hashed}_{readable}", span = Span::mixed_site())
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use proc_macro2::TokenStream;
     use quote::quote;
 
-    use super::{MAX_FIELD_TOKENS, MAX_GROUP_DEPTH, parse_ident_value, reject_if_too_complex, support_ident};
+    use super::{MAX_FIELD_TOKENS, MAX_GROUP_DEPTH, native_ident, parse_ident_value, reject_if_too_complex, support_ident};
+
+    #[test]
+    fn native_names_preserve_readable_identity_without_sanitization_collisions() {
+        assert!(native_ident("benchmark", "PREPARED_SEND").to_string().ends_with("_prepared_send"));
+        assert_ne!(native_ident("benchmark", "SEND"), native_ident("benchmark", "send"));
+        assert_ne!(native_ident("benchmark", "a-b"), native_ident("benchmark", "a_b"));
+        assert_ne!(
+            native_ident("benchmark", "a".repeat(100).as_str()),
+            native_ident("benchmark", format!("{}b", "a".repeat(100)).as_str())
+        );
+    }
 
     #[test]
     fn identifier_values_accept_only_one_unqualified_segment() {

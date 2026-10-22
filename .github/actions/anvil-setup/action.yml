@@ -111,8 +111,22 @@ runs:
     - name: Install cargo-binstall
       uses: cargo-bins/cargo-binstall@v1.21.0 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
 
+    # cargo-spellcheck links libclang when cargo-binstall falls back to a source
+    # build. Install it eagerly on Linux jobs whose selected setup group includes
+    # spellcheck, keeping package-manager policy in the GitHub runner adapter
+    # rather than in the portable Just catalog.
+    - name: Install libclang (Linux spellcheck groups)
+      if: runner.environment == 'github-hosted' && runner.os == 'Linux' && (inputs.group == '' || inputs.group == 'spellcheck' || inputs.group == 'pr-fast' || inputs.group == 'pr' || inputs.group == 'full')
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
     - name: Install just
       shell: pwsh -NoProfile -Command ". '{0}'"
+      env:
+        # cargo-binstall queries GitHub Releases. Use the workflow's built-in
+        # token so setup gets the authenticated API quota. Its effective
+        # permissions are defined by the calling workflow.
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         $minimum = [version]'1.46.0'
         $installed = if (Get-Command just -ErrorAction SilentlyContinue) {
@@ -146,6 +160,8 @@ runs:
       # composition.
       env:
         ANVIL_GROUP: ${{ inputs.group }}
+        # Catalog binstall calls also query GitHub Releases.
+        GITHUB_TOKEN: ${{ github.token }}
       # When `group` is empty (the default), installs the full catalog
       # via `just anvil-setup binstall`. When `group` is "none",
       # skips tool installation entirely (used by anvil-impact, which

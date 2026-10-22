@@ -13,37 +13,51 @@
 
 </div>
 
-High-performance process telemetry with extensible snapshot sources.
+Runtime telemetry for Rust applications.
 
-Instrumented crates record bounded events while registered sources contribute
-point-in-time state to a portable [`snapshot()`][__link0].
+`seismograph` collects allocation, synchronization, I/O, cache, and task events
+to help investigate memory use, contention, and scheduling. Crates such as
+`rallocator` and `performables` provide instrumentation.
+
+Recording is off by default, with sampling and optional backtraces to control
+its cost. Events are kept in bounded per-thread buffers. Snapshots combine
+those events with state supplied by registered sources, such as allocators
+and runtimes.
+
+## Usage
+
+Enable the event categories you need, run your workload, then capture a
+snapshot. For ownership and synchronization events:
 
 ```rust
-use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
 use seismograph::recorder::{Configuration, RecordingPolicy};
 
 seismograph::recorder(Configuration {
-    arc_dereferences: RecordingPolicy::all(false),
+    general_events: RecordingPolicy::all(false),
     ..Default::default()
 });
-seismograph::record(EventClass::ArcDereference, || {
-    Record::object(EventKind::ArcDeref, ObjectId::new(42))
-});
 
-let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
-assert!(
-    decoded
-        .events
-        .events
-        .iter()
-        .any(|event| event.object_id() == Some(ObjectId::new(42)))
-);
+// Run application code that uses instrumented libraries.
+let snapshot = seismograph::snapshot(Default::default())?;
 ```
 
-Applications built with the `monitor` feature can publish a localhost
+Inspect saved snapshots with `seismograph view` from the
+[Seismograph CLI][__link0].
+
+## Live monitoring
+
+Applications built with the `monitor` feature can publish an OS-authorized local
 endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-for as long as remote control should remain available:
+for as long as local control should remain available. The owning user and
+root/elevated administrators can connect without a token. Startup creates
+the user’s private registry automatically; no administrator setup is needed.
+Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
+fallback. Windows uses the user’s local application-data directory.
+Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
+the monitor’s identity, transport, discovery, persistence, and clock
+capability. Omitting it preserves native I/O; `seismograph_protocol`’s
+`test-util` feature provides an isolated in-memory implementation for
+application tests without host registry setup.
 
 ```rust
 let _monitor = seismograph::monitor::Monitor::builder()
@@ -53,11 +67,16 @@ let _monitor = seismograph::monitor::Monitor::builder()
     .unwrap();
 ```
 
+## Features
+
+* **`monitor`**: Enables the OS-authorized local monitor server.
+* **`test-util`**: Enables `monitor`, the protocol’s mock I/O controls, and
+  `monitor::Builder::isolated` for native tests using a temporary registry.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbkYDFCZVeY4AbBtigWCD3tyobeIgAtngn3zwbZjmjbU76VD9hZIGCa3NlaXNtb2dyYXBoZTAuMS4w
- [__link0]: https://docs.rs/seismograph/0.1.0/seismograph/fn.snapshot.html
+ [__link0]: https://crates.io/crates/seismograph_cli

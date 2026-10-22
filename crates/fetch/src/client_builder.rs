@@ -163,10 +163,13 @@ impl HttpClientBuilder {
     ///
     /// # Bounds
     ///
-    /// The output-size limit inherits the selected compression format's
-    /// streaming default, while the number of concatenated streams is capped at
-    /// 1,024 per decompression stage. Explicit bounds configured through
-    /// `options` apply while reading the body, even without buffering it.
+    /// The client inherits the safe `http_compression` defaults: decompressed
+    /// output is capped at 64 MiB, and the number of concatenated streams is
+    /// capped at 1,024 per decompression stage. `fetch` adds no default
+    /// overrides of its own. Explicit bounds configured through `options` apply
+    /// while reading the body, even without buffering it. Pass `None` to
+    /// [`max_output_len`][DecompressionOptions::max_output_len] to explicitly
+    /// remove the output-size bound.
     /// Exceeding a decompression bound fails the body with the
     /// `compression_limit_exceeded` error label.
     ///
@@ -257,8 +260,9 @@ impl HttpClientBuilder {
     ///
     /// Use `TlsOptions::builder_rustls()` for the rustls backend,
     /// or `TlsOptions::builder_native_tls()` for the platform native TLS backend.
-    /// The rustls backend also supports mutual TLS (`mTLS`) via the builder's
-    /// `client_identity` method.
+    /// Both backends support mutual TLS (`mTLS`) via the builder's
+    /// `client_identity` method. The native TLS builder also supports
+    /// endpoint-specific certificate server name overrides.
     ///
     /// # Example
     ///

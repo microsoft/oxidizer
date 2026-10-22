@@ -18,6 +18,9 @@ use std::thread::ThreadId;
 /// usually creating one per worker at startup, and passes them to
 /// [`ThreadAware::relocate`](crate::ThreadAware::relocate). An implementation reads whichever
 /// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to choose.
+/// The coordinate passed as `destination` must describe the thread that is executing
+/// [`relocate`](crate::ThreadAware::relocate), not a remote thread where the runtime hopes to
+/// run the callback.
 ///
 /// # Relation to `std::thread::Thread`
 ///

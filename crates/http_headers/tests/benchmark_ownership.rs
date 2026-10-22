@@ -54,8 +54,8 @@ fn assert_batches_reclaim_owners(
     mut operation: impl FnMut(HeaderMap) -> MapOutput,
     inspect: impl Fn(&HeaderMap),
 ) -> Result<(), InvalidHeaderValue> {
-    const BATCH_SIZE: usize = 8;
-    const SAMPLES: usize = 4;
+    const BATCH_SIZE: usize = if cfg!(miri) { 1 } else { 8 };
+    const SAMPLES: usize = if cfg!(miri) { 1 } else { 4 };
 
     let dropped = Arc::new(AtomicUsize::new(0));
     for sample in 0..SAMPLES {
@@ -166,6 +166,10 @@ fn deferred_and_materialized_outputs_release_every_map() -> Result<(), InvalidHe
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "benchmark corpus identity is a fixture contract covered natively and by cargo careful"
+)]
 fn name_setups_reuse_immutable_corpora_and_owned_names() {
     let known = known_names();
     let lowercase = custom_names_lowercase();

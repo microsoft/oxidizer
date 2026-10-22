@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0] - 2026-10-20
+
+- Update exposed Bytesbuf identities for Bytesbuf 0.12 and use the published future polling assertion helper in test utilities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; ohno ^0.5.2 -> 0.5.3.
+
+## [0.11.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.11.0` of `bytesbuf`
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.10.0] - 2026-09-10
 
 ### Breaking

@@ -61,6 +61,8 @@ buffered compression output is flushed so the consumer can decompress the bytes
 already sent without waiting for the body to end.
 
 ```rust
+use std::num::NonZeroU64;
+
 use compressors::DecompressorLimits;
 use compressors::format::Format;
 use http_compression::Compression;
@@ -68,7 +70,9 @@ use http_extensions::HttpBodyBuilder;
 
 let client = Compression::client(body_builder.clone())
     .decompress_responses(&[Format::Gzip])
-    .limits(DecompressorLimits::new());
+    .limits(
+        DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
+    );
 
 let server = Compression::server(body_builder)
     .decompress_requests(&[Format::Gzip])
@@ -91,10 +95,12 @@ HTTP content-coding token and is ignored when supplied.
 
 ## Bounds
 
-The streaming decompressor applies no bounds of its own, so whatever is passed to
-[`limits`][__link16] is the only thing standing between the
-reader and a decompression bomb. Anything that retains a decompressed body should
-set [`max_output_len`][__link17].
+Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams per
+decompression stage by default, including when they are streamed rather than buffered. Use
+[`limits`][__link16] to change either bound for an application’s budget. Removing
+them requires the explicit
+[`unbounded_output_len`][__link17] and
+[`unbounded_streams`][__link18] methods.
 
 ## Errors
 
@@ -105,7 +111,7 @@ is read rather than when its headers arrive. Failures carry one of three labels:
 |-----|-------------|
 |`compression_invalid`|The body was malformed for its declared compression format|
 |`compression_limit_exceeded`|Decompression would have exceeded the configured limits|
-|`compression_unsupported`|An unavailable format was seen under [`UnsupportedCompression::Fail`][__link18]|
+|`compression_unsupported`|An unavailable format was seen under [`UnsupportedCompression::Fail`][__link19]|
 
 A `Content-Encoding` that cannot be parsed is not an error: the body is left
 exactly as it arrived.
@@ -116,23 +122,24 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbyyYxZ6w8CoobCWNTppQxSqQbnCRaUZHu2fIbyUoBKEj83VthZIKCa2NvbXByZXNzb3JzZTAuMS4xgnBodHRwX2NvbXByZXNzaW9uZTAuMS4x
- [__link0]: https://crates.io/crates/compressors/0.1.1
- [__link1]: https://docs.rs/http_compression/0.1.1/http_compression/?search=Compression
- [__link10]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::on_unsupported
- [__link11]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::compressible_types
- [__link12]: https://docs.rs/compressors/0.1.1/compressors/?search=Level::FAST
- [__link13]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::level
- [__link14]: https://docs.rs/http_compression/0.1.1/http_compression/?search=OriginalBody
- [__link15]: https://docs.rs/compressors/0.1.1/compressors/?search=format::Format
- [__link16]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::limits
- [__link17]: https://docs.rs/compressors/0.1.1/compressors/?search=DecompressorLimits
- [__link18]: https://docs.rs/http_compression/0.1.1/http_compression/?search=UnsupportedCompression::Fail
- [__link2]: https://docs.rs/http_compression/0.1.1/http_compression/?search=Client
- [__link3]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::decompress_responses
- [__link4]: https://docs.rs/http_compression/0.1.1/http_compression/?search=Server
- [__link5]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::decompress_requests
- [__link6]: https://docs.rs/http_compression/0.1.1/http_compression/?search=Server
- [__link7]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::compress_responses
- [__link8]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::limits
- [__link9]: https://docs.rs/http_compression/0.1.1/http_compression/?search=CompressionLayer::resources
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRTuyOUnubrsbZ7dRIlt5B_kbOluzi0YM-7QbBhIflEyby5JhZIKCa2NvbXByZXNzb3JzZTAuMy4wgnBodHRwX2NvbXByZXNzaW9uZTAuMy4w
+ [__link0]: https://crates.io/crates/compressors/0.3.0
+ [__link1]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Compression
+ [__link10]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::on_unsupported
+ [__link11]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::compressible_types
+ [__link12]: https://docs.rs/compressors/0.3.0/compressors/?search=Level::FAST
+ [__link13]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::level
+ [__link14]: https://docs.rs/http_compression/0.3.0/http_compression/?search=OriginalBody
+ [__link15]: https://docs.rs/compressors/0.3.0/compressors/?search=format::Format
+ [__link16]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::limits
+ [__link17]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::unbounded_output_len
+ [__link18]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::unbounded_streams
+ [__link19]: https://docs.rs/http_compression/0.3.0/http_compression/?search=UnsupportedCompression::Fail
+ [__link2]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Client
+ [__link3]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::decompress_responses
+ [__link4]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Server
+ [__link5]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::decompress_requests
+ [__link6]: https://docs.rs/http_compression/0.3.0/http_compression/?search=Server
+ [__link7]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::compress_responses
+ [__link8]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::limits
+ [__link9]: https://docs.rs/http_compression/0.3.0/http_compression/?search=CompressionLayer::resources

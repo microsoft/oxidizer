@@ -3,7 +3,8 @@
 
 use std::rc::{Rc, Weak};
 
-use crate::{ExecutorCore, JoinHandle};
+use crate::remote::Sender as RemoteSender;
+use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
 
 /// Represents the set of tasks currently registered with an executor and allows new tasks
 /// to be registered.
@@ -16,33 +17,63 @@ pub struct TaskSet {
     // We only keep a weak reference, so even if the owner of this type does something odd, we do
     // not extend the lifetime of the `Executor`, which is governed by the `Executor` owner.
     core: Weak<ExecutorCore>,
+
+    // Retained independently so submissions after executor drop can still produce a valid
+    // disconnected join handle.
+    join_events: JoinEventLake,
 }
 
 impl TaskSet {
     pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
-        Self { core: Rc::downgrade(core) }
+        Self {
+            core: Rc::downgrade(core),
+            join_events: core.join_event_lake(),
+        }
     }
 
-    /// Registers a future to be processed by the executor as a new task.
+    /// Registers a future and its runtime integration options as a new task.
     ///
     /// The future will be polled until it completes, after which it will be dropped, unless the
     /// executor is commanded to shut down, in which case the future may be dropped before it
-    /// completes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the executor is already shutting down. This method will never panic when
-    /// called from inside an existing task on the same executor (the task is running,
-    /// therefore the executor is not shutting down).
-    pub fn add<F, R>(&self, future: F) -> JoinHandle<R>
+    /// completes. A submission after shutdown returns a join handle that resolves to
+    /// [`JoinError`](crate::JoinError). Use [`TaskOptions::default()`] when no execution context
+    /// or placement metadata is required.
+    pub fn add<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
     {
-        self.core
-            .upgrade()
-            .expect("task set is disconnected - executor has been dropped")
-            .add_task(future)
+        let Some(core) = self.core.upgrade() else {
+            return self.join_events.disconnected();
+        };
+
+        core.add_task(future, options)
+    }
+
+    /// Registers a task whose result is delivered to a cross-thread receiver.
+    ///
+    /// Arty uses this integration boundary to create a non-[`Send`] future on its destination
+    /// worker while returning a `Send` result handle to the submitting thread. Keeping the
+    /// concrete future at this call site lets the executor store it inline instead of behind a
+    /// `Pin<Box<dyn Future>>`. Obtain `result_tx` from
+    /// [`remote::Pool::channel`](crate::remote::Pool::channel).
+    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>)
+    where
+        F: IntoFuture<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        let Some(core) = self.core.upgrade() else {
+            return;
+        };
+
+        core.add_remote_task(future, options, result_tx);
+    }
+
+    /// Begins executor shutdown without borrowing executor-owned polling state.
+    pub fn begin_shutdown(&self) {
+        if let Some(core) = self.core.upgrade() {
+            core.request_shutdown();
+        }
     }
 }
 

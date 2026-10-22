@@ -4,7 +4,7 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.7.0"
+version = "0.8.0"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]
@@ -53,7 +53,7 @@ performables = { workspace = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
-tokio = { workspace = true, optional = true, features = ["time", "rt"] }
+tokio = { workspace = true, optional = true, features = ["sync", "time", "rt"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true, optional = true }
@@ -69,7 +69,6 @@ chrono = { workspace = true, features = ["clock"] }
 chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
-insta = { workspace = true }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
@@ -77,9 +76,10 @@ serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
-tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["sync", "test-util", "time", "rt", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = { workspace = true }

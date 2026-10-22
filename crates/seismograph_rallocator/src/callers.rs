@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::struct_field_names,
+    reason = "Recorder-log and actor identifiers retain explicit event-view names"
+)]
+
 //! Retained caller and symbol model types.
 
 /// Per-thread retained event-log summary.
@@ -9,13 +14,16 @@
 pub struct ThreadLog {
     /// Thread-log identifier.
     pub thread_log_id: u64,
-    /// Events observed by this log.
+    /// Accepted events reported by the shared recorder log, potentially across multiple event classes.
     pub total_events: u64,
-    /// Events overwritten before capture.
+    /// Accepted records overwritten before capture, not operations omitted by sampling or suppression.
     pub lost_events: u64,
     /// Allocated-size counts by bucket.
     pub allocated_histogram: Vec<u64>,
-    /// Live-size counts by bucket.
+    /// Size counts for retained allocations without a retained matching free.
+    ///
+    /// This is not proof of live allocations: recording boundaries, sampling and
+    /// overwrites can omit counterpart events.
     pub live_histogram: Vec<u64>,
 }
 
@@ -78,13 +86,18 @@ pub enum HeapKind {
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Event {
+    /// Whether this record has a retained allocation origin in the source capture.
+    ///
+    /// Preserved through filtering so hiding an allocation does not create an
+    /// apparent orphan free. Projection identities are local to one capture.
+    pub allocation_recorded: bool,
     /// Owning thread-log identifier.
     pub thread_log_id: u64,
     /// Thread that recorded this event.
     pub event_thread_id: u64,
     /// Sequence number within the log.
     pub sequence: u64,
-    /// Stable allocation identifier.
+    /// View-local allocation lifetime identifier, not the repeated address key.
     pub allocation_id: u64,
     /// Allocation or deallocation kind.
     pub kind: EventKind,
@@ -140,6 +153,7 @@ impl Event {
             call_stack,
         } = fields;
         Self {
+            allocation_recorded: kind == EventKind::Allocated,
             thread_log_id,
             event_thread_id,
             sequence,
@@ -188,9 +202,15 @@ impl ThreadName {
 pub struct Callers {
     /// Capture-session identifier.
     pub session_id: u64,
-    /// Events observed during the session.
+    /// Accepted events reported by the shared recording session.
+    ///
+    /// This can include non-allocation event classes even though [`Self::events`]
+    /// contains only allocation records. It is not an allocation population count.
     pub total_events: u64,
-    /// Events lost before capture.
+    /// Accepted shared-recorder records overwritten before capture.
+    ///
+    /// This is not allocation-specific loss and excludes operations never recorded
+    /// because of sampling, suppression, disabled policies or missing instrumentation.
     pub lost_events: u64,
     /// Per-thread log summaries.
     pub threads: Vec<ThreadLog>,
@@ -214,6 +234,7 @@ pub struct CallersFields {
 impl Callers {
     #[doc(hidden)]
     #[must_use]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Downstream fixture assembly only; recording projection is tested independently.
     pub fn from_fields(fields: CallersFields) -> Self {
         let CallersFields {
             session_id,
@@ -263,6 +284,7 @@ pub struct AddressLookupFields {
 impl AddressLookup {
     #[doc(hidden)]
     #[must_use]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Downstream symbol fixtures only; this adapter performs no lookup or transformation.
     pub fn from_fields(fields: AddressLookupFields) -> Self {
         let AddressLookupFields {
             address,
@@ -277,6 +299,39 @@ impl AddressLookup {
             filename,
             line,
             column,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_fields_preserve_provenance_and_distinguish_orphan_frees() {
+        for (kind, allocation_recorded) in [(EventKind::Allocated, true), (EventKind::Deallocated, false)] {
+            let event = Event::from_fields(EventFields {
+                thread_log_id: 11,
+                event_thread_id: 22,
+                sequence: 33,
+                allocation_id: 44,
+                kind,
+                heap_id: 55,
+                heap_kind: HeapKind::Bump,
+                freed_after_heap_release: !allocation_recorded,
+                address: 0x1000,
+                size: 64,
+                align: 16,
+                call_stack: vec![0x2000, 0x3000],
+            });
+            assert_eq!(event.allocation_recorded, allocation_recorded);
+            assert_eq!(event.kind, kind);
+            assert_eq!((event.thread_log_id, event.event_thread_id), (11, 22));
+            assert_eq!((event.sequence, event.allocation_id), (33, 44));
+            assert_eq!((event.heap_id, event.heap_kind), (55, HeapKind::Bump));
+            assert_eq!(event.freed_after_heap_release, !allocation_recorded);
+            assert_eq!((event.address, event.size, event.align), (0x1000, 64, 16));
+            assert_eq!(event.call_stack, [0x2000, 0x3000]);
         }
     }
 }

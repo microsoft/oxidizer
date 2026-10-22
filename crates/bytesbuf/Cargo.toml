@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.10.0"
+version = "0.12.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -65,6 +65,8 @@ mutants = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
 plurality = { path = "../plurality" }
+seismograph = { path = "../seismograph" }
+seismograph_io = { path = "../seismograph_io" }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
@@ -118,12 +120,36 @@ harness = false
 required-features = ["std"]
 
 [[example]]
+name = "bb_basic"
+required-features = ["std"]
+
+[[example]]
+name = "bb_has_memory_global"
+required-features = ["std"]
+
+[[example]]
 name = "bb_has_memory_forwarding"
 required-features = ["test-util"]
 
 [[example]]
 name = "bb_has_memory_optimizing"
 required-features = ["test-util"]
+
+[[example]]
+name = "bb_optimal_path"
+required-features = ["std"]
+
+[[example]]
+name = "bb_reuse"
+required-features = ["std"]
+
+[[example]]
+name = "bb_slice_count_metric"
+required-features = ["std"]
+
+[[example]]
+name = "bb_slice_by_slice_write"
+required-features = ["std"]
 
 [[example]]
 name = "bb_static_data"

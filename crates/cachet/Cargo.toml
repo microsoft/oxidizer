@@ -4,7 +4,7 @@
 [package]
 name = "cachet"
 description = "A composable, customizable multi-tier caching library with rich feature support."
-version = "0.14.0"
+version = "0.16.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -56,6 +56,7 @@ service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
 seismograph = [
     "anyspawn/seismograph",
+    "bytesbuf?/seismograph",
     "cachet_memory?/seismograph",
     "dep:seismograph",
     "tick/seismograph",
@@ -83,13 +84,14 @@ uniflight = { workspace = true }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
-bytesbuf = { path = "../bytesbuf" }
+bytesbuf = { path = "../bytesbuf", features = ["seismograph"] }
 cachet_memory = { path = "../cachet_memory" }
 cachet_service = { path = "../cachet_service" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 dashmap = { workspace = true }
+future_assert = { path = "../future_assert" }
 layered = { path = "../layered" }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }

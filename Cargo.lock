@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "allocation_hints"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pin-project-lite",
 ]
@@ -177,7 +177,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "anyspawn"
-version = "0.9.0"
+version = "0.9.2"
 dependencies = [
  "criterion",
  "futures",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "anyspawn_azure"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyspawn",
  "async-trait",
@@ -247,39 +247,106 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "arty"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
+ "arty_executor",
  "arty_io_core",
- "thread_aware_core",
- "tick",
-]
-
-[[package]]
-name = "arty_executor"
-version = "0.1.2"
-dependencies = [
+ "arty_io_host",
+ "arty_macros",
+ "bolero",
  "criterion",
+ "ctor",
+ "data_privacy",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
+ "futures",
  "gungraun",
- "infinity_pool",
+ "many_cpus",
  "metabench",
- "mockall",
  "mutants",
- "nm",
+ "nonempty",
+ "observed",
+ "observed_testing",
+ "ohno",
+ "performables",
  "pin-project",
  "scopeguard",
  "static_assertions",
  "testing_aids",
+ "thread_aware",
+ "thread_aware_core",
  "tick",
- "tracing",
- "tracing-subscriber",
+ "tokio",
+]
+
+[[package]]
+name = "arty_executor"
+version = "0.5.0"
+dependencies = [
+ "alloc_tracker",
+ "criterion",
+ "data_privacy",
+ "derive_more",
+ "events_once",
+ "foldhash 0.2.0",
+ "gungraun",
+ "metabench",
+ "mockall",
+ "mutants",
+ "nm",
+ "observed",
+ "observed_testing",
+ "pin-project",
+ "plurality",
+ "scopeguard",
+ "static_assertions",
+ "testing_aids",
+ "tick",
 ]
 
 [[package]]
 name = "arty_io_core"
+version = "0.3.0"
+dependencies = [
+ "static_assertions",
+ "thread_aware_core",
+]
+
+[[package]]
+name = "arty_io_host"
 version = "0.2.0"
+dependencies = [
+ "arty_io_core",
+ "data_privacy",
+ "foldhash 0.2.0",
+ "observed",
+ "observed_testing",
+ "static_assertions",
+ "thread_aware",
+ "thread_aware_core",
+]
+
+[[package]]
+name = "arty_macros"
+version = "0.5.0"
+dependencies = [
+ "arty_macros_impl",
+ "mutants",
+]
+
+[[package]]
+name = "arty_macros_impl"
+version = "0.5.0"
+dependencies = [
+ "darling",
+ "insta",
+ "proc-macro-crate 3.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+ "testing_aids",
+]
 
 [[package]]
 name = "asn1-rs"
@@ -680,12 +747,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
-name = "beef"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
-
-[[package]]
 name = "benchmarking"
 version = "0.1.0"
 dependencies = [
@@ -908,7 +969,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bytesbuf"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -921,6 +982,7 @@ dependencies = [
  "nm",
  "performables",
  "plurality",
+ "seismograph",
  "seismograph_io",
  "smallvec",
  "static_assertions",
@@ -931,21 +993,22 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "bytesbuf",
+ "future_assert",
  "futures",
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.5.2",
+ "ohno",
  "testing_aids",
  "trait-variant",
 ]
 
 [[package]]
 name = "cachet"
-version = "0.14.0"
+version = "0.16.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -957,6 +1020,7 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
+ "future_assert",
  "futures",
  "layered",
  "parking_lot",
@@ -977,14 +1041,14 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "cachet_tier",
  "criterion",
  "foldhash 0.2.0",
  "moka",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "performables",
  "thread_aware",
  "tokio",
@@ -992,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -1001,10 +1065,10 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "dynosaur",
- "ohno 0.5.2",
+ "ohno",
  "parking_lot",
  "recoverable",
  "tick",
@@ -1235,7 +1299,7 @@ dependencies = [
 
 [[package]]
 name = "compressors"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "bolero",
  "brotli",
@@ -1338,7 +1402,7 @@ checksum = "4c486bbc92a4c933fed0f062b7922927f646a8b986e147710eace6cf0713fee6"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.5.0",
+ "ohno",
 ]
 
 [[package]]
@@ -1516,7 +1580,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "data_privacy"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "data_privacy_core",
  "data_privacy_macros",
@@ -1533,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "insta",
  "mutants",
@@ -1543,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -1551,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -1813,6 +1877,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "fakeable"
+version = "0.2.2"
+dependencies = [
+ "fakeable_impl",
+ "mockall",
+ "mutants",
+]
+
+[[package]]
+name = "fakeable_impl"
+version = "0.2.2"
+dependencies = [
+ "insta",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+ "testing_aids",
+]
+
+[[package]]
+name = "fakeable_test"
+version = "0.0.0"
+dependencies = [
+ "fakeable",
+ "futures",
+ "mockall",
+ "static_assertions",
+ "thread_aware",
+]
+
+[[package]]
 name = "fast_time"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1830,7 +1925,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetch"
-version = "0.17.1"
+version = "0.19.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1856,7 +1951,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
@@ -1884,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.7.1"
+version = "0.9.0"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -1904,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.8.1"
+version = "0.10.0"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1918,17 +2013,17 @@ dependencies = [
  "http_extensions",
  "hyper",
  "hyper-rustls",
- "hyper-tls",
  "hyper-util",
  "insta",
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project",
+ "rcgen",
  "rustls",
  "seatbelt",
  "templated_uri",
@@ -1936,6 +2031,7 @@ dependencies = [
  "tick",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls",
  "tower",
  "tracing",
  "wiremock",
@@ -1943,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_options"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "http",
  "insta",
@@ -1953,14 +2049,14 @@ dependencies = [
 
 [[package]]
 name = "fetch_tls"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
  "http",
  "insta",
  "mutants",
  "native-tls",
- "ohno 0.5.2",
+ "ohno",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1969,7 +2065,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
@@ -1986,7 +2082,7 @@ dependencies = [
  "http-body-util",
  "http_extensions",
  "observed",
- "ohno 0.5.2",
+ "ohno",
  "testing_aids",
  "tick",
  "tokio",
@@ -1994,13 +2090,14 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp_impl"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "bytesbuf",
  "bytesbuf_io",
  "events_once",
  "fetch",
+ "future_assert",
  "futures",
  "h3",
  "h3-quinn",
@@ -2015,7 +2112,7 @@ dependencies = [
  "mutants",
  "observed",
  "observed_testing",
- "ohno 0.5.2",
+ "ohno",
  "plurality",
  "quinn",
  "rcgen",
@@ -2023,7 +2120,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "static_assertions",
- "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
@@ -2137,7 +2233,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fundle"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "fundle_macros",
  "trybuild",
@@ -2145,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "fundle_macros_impl",
  "mutants",
@@ -2153,7 +2249,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros_impl"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "insta",
  "mutants",
@@ -2162,6 +2258,10 @@ dependencies = [
  "syn 3.0.5",
  "testing_aids",
 ]
+
+[[package]]
+name = "future_assert"
+version = "0.1.0"
 
 [[package]]
 name = "futures"
@@ -2380,20 +2480,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gungraun-summary"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89f967da1beab0153f3f1e52408a71d3bd0fbea3c9e0bf0431f9a3a3c9e96130"
-dependencies = [
- "either-or-both",
- "gungraun-runner",
- "indexmap",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2584,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "http_compression"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "bytesbuf",
  "compressors",
@@ -2596,7 +2682,7 @@ dependencies = [
  "layered",
  "mime",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "seatbelt",
  "smallvec",
  "testing_aids",
@@ -2605,7 +2691,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.11.1"
+version = "0.13.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -2621,7 +2707,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "pin-project",
  "recoverable",
  "serde",
@@ -2637,7 +2723,7 @@ dependencies = [
 
 [[package]]
 name = "http_headers"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -2666,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "http_headers_simd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bolero",
  "criterion",
@@ -2675,7 +2761,7 @@ dependencies = [
 
 [[package]]
 name = "http_path_template"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "criterion",
  "gungraun",
@@ -2741,22 +2827,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "tokio",
- "tower-service",
-]
-
-[[package]]
-name = "hyper-tls"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
-dependencies = [
- "bytes",
- "http-body-util",
- "hyper",
- "hyper-util",
- "native-tls",
- "tokio",
- "tokio-native-tls",
  "tower-service",
 ]
 
@@ -2936,17 +3006,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "infinity_pool"
-version = "0.8.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1000fad933f772f0cda4bdeb1737bdb079e210701c7c0f21c44403d9975d42d"
-dependencies = [
- "new_zealand",
- "num-integer",
- "pastey",
-]
-
-[[package]]
 name = "insta"
 version = "1.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2973,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "internity"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bolero",
  "criterion",
@@ -2998,7 +3057,7 @@ dependencies = [
 
 [[package]]
 name = "internity_macros"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "internity_macros_impl",
  "mutants",
@@ -3007,7 +3066,7 @@ dependencies = [
 
 [[package]]
 name = "internity_macros_impl"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3199,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "layered"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -3292,36 +3351,11 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logos"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff472f899b4ec2d99161c51f60ff7075eeb3097069a36050d8037a6325eb8154"
-dependencies = [
- "logos-derive 0.15.1",
-]
-
-[[package]]
-name = "logos"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
 dependencies = [
- "logos-derive 0.16.1",
-]
-
-[[package]]
-name = "logos-codegen"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "192a3a2b90b0c05b27a0b2c43eecdb7c415e29243acc3f89cc8247a5b693045c"
-dependencies = [
- "beef",
- "fnv",
- "lazy_static",
- "proc-macro2",
- "quote",
- "regex-syntax",
- "rustc_version",
- "syn 2.0.119",
+ "logos-derive",
 ]
 
 [[package]]
@@ -3340,20 +3374,11 @@ dependencies = [
 
 [[package]]
 name = "logos-derive"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "605d9697bcd5ef3a42d38efc51541aa3d6a4a25f7ab6d1ed0da5ac632a26b470"
-dependencies = [
- "logos-codegen 0.15.1",
-]
-
-[[package]]
-name = "logos-derive"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
 dependencies = [
- "logos-codegen 0.16.1",
+ "logos-codegen",
 ]
 
 [[package]]
@@ -3442,28 +3467,33 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "metabench"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "alloc_tracker",
  "bolero",
  "command-group",
  "criterion",
+ "either-or-both",
  "gungraun",
- "gungraun-summary",
+ "gungraun-runner",
  "jiff",
+ "libc",
  "metabench_macros",
  "mutants",
  "nix 0.31.3",
+ "ohno",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
  "terminal_size",
  "unicode-width 0.2.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "metabench_macros"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "metabench_macros_impl",
  "mutants",
@@ -3472,7 +3502,7 @@ dependencies = [
 
 [[package]]
 name = "metabench_macros_impl"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "bolero",
  "proc-macro-crate 3.5.0",
@@ -3593,18 +3623,18 @@ dependencies = [
 
 [[package]]
 name = "msvc_spectre_libs"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "msvc_spectre_libs_build",
 ]
 
 [[package]]
 name = "msvc_spectre_libs_build"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cc",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
 ]
 
 [[package]]
@@ -3615,7 +3645,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "multitude"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
@@ -3643,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3652,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -3835,14 +3865,14 @@ dependencies = [
 
 [[package]]
 name = "observed"
-version = "0.26.0"
+version = "0.29.0"
 dependencies = [
- "all_the_time",
- "alloc_tracker",
  "criterion",
  "data_privacy",
+ "metabench",
+ "mutants",
  "observed_macros",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -3858,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros"
-version = "0.26.0"
+version = "0.29.0"
 dependencies = [
  "mutants",
  "observed_macros_impl",
@@ -3866,7 +3896,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros_impl"
-version = "0.26.0"
+version = "0.29.0"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -3880,16 +3910,16 @@ name = "observed_testing"
 version = "0.0.0"
 dependencies = [
  "data_privacy",
+ "future_assert",
  "observed",
  "observed_utils",
- "testing_aids",
  "tick",
  "tokio",
 ]
 
 [[package]]
 name = "observed_utils"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "arrayvec",
  "const-hex",
@@ -3901,22 +3931,12 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f03365c20a62c82c5da4cd93abf43cec7115c7d9f84a55ea827e2b56d704a5"
-dependencies = [
- "ohno_macros 0.5.0",
- "typeid",
-]
-
-[[package]]
-name = "ohno"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "futures",
  "insta",
  "mutants",
- "ohno_macros 0.5.2",
+ "ohno_macros",
  "regex",
  "testing_aids",
  "tokio",
@@ -3926,35 +3946,15 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4ce72614cf218523160501f1c275d718c80083697d62d54186e41512429ba9"
-dependencies = [
- "ohno_macros_impl 0.5.1",
-]
-
-[[package]]
-name = "ohno_macros"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "mutants",
- "ohno_macros_impl 0.5.2",
+ "ohno_macros_impl",
 ]
 
 [[package]]
 name = "ohno_macros_impl"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2711e52bb0de91b2d6a3c60636bac1827fb109003e235ed827dc9021287d0d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.5",
-]
-
-[[package]]
-name = "ohno_macros_impl"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -4035,9 +4035,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry"
-version = "0.32.0"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
+checksum = "6cdb0b1b267eb9db3331b434ed9ddab10d50e280a9adf9d13e5233e2002b61b5"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -4048,15 +4048,15 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
-version = "0.32.1"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c913ac17a6c451661ee255f4625d143e51647ae78ebd969b75e41c4442f4fe47"
+checksum = "d288b1e1bc3590052fbb8f0f635ef248dd9022cf1fbaeb6582b7ad6081a17b87"
 
 [[package]]
 name = "opentelemetry-stdout"
-version = "0.32.0"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1b1c6a247d79091f0062a5f4bd058589525cf987a8d4c169440d9c1be72f0ad"
+checksum = "9f71803f481d3f5ccbe477edb42a78f473613712b2327835911a9ea0ab069824"
 dependencies = [
  "chrono",
  "opentelemetry",
@@ -4065,9 +4065,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.32.1"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b59f80e1ac4d5ff7a2db8fb6c80badb7f0f3f858211fba08dd9aaec750894f9"
+checksum = "cb39533d9d1c912123efd7d41d7e0c29d16917b60ce15b4c8d87cb1af7f67520"
 dependencies = [
  "futures-channel",
  "futures-executor",
@@ -4206,14 +4206,21 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "performables"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
+ "ctor",
  "loom",
+ "metabench",
+ "mutants",
  "seismograph",
+ "seismograph_protocol",
  "serde",
+ "static_assertions",
+ "testing_aids",
  "thread_aware",
  "thread_aware_core",
+ "trybuild",
 ]
 
 [[package]]
@@ -4299,7 +4306,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plurality"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",
@@ -4307,7 +4314,6 @@ dependencies = [
  "criterion",
  "deadpool 0.13.1",
  "gungraun",
- "infinity_pool",
  "loom",
  "metabench",
  "mimalloc",
@@ -4541,7 +4547,7 @@ version = "0.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01b80ea363c31af2de2b92e3c07ed1156628f7838c4afb4df75ee78a37fedbd1"
 dependencies = [
- "logos 0.16.1",
+ "logos",
  "miette",
  "prost",
  "prost-types",
@@ -4558,9 +4564,9 @@ dependencies = [
 
 [[package]]
 name = "protox"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f25a07a73c6717f0b9bbbd685918f5df9815f7efba450b83d9c9dea41f0e3a1"
+checksum = "f43240d7f22cf77d1625885e547acf874dd63cd2790f29f4a38e86256f41996f"
 dependencies = [
  "bytes",
  "miette",
@@ -4573,11 +4579,11 @@ dependencies = [
 
 [[package]]
 name = "protox-parse"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "072eee358134396a4643dff81cfff1c255c9fbd3fb296be14bdb6a26f9156366"
+checksum = "34efee6fad0cf6d71642d20a66bfe0c281919c9577e7c66d20360dfcb7549272"
 dependencies = [
- "logos 0.15.1",
+ "logos",
  "miette",
  "prost-types",
  "thiserror",
@@ -4615,9 +4621,9 @@ dependencies = [
 
 [[package]]
 name = "quinn"
-version = "0.11.11"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
+checksum = "4051e23e9185c255a7e33ef59cdbca87a22d359052eecd22fc6b901fb37d9d11"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -4636,9 +4642,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.17"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -4694,21 +4700,11 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rallocator"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
- "allocation_hints",
- "backtrace",
- "criterion",
- "hashbrown 0.17.1",
  "libc",
- "mimalloc",
- "multitude",
- "mutants",
- "performables",
  "seismograph",
  "seismograph_rallocator",
- "seismograph_runtime",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4865,10 +4861,10 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "insta",
- "ohno 0.5.2",
+ "ohno",
  "static_assertions",
  "testing_aids",
 ]
@@ -4919,7 +4915,7 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "rest_over_grpc"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "axum-core",
  "base64 0.23.1",
@@ -5029,7 +5025,7 @@ checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
 
 [[package]]
 name = "routerama"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "alloc_tracker",
  "axum",
@@ -5055,7 +5051,7 @@ dependencies = [
 
 [[package]]
 name = "routerama_build"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "http_path_template",
@@ -5070,7 +5066,7 @@ dependencies = [
 
 [[package]]
 name = "routerama_macros"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "mutants",
  "routerama_build",
@@ -5147,9 +5143,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -5210,9 +5206,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -5264,7 +5260,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -5279,7 +5275,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -5300,14 +5296,14 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.9.1"
+version = "0.11.0"
 dependencies = [
  "futures",
  "http",
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -5338,9 +5334,8 @@ dependencies = [
 
 [[package]]
 name = "seismograph"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
- "getrandom 0.4.3",
  "libc",
  "mutants",
  "seismograph_protocol",
@@ -5349,11 +5344,12 @@ dependencies = [
 
 [[package]]
 name = "seismograph_cli"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
  "crossterm",
+ "mutants",
  "performables",
  "ratatui",
  "same-file",
@@ -5365,29 +5361,32 @@ dependencies = [
 
 [[package]]
 name = "seismograph_io"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "seismograph",
 ]
 
 [[package]]
 name = "seismograph_protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "getrandom 0.4.3",
  "libc",
  "mutants",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "seismograph_rallocator"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "seismograph",
 ]
 
 [[package]]
 name = "seismograph_runtime"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "backtrace",
  "seismograph",
@@ -5792,14 +5791,14 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "criterion",
  "data_privacy",
  "gungraun",
  "http",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "serde",
  "serde_json",
  "static_assertions",
@@ -5811,7 +5810,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -5819,13 +5818,13 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chumsky",
  "darling",
  "insta",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -5869,6 +5868,7 @@ dependencies = [
  "proc-macro2",
  "serial_test",
  "syn 3.0.5",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
@@ -5895,7 +5895,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "futures",
  "mutants",
@@ -5917,14 +5917,14 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "static_assertions",
 ]
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "mutants",
  "syn 3.0.5",
@@ -5933,7 +5933,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -5953,7 +5953,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "alloc_tracker",
  "chrono",
@@ -5961,17 +5961,17 @@ dependencies = [
  "criterion",
  "futures",
  "futures-core",
- "insta",
  "jiff",
  "libc",
  "mutants",
- "ohno 0.5.2",
+ "ohno",
  "performables",
  "pin-project-lite",
  "serde",
  "serde_core",
  "serde_json",
  "static_assertions",
+ "testing_aids",
  "thread_aware",
  "time",
  "tokio",
@@ -6494,7 +6494,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.6.0"
+version = "0.8.0"
 dependencies = [
  "ahash",
  "async-once-cell",
@@ -6682,9 +6682,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]

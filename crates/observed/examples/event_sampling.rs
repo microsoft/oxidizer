@@ -70,18 +70,13 @@ impl EventProcessor for PrintingProcessor {
 struct DropHealthChecks;
 
 impl EventSampler for DropHealthChecks {
-    fn sample(&self, event: &EventSamplingContext<'_>) -> EventSamplingDecision {
-        let decision = if event.description().name() == "health.check" {
+    fn sample(&self, context: &EventSamplingContext<'_>) -> EventSamplingDecision {
+        let decision = if context.description().name() == "health.check" {
             EventSamplingDecision::Drop
         } else {
             EventSamplingDecision::Continue
         };
-        println!(
-            "sample {} on {} at {:?} -> {decision:?}",
-            event.description().name(),
-            event.sink_id(),
-            event.timestamp(),
-        );
+        println!("sample {} -> {decision:?}", context.description().name());
 
         decision
     }
@@ -92,7 +87,10 @@ fn main() {
         Arc::new(PrintingProcessor { signal: Signal::Log }),
         Arc::new(PrintingProcessor { signal: Signal::Metric }),
     ];
-    let sink = Sink::new("service", processors, tick::SimpleClock::new_system()).with_event_sampler(Arc::new(DropHealthChecks));
+    let sink = Sink::builder("service")
+        .processors(processors)
+        .event_sampler(DropHealthChecks)
+        .build();
 
     let route = String::from("/users");
     emit!(

@@ -3,28 +3,19 @@
 
 //! Benchmarks for the `observed` crate's hot paths.
 //!
-//! Measures:
-//! - Full emit pipeline (event -> log record via `OTel` provider)
-//! - Enrichment resolution (context lookup + Vec building)
-//! - Metric dimension building
-//! - Sink operations (construction, emit through a no-op sink)
-//!
 //! Run with:
-//! ```sh
-//! cargo bench -p observed --features test-util
-//! ```
+//! `cargo bench -p observed --features test-util --bench observed_benchmarks`.
 
+use std::any::Any;
 use std::hint::black_box;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{self, Poll};
-use std::time::Instant;
 
-use alloc_tracker::Allocator;
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, Sensitive};
 use observed::__private::EnrichmentEntry;
+use observed::context::{Transfer, Transferred};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Key, Sink, Value, event};
 use opentelemetry::logs::LoggerProvider;
@@ -34,16 +25,12 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 mod otel;
 
 const BENCH_DC: DataClass = DataClass::new("bench", "public");
-
-criterion_group!(benches, entrypoint);
-criterion_main!(benches);
-
-#[global_allocator]
-static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
-
-// ---------------------------------------------------------------------------
-// Event types
-// ---------------------------------------------------------------------------
+const EMIT_PIPELINE: &str = "observed_benchmarks/emit_pipeline";
+const EMIT_ENRICHMENT: &str = "observed_benchmarks/emit_enrichment";
+const SINK_OPERATIONS: &str = "observed_benchmarks/sink_operations";
+const ALLOCATION: &str = "observed_benchmarks/allocation";
+const ENRICHMENT_TRANSFER: &str = "observed_benchmarks/enrichment_transfer";
+const BENCH_SINK_IDS: [&str; 3] = ["bench-0", "bench-1", "bench-2"];
 
 #[event("bench.simple_log")]
 #[info]
@@ -96,10 +83,6 @@ struct BodyEvent {
     code: i64,
 }
 
-/// An event whose fields go through the redaction path and produce strings.
-///
-/// Every other event here carries only `i64` fields, whose `Value` needs no
-/// string at all. This one is the shape that pays for redaction on every emit.
 #[event("bench.redacted_strings")]
 #[info]
 struct RedactedStringsEvent {
@@ -108,10 +91,6 @@ struct RedactedStringsEvent {
     #[data_class(BENCH_DC)]
     user_agent: &'static str,
 }
-
-// ---------------------------------------------------------------------------
-// Enrichment types for benchmarks
-// ---------------------------------------------------------------------------
 
 #[derive(Enrichment)]
 struct BenchEnrich1 {
@@ -143,11 +122,6 @@ struct BenchEnrich5 {
     pod: i64,
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// A simple processor that forwards events to an `OTel` logger provider.
 struct SimpleLogProcessor {
     logger: opentelemetry_sdk::logs::SdkLogger,
     redaction_engine: data_privacy::RedactionEngine,
@@ -172,39 +146,7 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
     }
 }
 
-/// A redaction engine that actually rewrites the value.
-///
-/// The default engine erases, so its output is always empty and hides the cost
-/// of moving redacted bytes around. `Replace('*')` produces an output the same
-/// length as the input, which is what a real deployment pays for.
-fn replacing_engine() -> data_privacy::RedactionEngine {
-    data_privacy::RedactionEngine::builder()
-        .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::new())
-        .build()
-}
-
-fn make_log_processor() -> (SimpleLogProcessor, SdkLoggerProvider) {
-    make_log_processor_with(data_privacy::RedactionEngine::default())
-}
-
-fn make_log_processor_with(redaction_engine: data_privacy::RedactionEngine) -> (SimpleLogProcessor, SdkLoggerProvider) {
-    // Use a no-op log exporter to avoid retaining millions of `LogRecord`s
-    // during high-iteration benchmarks (the default `InMemoryLogExporter`
-    // accumulates every emitted record and OOMs on agents with limited RAM).
-    let logger_provider = SdkLoggerProvider::builder().with_simple_exporter(NoOpLogExporter).build();
-
-    let logger = logger_provider.logger("bench");
-
-    let processor = SimpleLogProcessor { logger, redaction_engine };
-
-    (processor, logger_provider)
-}
-
-/// No-op log exporter for benchmarks.
-///
-/// Discards every batch immediately so that benches measuring the
-/// `emit -> OTel` pipeline don't accumulate `LogRecord`s in memory across
-/// millions of iterations.
+/// Discards exported records so pipeline benchmarks do not retain unbounded output.
 #[derive(Debug)]
 struct NoOpLogExporter;
 
@@ -221,398 +163,186 @@ impl opentelemetry_sdk::logs::LogExporter for NoOpLogExporter {
     }
 }
 
-/// No-op log exporter for benchmarks.
-///
-/// Helper to run a benchmark with `alloc_tracker` and `all_the_time` tracking.
-fn bench_with_tracking(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-    name: &str,
-    mut body: impl FnMut(),
-) {
-    let allocs_op = allocs.operation(name);
-    let time_op = time.operation(name);
-    group.bench_function(name, |b| {
-        b.iter_custom(|iters| {
-            let _alloc = allocs_op.measure_thread().iterations(iters);
-            let _clock = time_op.measure_thread().iterations(iters);
-
-            let start = Instant::now();
-
-            for _ in 0..iters {
-                body();
-            }
-
-            start.elapsed()
-        });
-    });
+/// Keeps the provider alive for as long as its sink is used by a benchmark.
+struct EmitState {
+    sink: Sink,
+    _provider: SdkLoggerProvider,
 }
 
-// ---------------------------------------------------------------------------
-// Entrypoint
-// ---------------------------------------------------------------------------
-
-fn entrypoint(c: &mut Criterion) {
-    let allocs = alloc_tracker::Session::new();
-    let time = all_the_time::Session::new();
-
-    // --- Emit pipeline benchmarks ---
-    {
-        let mut group = c.benchmark_group("emit_pipeline");
-        bench_emit_simple_log(&mut group, &allocs, &time);
-        bench_emit_many_fields(&mut group, &allocs, &time);
-        bench_emit_with_body(&mut group, &allocs, &time);
-        bench_emit_log_of_metric_event(&mut group, &allocs, &time);
-        bench_emit_redacted_strings(&mut group, &allocs, &time);
-        group.finish();
-    }
-
-    // --- Enrichment benchmarks ---
-    {
-        let mut group = c.benchmark_group("emit_enrichment");
-        bench_emit_with_enrichments(&mut group, &allocs, &time);
-        bench_emit_deeply_nested_enrichments(&mut group, &allocs, &time);
-        bench_enrich_push_pop(&mut group, &allocs, &time);
-        group.finish();
-    }
-
-    // --- Sink operation benchmarks ---
-    {
-        let mut group = c.benchmark_group("sink_operations");
-        bench_construct_processor_free_sink(&mut group, &allocs, &time);
-        bench_emit_to_noop_sink(&mut group, &allocs, &time);
-        group.finish();
-    }
-
-    // --- Allocation-focused benchmarks (infinity_pool exploration) ---
-    {
-        let mut group = c.benchmark_group("emit_alloc");
-        bench_enrichment_vec_collect(&mut group, &allocs, &time);
-        bench_enrichment_vec_collect_deep(&mut group, &allocs, &time);
-        bench_enrichment_entry_clone(&mut group, &allocs, &time);
-        bench_arc_enrichment_node_churn(&mut group, &allocs, &time);
-        bench_pending_enriched_future_polls(&mut group, &allocs, &time);
-        bench_key_value_creation(&mut group, &allocs, &time);
-        bench_redacted_value_creation(&mut group, &allocs, &time);
-        bench_emit_varying_enrichment_depth(&mut group, &allocs, &time);
-        group.finish();
-    }
-
-    // Both sessions are measured for every benchmark, so report both when
-    // dropped: the allocation table is the point of the `emit_alloc` group and
-    // of the enrichment benchmarks generally.
+struct EnrichedEmitState {
+    // Drop the guard before the state that owns the sink and provider.
+    _guard: Box<dyn Any>,
+    state: EmitState,
 }
 
-// ---------------------------------------------------------------------------
-// Pipeline benchmarks
-// ---------------------------------------------------------------------------
-
-fn bench_emit_simple_log(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "simple_log_2_fields";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
-    });
+struct EnrichedSinkState {
+    // Drop the guard before the sink whose slot it restores.
+    _guard: Box<dyn Any>,
+    sink: Sink,
 }
 
-fn bench_emit_many_fields(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "log_8_fields";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(
-            &sink,
-            ManyFieldsEvent {
-                field_a: 1,
-                field_b: 2,
-                field_c: 3,
-                field_d: 4,
-                field_e: 5,
-                field_f: 6,
-                field_g: 7,
-                field_h: 8,
-            }
-        );
-    });
+fn replacing_engine() -> data_privacy::RedactionEngine {
+    data_privacy::RedactionEngine::builder()
+        .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::new())
+        .build()
 }
 
-fn bench_emit_with_body(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "log_with_body";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(&sink, BodyEvent { code: 42 });
-    });
+fn emit_state() -> EmitState {
+    emit_state_with(data_privacy::RedactionEngine::default())
 }
 
-/// Benchmarks emitting an event that declares **both** a log and a metric
-/// signal, through a log-only processor.
-///
-/// This is deliberately not a log-plus-metric measurement: no processor here
-/// owns a meter or records an instrument, so what it captures is the cost of
-/// log mapping for an event whose descriptor also carries metric metadata -
-/// the field visit yields metric descriptors the processor then skips.
-/// Use it as a full-pipeline log baseline for that event shape rather than as
-/// an isolated metric-descriptor comparison.
-fn bench_emit_log_of_metric_event(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "log_of_metric_event";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(
-            &sink,
-            MetricEvent {
-                duration_ms: 42.5,
-                region: 1,
-                service: 2,
-            }
-        );
-    });
+fn redacted_emit_state() -> EmitState {
+    emit_state_with(replacing_engine())
 }
 
-// ---------------------------------------------------------------------------
-// Enrichment benchmarks
-// ---------------------------------------------------------------------------
-
-/// Benchmarks emitting an event whose fields are classified strings.
-///
-/// This is a full emit-pipeline case in which each field is rendered through
-/// the redaction engine and stored as a string `Value`.
-fn bench_emit_redacted_strings(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "log_2_redacted_strings";
-    let (processor, _provider) = make_log_processor_with(replacing_engine());
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(
-            &sink,
-            RedactedStringsEvent {
-                request_id: "6f1c2f10-6a5b-4f0a-9c1f-2f106a5b4f0a",
-                user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            }
-        );
-    });
+fn emit_state_with(redaction_engine: data_privacy::RedactionEngine) -> EmitState {
+    let provider = SdkLoggerProvider::builder().with_simple_exporter(NoOpLogExporter).build();
+    let logger = provider.logger("bench");
+    let processor = SimpleLogProcessor { logger, redaction_engine };
+    let sink = Sink::builder("bench").processors(vec![Arc::new(processor)]).build();
+    EmitState { sink, _provider: provider }
 }
 
-fn bench_emit_with_enrichments(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "emit_with_3_enrichments";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
+fn processor_free_sink() -> Sink {
+    Sink::builder("bench").build()
+}
 
-    // Establish an enrichment context, then benchmark emission within it.
-    (|| {
-        bench_with_tracking(group, allocs, time, ID, || {
-            observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
-        });
-    })
-    .enrich(
-        &sink,
-        BenchEnrich3 {
+fn enriched_emit_state(depth: usize) -> EnrichedEmitState {
+    let state = emit_state();
+    let guard = applied_enrichment(&state.sink, depth);
+    EnrichedEmitState { _guard: guard, state }
+}
+
+fn enriched_sink_state(depth: usize) -> EnrichedSinkState {
+    let sink = processor_free_sink();
+    let guard = applied_enrichment(&sink, depth);
+    EnrichedSinkState { _guard: guard, sink }
+}
+
+fn applied_enrichment(sink: &Sink, depth: usize) -> Box<dyn Any> {
+    let mut transfer = sink.transfer_context();
+    if depth == 3 {
+        transfer = transfer.with_enrichment(BenchEnrich3 {
             service: 1,
             region: 2,
             env: 3,
-        },
-    )();
-}
-
-fn bench_emit_deeply_nested_enrichments(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    const ID: &str = "emit_with_10_nested_enrichments";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    // Create 10 nested enrichment levels to stress the Arc-linked list resolution.
-    (|| {
-        bench_with_tracking(group, allocs, time, ID, || {
-            observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
         });
-    })
-    .enrich(&sink, BenchEnrich1 { val: 9 })
-    .enrich(&sink, BenchEnrich1 { val: 8 })
-    .enrich(&sink, BenchEnrich1 { val: 7 })
-    .enrich(&sink, BenchEnrich1 { val: 6 })
-    .enrich(&sink, BenchEnrich1 { val: 5 })
-    .enrich(&sink, BenchEnrich1 { val: 4 })
-    .enrich(&sink, BenchEnrich1 { val: 3 })
-    .enrich(&sink, BenchEnrich1 { val: 2 })
-    .enrich(&sink, BenchEnrich1 { val: 1 })
-    .enrich(&sink, BenchEnrich1 { val: 0 })();
+    } else {
+        for value in 0..depth {
+            transfer = transfer.with_enrichment(BenchEnrich1 {
+                val: i64::try_from(value).expect("benchmark enrichment depth fits in i64"),
+            });
+        }
+    }
+    Box::new(transfer.apply_current_thread())
 }
 
-fn bench_enrich_push_pop(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "enrich_push_pop_3_entries";
-    let noop = Sink::noop();
+fn transfer_with_entries(slot_count: usize) -> Transfer {
+    let sink = if slot_count == 1 {
+        processor_free_sink()
+    } else {
+        Sink::composite(BENCH_SINK_IDS[..slot_count].iter().map(|&id| Sink::builder(id).build()))
+    };
 
-    bench_with_tracking(group, allocs, time, ID, || {
-        (|| {
-            black_box(());
-        })
-        .enrich(
-            &noop,
+    (|| sink.transfer_context()).enrich(&sink, BenchEnrich1 { val: 42 })()
+}
+
+struct AttachedPollState {
+    future: Pin<Box<Transferred<AlwaysPending>>>,
+}
+
+fn attached_poll_state(slot_count: usize) -> AttachedPollState {
+    AttachedPollState {
+        future: Box::pin(AlwaysPending.attach(transfer_with_entries(slot_count))),
+    }
+}
+
+#[metabench::benchmark(EMIT_SIMPLE_LOG, EMIT_PIPELINE, "simple_log_2_fields")]
+#[bench::run(&emit_state())]
+fn emit_simple_log(state: &EmitState) {
+    observed::emit!(&state.sink, SimpleLogEvent { status: 200, retries: 0 });
+}
+
+#[metabench::benchmark(EMIT_MANY_FIELDS, EMIT_PIPELINE, "log_8_fields")]
+#[bench::run(&emit_state())]
+fn emit_many_fields(state: &EmitState) {
+    observed::emit!(
+        &state.sink,
+        ManyFieldsEvent {
+            field_a: 1,
+            field_b: 2,
+            field_c: 3,
+            field_d: 4,
+            field_e: 5,
+            field_f: 6,
+            field_g: 7,
+            field_h: 8,
+        }
+    );
+}
+
+#[metabench::benchmark(EMIT_WITH_BODY, EMIT_PIPELINE, "log_with_body")]
+#[bench::run(&emit_state())]
+fn emit_with_body(state: &EmitState) {
+    observed::emit!(&state.sink, BodyEvent { code: 42 });
+}
+
+#[metabench::benchmark(EMIT_METRIC_EVENT, EMIT_PIPELINE, "log_of_metric_event")]
+#[bench::run(&emit_state())]
+/// Measures log mapping for an event that also declares metric metadata.
+///
+/// The fixture installs only a log processor, so this excludes instrument
+/// creation and metric recording.
+fn emit_log_of_metric_event(state: &EmitState) {
+    observed::emit!(
+        &state.sink,
+        MetricEvent {
+            duration_ms: 42.5,
+            region: 1,
+            service: 2,
+        }
+    );
+}
+
+#[metabench::benchmark(EMIT_REDACTED_STRINGS, EMIT_PIPELINE, "log_2_redacted_strings")]
+#[bench::run(&redacted_emit_state())]
+fn emit_redacted_strings(state: &EmitState) {
+    observed::emit!(
+        &state.sink,
+        RedactedStringsEvent {
+            request_id: "6f1c2f10-6a5b-4f0a-9c1f-2f106a5b4f0a",
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        }
+    );
+}
+
+#[metabench::benchmark(EMIT_WITH_ENRICHMENTS, EMIT_ENRICHMENT, "emit_with_3_enrichments")]
+#[bench::run(&enriched_emit_state(3))]
+fn emit_with_enrichments(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
+}
+
+#[metabench::benchmark(EMIT_DEEP_ENRICHMENTS, EMIT_ENRICHMENT, "emit_with_10_nested_enrichments")]
+#[bench::run(&enriched_emit_state(10))]
+fn emit_deep_enrichments(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
+}
+
+#[metabench::benchmark(ENRICH_PUSH_POP, EMIT_ENRICHMENT, "enrich_push_pop")]
+#[bench::three_entries(&processor_free_sink(), 3)]
+#[bench::five_entries(&processor_free_sink(), 5)]
+fn enrich_push_pop(sink: &Sink, entry_count: usize) {
+    match entry_count {
+        3 => (|| black_box(())).enrich(
+            sink,
             BenchEnrich3 {
                 service: 1,
                 region: 2,
                 env: 3,
             },
-        )();
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Sink operation benchmarks
-// ---------------------------------------------------------------------------
-
-fn bench_construct_processor_free_sink(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    const ID: &str = "construct_processor_free_sink";
-    const EMPTY_PROCESSORS: Vec<Arc<dyn observed::processing::EventProcessor>> = Vec::new();
-
-    // The clock is built once and passed by reference: an application owns its
-    // clock and hands it to every sink, so clock construction is not part of the
-    // sink-construction cost this benchmark reports. `Sink::new` clones it
-    // internally, so a reference keeps that at exactly one clone per iteration.
-    let clock = tick::SimpleClock::new_system();
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        let sink = Sink::new("bench", EMPTY_PROCESSORS, &clock);
-        drop(sink);
-    });
-}
-
-fn bench_emit_to_noop_sink(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "emit_to_noop_sink";
-
-    // Benchmark the emit path through an explicit no-op sink.
-    let noop = Sink::noop();
-    bench_with_tracking(group, allocs, time, ID, || {
-        observed::emit!(&noop, SimpleLogEvent { status: 200, retries: 0 });
-    });
-}
-
-// ===========================================================================
-// Allocation-focused benchmarks for infinity_pool exploration
-//
-// These benchmarks isolate the allocation-heavy operations in the emit hot
-// path to establish a baseline before exploring pooled alternatives:
-//
-// 1. Vec<EnrichmentEntry> collection (resolve_enrichments / to_vec)
-// 2. Arc<EnrichmentNode> creation in enrich() scope push/pop
-// 3. Key/Value object creation and cloning
-// 4. Scaling behavior with enrichment depth
-// ===========================================================================
-
-/// Benchmarks the allocation cost of collecting enrichments into a Vec
-/// (the `resolve_enrichments` path) with 3 enrichments in a flat scope.
-fn bench_enrichment_vec_collect(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "enrichment_vec_collect_3";
-    let (processor, _provider) = make_log_processor();
-    let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
-
-    // Single enrich scope with 3 entries - measures the Vec allocation
-    // and EnrichmentEntry cloning that happens on every emit.
-    (|| {
-        // Only read enrichments, don't go through the full emit pipeline.
-        bench_with_tracking(group, allocs, time, ID, || {
-            let entries = sink.current_enrichments();
-            black_box(entries);
-        });
-    })
-    .enrich(
-        &sink,
-        BenchEnrich3 {
-            service: 1,
-            region: 2,
-            env: 3,
-        },
-    )();
-}
-
-/// Benchmarks Vec<EnrichmentEntry> collection with 10 entries across 10
-/// nested scopes - stresses the Arc-linked-list traversal + Vec reallocation.
-fn bench_enrichment_vec_collect_deep(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    const ID: &str = "enrichment_vec_collect_10_nested";
-    let noop = Sink::noop();
-
-    // Build 10 nested enrichment scopes (1 entry each) then collect.
-    (|| {
-        bench_with_tracking(group, allocs, time, ID, || {
-            let entries = noop.current_enrichments();
-            black_box(entries);
-        });
-    })
-    .enrich(&noop, BenchEnrich1 { val: 9 })
-    .enrich(&noop, BenchEnrich1 { val: 8 })
-    .enrich(&noop, BenchEnrich1 { val: 7 })
-    .enrich(&noop, BenchEnrich1 { val: 6 })
-    .enrich(&noop, BenchEnrich1 { val: 5 })
-    .enrich(&noop, BenchEnrich1 { val: 4 })
-    .enrich(&noop, BenchEnrich1 { val: 3 })
-    .enrich(&noop, BenchEnrich1 { val: 2 })
-    .enrich(&noop, BenchEnrich1 { val: 1 })
-    .enrich(&noop, BenchEnrich1 { val: 0 })();
-}
-
-/// Benchmarks the cost of cloning `EnrichmentEntry` objects (Key + Value
-/// cloning), which happens on every enrichment resolution.
-fn bench_enrichment_entry_clone(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "enrichment_entry_clone_5";
-
-    let entries: Vec<observed::__private::EnrichmentEntry> = vec![
-        EnrichmentEntry::new("service", Sensitive::new("api-gateway", BENCH_DC)),
-        EnrichmentEntry::new("region", Sensitive::new("us-west-2", BENCH_DC)),
-        EnrichmentEntry::new("env", Sensitive::new("production", BENCH_DC)),
-        EnrichmentEntry::new("tenant", Sensitive::new("contoso", BENCH_DC)),
-        EnrichmentEntry::new("version", Sensitive::new("1.2.3", BENCH_DC)),
-    ];
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        let cloned: Vec<observed::__private::EnrichmentEntry> = entries.clone();
-        black_box(cloned);
-    });
-}
-
-/// Benchmarks the Arc<EnrichmentNode> creation that happens in `enrich()`
-/// scope push - this is the allocation that `infinity_pool` could pool.
-///
-/// Measures repeated push/pop of a single enrichment scope (1 entry).
-fn bench_arc_enrichment_node_churn(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    const ID: &str = "arc_enrichment_node_churn_1_entry";
-    const NAME_5: &str = "arc_enrichment_node_churn_5_entries";
-    let noop = Sink::noop();
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        (|| {
-            black_box(());
-        })
-        .enrich(&noop, BenchEnrich1 { val: 42 })();
-    });
-
-    bench_with_tracking(group, allocs, time, NAME_5, || {
-        (|| {
-            black_box(());
-        })
-        .enrich(
-            &noop,
+        )(),
+        5 => (|| black_box(())).enrich(
+            sink,
             BenchEnrich5 {
                 service: 1,
                 region: 2,
@@ -620,163 +350,248 @@ fn bench_arc_enrichment_node_churn(
                 cluster: 4,
                 pod: 5,
             },
-        )();
-    });
+        )(),
+        _ => unreachable!("benchmark cases only use 3 or 5 entries"),
+    }
 }
 
-/// Benchmarks the per-poll enrichment cost of a future that stays **pending**.
-///
-/// `Enriched::poll` pushes the entries on every poll and drops the guard before
-/// returning, and each push allocates a fresh `Arc<EnrichmentNode>`. A composite
-/// broadcasts that push to every leaf, so a future polled `N` times through `M`
-/// children allocates `N x M` nodes - and it pays that even while pending, having
-/// emitted no telemetry at all. A frequently awakened request future therefore
-/// carries an allocator cost purely for context propagation.
-///
-/// The single/composite pair is what isolates the fan-out multiplier: compare
-/// the two to see whether the per-poll or the per-leaf term dominates before
-/// deciding that node reuse or preallocation is worth its complexity.
-///
-/// Distinct from `arc_enrichment_node_churn_*`, which measures one synchronous
-/// push/pop of an immediately invoked closure rather than repeated polling.
-fn bench_pending_enriched_future_polls(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    /// How many times each iteration polls the pending future.
+#[metabench::benchmark(CONSTRUCT_PROCESSOR_FREE_SINK, SINK_OPERATIONS, "construct_processor_free_sink")]
+#[bench::run(&tick::SimpleClock::new_system())]
+fn construct_processor_free_sink(clock: &tick::SimpleClock) -> Sink {
+    Sink::builder("bench").clock(clock.clone()).build()
+}
+
+#[metabench::benchmark(EMIT_TO_NOOP_SINK, SINK_OPERATIONS, "emit_to_noop_sink")]
+#[bench::run(&Sink::noop())]
+fn emit_to_noop_sink(sink: &Sink) {
+    observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
+}
+
+#[metabench::benchmark(ENRICHMENT_COLLECT, ALLOCATION, "enrichment_collect")]
+#[bench::three_entries(&enriched_sink_state(3))]
+#[bench::ten_nested(&enriched_sink_state(10))]
+fn enrichment_collect(state: &EnrichedSinkState) -> Vec<EnrichmentEntry> {
+    black_box(state.sink.current_enrichments())
+}
+
+fn enrichment_entries() -> Vec<EnrichmentEntry> {
+    vec![
+        EnrichmentEntry::new("service", Sensitive::new("api-gateway", BENCH_DC)),
+        EnrichmentEntry::new("region", Sensitive::new("us-west-2", BENCH_DC)),
+        EnrichmentEntry::new("env", Sensitive::new("production", BENCH_DC)),
+        EnrichmentEntry::new("tenant", Sensitive::new("contoso", BENCH_DC)),
+        EnrichmentEntry::new("version", Sensitive::new("1.2.3", BENCH_DC)),
+    ]
+}
+
+#[metabench::benchmark(ENRICHMENT_ENTRY_CLONE, ALLOCATION, "enrichment_entry_clone_5")]
+#[bench::run(&enrichment_entries())]
+fn enrichment_entry_clone(entries: &[EnrichmentEntry]) -> Vec<EnrichmentEntry> {
+    entries.to_vec()
+}
+
+struct AlwaysPending;
+
+impl Future for AlwaysPending {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
+
+fn poll_pending(future: impl Future<Output = ()>) {
     const POLLS: u32 = 8;
-    /// Leaves in the composite case.
-    const COMPOSITE_CHILDREN: usize = 3;
-    /// A composite leaf needs no processors: the measurement is the enrichment
-    /// push/pop, not dispatch.
-    const EMPTY_PROCESSORS: Vec<Arc<dyn observed::processing::EventProcessor>> = Vec::new();
 
-    const ID_SINGLE: &str = "pending_enriched_future_8_polls_single";
-    const ID_COMPOSITE: &str = "pending_enriched_future_8_polls_composite_3";
-
-    /// A future that reports `Pending` for its whole measured lifetime, so each
-    /// poll exercises only the enrichment push/pop the wrapper adds.
-    struct AlwaysPending;
-
-    impl Future for AlwaysPending {
-        type Output = ();
-
-        fn poll(self: Pin<&mut Self>, _cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-            Poll::Pending
-        }
+    let waker = task::Waker::noop();
+    let mut cx = task::Context::from_waker(waker);
+    let mut future = std::pin::pin!(future);
+    for _ in 0..POLLS {
+        let _ = black_box(future.as_mut().poll(&mut cx));
     }
-
-    /// Polls `future` `POLLS` times without a runtime, so the measurement covers
-    /// the wrapper rather than an executor.
-    fn poll_pending(future: impl Future<Output = ()>) {
-        let waker = task::Waker::noop();
-        let mut cx = task::Context::from_waker(waker);
-        let mut future = std::pin::pin!(future);
-        for _ in 0..POLLS {
-            // The future never completes, so the result is discarded on purpose:
-            // what is being measured is the enrichment work each poll performs.
-            let _pending = black_box(future.as_mut().poll(&mut cx));
-        }
-    }
-
-    let single = Sink::noop();
-    bench_with_tracking(group, allocs, time, ID_SINGLE, || {
-        poll_pending(AlwaysPending.enrich(&single, BenchEnrich1 { val: 42 }));
-    });
-
-    let children: Vec<Sink> = (0..COMPOSITE_CHILDREN)
-        .map(|_| Sink::new("bench", EMPTY_PROCESSORS, tick::SimpleClock::new_system()))
-        .collect();
-    let composite = Sink::composite(children);
-    bench_with_tracking(group, allocs, time, ID_COMPOSITE, || {
-        poll_pending(AlwaysPending.enrich(&composite, BenchEnrich1 { val: 42 }));
-    });
 }
 
-/// Benchmarks Key and Value creation - measures the allocation cost of
-/// constructing the types that form `EnrichmentEntry` fields.
-fn bench_key_value_creation(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID: &str = "key_value_creation_string";
-    const NAME_I64: &str = "key_value_creation_i64";
-
-    bench_with_tracking(group, allocs, time, ID, || {
-        let key = Key::from("http.request.method");
-        let value = Value::from("GET");
-        black_box((key, value));
-    });
-
-    bench_with_tracking(group, allocs, time, NAME_I64, || {
-        let key = Key::from("http.status_code");
-        let value = Value::from(200_i64);
-        black_box((key, value));
-    });
+fn composite_sink() -> Sink {
+    Sink::composite(BENCH_SINK_IDS.iter().map(|&id| Sink::builder(id).build()))
 }
 
-/// Benchmarks building a redacted string `Value`, the per-field cost of the
-/// redaction path.
+#[metabench::benchmark(PENDING_ENRICHED_FUTURE, ALLOCATION, "pending_enriched_future_8_polls")]
+#[bench::single(&processor_free_sink())]
+#[bench::composite_3(&composite_sink())]
+/// Compares per-poll enrichment work without executor scheduling overhead.
 ///
-/// The two variants are the same work through two constructions:
-/// `to_redacted_string` materializes a `String` that is then copied into the
-/// `Arc<str>`, while `Value::from_redacted` renders into a reusable scratch
-/// buffer and allocates only the `Arc<str>`.
-fn bench_redacted_value_creation(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
-    const ID_VIA_STRING: &str = "redacted_value_via_string";
-    const ID_DIRECT: &str = "redacted_value_from_redacted";
-
-    let engine = replacing_engine();
-
-    bench_with_tracking(group, allocs, time, ID_VIA_STRING, || {
-        let classified = Sensitive::new(black_box("Mozilla/5.0 (Windows NT 10.0)"), BENCH_DC);
-        let value = Value::String(observed::Text::from(observed::__private::RedactedToString::to_redacted_string(
-            &classified,
-            &engine,
-        )));
-        black_box(value);
-    });
-
-    bench_with_tracking(group, allocs, time, ID_DIRECT, || {
-        let classified = Sensitive::new(black_box("Mozilla/5.0 (Windows NT 10.0)"), BENCH_DC);
-        let value = Value::from_redacted(&classified, &engine);
-        black_box(value);
-    });
+/// The future stays pending and is driven directly with a no-op waker; the
+/// cases isolate one sink from representative composite fan-out.
+fn pending_enriched_future(sink: &Sink) {
+    poll_pending(AlwaysPending.enrich(sink, BenchEnrich1 { val: 42 }));
 }
 
-/// Benchmarks the full emit pipeline at enrichment depths 0 and 5, providing
-/// representative low- and higher-depth baselines for the current
-/// implementation. These endpoints show aggregate overhead for those cases,
-/// not a per-level marginal cost or a pooling breakeven point.
-fn bench_emit_varying_enrichment_depth(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
-    // Depth 0: no enrichments
-    {
-        const ID: &str = "emit_depth_0";
-        let (processor, _provider) = make_log_processor();
-        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
+#[metabench::benchmark(KEY_VALUE_CREATION, ALLOCATION, "key_value_creation")]
+#[bench::string_value(false)]
+#[bench::i64_value(true)]
+fn key_value_creation(integer: bool) -> (Key, Value) {
+    if integer {
+        (Key::from("http.status_code"), Value::from(200_i64))
+    } else {
+        (Key::from("http.request.method"), Value::from("GET"))
+    }
+}
 
-        bench_with_tracking(group, allocs, time, ID, || {
-            observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
+#[metabench::benchmark(REDACTED_VALUE_CREATION, ALLOCATION, "redacted_value_creation")]
+#[bench::via_string(&replacing_engine(), false)]
+#[bench::direct(&replacing_engine(), true)]
+/// Compares intermediate `String` construction with direct rendering into `Value`.
+fn redacted_value_creation(engine: &data_privacy::RedactionEngine, direct: bool) -> Value {
+    let classified = Sensitive::new(black_box("Mozilla/5.0 (Windows NT 10.0)"), BENCH_DC);
+    if direct {
+        Value::from_redacted(&classified, engine)
+    } else {
+        Value::String(observed::Text::from(observed::__private::RedactedToString::to_redacted_string(
+            &classified,
+            engine,
+        )))
+    }
+}
+
+#[metabench::benchmark(EMIT_ENRICHMENT_DEPTH, ALLOCATION, "emit_enrichment_depth")]
+#[bench::depth_0(&enriched_emit_state(0))]
+#[bench::depth_5(&enriched_emit_state(5))]
+/// Uses representative low and higher depths to compare aggregate emit cost.
+///
+/// These endpoints are not intended to report a per-layer marginal cost.
+fn emit_enrichment_depth(state: &EnrichedEmitState) {
+    emit_simple_log(&state.state);
+}
+
+#[metabench::benchmark(POLL_ATTACHED, ENRICHMENT_TRANSFER, "poll_attached")]
+#[bench::single_slot(attached_poll_state(1))]
+#[bench::three_slots(attached_poll_state(3))]
+/// Measures the attached-future hot path that applies borrowed transfer state.
+///
+/// The single leaf is the lower bound; the small composite represents common
+/// fan-out without treating the result as a per-slot scaling model.
+fn poll_attached(mut state: AttachedPollState) -> AttachedPollState {
+    let waker = task::Waker::noop();
+    let mut cx = task::Context::from_waker(waker);
+    let _ = black_box(state.future.as_mut().poll(&mut cx));
+    state
+}
+
+fn criterion_benchmarks(criterion: &mut Criterion) {
+    let mut emit_pipeline = criterion.benchmark_group(EMIT_PIPELINE);
+    let emit = emit_state();
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_SIMPLE_LOG.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_simple_log(black_box(&emit)));
+    });
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_MANY_FIELDS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_many_fields(black_box(&emit)));
+    });
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_WITH_BODY.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_with_body(black_box(&emit)));
+    });
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_METRIC_EVENT.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_log_of_metric_event(black_box(&emit)));
+    });
+    let redacted = redacted_emit_state();
+    emit_pipeline.bench_function(BenchmarkId::new(EMIT_REDACTED_STRINGS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_redacted_strings(black_box(&redacted)));
+    });
+    emit_pipeline.finish();
+
+    let mut enrichment = criterion.benchmark_group(EMIT_ENRICHMENT);
+    let enriched = enriched_emit_state(3);
+    enrichment.bench_function(BenchmarkId::new(EMIT_WITH_ENRICHMENTS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_with_enrichments(black_box(&enriched)));
+    });
+    let deeply_enriched = enriched_emit_state(10);
+    enrichment.bench_function(BenchmarkId::new(EMIT_DEEP_ENRICHMENTS.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_deep_enrichments(black_box(&deeply_enriched)));
+    });
+    let sink = processor_free_sink();
+    for (case, count) in [("three_entries", 3), ("five_entries", 5)] {
+        enrichment.bench_function(BenchmarkId::new(ENRICH_PUSH_POP.benchmark_name(), case), |bencher| {
+            bencher.iter(|| enrich_push_pop(black_box(&sink), count));
         });
     }
+    enrichment.finish();
 
-    // Depth 5: five enrichment levels
-    {
-        const ID: &str = "emit_depth_5";
-        let (processor, _provider) = make_log_processor();
-        let sink = Sink::new("bench", vec![Arc::new(processor)], tick::SimpleClock::new_system());
+    let mut sink_operations = criterion.benchmark_group(SINK_OPERATIONS);
+    let clock = tick::SimpleClock::new_system();
+    sink_operations.bench_function(BenchmarkId::new(CONSTRUCT_PROCESSOR_FREE_SINK.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| construct_processor_free_sink(black_box(&clock)));
+    });
+    let noop = Sink::noop();
+    sink_operations.bench_function(BenchmarkId::new(EMIT_TO_NOOP_SINK.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| emit_to_noop_sink(black_box(&noop)));
+    });
+    sink_operations.finish();
 
-        (|| {
-            bench_with_tracking(group, allocs, time, ID, || {
-                observed::emit!(&sink, SimpleLogEvent { status: 200, retries: 0 });
-            });
-        })
-        .enrich(&sink, BenchEnrich1 { val: 4 })
-        .enrich(&sink, BenchEnrich1 { val: 3 })
-        .enrich(&sink, BenchEnrich1 { val: 2 })
-        .enrich(&sink, BenchEnrich1 { val: 1 })
-        .enrich(&sink, BenchEnrich1 { val: 0 })();
+    let mut allocation = criterion.benchmark_group(ALLOCATION);
+    for (case, state) in [("three_entries", enriched_sink_state(3)), ("ten_nested", enriched_sink_state(10))] {
+        allocation.bench_function(BenchmarkId::new(ENRICHMENT_COLLECT.benchmark_name(), case), |bencher| {
+            bencher.iter(|| enrichment_collect(black_box(&state)));
+        });
     }
+    let entries = enrichment_entries();
+    allocation.bench_function(BenchmarkId::new(ENRICHMENT_ENTRY_CLONE.benchmark_name(), "run"), |bencher| {
+        bencher.iter(|| enrichment_entry_clone(black_box(&entries)));
+    });
+    let composite = composite_sink();
+    for (case, case_sink) in [("single", &sink), ("composite_3", &composite)] {
+        allocation.bench_function(BenchmarkId::new(PENDING_ENRICHED_FUTURE.benchmark_name(), case), |bencher| {
+            bencher.iter(|| pending_enriched_future(black_box(case_sink)));
+        });
+    }
+    for (case, integer) in [("string_value", false), ("i64_value", true)] {
+        allocation.bench_function(BenchmarkId::new(KEY_VALUE_CREATION.benchmark_name(), case), |bencher| {
+            bencher.iter(|| key_value_creation(integer));
+        });
+    }
+    let engine = replacing_engine();
+    for (case, direct) in [("via_string", false), ("direct", true)] {
+        allocation.bench_function(BenchmarkId::new(REDACTED_VALUE_CREATION.benchmark_name(), case), |bencher| {
+            bencher.iter(|| redacted_value_creation(black_box(&engine), direct));
+        });
+    }
+    for (case, state) in [("depth_0", enriched_emit_state(0)), ("depth_5", enriched_emit_state(5))] {
+        allocation.bench_function(BenchmarkId::new(EMIT_ENRICHMENT_DEPTH.benchmark_name(), case), |bencher| {
+            bencher.iter(|| emit_enrichment_depth(black_box(&state)));
+        });
+    }
+    allocation.finish();
+
+    let mut transfer = criterion.benchmark_group(ENRICHMENT_TRANSFER);
+    for (case, slot_count) in [("single_slot", 1), ("three_slots", 3)] {
+        transfer.bench_function(BenchmarkId::new(POLL_ATTACHED.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(
+                || attached_poll_state(slot_count),
+                |state| black_box(poll_attached(state)),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+    transfer.finish();
 }
+
+metabench::main!(
+    criterion = criterion_benchmarks,
+    benchmarks = [
+        EMIT_SIMPLE_LOG,
+        EMIT_MANY_FIELDS,
+        EMIT_WITH_BODY,
+        EMIT_METRIC_EVENT,
+        EMIT_REDACTED_STRINGS,
+        EMIT_WITH_ENRICHMENTS,
+        EMIT_DEEP_ENRICHMENTS,
+        ENRICH_PUSH_POP,
+        CONSTRUCT_PROCESSOR_FREE_SINK,
+        EMIT_TO_NOOP_SINK,
+        ENRICHMENT_COLLECT,
+        ENRICHMENT_ENTRY_CLONE,
+        PENDING_ENRICHED_FUTURE,
+        KEY_VALUE_CREATION,
+        REDACTED_VALUE_CREATION,
+        EMIT_ENRICHMENT_DEPTH,
+        POLL_ATTACHED,
+    ],
+);

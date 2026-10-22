@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: http_extensions ^0.12.0 -> 0.13.0; seatbelt ^0.10.0 -> 0.11.0; templated_uri ^0.6.0 -> 0.7.0; tick ^0.7.1 -> 0.8.0.
+
+## [0.10.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.12.0` of `http_extensions`
+  - Now requires `0.10.0` of `seatbelt`
+  - Now requires `0.7.1` of `tick`
+
 ## [0.9.1] - 2026-09-16
 
 - 🔧 Maintenance

@@ -56,6 +56,16 @@ with `--config`, so the shared policy is intentionally duplicated across all
 three files. Selection is by operating system, not architecture, so both Linux
 runner architectures share the Linux configuration.
 
+The `rallocator` and `seismograph_rallocator` crates are excluded entirely from
+mutation testing in all three configurations, on every runner architecture.
+This includes allocator termination guards, platform backends, and Seismograph
+integration rather than only individual known-hanging candidates. Ordinary tests,
+coverage, and runtime-analysis selection remain unchanged.
+
+The mutation configurations retain intentional-abort test filters and known-hanging
+candidate exclusions as additional safeguards. Hosted Linux mutation jobs also
+disable crash-handler forwarding so expected aborts do not launch crash reporters.
+
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
 inactive source, produce an unchanged test binary, and report the surviving
@@ -97,3 +107,8 @@ Bolero's corpus replay requires filesystem access blocked by Miri isolation.
 Fixed regression seeds and deterministic scanner and parser checks still run
 under Miri. The in-memory Axum example tests use a runtime without an OS I/O
 driver, so they do not require Windows I/O completion port emulation.
+
+## Crate designs
+
+- [`fakeable`](fakeable.md) describes the generated real/fake wrapper model and
+  its optional Mockall integration.

@@ -2,40 +2,58 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! High-performance process telemetry with extensible snapshot sources.
+//! Runtime telemetry for Rust applications.
 //!
-//! Instrumented crates record bounded events while registered sources contribute
-//! point-in-time state to a portable [`snapshot()`].
+//! `seismograph` collects allocation, synchronization, I/O, cache, and task events
+//! to help investigate memory use, contention, and scheduling. Crates such as
+//! `rallocator` and `performables` provide instrumentation.
 //!
-//! ```
-//! use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
+//! Recording is off by default, with sampling and optional backtraces to control
+//! its cost. Events are kept in bounded per-thread buffers. Snapshots combine
+//! those events with state supplied by registered sources, such as allocators
+//! and runtimes.
+//!
+//! # Usage
+//!
+//! Enable the event categories you need, run your workload, then capture a
+//! snapshot. For ownership and synchronization events:
+//!
+//! ```rust
 //! use seismograph::recorder::{Configuration, RecordingPolicy};
 //!
 //! seismograph::recorder(Configuration {
-//!     arc_dereferences: RecordingPolicy::all(false),
+//!     general_events: RecordingPolicy::all(false),
 //!     ..Default::default()
 //! });
-//! seismograph::record(EventClass::ArcDereference, || {
-//!     Record::object(EventKind::ArcDeref, ObjectId::new(42))
-//! });
 //!
-//! let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-//! let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
-//! assert!(
-//!     decoded
-//!         .events
-//!         .events
-//!         .iter()
-//!         .any(|event| event.object_id() == Some(ObjectId::new(42)))
-//! );
+//! // Run application code that uses instrumented libraries.
+//! let snapshot = seismograph::snapshot(Default::default())?;
+//! # let _decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
+//! # seismograph::recorder(Configuration::default());
+//! # Ok::<(), seismograph::Error>(())
 //! ```
 //!
-//! Applications built with the `monitor` feature can publish a localhost
+//! Inspect saved snapshots with `seismograph view` from the
+//! [Seismograph CLI](https://crates.io/crates/seismograph_cli).
+//!
+//! # Live monitoring
+//!
+//! Applications built with the `monitor` feature can publish an OS-authorized local
 //! endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-//! for as long as remote control should remain available:
+//! for as long as local control should remain available. The owning user and
+//! root/elevated administrators can connect without a token. Startup creates
+//! the user's private registry automatically; no administrator setup is needed.
+//! Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
+//! fallback. Windows uses the user's local application-data directory.
+//! Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
+//! the monitor's identity, transport, discovery, persistence, and clock
+//! capability. Omitting it preserves native I/O; `seismograph_protocol`'s
+//! `test-util` feature provides an isolated in-memory implementation for
+//! application tests without host registry setup.
 //!
-//! ```
+//! ```no_run
 //! # #[cfg(feature = "monitor")]
 //! # {
 //! let _monitor = seismograph::monitor::Monitor::builder()
@@ -45,12 +63,19 @@
 //!     .unwrap();
 //! # }
 //! ```
+//!
+//! # Features
+//!
+//! - **`monitor`**: Enables the OS-authorized local monitor server.
+//! - **`test-util`**: Enables `monitor`, the protocol's mock I/O controls, and
+//!   `monitor::Builder::isolated` for native tests using a temporary registry.
 
 use std::fmt;
 use std::path::PathBuf;
 
-/// Localhost monitor server.
+/// OS-authorized local monitor server.
 #[cfg(feature = "monitor")]
+#[cfg_attr(docsrs, doc(cfg(feature = "monitor")))]
 pub mod monitor;
 /// Event types.
 pub mod recorder;
@@ -59,17 +84,27 @@ pub mod snapshot;
 #[doc(hidden)]
 pub mod system;
 
-/// Opaque error reported by seismograph operations.
+/// Opaque error reported by snapshot operations or monitor startup.
+///
+/// [`std::error::Error::source`] exposes the underlying cause when available.
 pub struct Error {
     kind: ErrorKind,
 }
 
 enum ErrorKind {
     Message(&'static str),
-    SourceFailed { source: snapshot::SourceId, error: Box<Error> },
+    SourceFailed {
+        source: snapshot::SourceId,
+        error: Box<Error>,
+    },
     DuplicateSource(snapshot::SourceId),
     InvalidFormat,
-    WriteFile { path: PathBuf, source: std::io::Error },
+    WriteFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[cfg(feature = "monitor")]
+    Monitor(monitor::StartupFailure),
 }
 
 impl Error {
@@ -111,6 +146,13 @@ impl Error {
             kind: ErrorKind::WriteFile { path, source },
         }
     }
+
+    #[cfg(feature = "monitor")]
+    fn monitor(failure: monitor::StartupFailure) -> Self {
+        Self {
+            kind: ErrorKind::Monitor(failure),
+        }
+    }
 }
 
 impl fmt::Debug for Error {
@@ -133,6 +175,8 @@ impl fmt::Display for Error {
             ErrorKind::WriteFile { path, source } => {
                 write!(f, "failed to write seismograph snapshot to {}: {source}", path.display())
             }
+            #[cfg(feature = "monitor")]
+            ErrorKind::Monitor(failure) => fmt::Display::fmt(failure, f),
         }
     }
 }
@@ -142,6 +186,8 @@ impl std::error::Error for Error {
         match &self.kind {
             ErrorKind::SourceFailed { error, .. } => Some(error),
             ErrorKind::WriteFile { source, .. } => Some(source),
+            #[cfg(feature = "monitor")]
+            ErrorKind::Monitor(failure) => std::error::Error::source(failure),
             _ => None,
         }
     }
@@ -153,31 +199,41 @@ pub fn recorder(configuration: recorder::Configuration) {
 }
 
 /// Lazily constructs and records an event in an independently configured class.
-pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> recorder::event::Record) {
+///
+/// The closure runs only while recording for this class is active and not
+/// suppressed. Return `None` to skip the event conditionally. Object sampling
+/// is checked after the closure constructs a record.
+pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> Option<recorder::event::Record>) {
     recorder::record(class, event);
 }
 
 /// Lazily constructs an event and returns the session that accepted it.
+///
+/// Returns `None` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
 pub fn record_session(
     class: recorder::event::EventClass,
-    event: impl FnOnce() -> recorder::event::Record,
+    event: impl FnOnce() -> Option<recorder::event::Record>,
 ) -> Option<recorder::RecordingSession> {
     recorder::record_session(class, event)
 }
 
 /// Records an event only while its originating session remains active.
+///
+/// Returns `false` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
-pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> recorder::event::Record) -> bool {
+pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> Option<recorder::event::Record>) -> bool {
     recorder::record_in_session(session, event)
 }
 
 /// Records a classified event only while its originating session remains active.
+///
+/// Returns `false` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
 pub fn record_in_session_classified(
     session: recorder::RecordingSession,
     class: recorder::event::EventClass,
-    event: impl FnOnce() -> recorder::event::Record,
+    event: impl FnOnce() -> Option<recorder::event::Record>,
 ) -> bool {
     recorder::record_in_session_classified(session, class, event)
 }
@@ -248,16 +304,18 @@ mod tests {
         });
         let object_id = ObjectId::new(41);
         let general = record_session(recorder::event::EventClass::General, || {
-            Record::object(EventKind::MutexAccess, object_id)
+            Some(Record::object(EventKind::MutexAccess, object_id))
         })
         .unwrap();
         let runtime = recorder::select_object_for(recorder::event::EventClass::RuntimeTask, object_id).unwrap();
 
-        assert!(record_in_session(general, || { Record::object(EventKind::MutexAccess, object_id) }));
+        assert!(record_in_session(general, || {
+            Some(Record::object(EventKind::MutexAccess, object_id))
+        }));
         assert!(record_in_session_classified(
             runtime,
             recorder::event::EventClass::RuntimeTask,
-            || Record::runtime(
+            || Some(Record::runtime(
                 recorder::event::EventTimestamp::now(),
                 EventKind::RuntimeCreated,
                 recorder::runtime::RuntimeEvent {
@@ -269,21 +327,21 @@ mod tests {
                     value_1: 0,
                 },
                 recorder::event::BacktraceCapture::Never,
-            )
+            ))
         ));
         recorder(recorder::Configuration::default());
 
         let constructed = AtomicUsize::new(0);
         assert!(!record_in_session(general, || {
             constructed.fetch_add(1, Ordering::Relaxed);
-            Record::object(EventKind::MutexAccess, object_id)
+            Some(Record::object(EventKind::MutexAccess, object_id))
         }));
         assert!(!record_in_session_classified(
             runtime,
             recorder::event::EventClass::RuntimeTask,
             || {
                 constructed.fetch_add(1, Ordering::Relaxed);
-                Record::runtime(
+                Some(Record::runtime(
                     recorder::event::EventTimestamp::now(),
                     EventKind::RuntimeCreated,
                     recorder::runtime::RuntimeEvent {
@@ -295,7 +353,7 @@ mod tests {
                         value_1: 0,
                     },
                     recorder::event::BacktraceCapture::Never,
-                )
+                ))
             }
         ));
         assert_eq!(constructed.load(Ordering::Relaxed), 0);

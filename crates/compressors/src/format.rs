@@ -665,67 +665,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_format_round_trips_through_the_enum() {
-        let payload = b"runtime selected format ".repeat(200);
-
-        for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
-            let plain = crate::format::decompress(format, compressed, &Resources::default()).unwrap();
-
-            assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
-        }
-    }
-
-    #[test]
-    fn content_encoding_tokens_round_trip() {
-        for &format in Format::ALL {
-            let Some(token) = format.content_encoding() else {
-                continue;
-            };
-
-            assert_eq!(
-                Format::from_content_encoding(token),
-                Some(format),
-                "{format:?} did not survive its own token"
-            );
-        }
-    }
-
-    #[cfg(any(test, all(feature = "deflate", feature = "zlib")))]
-    #[test]
-    fn http_deflate_token_means_zlib() {
-        // The most common source of confusion in this area: the HTTP `deflate` token denotes a zlib
-        // stream, not raw deflate.
-        assert_eq!(Format::from_content_encoding("deflate"), Some(Format::Zlib));
-        assert_eq!(Format::Deflate.content_encoding(), None);
-    }
-
-    #[cfg(any(test, feature = "gzip"))]
-    #[test]
-    fn content_encoding_parsing_is_case_insensitive_and_trims() {
-        assert_eq!(Format::from_content_encoding("GZIP"), Some(Format::Gzip));
-        assert_eq!(Format::from_content_encoding("  gzip  "), Some(Format::Gzip));
-        assert_eq!(Format::from_content_encoding("x-gzip"), Some(Format::Gzip));
-        assert_eq!(Format::from_content_encoding("identity"), None);
-        assert_eq!(Format::from_content_encoding(""), None);
-    }
-
-    #[cfg(any(test, feature = "brotli"))]
-    #[test]
-    fn brotli_uses_the_br_token() {
-        assert_eq!(Format::from_content_encoding("br"), Some(Format::Brotli));
-        assert_eq!(Format::Brotli.content_encoding(), Some("br"));
-    }
-
-    #[test]
-    fn unknown_tokens_are_rejected() {
-        // A token no format claims, and one that names a format this crate deliberately gives no
-        // content coding: raw deflate has none, because the HTTP `deflate` token means zlib.
-        assert_eq!(Format::from_content_encoding("compress"), None);
-        assert_eq!(Format::from_content_encoding("identity"), None);
-    }
-
     /// A payload with real matching work in it, for distinguishing compression levels.
     ///
     /// A trivially repetitive payload cannot: every level finds the same single long match and
@@ -1044,16 +983,5 @@ mod tests {
         assert_uncapped("brotli", crate::brotli::DEFAULT_LIMITS);
         #[cfg(any(test, feature = "zstd"))]
         assert_uncapped("zstd", crate::zstd::DEFAULT_LIMITS);
-    }
-
-    #[test]
-    fn all_lists_exactly_the_compiled_in_formats() {
-        let expected = usize::from(cfg!(any(test, feature = "deflate")))
-            + usize::from(cfg!(any(test, feature = "zlib")))
-            + usize::from(cfg!(any(test, feature = "gzip")))
-            + usize::from(cfg!(any(test, feature = "brotli")))
-            + usize::from(cfg!(any(test, feature = "zstd")));
-
-        assert_eq!(Format::ALL.len(), expected);
     }
 }

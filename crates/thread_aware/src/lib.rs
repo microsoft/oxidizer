@@ -35,6 +35,11 @@
 //! The primary goal is performance, so types should aim to minimize contention on synchronization primitives
 //! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
 //! to users.
+//! Relocation is always a callback on the current thread: the runtime must move or schedule the value
+//! to the destination first, then invoke [`ThreadAware::relocate`] on that destination thread.
+//! The destination argument describes the thread executing the callback; it does not identify a
+//! remote thread for the callback to run on. This is important for implementations that release,
+//! allocate, or initialize thread- and NUMA-local state.
 //!
 //! ## Implementing [`ThreadAware`]
 //!
@@ -45,15 +50,15 @@
 //!
 //! ## Relation to [`Send`]
 //!
-//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to another thread,
-//! then the [`ThreadAware`] relocation notification is invoked.
+//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to the destination
+//! thread, then the [`ThreadAware`] relocation notification is invoked on that same thread.
 //!
 //!
 //! ## Thread vs. Core Semantics
 //!
 //! As this library is primarily intended for use in thread-per-core runtimes,
 //! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
+//! primarily arrive on different threads, where each thread is pinned to a different CPU core.
 //! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
 //! be able to observe this fact.
 //!
@@ -133,6 +138,16 @@ extern crate std;
 
 mod wrappers;
 
+/// A guide to authoring thread-aware types: how to implement and test them, and the anti-patterns
+/// to avoid. See [the guide](documentation).
+///
+/// Gated on `derive` because every example is built around `#[derive(ThreadAware)]`, which is only
+/// available with that feature; this keeps the guide's examples valid in a build without it (they
+/// are simply absent) per `docs/feature-gated-doctests.md`.
+#[cfg(all(any(doc, test), feature = "derive"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+pub mod documentation;
+
 pub mod closure;
 
 #[cfg(feature = "test-utils")]
@@ -206,7 +221,7 @@ mod thread;
 /// }
 ///
 /// fn demo(a1: Option<&Thread>, a2: &Thread, mut w: Wrapper) {
-///     // Move the wrapper from a1 to a2.
+///     // The wrapper has already moved from a1 to a2; tell it where it landed.
 ///     w.relocate(a1, a2);
 /// }
 /// ```

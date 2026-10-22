@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0] - 2026-10-20
+
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: layered ^0.3.7 -> 0.3.8; recoverable ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
+
+## [0.10.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - The `metrics` feature now uses OpenTelemetry `0.33` instead of `0.32`.
+    `ResilienceContext::use_metrics` requires a `MeterProvider` from the new
+    version; providers implementing the `0.32` trait are no longer compatible
+    ([#784](https://github.com/microsoft/oxidizer/pull/784)).
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `tick`
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 ## [0.9.0] - 2026-09-10
 
 ### Breaking

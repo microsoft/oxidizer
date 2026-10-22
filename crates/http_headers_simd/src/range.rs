@@ -427,9 +427,12 @@ mod tests {
         // The wide alphabet covers every class, and the narrow one reaches the
         // lengths that hold two specifications and a separator between them.
         let wide_max = if cfg!(miri) { 3 } else { 5 };
-        let narrow_max = if cfg!(miri) { 7 } else { 8 };
+        let narrow_max = if cfg!(miri) { 6 } else { 8 };
         sweep(ALPHABET, 0..=wide_max);
-        sweep(NARROW, 6..=narrow_max);
+        // Miri keeps the two-specification topology. The wide sweep and direct
+        // grammar tests cover whitespace and digit classes; native runs retain
+        // every combination of those classes in the longer inputs.
+        sweep(if cfg!(miri) { b"0-," } else { NARROW }, 6..=narrow_max);
     }
 
     #[test]
@@ -443,7 +446,13 @@ mod tests {
 
         let mut payload = Vec::new();
         for first in 0..=120_u32 {
+            if cfg!(miri) && !matches!(first, 0 | 1 | 8..=11 | 98..=101 | 119 | 120) {
+                continue;
+            }
             for last in 0..=120_u32 {
+                if cfg!(miri) && !matches!(last, 0 | 1 | 8..=11 | 98..=101 | 119 | 120) {
+                    continue;
+                }
                 payload.clear();
                 digits(first, &mut payload);
                 payload.push(b'-');

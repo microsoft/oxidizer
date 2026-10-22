@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0] - 2026-10-20
+
+- The public API exposes types from `observed`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed ^0.28.0 -> 0.29.0.
+
+## [0.4.0] - 2026-10-05
+
+- ⚠️ Breaking
+
+  - Now requires `0.27.0` of `observed`
+
+- ✔️ Tasks
+
+  - bump OpenTelemetry crates to 0.33.0 ([#784](https://github.com/microsoft/oxidizer/pull/784))
+
+- 🔄 Continuous Integration
+
+  - complete cargo-anvil adoption ([#759](https://github.com/microsoft/oxidizer/pull/759))
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

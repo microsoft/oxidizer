@@ -4,27 +4,48 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
-//! Performance-oriented ownership and asynchronous synchronization primitives.
+//! Shared ownership and synchronization with thread-aware runtime and
+//! `seismograph` integration.
 //!
-//! The synchronization types are executor-independent and optimize for the
-//! uncontended case. Acquiring an available lock performs only atomic
-//! operations; waiter allocation and queue locking occur after contention is
-//! observed. Locks support asynchronous acquisition as well as explicit
-//! `lock_sync`, `read_sync`, and `write_sync` operations for synchronous call
-//! sites. Default lock acquisition panics on poison, while explicit `*_result`
-//! APIs return [`sync::PoisonError`] with the acquired guard for recovery.
-//! [`sync::barrier::Barrier`] and [`sync::condition::Condvar`] provide
-//! asynchronous and blocking waits, while [`sync::once::OnceLock`] and
-//! [`sync::once::LazyLock`] instrument one-time initialization.
-//! [`sync::channel`] provides multi-producer queues, oneshot transfer, and
-//! independently versioned latest-value observation. The optional `seismograph`
-//! feature enables runtime ownership and synchronization telemetry.
+//! `performables` provides [`Arc`](arc::Arc), mutex and reader-writer locks,
+//! barriers, condition variables, one-time initialization, and channels.
+//! Synchronization supports blocking callers and executor-independent async
+//! waits.
 //!
-//! [`arc::Arc`] defaults to a process-wide allocation with the same
-//! representation size as [`std::sync::Arc`]. Its thread-aware per-thread and
-//! per-NUMA strategies lazily materialize and reuse affinity-local values.
+//! # Why use this instead of `std` or `tokio`?
+//!
+//! The crate offers:
+//!
+//! - **Uncontended performance.** Optimized for uncontended access, which is
+//!   common in thread-per-core environments.
+//! - **`seismograph` telemetry.** The optional `seismograph` feature records
+//!   ownership, lock contention, and channel activity through Seismograph's
+//!   recorder. Normal operations supply the events without manual
+//!   instrumentation at each call site.
+//! - **Thread-aware ownership.** `Arc` with [`PerThread`](arc::PerThread) or
+//!   [`PerNuma`](arc::PerNuma) implements
+//!   [`ThreadAware`](thread_aware_core::ThreadAware) when its pointee is
+//!   `Send + Sync`. A thread-aware runtime can relocate the pointer to a value
+//!   local to the destination thread or NUMA node, rather than sharing one
+//!   process-wide value as `std::sync::Arc` does.
+//!
+//! See [`arc`] and [`sync`] for the available types and their full APIs.
+//!
+//! # Live monitor integration workload
+//!
+//! Run `cargo +1.95.0 test -p performables --features seismograph --test seismograph_monitor live_monitor -- --ignored --nocapture`
+//! in one terminal, then `cargo +1.95.0 run -p seismograph_cli -- monitor`
+//! in another terminal using the same checkout and OS environment.
+//! Select `performables-integration`,
+//! press Enter to connect, and press `s` to capture. The Primitives and Threads
+//! tabs show real mutex and Arc activity from three named worker threads.
+//! Press Enter in the workload terminal to stop it and remove its endpoint.
+//! No administrator setup or application changes are required.
 
 pub mod arc;
 pub mod sync;
 
+mod error;
 mod telemetry;
+
+pub use error::Error;

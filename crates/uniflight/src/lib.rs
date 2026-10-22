@@ -65,6 +65,9 @@
 //! - [`PerThread`]: Separate state per runtime thread; the same key coalesces within one partition
 //!   partition, with no sharing across thread partitions
 //!
+//! Only the [`PerThread`] and [`PerNuma`] strategies implement [`ThreadAware`].
+//! The process-wide strategy shares its state without relocation.
+//!
 //! ```
 //! use performables::arc::PerNuma;
 //! use uniflight::Merger;
@@ -350,7 +353,7 @@ where
     K: Send + Sync,
     T: Send + Sync,
     S: Strategy<MergerState<K, T>> + Send + Sync,
-    S::State: Send,
+    PerformableArc<MergerState<K, T>, S>: ThreadAware,
 {
     #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
@@ -537,7 +540,9 @@ mod tests {
 
     use super::*;
 
-    static_assertions::assert_impl_all!(Merger<String, String>: ThreadAware);
+    static_assertions::assert_impl_all!(Merger<String, String, PerThread>: ThreadAware);
+    static_assertions::assert_impl_all!(Merger<String, String, PerNuma>: ThreadAware);
+    static_assertions::assert_not_impl_any!(Merger<String, String>: ThreadAware);
 
     #[test]
     fn merger_state_debug_is_opaque() {

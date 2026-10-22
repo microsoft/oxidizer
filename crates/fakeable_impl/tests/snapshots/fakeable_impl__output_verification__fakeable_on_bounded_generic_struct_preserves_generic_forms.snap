@@ -1,0 +1,39 @@
+---
+source: crates/fakeable_impl/src/../tests/output_verification.rs
+expression: "prettyplease::unparse(&result_file)"
+---
+#[allow(non_snake_case)]
+mod __fakeable__MyService {
+    use super::*;
+    pub(super) enum Enum<T: Clone>
+    where
+        T: Send,
+    {
+        Real(MyService<T>),
+        #[cfg(any(feature = "test-util", test))]
+        Fake(FakeMyService<T>),
+    }
+    pub(super) struct MyService<T: Clone>
+    where
+        T: Send,
+    {
+        pub(super) value: T,
+    }
+}
+struct MyService<T: Clone>
+where
+    T: Send,
+{
+    inner: __fakeable__MyService::Enum<T>,
+}
+impl<T: Clone> MyService<T>
+where
+    T: Send,
+{
+    #[cfg(any(feature = "test-util", test))]
+    fn fake(fake_impl: FakeMyService<T>) -> Self {
+        Self {
+            inner: __fakeable__MyService::Enum::Fake(fake_impl),
+        }
+    }
+}

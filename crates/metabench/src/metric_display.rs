@@ -31,17 +31,18 @@ impl TableMetric {
 
 fn descriptor(key: &str) -> (Cow<'static, str>, u8, u8) {
     let known = match key {
-        "criterion/median" => ("Time", 1, 1),
+        "criterion/time" => ("Time", 1, 1),
+        "criterion/median" => ("Median time", 1, 1),
         "alloc_tracker/Allocations" => ("Allocs", 1, 12),
-        "alloc_tracker/Allocated bytes" => ("Bytes", 1, 13),
+        "alloc_tracker/Allocated bytes" => ("Allocated bytes", 1, 13),
         "gungraun.callgrind/Ir" => ("Instr", 1, 2),
         "gungraun.cachegrind/Ir" => ("Instr", 1, 3),
-        "gungraun.callgrind/EstimatedCycles" => ("Cycles", 1, 4),
+        "gungraun.callgrind/EstimatedCycles" => ("Est cycles", 1, 4),
         "perf/instructions" => ("HW Instr", 1, 5),
         "perf/cycles" => ("HW Cycles", 1, 6),
         "criterion/declared_throughput.bits" => ("Bits", 1, 7),
-        "criterion/declared_throughput.bytes" => ("Bytes", 1, 8),
-        "criterion/declared_throughput.bytes_decimal" => ("Decimal Bytes", 1, 9),
+        "criterion/declared_throughput.bytes" => ("Input bytes", 1, 8),
+        "criterion/declared_throughput.bytes_decimal" => ("Input bytes (decimal)", 1, 9),
         "criterion/declared_throughput.elements" => ("Elements", 1, 10),
         "criterion/declared_throughput.elements_and_bytes" => ("Elements And Bytes", 1, 11),
 
@@ -200,5 +201,24 @@ mod tests {
         let metric = TableMetric::new("vtune".to_owned(), "INST_RETIRED.ANY".to_owned());
         assert_eq!(metric.label, "INST RETIRED ANY");
         assert_eq!(metric.priority, 10);
+    }
+
+    #[test]
+    fn primary_metric_descriptors_preserve_labels_and_order() {
+        for (engine, key, label, rank) in [
+            ("criterion", "time", "Time", 1),
+            ("criterion", "median", "Median time", 1),
+            ("gungraun.callgrind", "Ir", "Instr", 2),
+            ("gungraun.cachegrind", "Ir", "Instr", 3),
+            ("gungraun.callgrind", "EstimatedCycles", "Est cycles", 4),
+            ("criterion", "declared_throughput.bits", "Bits", 7),
+            ("criterion", "declared_throughput.bytes", "Input bytes", 8),
+            ("criterion", "declared_throughput.bytes_decimal", "Input bytes (decimal)", 9),
+            ("alloc_tracker", "Allocated bytes", "Allocated bytes", 13),
+        ] {
+            let metric = TableMetric::new(engine.to_owned(), key.to_owned());
+            assert_eq!(metric.label, label);
+            assert_eq!(metric.sort_key(), (1, rank, engine, key));
+        }
     }
 }

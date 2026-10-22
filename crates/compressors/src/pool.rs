@@ -174,7 +174,7 @@ impl Pool {
 
         // A poisoned pool is not worth propagating: recycling is an optimisation, so building a
         // fresh engine is always preferable to failing the caller's compression.
-        let mut engine = self.inner.compressors.lock_sync_result().ok()?.get_mut(&key).and_then(Vec::pop)?;
+        let mut engine = self.inner.compressors.lock_result().ok()?.get_mut(&key).and_then(Vec::pop)?;
 
         engine.reset();
         Some(engine)
@@ -192,7 +192,7 @@ impl Pool {
             return;
         }
 
-        if let Ok(mut guard) = self.inner.compressors.lock_sync_result() {
+        if let Ok(mut guard) = self.inner.compressors.lock_result() {
             // Probe before inserting. `entry(..).or_default()` leaves an empty bucket behind for
             // every key it is asked about, so a full pool would still grow the map without bound.
             if guard.get(&key).map_or(0, Vec::len) < self.inner.capacity
@@ -213,13 +213,7 @@ impl Pool {
             return None;
         }
 
-        let mut engine = self
-            .inner
-            .decompressors
-            .lock_sync_result()
-            .ok()?
-            .get_mut(&wrapper)
-            .and_then(Vec::pop)?;
+        let mut engine = self.inner.decompressors.lock_result().ok()?.get_mut(&wrapper).and_then(Vec::pop)?;
 
         engine.reset(wrapper.expects_zlib_header());
         Some(engine)
@@ -232,7 +226,7 @@ impl Pool {
             return;
         }
 
-        if let Ok(mut guard) = self.inner.decompressors.lock_sync_result() {
+        if let Ok(mut guard) = self.inner.decompressors.lock_result() {
             // Probe before inserting, for the reason given on `return_compressor`.
             if guard.get(&wrapper).map_or(0, Vec::len) < self.inner.capacity
                 && let Some(engine) = engine.take()
@@ -252,7 +246,7 @@ impl Pool {
             return None;
         }
 
-        let mut context = self.inner.zstd_compressors.lock_sync_result().ok()?.pop()?;
+        let mut context = self.inner.zstd_compressors.lock_result().ok()?.pop()?;
 
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
         Some(context)
@@ -265,7 +259,7 @@ impl Pool {
             return;
         }
 
-        if let Ok(mut guard) = self.inner.zstd_compressors.lock_sync_result()
+        if let Ok(mut guard) = self.inner.zstd_compressors.lock_result()
             && guard.len() < self.inner.capacity
             && let Some(context) = context.take()
         {
@@ -280,7 +274,7 @@ impl Pool {
             return None;
         }
 
-        let mut context = self.inner.zstd_decompressors.lock_sync_result().ok()?.pop()?;
+        let mut context = self.inner.zstd_decompressors.lock_result().ok()?.pop()?;
 
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
         Some(context)
@@ -293,7 +287,7 @@ impl Pool {
             return;
         }
 
-        if let Ok(mut guard) = self.inner.zstd_decompressors.lock_sync_result()
+        if let Ok(mut guard) = self.inner.zstd_decompressors.lock_result()
             && guard.len() < self.inner.capacity
             && let Some(context) = context.take()
         {
@@ -359,7 +353,7 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle(pool: &Pool, key: EngineKey) -> usize {
-            pool.inner.compressors.lock_sync().get(&key).map_or(0, Vec::len)
+            pool.inner.compressors.lock().get(&key).map_or(0, Vec::len)
         }
 
         #[test]
@@ -426,7 +420,7 @@ mod tests {
 
             // Poison the compressors mutex the same way a panicking holder would.
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.compressors.lock_sync();
+                let _guard = pool.inner.compressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");
@@ -458,7 +452,7 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle(pool: &Pool, wrapper: Wrapper) -> usize {
-            pool.inner.decompressors.lock_sync().get(&wrapper).map_or(0, Vec::len)
+            pool.inner.decompressors.lock().get(&wrapper).map_or(0, Vec::len)
         }
 
         #[test]
@@ -496,7 +490,7 @@ mod tests {
             let pool = Pool::new();
 
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.decompressors.lock_sync();
+                let _guard = pool.inner.decompressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");
@@ -513,11 +507,11 @@ mod tests {
 
         /// Counts what the pool is holding, which the public API deliberately does not expose.
         fn idle_compressors(pool: &Pool) -> usize {
-            pool.inner.zstd_compressors.lock_sync().len()
+            pool.inner.zstd_compressors.lock().len()
         }
 
         fn idle_decompressors(pool: &Pool) -> usize {
-            pool.inner.zstd_decompressors.lock_sync().len()
+            pool.inner.zstd_decompressors.lock().len()
         }
 
         #[test]
@@ -555,7 +549,7 @@ mod tests {
             let pool = Pool::new();
 
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _guard = pool.inner.zstd_compressors.lock_sync();
+                let _guard = pool.inner.zstd_compressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
             assert!(poisoned.is_err(), "the panic should have been caught");

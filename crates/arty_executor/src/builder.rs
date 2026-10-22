@@ -2,28 +2,25 @@
 // Licensed under the MIT License.
 
 use std::task::Waker;
-use std::time::Duration;
 
-use crate::{Executor, ExecutorCore, ShutdownTimeoutBehavior};
+use observed::Sink;
+
+use crate::{Executor, ExecutorCore};
 
 /// Builds an instance of [`Executor`].
 #[derive(Debug)]
 #[must_use]
 pub struct ExecutorBuilder {
-    shutdown_timeout: Duration,
-    shutdown_timeout_behavior: ShutdownTimeoutBehavior,
     owner_waker: Waker,
+    sink: Sink,
 }
-
-const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl ExecutorBuilder {
     /// Creates a new [`ExecutorBuilder`] with default settings.
     pub fn new() -> Self {
         Self {
-            shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
-            shutdown_timeout_behavior: ShutdownTimeoutBehavior::TerminateProcess,
             owner_waker: Waker::noop().clone(),
+            sink: Sink::noop(),
         }
     }
 
@@ -39,45 +36,18 @@ impl ExecutorBuilder {
         self
     }
 
-    /// How long the executor will wait for cleanup before declaring a shutdown timeout.
+    /// Configures the observed sink used for task lifecycle events.
     ///
-    /// A value of `Duration::ZERO` means shutdown is required to complete immediately,
-    /// with the first call to [`execute_cycle()`][Executor::execute_cycle] after
-    /// [`begin_shutdown()`][Executor::begin_shutdown].
-    ///
-    /// The default value is unspecified and may change in future versions.
-    ///
-    /// # Panics
-    ///
-    /// Shutdown will panic when it begins if the timeout cannot be represented as a future
-    /// [`Instant`][std::time::Instant].
-    pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
-        self.shutdown_timeout = timeout;
-        self
-    }
-
-    /// What happens when the executor declares a shutdown timeout.
-    #[cfg(test)]
-    pub(crate) fn shutdown_timeout_behavior(mut self, behavior: ShutdownTimeoutBehavior) -> Self {
-        self.shutdown_timeout_behavior = behavior;
+    /// The default sink is a no-op.
+    pub fn sink(mut self, sink: Sink) -> Self {
+        self.sink = sink;
         self
     }
 
     /// Builds the executor with the configured settings.
-    ///
-    /// # Safety
-    ///
-    /// The returned object must not be dropped until a call to
-    /// [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`][2].
-    ///
-    /// [1]: Executor::execute_cycle
-    /// [2]: crate::CycleOutcome::Shutdown
     #[must_use]
-    pub unsafe fn build(self) -> Executor {
-        // SAFETY: Forwarding safety guarantees from caller.
-        let core = unsafe { ExecutorCore::new(self.owner_waker, self.shutdown_timeout, self.shutdown_timeout_behavior) };
-
-        Executor::new(core)
+    pub fn build(self) -> Executor {
+        Executor::new(ExecutorCore::new(self.owner_waker, self.sink))
     }
 }
 

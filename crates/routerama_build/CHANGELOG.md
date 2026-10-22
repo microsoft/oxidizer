@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+- Refresh published build-helper documentation and runtime-analysis coverage.
+- Update local dependency requirements: http_path_template ^0.2.1 -> 0.2.2.
+
 ## [0.1.1] - 2026-09-10
 
 ### Maintenance

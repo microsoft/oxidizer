@@ -3,7 +3,7 @@
 
 [package]
 name = "performables"
-version = "0.1.0"
+version = "0.3.0"
 description = "Performance-oriented ownership and asynchronous synchronization primitives."
 readme = "README.md"
 keywords = ["async", "concurrency", "synchronization", "telemetry"]
@@ -44,16 +44,32 @@ loom = { workspace = true }
 
 [dev-dependencies]
 criterion.workspace = true
+ctor.workspace = true
+metabench.workspace = true
+mutants.workspace = true
+seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph_protocol = { path = "../seismograph_protocol" }
 serde = { workspace = true, features = ["std"] }
+static_assertions.workspace = true
+testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
+trybuild.workspace = true
 
 [[bench]]
 name = "performables_uncontended"
 harness = false
 
 [[bench]]
+name = "performables_arc_clone"
+harness = false
+
+[[bench]]
 name = "performables_telemetry_sampling"
 harness = false
+required-features = ["seismograph"]
+
+[[test]]
+name = "seismograph_monitor"
 required-features = ["seismograph"]
 
 [[test]]

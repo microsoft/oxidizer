@@ -614,7 +614,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn enrich_from_request_and_response_add_attributes() {
-        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::<_>::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
@@ -628,25 +628,25 @@ mod tests {
                 attrs.push(KeyValue::new("response.is_err", result.is_err()));
             })
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock_sync().extend(attrs.iter().cloned());
+                attrs_clone.lock().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
 
-        let attrs = recorded_attrs.lock_sync();
+        let attrs = recorded_attrs.lock();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn abandoned_future_records_abandoned_error_type() {
-        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::<_>::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock_sync().extend(attrs.iter().cloned());
+                attrs_clone.lock().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from_async_fn(|_req| async {
                 // This future will never complete because it pends forever.
@@ -664,25 +664,25 @@ mod tests {
         // Drop the future, triggering the MetricsDropGuard.
         drop(future);
 
-        let attrs = recorded_attrs.lock_sync();
+        let attrs = recorded_attrs.lock();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn completed_future_does_not_record_abandoned() {
-        let recorded_attrs = Arc::new(Mutex::new(Vec::<KeyValue>::new()));
+        let recorded_attrs = Arc::new(Mutex::<_>::new(Vec::<KeyValue>::new()));
         let attrs_clone = Arc::clone(&recorded_attrs);
 
         let handler = test_layer()
             .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock_sync().extend(attrs.iter().cloned());
+                attrs_clone.lock().extend(attrs.iter().cloned());
             })
             .layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
 
-        let attrs = recorded_attrs.lock_sync();
+        let attrs = recorded_attrs.lock();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
