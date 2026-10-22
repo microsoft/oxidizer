@@ -32,6 +32,7 @@ impl TimerKey {
 /// timer precision with the cost of frequent timer checks.
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
+#[cfg(any(feature = "test-util", test))]
 pub(crate) type ReadyWakers = BTreeMap<TimerKey, Waker>;
 
 /// Stores one-shot timers.
@@ -108,9 +109,34 @@ impl Timers {
         self.wakers.keys().next().map(TimerKey::tick)
     }
 
+    /// Removes ready timers into caller-provided storage.
+    ///
+    /// Removing existing `BTreeMap` entries does not allocate. Caller-provided storage lets the
+    /// caller release its timer lock before waking tasks without allocating a temporary `Vec`.
+    pub(crate) fn pop_ready_into(&mut self, now: Instant, ready: &mut [Option<Waker>]) -> (usize, Option<Instant>) {
+        self.alive = true;
+
+        let mut count = 0;
+        while count < ready.len() {
+            let Some(entry) = self.wakers.first_entry() else {
+                break;
+            };
+            if entry.key().tick() > now {
+                break;
+            }
+
+            let (_, waker) = entry.remove_entry();
+            ready[count] = Some(waker);
+            count += 1;
+        }
+
+        (count, self.next_timer())
+    }
+
     /// Wakes each timer that is ready.
     ///
     /// Returns the next timer instant, or `None` when no timer remains.
+    #[cfg(any(feature = "test-util", test))]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyWakers) -> Option<Instant> {
         self.alive = true;

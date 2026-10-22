@@ -5962,6 +5962,7 @@ dependencies = [
  "futures",
  "jiff",
  "libc",
+ "metabench",
  "mutants",
  "ohno",
  "performables",

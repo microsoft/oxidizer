@@ -69,6 +69,7 @@ chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
+metabench = { path = "../metabench", default-features = false }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
@@ -115,7 +116,7 @@ name = "interop_jiff"
 required-features = ["test-util"]
 
 [[bench]]
-name = "clock_bench"
+name = "tick_clock"
 harness = false
 
 [[bench]]
