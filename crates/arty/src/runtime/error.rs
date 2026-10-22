@@ -10,9 +10,8 @@ use performables::arc::Arc;
 /// An error constructing or operating a runtime.
 ///
 /// You may receive this error when building a runtime with an invalid worker
-/// count or blocking-pool limit, requesting more workers than are available,
-/// waiting from an async worker, or stopping a runtime whose worker or I/O
-/// driver failed.
+/// count or blocking-pool limit, waiting from an async worker, or stopping a
+/// runtime whose worker or I/O driver failed.
 ///
 /// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 /// fails because a task panicked or was cancelled, its source is a
@@ -20,7 +19,7 @@ use performables::arc::Arc;
 ///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
 /// diagnostics. Do not depend on specific messages or source types to classify
-/// construction or affinity failures. Task joins report `JoinError` directly.
+/// construction failures. Task joins report `JoinError` directly.
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,
@@ -29,10 +28,6 @@ pub struct Error {
 impl Error {
     pub(crate) fn new(source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
         Self { source: source.into() }
-    }
-
-    pub(crate) fn insufficient_processors(requested: usize, available: usize) -> Self {
-        Self::new(InsufficientProcessors { requested, available })
     }
 
     pub(crate) fn invalid_worker_count() -> Self {
@@ -84,24 +79,6 @@ impl StdError for Error {
         Some(self.source.as_ref())
     }
 }
-
-#[derive(Debug)]
-struct InsufficientProcessors {
-    requested: usize,
-    available: usize,
-}
-
-impl Display for InsufficientProcessors {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "requested {} processors, but only {} are available",
-            self.requested, self.available
-        )
-    }
-}
-
-impl StdError for InsufficientProcessors {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeValidation {
@@ -158,13 +135,6 @@ mod tests {
     use std::io;
 
     use super::*;
-
-    #[test]
-    fn processor_failure_preserves_requested_and_available_counts() {
-        let error = Error::insufficient_processors(17, 3);
-        assert_eq!(error.to_string(), "requested 17 processors, but only 3 are available");
-        assert!(error.source().unwrap().source().is_none());
-    }
 
     #[test]
     fn internal_constructor_preserves_display_context() {

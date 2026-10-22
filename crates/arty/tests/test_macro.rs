@@ -57,9 +57,17 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     }
 }
 
-#[test(workers = 4_294_967_295usize)]
-async fn worker_limit_clamps_instead_of_failing_construction(cx: Builtins) {
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+#[test(workers = 3)]
+async fn worker_count_is_exact_even_when_processors_are_shared(cx: Builtins) {
+    let tasks: Vec<_> = cx
+        .control()
+        .workers()
+        .into_iter()
+        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .collect();
+    assert_eq!(tasks.len(), 3);
+    let workers: std::collections::HashSet<_> = futures::future::join_all(tasks).await.into_iter().map(Result::unwrap).collect();
+    assert_eq!(workers.len(), 3);
 }
 
 #[test(workers = 0)]
