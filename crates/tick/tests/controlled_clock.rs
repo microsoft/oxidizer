@@ -122,8 +122,8 @@ fn frozen_clock_constructors_preserve_time() {
 }
 
 #[test]
-fn try_system_time_as_reports_when_the_target_rejects_the_time() {
-    #[derive(Debug)]
+#[should_panic(expected = "target type cannot represent the current SystemTime")]
+fn system_time_as_panics_when_the_target_rejects_the_time() {
     struct AlwaysFailsConversion;
 
     impl TryFrom<SystemTime> for AlwaysFailsConversion {
@@ -134,9 +134,7 @@ fn try_system_time_as_reports_when_the_target_rejects_the_time() {
         }
     }
 
-    let error = Clock::new_frozen().try_system_time_as::<AlwaysFailsConversion>().unwrap_err();
-
-    assert_eq!(error, "conversion always fails");
+    let _: AlwaysFailsConversion = Clock::new_frozen().system_time_as();
 }
 
 #[test]

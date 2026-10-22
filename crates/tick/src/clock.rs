@@ -345,16 +345,20 @@ impl Clock {
     ///
     /// This is a convenience method that retrieves the current [`SystemTime`] via
     /// [`system_time()`][Self::system_time] and converts it to the specified target type.
+    /// It is intentionally infallible for normalized production clock data and all formats
+    /// supported by `tick`. See
+    /// [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as] for the panic boundary.
     ///
     /// # Type Parameters
     ///
     /// * `T` - The target type that implements [`TryFrom<SystemTime>`]. Common examples include
     ///   timestamp types from external crates that can be constructed from a [`SystemTime`].
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns the target type's conversion error when the current [`SystemTime`] is outside
-    /// the target type's representable range.
+    /// Panics if the target type cannot represent the current system time. Supported `tick`
+    /// formats must represent normalized production clock data; failure indicates an unsupported
+    /// target range or a controlled test clock outside that range.
     ///
     /// # Examples
     ///
@@ -363,14 +367,14 @@ impl Clock {
     ///
     /// use tick::Clock;
     ///
-    /// # fn example(clock: &Clock) -> Result<(), std::convert::Infallible> {
-    /// let time = clock.try_system_time_as::<SystemTime>()?;
+    /// # fn example(clock: &Clock) {
+    /// let time = clock.system_time_as::<SystemTime>();
     /// assert_eq!(time, clock.system_time());
-    /// # Ok(())
     /// # }
     /// ```
-    pub fn try_system_time_as<T: TryFrom<SystemTime>>(&self) -> Result<T, T::Error> {
-        self.simple_clock().try_system_time_as()
+    #[must_use]
+    pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
+        self.simple_clock().system_time_as()
     }
 
     /// Retrieves the current [`Instant`] time.

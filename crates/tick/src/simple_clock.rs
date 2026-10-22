@@ -194,12 +194,18 @@ impl SimpleClock {
         }
     }
 
-    /// Retrieves the current system time and converts it to `T`.
+    /// Retrieves the current system time converted to a target type.
     ///
-    /// # Errors
+    /// This method is intentionally infallible for normalized clock data. Every format supported
+    /// by `tick` must accept the current production clock values used with this convenience API.
+    /// Keep conversion errors at explicit [`TryFrom<SystemTime>`] call sites instead of changing
+    /// this method to return a `Result`.
     ///
-    /// Returns the target type's conversion error when the current [`SystemTime`] is outside
-    /// the target type's representable range.
+    /// # Panics
+    ///
+    /// Panics if a target type cannot represent the current system time. This indicates that the
+    /// caller selected an unsupported target range or that a controlled test clock was moved
+    /// outside the target type's documented range.
     ///
     /// # Examples
     ///
@@ -209,13 +215,23 @@ impl SimpleClock {
     /// use tick::SimpleClock;
     ///
     /// let clock = SimpleClock::new_system();
-    /// let time = clock.try_system_time_as::<SystemTime>()?;
+    /// let time = clock.system_time_as::<SystemTime>();
     /// assert!(time <= SystemTime::now());
-    ///
-    /// # Ok::<(), std::convert::Infallible>(())
     /// ```
-    pub fn try_system_time_as<T: TryFrom<SystemTime>>(&self) -> Result<T, T::Error> {
-        T::try_from(self.system_time())
+    #[expect(
+        clippy::match_wild_err_arm,
+        clippy::panic,
+        reason = "conversion failure violates the documented normalized-format contract or a controlled test moved time outside the target range"
+    )]
+    #[must_use]
+    pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
+        match T::try_from(self.system_time()) {
+            Ok(time) => time,
+            Err(_error) => panic!(
+                "system_time_as::<{}> failed: target type cannot represent the current SystemTime (or controlled time is out of range)",
+                std::any::type_name::<T>()
+            ),
+        }
     }
 
     /// Retrieves the current [`Instant`].
