@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-/// The default timeout is 30 seconds.
+/// The default timeout fits most service-to-service calls.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Configuration for the timeout middleware.

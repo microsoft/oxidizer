@@ -52,7 +52,7 @@
 //!             "operation timed out" => RecoveryInfo::retry(),
 //!             _ => RecoveryInfo::never(),
 //!         }),
-//!     // Stop each attempt after 30 seconds.
+//!     // Apply the time limit to each retry attempt.
 //!     Timeout::layer("timeout", &context)
 //!         .timeout_output(|_| "operation timed out".to_string())
 //!         .timeout(Duration::from_secs(30)),

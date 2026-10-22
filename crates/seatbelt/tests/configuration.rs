@@ -14,10 +14,13 @@
 use std::time::Duration;
 
 #[cfg(feature = "breaker")]
+use seatbelt::breaker::{AbandonedPolicy, BreakerConfig, HalfOpenMode};
+#[cfg(feature = "retry")]
+use seatbelt::retry::{Backoff, RetryConfig};
+
+#[cfg(feature = "breaker")]
 #[test]
 fn breaker_defaults_match_the_public_contract() {
-    use seatbelt::breaker::{AbandonedPolicy, BreakerConfig, HalfOpenMode};
-
     let config = BreakerConfig::default();
 
     assert!(config.enabled);
@@ -32,8 +35,6 @@ fn breaker_defaults_match_the_public_contract() {
 #[cfg(feature = "retry")]
 #[test]
 fn retry_defaults_match_the_public_contract() {
-    use seatbelt::retry::{Backoff, RetryConfig};
-
     let config = RetryConfig::default();
 
     assert!(config.enabled);
@@ -88,8 +89,6 @@ fn latency_defaults_match_the_public_contract() {
 #[cfg(all(feature = "serde", feature = "breaker"))]
 #[test]
 fn breaker_configuration_serialization_roundtrips() {
-    use seatbelt::breaker::{AbandonedPolicy, BreakerConfig, HalfOpenMode};
-
     let default = BreakerConfig::default();
     assert_eq!(
         serde_json::to_string(&default).unwrap(),
@@ -126,8 +125,6 @@ fn breaker_configuration_serialization_roundtrips() {
 #[cfg(all(feature = "serde", feature = "retry"))]
 #[test]
 fn retry_configuration_serialization_roundtrips() {
-    use seatbelt::retry::{Backoff, RetryConfig};
-
     let default = RetryConfig::default();
     assert_eq!(
         serde_json::to_string(&default).unwrap(),
