@@ -12,13 +12,14 @@ use nonempty::NonEmpty;
 use observed::emit;
 use performables::arc::Arc;
 use performables::sync::channel;
+use performables::sync::mutex::Mutex;
 use thread_aware::Thread;
 
-use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedTaskFactory};
+use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
+use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -60,8 +61,10 @@ pub(crate) struct DispatcherCore {
     /// special-case logic in some situations that need special handling during shutdown.
     shutdown_started: Arc<AtomicBool>,
     stopped_reported: AtomicBool,
+    shutdown_error: Mutex<Option<Error>>,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
+    workers: Workers,
 
     // Immutable, runtime-local lookup for placement and relocation; ordinary spawn uses a
     // cached index. IDs come only from registered workers, so a non-cryptographic hasher fits.
@@ -99,6 +102,13 @@ impl DispatcherCore {
             .enumerate()
             .map(|(index, endpoint)| (endpoint.thread.id(), WorkerIndex(index)))
             .collect();
+        let workers = Workers::new(
+            worker_endpoints
+                .iter()
+                .map(|endpoint| endpoint.thread.clone())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
         assert_eq!(
             worker_indices.len(),
             worker_endpoints.len(),
@@ -108,7 +118,9 @@ impl DispatcherCore {
             wait_for_shutdown,
             shutdown_started,
             stopped_reported: AtomicBool::new(false),
+            shutdown_error: Mutex::new(None),
             worker_endpoints,
+            workers,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             sink,
@@ -117,8 +129,20 @@ impl DispatcherCore {
     }
 
     /// Stops the runtime. Safe to call multiple times.
-    #[cfg_attr(test, mutants::skip)] // Tests will hang if we mutate away the stop signal.
+    #[cfg_attr(test, mutants::skip)] // Removing the public stop boundary strands runtime workers before tests can assert.
     pub(crate) fn stop(&self) {
+        self.stop_inner();
+    }
+
+    pub(crate) fn stop_with_error(&self, error: Error) {
+        let mut shutdown_error = self.shutdown_error.lock();
+        _ = shutdown_error.get_or_insert(error);
+        drop(shutdown_error);
+        self.stop_inner();
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
+    fn stop_inner(&self) {
         // If we've already started shutting down, don't do it again.
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
@@ -133,6 +157,10 @@ impl DispatcherCore {
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
+    }
+
+    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
+        self.shutdown_error.lock().take()
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -154,20 +182,27 @@ impl DispatcherCore {
         self.worker_indices.get(&thread_id).copied()
     }
 
-    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
-    where
-        M: FnMut() -> FF,
-        FF: FnOnce(Builtins) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), TaskPlacement::Any, make_factory()))
-            .collect()
+    pub(crate) const fn workers(&self) -> &Workers {
+        &self.workers
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
         self.worker_endpoints.first().thread.owner() == thread.owner()
+    }
+
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
+        if self.is_shutting_down() {
+            return Err(Error::runtime_shutting_down());
+        }
+        let endpoint = self
+            .worker_endpoints
+            .get(usize::from(worker_index))
+            .expect("worker index must identify a registered runtime worker");
+        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::AccessIo {
+            access: QueuedIoAccess::new(access),
+        });
+        endpoint.waker.wake_by_ref();
+        send_result.map_err(|_error| Error::runtime_shutting_down())
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -218,6 +253,15 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue(worker_index, TaskPlacement::SpecificThread, future_factory)
     }
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
@@ -420,6 +464,35 @@ mod tests {
         core.stop();
 
         assert!(signal.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn io_access_after_shutdown_is_rejected() {
+        let (tx, rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let dispatcher = DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &threads[0])),
+            observed::Sink::noop(),
+        );
+        dispatcher.stop();
+        let invoked = Arc::new(AtomicBool::new(false));
+
+        assert!(
+            dispatcher
+                .access_io(
+                    WorkerIndex(0),
+                    Box::new({
+                        let invoked = Arc::clone(&invoked);
+                        move |_| invoked.store(true, Ordering::Relaxed)
+                    }),
+                )
+                .is_err()
+        );
+
+        // Rejection is synchronous and the callback publishes no other data.
+        assert!(!invoked.load(Ordering::Relaxed));
+        assert!(matches!(drain_rx(&rx).as_slice(), [AsyncWorkerCommand::Shutdown]));
     }
 
     #[test]

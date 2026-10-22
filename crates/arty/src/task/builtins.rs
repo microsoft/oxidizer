@@ -9,6 +9,8 @@ use observed::emit;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
+use crate::io::Io;
+use crate::runtime::RuntimeControl;
 use crate::runtime::dispatch::DispatcherClient;
 #[cfg(debug_assertions)]
 use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
@@ -51,8 +53,10 @@ use crate::task::scheduler::Scheduler;
 #[derive(Debug, Clone)]
 pub struct Builtins {
     pub(crate) scheduler: Scheduler,
+    control: RuntimeControl,
     thread: Thread,
     clock: Clock,
+    io: Io,
     sink: Sink,
 }
 
@@ -85,6 +89,19 @@ impl Builtins {
         self.validate();
 
         &self.scheduler
+    }
+
+    /// Returns runtime-wide control available to this task.
+    ///
+    /// Use [`RuntimeControl::workers`] to inspect the runtime's worker
+    /// coordinates and [`RuntimeControl::request_stop`] to request shutdown
+    /// without waiting.
+    #[must_use]
+    #[inline]
+    pub fn control(&self) -> &RuntimeControl {
+        self.validate();
+
+        &self.control
     }
 
     /// Returns the associated worker's coordinate, including its NUMA locality.
@@ -136,6 +153,14 @@ impl Builtins {
         self.validate();
 
         &self.clock
+    }
+
+    /// Returns access to I/O contexts hosted by this runtime.
+    #[must_use]
+    #[inline]
+    pub fn io(&self) -> &Io {
+        self.validate();
+        &self.io
     }
 
     /// Returns this runtime's telemetry sink.
@@ -210,16 +235,19 @@ impl ThreadAware for Builtins {
         self.scheduler.relocate_to_worker(destination, worker_index);
         self.thread = destination.clone();
         self.clock.relocate(Some(&source), destination);
+        self.io.relocate(Some(&source), destination);
         self.sink.relocate(Some(&source), destination);
     }
 }
 
 impl Builtins {
-    pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, thread: Thread, sink: Sink) -> Self {
+    pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
         Self {
-            scheduler: Scheduler::new(dispatcher, thread.clone()),
+            scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
+            control: RuntimeControl::new(dispatcher),
             thread,
             clock,
+            io,
             sink,
         }
     }

@@ -148,8 +148,9 @@
 //!
 //! - **`std`** *(default)* - Adds runtime construction support and [`Thread::id`], which need
 //!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
-//!   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs only
-//!   `alloc` and pointer-width atomics.
+//!   types such as `HashMap`, `Path`, `PathBuf`, `SocketAddr`, `SocketAddrV4` and
+//!   `SocketAddrV6`. Turn it off for `no_std`, which needs only `alloc` and pointer-width
+//!   atomics.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]

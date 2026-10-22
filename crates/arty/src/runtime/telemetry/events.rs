@@ -28,7 +28,7 @@ impl From<usize> for SystemMetricCount {
     }
 }
 
-/// Dense index of a worker in the runtime's selected processor set.
+/// Dense index of a worker in runtime startup order.
 ///
 /// This is a runtime-local ordinal, not a hardware processor ID.
 #[classified(SYSTEM_METADATA)]
@@ -90,7 +90,7 @@ pub(crate) struct RuntimeStarted {
     /// Processors available on the system.
     #[dimension(log = "processors.available", metric = "processors.available")]
     pub processors_available: SystemMetricCount,
-    /// Processors actually used (one async worker each).
+    /// Distinct processors assigned to async workers.
     #[dimension(log = "processors.used", metric = "processors.used")]
     pub processors_used: SystemMetricCount,
     #[dimension(log = "blocking_worker_pool.mode", metric = "blocking_worker_pool.mode")]

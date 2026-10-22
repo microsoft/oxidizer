@@ -80,17 +80,17 @@ mod tests {
         let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();
 
-        // The first probe should be accepted
+        // The first probe is accepted.
         assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
 
-        // The second probe immediately should be rejected
+        // The immediate second probe is rejected.
         assert_eq!(probe.allow_probe(now), AllowProbeResult::Rejected);
 
-        // After 3 seconds, still should be rejected
+        // After 3 seconds, the probe is still rejected.
         let later = now + Duration::from_secs(3);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Rejected);
 
-        // After cooldown, the probe should be accepted again
+        // After the cooldown, the probe is accepted again.
         let later = now + Duration::from_secs(6);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Accepted);
     }
@@ -100,14 +100,14 @@ mod tests {
         let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();
 
-        // The first probe should be accepted
+        // The first probe is accepted.
         assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
 
-        // After exactly cool-down duration, the probe should still be rejected
+        // At the exact cooldown duration, the probe is still rejected.
         let later = now + Duration::from_secs(5);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Rejected);
 
-        // After cool-down + 1 microsecond, the probe should be accepted
+        // One microsecond after the cooldown, the probe is accepted.
         let later = now + Duration::from_secs(5) + Duration::from_micros(1);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Accepted);
     }

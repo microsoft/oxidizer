@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Fallback resilience middleware for services, applications, and libraries.
+//! Fallback middleware for services, applications, and libraries.
 //!
-//! This module provides a fallback mechanism that replaces invalid service output
-//! with a user-defined alternative. The primary types are [`Fallback`] and
-//! [`FallbackLayer`]:
+//! This module replaces invalid service output with another value.
+//! It provides these main types:
 //!
-//! - [`Fallback`] is the middleware that wraps an inner service and applies fallback logic
-//! - [`FallbackLayer`] is used to configure and construct the fallback middleware
+//! - [`Fallback`] wraps an inner service and applies a fallback.
+//! - [`FallbackLayer`] configures and creates the fallback middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -35,59 +34,52 @@
 //!
 //! # Configuration
 //!
-//! The [`FallbackLayer`] uses a type-state pattern to enforce that all required
-//! properties are configured before the layer can be built. This compile-time
-//! safety ensures that you cannot accidentally create a fallback layer without
-//! properly specifying the predicate and the fallback action:
+//! [`FallbackLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these properties:
 //!
-//! - [`should_fallback`][FallbackLayer::should_fallback]: Required predicate that decides whether the output needs replacing
-//! - [`fallback`][FallbackLayer::fallback] or [`fallback_async`][FallbackLayer::fallback_async]: Required action that produces the replacement output
+//! - [`should_fallback`][FallbackLayer::should_fallback] decides whether to replace output.
+//! - [`fallback`][FallbackLayer::fallback] or [`fallback_async`][FallbackLayer::fallback_async] creates replacement output.
 //!
-//! Each fallback layer requires an identifier for telemetry purposes. This
-//! identifier should use `snake_case` naming convention to maintain consistency
-//! across the codebase.
+//! Each fallback layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! # Sync and Async Fallback
+//! # Synchronous and asynchronous fallback
 //!
-//! Fallback actions can be either synchronous or asynchronous:
+//! A fallback action can be synchronous or asynchronous:
 //!
-//! - [`fallback`][FallbackLayer::fallback]: Synchronous - the closure runs inline.
-//! - [`fallback_async`][FallbackLayer::fallback_async]: Asynchronous - the closure
-//!   returns a `Future` that is `.await`ed.
-//! - [`fallback_output`][FallbackLayer::fallback_output]: Convenience shorthand that
-//!   clones a fixed value on every invocation.
+//! - [`fallback`][FallbackLayer::fallback] runs the closure inline.
+//! - [`fallback_async`][FallbackLayer::fallback_async] waits for the returned `Future`.
+//! - [`fallback_output`][FallbackLayer::fallback_output] clones a fixed value.
 //!
-//! Both [`fallback`][FallbackLayer::fallback] and [`fallback_async`][FallbackLayer::fallback_async]
-//! receive the original (invalid) output and [`FallbackActionArgs`] with additional context,
-//! and produce a replacement.
+//! Both actions receive the invalid output and [`FallbackActionArgs`].
 //!
 //! # Defaults
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
 //! | Predicate | `None` (required) | Decides when fallback is needed | [`should_fallback`][FallbackLayer::should_fallback] |
 //! | Action | `None` (required) | Produces the replacement output | [`fallback`][FallbackLayer::fallback], [`fallback_async`][FallbackLayer::fallback_async], [`fallback_output`][FallbackLayer::fallback_output] |
 //! | Enable condition | Always enabled | Fallback is applied to all requests | [`enable_if`][FallbackLayer::enable_if], [`enable_always`][FallbackLayer::enable_always], [`disable`][FallbackLayer::disable] |
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Fallback`] type is thread-safe and implements both `Send` and `Sync` as
-//! enforced by the `Service` trait it implements.
+//! [`Fallback`] implements `Send` and `Sync` as required by its `Service` implementation.
 //!
 //! # Telemetry
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when a fallback action is invoked
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: When a fallback action runs
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Fallback identifier from [`Fallback::layer`]
-//!   - `resilience.event.name`: Always `fallback`
+//!   - `resilience.event.name`: `fallback`
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -110,7 +102,7 @@
 //! # async fn execute_unreliable_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## Async Fallback
+//! ## Asynchronous fallback
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -133,7 +125,7 @@
 //! # async fn execute_unreliable_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## With Observability
+//! ## Conditional fallback
 //!
 //! ```rust
 //! # use tick::Clock;

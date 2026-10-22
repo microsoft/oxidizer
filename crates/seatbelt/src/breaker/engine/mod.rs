@@ -30,13 +30,12 @@ impl CircuitState {
 /// Result of attempting to enter the circuit.
 #[derive(Debug, Clone)]
 pub(crate) enum EnterCircuitResult {
-    /// The operation is allowed to proceed.
+    /// The operation can proceed.
     ///
-    /// The `probe` indicates that this is a test operation used to evaluate whether
-    /// the circuit can be closed again.
+    /// `probe` marks an operation that tests whether the circuit can close.
     Accepted { mode: ExecutionMode },
 
-    /// Operation is rejected due to open circuit.
+    /// The open circuit rejects the operation.
     Rejected,
 }
 
@@ -45,17 +44,17 @@ pub(crate) enum ExitCircuitResult {
     /// The state remains unchanged.
     Unchanged,
 
-    /// Circuit transitioned to Open state.
+    /// The circuit changed to open.
     Opened(HealthInfo),
 
-    /// Circuit re-transitioned to Open state due to a failure in Half-Open state.
+    /// A failed half-open probe changed the circuit back to open.
     Reopened,
 
-    /// Circuit transitioned back to Closed state.
+    /// The circuit changed back to closed.
     Closed(Stats),
 }
 
-/// Configuration options for the circuit breaker engine.
+/// Configures the circuit breaker engine.
 #[derive(Debug, Clone)]
 pub(crate) struct EngineOptions {
     pub break_duration: Duration,
@@ -63,20 +62,20 @@ pub(crate) struct EngineOptions {
     pub probes: probing::ProbesOptions,
 }
 
-/// Determines the mode of execution for an operation.
+/// Identifies the execution mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ExecutionMode {
     /// Regular operation.
     Normal,
 
-    /// A probe operation to test the health of the underlying service.
+    /// A probe that tests the inner service.
     Probe,
 }
 
 // Type alias for the default engine with telemetry.
 pub(crate) type Engine = EngineTelemetry<EngineCore>;
 
-/// Trait defining the behavior of a circuit breaker engine.
+/// Defines circuit breaker engine behavior.
 pub(crate) trait CircuitEngine: Debug + Send + Sync + 'static {
     fn enter(&self) -> EnterCircuitResult;
 

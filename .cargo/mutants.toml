@@ -35,6 +35,8 @@ profile = "mutants"
 # Retain fatal-path tests needed to detect mutations in termination guards;
 # skip the remaining intentional-abort tests only during mutation runs.
 # Exact metabench deadlines use FakeClock/FakeProcess; keep real-time stress outside mutation runs.
+# Type/trait UI contracts stay in native/careful suites. Runtime-body mutations
+# do not change trait bounds, so rebuilding UI diagnostics adds no runtime coverage.
 additional_cargo_test_args = [
     "--locked", "--tests", "--",
     "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
@@ -46,6 +48,7 @@ additional_cargo_test_args = [
     "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
     "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
     "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
+    "--skip", "type_system_contracts",
 ]
 
 exclude_re = [
@@ -142,8 +145,85 @@ exclude_re = [
     # Inverting the Linux wait predicate spins on immediate EAGAIN responses,
     # so the per-syscall timeout cannot bound it. Reproduced in an isolated test.
     'crates/rallocator/src/hal/linux/mod.rs:\d+:\d+: replace == with != in wait$',
+    # Synchronization progress faults reproduced as whole-process hangs on
+    # Linux x64/ARM64 in PR #854. Retain other mutations in these functions,
+    # native behavioral tests, coverage, and Miri; do not spend minutes per hang.
+    'crates/arty/src/runtime/worker/signal.rs:\d+:\d+: delete ! in WorkerSignal::wait_for_notification$',
+    'crates/arty/src/runtime/worker/signal.rs:\d+:\d+: replace WorkerSignal::notify with \(\)$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace & with (\||\^) in WatchReceiver<T>::wait_for_async$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: delete ! in WatchReceiver<T>::wait_for_async$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace Waiter::wake with \(\)$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace State::try_take -> bool with false$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace State::(notify_one|notify_from) with \(\)$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace == with != in State::notify_from$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace State::notify_waiter -> bool with (true|false)$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace Notify<M>::notify_one with \(\)$',
+    'crates/performables/src/sync/raw_mutex.rs:\d+:\d+: replace <impl Drop for RawMutexGuard.*>::drop with \(\)$',
+    'crates/performables/src/sync/slot_list.rs:\d+:\d+: replace SlotList<T>::(remove|pop_front) -> Option<T> with None$',
+    'crates/performables/src/sync/slot_list.rs:\d+:\d+: replace != with == in SlotList<T>::remove$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Timeout::elapsed -> Duration with Default::default\(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Timeout::(remaining_after|remaining) -> Option<Duration> with Some\(Default::default\(\)\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: delete ! in Timeout::remaining_after$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Waiter::register with \(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace Waiter::take_waker -> Option<Waker> with None$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: delete ! in EagerWaitQueue::enqueue_if_needed_marked$',
+    # Reproduced with MUTATION_TESTING=1 and progress watchdogs disabled.
+    # Only the single-participant shortcut inversion hangs; keep arrival-count comparisons.
+    'crates/performables/src/sync/barrier.rs:164:29: replace == with != in Barrier<Async>::arrive$',
+    'crates/performables/src/sync/broadcast.rs:\d+:\d+: replace Broadcast::register -> bool with (true|false)$',
+    'crates/performables/src/sync/broadcast.rs:\d+:\d+: delete ! in Broadcast::wake_all$',
+    'crates/performables/src/sync/broadcast.rs:\d+:\d+: replace Broadcast::wake_all with \(\)$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace WatchShared<T>::status -> u64 with 0$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace WatchShared<T>::publish with \(\)$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace WatchSender<T>::send -> Result<\(\), Error<T>> with Ok\(\(\)\)$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace <impl Drop for WatchSender<T>>::drop with \(\)$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace == with != in <impl Drop for WatchSender<T>>::drop$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace WatchReceiver<T>::try_changed -> Option<Result<\(\), Error>> with None$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace & with (\||\^) in WatchReceiver<T>::change_status$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: delete ! in WatchReceiver<T>::change_status$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: replace == with != in WatchReceiver<T>::change_status$',
+    'crates/performables/src/sync/channel.rs:\d+:\d+: delete ! in WatchReceiver<T>::observe_change$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace State::try_take -> bool with true$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace Notify<M>::try_wait -> bool with true$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace Notify<M>::wait with \(\)$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: delete ! in Notify<M>::wait$',
+    'crates/performables/src/sync/notify.rs:\d+:\d+: replace Notify<M>::wait_contended(_with)? -> bool with (true|false)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace <impl Wake for ThreadWaker>::wake with \(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace EagerWaitQueue::wake_(one|all)(_marked)? with \(\)$',
+    'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace EagerWaitQueue::enqueue_if_needed_marked -> bool with (true|false)$',
+    'crates/performables/src/sync/lock/native.rs:\d+:\d+: replace RwLockReadGuard.*::release_native with \(\)$',
+    'crates/performables/src/sync/mutex/hal/mod.rs:\d+:\d+: replace <impl Drop for Unlock.*>::drop with \(\)$',
+    'crates/performables/src/sync/mutex/hal/mod.rs:\d+:\d+: replace wake_all_at_address with \(\)$',
+    'crates/performables/src/sync/mutex/hal/portable.rs:\d+:\d+: replace Condvar::notify_(one|all) with \(\)$',
+    'crates/performables/src/sync/mutex/hal/portable.rs:\d+:\d+: replace Mutex::is_poisoned -> bool with false$',
+    'crates/performables/src/sync/mutex/native.rs:\d+:\d+: replace Mutex<T, Sync>::release_panicking_native with \(\)$',
+    'crates/performables/src/sync/mutex/native.rs:\d+:\d+: replace MutexGuard.*::release_native with \(\)$',
+    'crates/performables/src/sync/lock/hal/portable.rs:\d+:\d+: replace RwLock::read_unlock with \(\)$',
+    'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace Mutex::unlock with \(\)$',
+    'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace == with != in Mutex::unlock$',
+    # Reversing contended acquisition also stalls native ARM tests.
+    'crates/performables/src/sync/mutex/hal/address.rs:\d+:\d+: replace != with == in Mutex::lock_contended$',
+    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace (wake|wake_lock|wake_condition_(one|all)) with \(\)$',
+    # Windows wake-call deletion also strands native sleepers.
+    'crates/performables/src/sync/mutex/hal/windows.rs:\d+:\d+: replace (wake_lock|wake_condition_(one|all)) with \(\)$',
+    # FUTEX operation codes and PRIVATE_FLAG have disjoint bits; XOR is identical.
+    'crates/performables/src/sync/mutex/hal/linux.rs:\d+:\d+: replace \| with \^$',
+    # AND mismatches private wait/wake queues or turns wake into a blocking wait.
+    'crates/performables/src/sync/mutex/hal/linux.rs:(11|12):\d+: replace \| with &$',
     'crates/performables/src/sync/condition.rs:\d+:\d+: replace Condvar<Sync>::notify_one with \(\)$',
     'crates/performables/src/sync/wait_queue.rs:\d+:\d+: replace WaitQueue::wake_all with \(\)$',
+    # Exact ownership/progress mutations strand native RwLock tests, as confirmed
+    # by bounded Windows mutation runs. Keep all other mutations in these methods.
+    'crates/performables/src/sync/lock/native.rs:\d+:\d+: replace RwLockWriteGuard.*::release_native with \(\)$',
+    'crates/performables/src/sync/lock/hal/address.rs:12:\d+: replace - with (\+|/)$',
+    'crates/performables/src/sync/lock/hal/address.rs:14:\d+: replace - with \+$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace RwLock::try_read -> .* with None$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with (==|>) in RwLock::try_read$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace (== with !=|& with (\||\^)) in RwLock::write_contended_with$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace RwLock::(read_unlock|write_unlock|write_unlock_with) with \(\)$',
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with > in RwLock::read_contended_with$',
+    # The preceding saturation assertion already rejects the equality case.
+    'crates/performables/src/sync/lock/hal/address.rs:\d+:\d+: replace < with <= in RwLock::read_contended_with$',
     'crates/rallocator/src/tuning_telemetry.rs:50:48: replace - with (\+|/)$',
     'crates/rallocator/src/tuning_telemetry.rs:\d+:\d+: replace close_recording -> usize with 1$',
     'crates/rallocator/src/allocator/medium.rs:\d+:\d+: replace - with \+ in MediumCache::refill_count$',

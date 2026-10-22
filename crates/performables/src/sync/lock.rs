@@ -12,6 +12,7 @@ use std::task::{Context, Poll};
 
 use super::{Async, Mode, Sync};
 
+mod hal;
 mod native;
 
 use super::panic_poisoned;
@@ -30,6 +31,8 @@ const READERS: usize = WAITERS - 1;
 /// [`write_async`](RwLock::write_async).
 ///
 /// Uncontended reads and writes use atomic operations and do not allocate.
+/// Windows and Linux use crate-owned atomic state with address-based parking;
+/// other targets retain the standard library's blocking backend.
 /// The lock is poisoned when an exclusive write guard is dropped during an
 /// unwind that began after the guard was acquired. Read guards never poison it.
 pub struct RwLock<T: ?Sized, M: Mode = Sync> {
@@ -38,6 +41,33 @@ pub struct RwLock<T: ?Sized, M: Mode = Sync> {
     // native or atomic ownership evidence before accessing this cell.
     raw: M::RwLockState,
     value: UnsafeCell<T>,
+}
+
+/// Internal synchronous reader-writer lock state.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct StateSync {
+    inner: hal::RwLock,
+}
+
+impl StateSync {
+    pub(super) const fn new() -> Self {
+        Self { inner: hal::RwLock::new() }
+    }
+}
+
+/// Internal evidence of synchronous shared ownership.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ReadGuardSync<'a> {
+    inner: hal::ReadGuard<'a>,
+}
+
+/// Internal evidence of synchronous exclusive ownership.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WriteGuardSync<'a> {
+    inner: hal::WriteGuard<'a>,
 }
 
 /// Internal asynchronous reader-writer lock ownership state.
@@ -84,6 +114,7 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     /// # Panics
     ///
     /// Panics after acquisition if a writer poisoned the lock.
+    /// Panics if native parking fails or too many readers hold the lock.
     pub fn read(&self) -> RwLockReadGuard<'_, T, M> {
         match self.read_result() {
             Ok(guard) => guard,
@@ -129,6 +160,7 @@ impl<T: ?Sized, M: Mode> RwLock<T, M> {
     /// # Panics
     ///
     /// Panics after acquisition if a writer poisoned the lock.
+    /// Panics if native parking fails.
     pub fn write(&self) -> RwLockWriteGuard<'_, T, M> {
         match self.write_result() {
             Ok(guard) => guard,
@@ -644,6 +676,17 @@ impl<T: ?Sized> Drop for RwLockWriteFuture<'_, T> {
 }
 
 /// Shared ownership of an [`RwLock`] using the same synchronization mode.
+///
+/// Native [`Sync`] guards cannot be transferred to another thread.
+///
+/// ```compile_fail
+/// use performables::sync::lock::RwLock;
+/// let lock = RwLock::<u64>::new(7);
+/// let guard = lock.read();
+/// std::thread::scope(|scope| {
+///     scope.spawn(move || drop(guard));
+/// });
+/// ```
 pub struct RwLockReadGuard<'a, T: ?Sized, M: Mode = Sync> {
     lock: &'a RwLock<T, M>,
     raw: M::RwLockReadGuard<'a>,
@@ -685,6 +728,17 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for RwLockReadGuard<'_, T, 
 }
 
 /// Exclusive ownership of an [`RwLock`] using the same synchronization mode.
+///
+/// Native [`Sync`] guards cannot be transferred to another thread.
+///
+/// ```compile_fail
+/// use performables::sync::lock::RwLock;
+/// let lock = RwLock::<u64>::new(7);
+/// let guard = lock.write();
+/// std::thread::scope(|scope| {
+///     scope.spawn(move || drop(guard));
+/// });
+/// ```
 pub struct RwLockWriteGuard<'a, T: ?Sized, M: Mode = Sync> {
     lock: &'a RwLock<T, M>,
     raw: M::RwLockWriteGuard<'a>,
@@ -738,8 +792,9 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for RwLockWriteGuard<'_, T,
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::{Arc as StdArc, TryLockError};
+    use std::sync::Arc as StdArc;
     use std::task::{Wake, Waker};
 
     use super::*;
@@ -765,6 +820,20 @@ mod tests {
     }
 
     #[test]
+    fn synchronous_state_retains_exclusion_across_ownership_transitions() {
+        let state = StateSync::new();
+        let mut reader = state.inner.read();
+        let writer_blocked = state.inner.try_write().is_none();
+        state.inner.read_unlock(&mut reader);
+        let mut writer = state.inner.try_write().unwrap();
+        let reader_blocked = state.inner.try_read().is_none();
+        state.inner.write_unlock(&mut writer);
+        let mut reader = state.inner.try_read().unwrap();
+        state.inner.read_unlock(&mut reader);
+        assert_eq!((writer_blocked, reader_blocked, state.inner.is_poisoned()), (true, true, false));
+    }
+
+    #[test]
     fn native_try_acquisitions_report_success_and_poison() {
         let lock = RwLock::<_, Sync>::new(0);
         drop(lock.try_write_result_native().unwrap().unwrap());
@@ -778,23 +847,14 @@ mod tests {
     }
 
     #[test]
-    fn native_guard_release_is_idempotent() {
+    fn native_guard_destruction_releases_both_ownership_modes() {
         let lock = RwLock::<_, Sync>::new(0);
-        let mut guard = lock.write();
-
-        guard.release_native();
-        guard.release_native();
-
-        assert!(lock.try_write().is_some());
-    }
-
-    #[test]
-    fn native_contended_paths_acquire_the_released_lock() {
-        let lock = RwLock::<_, Sync>::new(0);
-
-        drop(lock.read_result_from_native(Err(TryLockError::WouldBlock)).unwrap());
-        drop(lock.write_result_from_native(Err(TryLockError::WouldBlock)).unwrap());
-
+        let reader = lock.read();
+        assert!(lock.try_write().is_none());
+        drop(reader);
+        let writer = lock.write();
+        assert!(lock.try_read().is_none());
+        drop(writer);
         assert!(lock.try_write().is_some());
     }
 
