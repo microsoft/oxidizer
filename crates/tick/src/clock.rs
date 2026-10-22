@@ -169,13 +169,13 @@ use crate::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use futures::StreamExt;
 /// use tick::{Clock, PeriodicTimer};
 ///
 /// # async fn timer_example(clock: &Clock) {
 /// let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(10));
 ///
-/// while let Some(()) = timer.next().await {
+/// loop {
+///     timer.next().await;
 ///     // do something
 ///         # break;
 /// }

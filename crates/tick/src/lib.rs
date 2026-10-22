@@ -240,21 +240,18 @@
 //! ```
 //! use std::time::Duration;
 //!
-//! use futures::StreamExt;
 //! use tick::{Clock, PeriodicTimer};
 //!
 //! # async fn periodic_timer_example(clock: &Clock) {
 //! // Delay for 10ms before the timer starts ticking
 //! clock.delay(Duration::from_millis(10)).await;
 //!
-//! let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+//! let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 //!
-//! timer
-//!     .take(3)
-//!     .for_each(async |()| {
-//!         // Do something every 1ms
-//!     })
-//!     .await;
+//! for _ in 0..3 {
+//!     timer.next().await;
+//!     // Do something every 1ms
+//! }
 //! # }
 //! ```
 //!
@@ -340,7 +337,7 @@ pub use clock_control::ClockControl;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
-pub use periodic_timer::PeriodicTimer;
+pub use periodic_timer::{PeriodicTimer, TimerTick};
 pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
 #[cfg(any(feature = "fmt", test))]

@@ -6,15 +6,14 @@
 #![cfg(feature = "test-util")]
 
 use std::error::Error as _;
+use std::future::Future as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(feature = "tokio")]
-use futures::StreamExt as _;
-use futures::{FutureExt as _, Stream};
+use futures::FutureExt as _;
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 use tick::{Clock, ClockControl, Delay, FutureExt as _, PeriodicTimer, SimpleClock};
@@ -282,10 +281,13 @@ fn periodic_timer_ignores_real_time_until_controlled_time_advances() {
     let clock = control.to_clock();
     let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
     control.advance(Duration::from_millis(2));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    let Poll::Ready(tick) = poll_timer(&mut timer) else {
+        panic!("the timer must fire after controlled time advances");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
 }
 
 #[test]
@@ -293,11 +295,14 @@ fn periodic_timer_fires_at_its_exact_controlled_deadline() {
     let control = ClockControl::new();
     let clock = control.to_clock();
     let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_millis(1));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    let Poll::Ready(tick) = poll_timer(&mut timer) else {
+        panic!("the timer must fire at its controlled deadline");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
 }
 
 #[test]
@@ -305,13 +310,13 @@ fn zero_period_is_clamped_to_exactly_one_millisecond() {
     let control = ClockControl::new();
     let clock = control.to_clock();
     let mut timer = PeriodicTimer::new(&clock, Duration::ZERO);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_micros(999));
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_micros(1));
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    assert!(poll_timer(&mut timer).is_ready());
 }
 
 #[test]
@@ -574,8 +579,9 @@ async fn timeout_and_periodic_timer_cover_both_tokio_outcomes() {
     assert_eq!(value, 10);
 
     let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
-    assert_eq!(timer.next().await, Some(()));
-    assert_eq!(timer.next().await, Some(()));
+    let first = timer.next().await;
+    let second = timer.next().await;
+    assert!(second.observed_at() >= first.observed_at());
 }
 
 fn poll_delay(delay: &mut Delay) -> Poll<()> {
@@ -583,7 +589,7 @@ fn poll_delay(delay: &mut Delay) -> Poll<()> {
     std::pin::pin!(delay).poll(&mut context)
 }
 
-fn poll_timer(timer: &mut PeriodicTimer) -> Poll<Option<()>> {
+fn poll_timer(timer: &mut PeriodicTimer) -> Poll<tick::TimerTick> {
     let mut context = Context::from_waker(Waker::noop());
-    std::pin::pin!(timer).poll_next(&mut context)
+    std::pin::pin!(timer.next()).poll(&mut context)
 }

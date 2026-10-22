@@ -19,3 +19,16 @@ directly.
 
 When a new `tick::fmt` type is added, its public integration tests must show
 that `system_time_as` accepts representative normalized production clock data.
+
+## Periodic timers do not expose `futures_core::Stream`
+
+`PeriodicTimer::next` is the public iteration API. It returns a `TimerTick` with
+the clock instant observed when the tick completed.
+
+`PeriodicTimer` must not implement `futures_core::Stream`. A 0.x futures crate
+in the public surface would couple every `tick` consumer to that external API.
+Applications that need stream combinators can adapt the timer locally with
+`futures::stream::unfold`, as shown in the `PeriodicTimer` rustdoc.
+
+Keep `futures` as a development dependency only when examples or tests need its
+executor or extension helpers. It must not be a normal dependency of `tick`.

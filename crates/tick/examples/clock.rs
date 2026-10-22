@@ -6,7 +6,6 @@
 
 use std::time::Duration;
 
-use futures::StreamExt;
 use tick::fmt::Iso8601;
 use tick::{Clock, FutureExt, PeriodicTimer};
 
@@ -24,13 +23,11 @@ async fn main() -> Result<(), ohno::AppError> {
     api.do_something().await?;
 
     // Execute a periodic timer.
-    let timer = PeriodicTimer::new(&clock, Duration::from_secs(2));
-    timer
-        .take(3)
-        .for_each(async |()| {
-            println!("Timer fired in background!");
-        })
-        .await;
+    let mut timer = PeriodicTimer::new(&clock, Duration::from_secs(2));
+    for _ in 0..3 {
+        let tick = timer.next().await;
+        println!("Timer fired at {:?}!", tick.observed_at());
+    }
 
     // Apply a timeout to long operations.
     match clock.delay(Duration::from_secs(30)).timeout(&clock, Duration::from_secs(2)).await {

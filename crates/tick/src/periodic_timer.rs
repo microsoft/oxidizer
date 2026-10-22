@@ -1,11 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::pin::Pin;
+use std::future::poll_fn;
 use std::task::{Context, Poll, Waker};
-use std::time::Duration;
-
-use futures_core::Stream;
+use std::time::{Duration, Instant};
 
 use super::Clock;
 use super::timers::TimerKey;
@@ -25,13 +23,10 @@ use crate::timers::TIMER_RESOLUTION;
 ///
 /// > **Note**: The periodic timer is not affected by adjustments to the system clock.
 ///
-/// # Stream Behavior
+/// # Timer behavior
 ///
-/// `PeriodicTimer` implements [`Stream`] and will never complete. The stream produces
-/// a tick every period indefinitely. Use stream combinators like [`StreamExt::take`]
-/// to limit the number of ticks.
-///
-/// [`StreamExt::take`]: https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.take
+/// Call [`next`][Self::next] to wait for each tick. A periodic timer does not terminate; callers
+/// decide how many ticks to await.
 ///
 /// # Examples
 ///
@@ -40,18 +35,15 @@ use crate::timers::TIMER_RESOLUTION;
 /// ```
 /// use std::time::Duration;
 ///
-/// use futures::StreamExt;
 /// use tick::{Clock, PeriodicTimer, Stopwatch};
 ///
 /// # async fn periodic_timer_example(clock: &Clock) {
-/// let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 ///
-/// timer
-///     .take(3)
-///     .for_each(async |()| {
-///         // Do something every 1ms
-///     })
-///     .await;
+/// for _ in 0..3 {
+///     let tick = timer.next().await;
+///     assert!(tick.observed_at() <= clock.instant());
+/// }
 /// # }
 /// ```
 ///
@@ -60,32 +52,71 @@ use crate::timers::TIMER_RESOLUTION;
 /// ```
 /// use std::time::Duration;
 ///
-/// use futures::StreamExt;
 /// use tick::{Clock, PeriodicTimer};
 ///
 /// # async fn periodic_timer_example(clock: &Clock) {
 /// // Delay for 10ms before the timer starts ticking
 /// clock.delay(Duration::from_millis(10)).await;
 ///
-/// let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 ///
-/// timer
-///     .take(3)
-///     .for_each(async |()| {
-///         // Do something every 1ms
-///     })
-///     .await;
+/// for _ in 0..3 {
+///     timer.next().await;
+/// }
 /// # }
 /// ```
+///
+/// # Stream interoperability
+///
+/// `tick` does not expose a `futures` trait in its public API. Applications that use
+/// [`futures_core::Stream`](https://docs.rs/futures-core/latest/futures_core/stream/trait.Stream.html)
+/// can adapt a timer locally:
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use futures::{Stream, stream};
+/// use tick::{Clock, PeriodicTimer, TimerTick};
+///
+/// fn into_stream(timer: PeriodicTimer) -> impl Stream<Item = TimerTick> {
+///     stream::unfold(timer, |mut timer| async move {
+///         let tick = timer.next().await;
+///         Some((tick, timer))
+///     })
+/// }
+///
+/// # fn example(clock: &Clock) {
+/// let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
+/// let ticks = into_stream(timer);
+/// # let _ = ticks;
+/// # }
+/// ```
+///
+/// This adapter keeps the timer as the stream state and does not require `tick` itself to depend on
+/// `futures-core`.
 #[derive(Debug)]
-#[must_use = "streams do nothing unless polled"]
+#[must_use = "periodic timers do nothing unless `next` is awaited"]
 pub struct PeriodicTimer {
     period: Duration,
     clock: Clock,
-    // Currently scheduled timer. This value is not initialized until
-    // the first call to the `Stream::poll_next` method.
+    // Currently scheduled timer. This value is not initialized until the first `next` call.
     current_timer: Option<TimerKey>,
     current_waker: Option<Waker>,
+}
+
+/// Information observed when a [`PeriodicTimer`] fires.
+#[derive(Debug)]
+#[must_use]
+pub struct TimerTick {
+    observed_at: Instant,
+}
+
+impl TimerTick {
+    /// Returns the clock instant observed when the timer tick completed.
+    #[must_use]
+    pub const fn observed_at(&self) -> Instant {
+        self.observed_at
+    }
 }
 
 impl PeriodicTimer {
@@ -93,18 +124,25 @@ impl PeriodicTimer {
     ///
     /// > **Note**: The minimum precision of the timer is 1ms. If a smaller period is specified,
     /// > it will be adjusted to 1ms.
-    #[must_use = "streams do nothing unless polled"]
+    #[must_use = "periodic timers do nothing unless `next` is awaited"]
     pub fn new(clock: &Clock, period: Duration) -> Self {
         let period = period.max(TIMER_RESOLUTION);
 
         Self {
-            // The timer is not registered yet; it will be registered on the first
-            // call to `Stream::poll_next`.
+            // The timer is not registered yet; it will be registered by the first `next` call.
             current_timer: None,
             current_waker: None,
             period,
             clock: clock.clone(),
         }
+    }
+
+    /// Waits for the next timer tick.
+    ///
+    /// The returned future is cancellation-safe. If it is dropped while pending, the timer keeps
+    /// its registered deadline and the next call continues waiting for the same tick.
+    pub async fn next(&mut self) -> TimerTick {
+        poll_fn(|cx| self.poll_next_tick(cx)).await
     }
 
     fn register_timer(&mut self, waker: &Waker) {
@@ -119,55 +157,46 @@ impl PeriodicTimer {
             self.current_waker = None;
         }
     }
-}
-
-impl Stream for PeriodicTimer {
-    type Item = ();
-
     #[cfg_attr(test, mutants::skip)] // cannot reliably check that poll_tick has been called
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        if this.period == Duration::MAX {
+    fn poll_next_tick(&mut self, cx: &Context<'_>) -> Poll<TimerTick> {
+        if self.period == Duration::MAX {
             return Poll::Pending;
         }
 
-        match this.current_timer {
-            Some(key) if key.tick() <= this.clock.timer_instant() => {
+        if let Some(key) = self.current_timer {
+            let observed_at = self.clock.timer_instant();
+            if key.tick() <= observed_at {
                 // Reset the timer. It will be registered again on the next poll.
-                this.current_timer = None;
-                this.current_waker = None;
+                self.current_timer = None;
+                self.current_waker = None;
 
                 // Unregister the timer, just in case this call was explicit and not due to
                 // timers advancing.
-                this.clock.unregister_timer(key);
+                self.clock.unregister_timer(key);
 
-                Poll::Ready(Some(()))
+                return Poll::Ready(TimerTick { observed_at });
             }
+
             // Timer is registered and will fire later in the future.
-            Some(key) => {
-                if this.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
-                    return Poll::Pending;
-                }
-
-                if this.clock.update_timer_waker(key, cx.waker()) {
-                    this.current_waker = Some(cx.waker().clone());
-                    Poll::Pending
-                } else {
-                    this.current_timer = None;
-                    this.current_waker = None;
-                    Poll::Ready(Some(()))
-                }
+            if self.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
+                Poll::Pending
+            } else if self.clock.update_timer_waker(key, cx.waker()) {
+                self.current_waker = Some(cx.waker().clone());
+                Poll::Pending
+            } else {
+                self.current_timer = None;
+                self.current_waker = None;
+                Poll::Ready(TimerTick {
+                    observed_at: self.clock.timer_instant(),
+                })
             }
-
+        } else {
             // Timer is not registered yet; let's register it.
             // The registration is lazy, occurring when someone polls the future. This means
             // that the work between two ticks is not taken into account when scheduling
             // the next tick. When the thread is busy, the timer may tick later than expected.
-            None => {
-                this.register_timer(cx.waker());
-                Poll::Pending
-            }
+            self.register_timer(cx.waker());
+            Poll::Pending
         }
     }
 }
@@ -202,13 +231,16 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
         let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
-        let mut first_context = Context::from_waker(&first_waker);
-        assert_eq!(Pin::new(&mut timer).poll_next(&mut first_context), Poll::Pending);
+        let first_context = Context::from_waker(&first_waker);
+        assert!(timer.poll_next_tick(&first_context).is_pending());
         clock.unregister_timer(timer.current_timer.unwrap());
 
         let second_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
-        let mut second_context = Context::from_waker(&second_waker);
+        let second_context = Context::from_waker(&second_waker);
 
-        assert_eq!(Pin::new(&mut timer).poll_next(&mut second_context), Poll::Ready(Some(())));
+        let Poll::Ready(tick) = timer.poll_next_tick(&second_context) else {
+            panic!("the removed timer must be treated as fired");
+        };
+        assert_eq!(tick.observed_at(), clock.instant());
     }
 }

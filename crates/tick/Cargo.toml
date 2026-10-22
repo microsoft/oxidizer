@@ -21,7 +21,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
-    "futures_core::stream::Stream",
     "thread_aware_core::thread_aware::ThreadAware",
     "thread_aware_core::thread::Thread",
 ]
@@ -48,7 +47,6 @@ rt-shared = []
 fmt = ["dep:jiff"]
 
 [dependencies]
-futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 performables = { workspace = true }
 pin-project-lite = { workspace = true }
