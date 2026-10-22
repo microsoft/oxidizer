@@ -93,24 +93,18 @@ impl WorkersPolicy {
         Self(WorkersPolicyKind::All)
     }
 
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "available processor sets are nonempty, so the round-robin divisor is nonzero"
-    )]
     pub(crate) fn select(&self, available: &ProcessorSet) -> Result<WorkerPlacements, Error> {
         match self.0 {
             WorkersPolicyKind::Exactly(0) | WorkersPolicyKind::AtMost(0) => Err(Error::invalid_worker_count()),
-            WorkersPolicyKind::Exactly(count) if count > available.len() => {
+            WorkersPolicyKind::Exactly(count) => {
                 let processors = sorted_singletons(available);
-                let workers = (0..count)
-                    .map(|worker_index| processors[worker_index % processors.len()].clone())
-                    .collect();
+                let workers = processors.iter().cycle().take(count).cloned().collect();
                 Ok(WorkerPlacements {
                     workers,
-                    processors_used: processors.len(),
+                    processors_used: count.min(processors.len()),
                 })
             }
-            WorkersPolicyKind::Exactly(count) | WorkersPolicyKind::AtMost(count) => {
+            WorkersPolicyKind::AtMost(count) => {
                 let count = count.min(available.len());
                 let count = NonZero::new(count).expect("zero counts were rejected above and available processor sets are nonempty");
                 let selected = available
