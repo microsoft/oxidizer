@@ -141,15 +141,16 @@ fn gungraun_runner_available() -> bool {
             "gungraun-runner 0.20.0",
             "required native contracts must match the workspace Gungraun version"
         );
-        assert!(
-            Command::new("valgrind")
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| output.status.success()),
-            "required native contracts need Valgrind on PATH"
-        );
+        assert!(valgrind_available(), "required native contracts need Valgrind on PATH");
     }
     available
+}
+
+fn valgrind_available() -> bool {
+    Command::new("valgrind")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 #[test]
@@ -633,8 +634,8 @@ fn gungraun_listing_is_forwarded() {
 #[cfg(target_os = "linux")]
 #[test]
 fn gungraun_measurements_write_report() {
-    if !gungraun_runner_available() {
-        eprintln!("skipping Gungraun measurements because gungraun-runner is unavailable");
+    if !gungraun_runner_available() || !valgrind_available() {
+        eprintln!("skipping Gungraun measurements because gungraun-runner or Valgrind is unavailable");
         return;
     }
 
@@ -645,6 +646,7 @@ fn gungraun_measurements_write_report() {
         "metabench_basic",
         &[
             "--gungraun".as_ref(),
+            "--show-engine-output".as_ref(),
             "--no-baseline".as_ref(),
             "--export-json".as_ref(),
             json.as_os_str(),
