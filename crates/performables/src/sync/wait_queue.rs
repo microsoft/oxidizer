@@ -33,16 +33,7 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
                 #[cfg(not(test))]
                 park();
                 #[cfg(test)]
-                {
-                    if let Some(deadline) = deadline {
-                        let remaining = deadline
-                            .checked_duration_since(Instant::now())
-                            .expect("test future must make progress before the deadline");
-                        park_timeout(remaining);
-                    } else {
-                        park();
-                    }
-                }
+                test_park(deadline);
             }
         }
     }
@@ -52,6 +43,19 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn test_deadline() -> Option<Instant> {
     (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(2))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test watchdog; mutation runs deliberately park without a deadline.
+fn test_park(deadline: Option<Instant>) {
+    if let Some(deadline) = deadline {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("test future must make progress before the deadline");
+        park_timeout(remaining);
+    } else {
+        park();
+    }
 }
 
 pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {

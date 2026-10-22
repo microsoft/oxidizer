@@ -112,19 +112,26 @@ impl RwLock {
 
     #[cold]
     fn write_contended(&self) -> WriteGuard<'_> {
-        self.write_contended_with(wait_on_address)
+        self.write_contended_with(
+            |state| {
+                self.state
+                    .compare_exchange_weak(state, WRITER_WAITING, Ordering::Acquire, Ordering::Relaxed)
+            },
+            wait_on_address,
+        )
     }
 
     #[cold]
-    fn write_contended_with(&self, mut wait: impl FnMut(&AtomicU32, u32)) -> WriteGuard<'_> {
+    fn write_contended_with(
+        &self,
+        mut acquire: impl FnMut(u32) -> Result<u32, u32>,
+        mut wait: impl FnMut(&AtomicU32, u32),
+    ) -> WriteGuard<'_> {
         let mut state = self.state.load(Ordering::Relaxed);
         loop {
             if state & OWNERS == 0 {
                 // Retain registration for other sleepers until this writer releases.
-                match self
-                    .state
-                    .compare_exchange_weak(state, WRITER_WAITING, Ordering::Acquire, Ordering::Relaxed)
-                {
+                match acquire(state) {
                     Ok(_) => return WriteGuard { marker: PhantomData },
                     Err(current) => state = current,
                 }
@@ -290,15 +297,49 @@ mod tests {
         let lock = RwLock::new();
         let mut owner = Some(lock.write());
         let mut waits = Vec::new();
-        let mut writer = lock.write_contended_with(|state, expected| {
-            let observed = state.load(Ordering::Relaxed);
-            waits.push((observed & WAITERS != 0, expected == observed));
-            if waits.len() == 2 {
-                lock.write_unlock(&mut owner.take().unwrap());
-            }
-        });
+        let mut writer = lock.write_contended_with(
+            |state| {
+                lock.state
+                    .compare_exchange_weak(state, WRITER_WAITING, Ordering::Acquire, Ordering::Relaxed)
+            },
+            |state, expected| {
+                let observed = state.load(Ordering::Relaxed);
+                waits.push((observed & WAITERS != 0, expected == observed));
+                if waits.len() == 2 {
+                    lock.write_unlock(&mut owner.take().unwrap());
+                }
+            },
+        );
         lock.write_unlock(&mut writer);
         assert_eq!((waits, lock.state.load(Ordering::Relaxed)), (vec![(true, true); 2], 0));
+    }
+
+    #[test]
+    fn writer_waits_for_the_owner_that_wins_an_empty_handoff() {
+        let lock = RwLock::new();
+        let mut attempts = 0;
+        let mut waits = Vec::new();
+        let mut writer = lock.write_contended_with(
+            |state| {
+                attempts += 1;
+                assert!(attempts <= 2);
+                if attempts == 1 {
+                    // A rival writer wins between the initial load and this CAS.
+                    lock.state.store(WRITER_WAITING, Ordering::Relaxed);
+                }
+                lock.state
+                    .compare_exchange(state, WRITER_WAITING, Ordering::Acquire, Ordering::Relaxed)
+            },
+            |state, expected| {
+                waits.push((expected, state.load(Ordering::Relaxed)));
+                state.store(0, Ordering::Release);
+            },
+        );
+        lock.write_unlock(&mut writer);
+        assert_eq!(
+            (attempts, waits, lock.state.load(Ordering::Relaxed)),
+            (2, vec![(WRITER_WAITING, WRITER_WAITING)], 0)
+        );
     }
 
     #[test]
