@@ -205,7 +205,9 @@ fn queue_payload_destruction_can_reenter_its_channel_after_receiver_drop() {
 struct CloseQueueOnDrop(performables::sync::channel::Receiver<usize>);
 
 impl Wake for CloseQueueOnDrop {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        unreachable!("the test replaces this waker before its drop closes the channel");
+    }
 }
 
 impl Drop for CloseQueueOnDrop {

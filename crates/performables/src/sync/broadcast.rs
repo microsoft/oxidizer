@@ -12,6 +12,10 @@ use crate::sync::slot_list::{Key, SlotList};
 // Eight cache-line-separated shards avoid one registration/cancellation lock;
 // indexed slots avoid both a waiter allocation and an O(n) cancellation scan.
 const SHARDS: usize = 8;
+const _: () = assert!(
+    SHARDS.is_power_of_two(),
+    "watch shard bitmask selection requires a power-of-two shard count"
+);
 
 // This is only a load-balancing hint, never ownership or channel identity.
 // Allocate a lane once per worker instead of contending on a selector on every

@@ -74,7 +74,9 @@ fn consecutive_selected_cancellations_forward_one_notification_without_duplicati
 struct NotifyOnDrop(Arc<Notify<Async>>);
 
 impl Wake for NotifyOnDrop {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        unreachable!("the test cancels or replaces this waker before its drop notifies");
+    }
 }
 
 impl Drop for NotifyOnDrop {
