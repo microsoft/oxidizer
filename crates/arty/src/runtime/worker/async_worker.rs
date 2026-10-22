@@ -949,7 +949,7 @@ mod tests {
             .io()
             .context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
-            command_tx.send(enqueue(Box::new(|_, _| {}))).unwrap();
+            command_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());

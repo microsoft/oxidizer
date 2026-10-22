@@ -169,18 +169,15 @@ mod tests {
 
     #[test]
     fn remote_wake_releases_an_indefinite_waiter() {
-        let signal = Arc::new(WorkerSignal::default());
+        let (wait_entered, wait_entry) = mpsc::channel();
+        let signal = Arc::new(WorkerSignal::with_wait_observer(wait_entered));
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&signal);
         let worker = thread::spawn(move || {
             waiter.wait_for_notification();
             done_tx.send(()).unwrap();
         });
-        let deadline = std::time::Instant::now() + TEST_TIMEOUT;
-        while signal.worker.get().is_none() {
-            assert!(std::time::Instant::now() < deadline);
-            thread::yield_now();
-        }
+        wait_entry.recv_timeout(TEST_TIMEOUT).unwrap();
         assert_eq!(
             done_rx.recv_timeout(Duration::from_millis(20)),
             Err(mpsc::RecvTimeoutError::Timeout)
