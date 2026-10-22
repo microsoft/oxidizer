@@ -12,7 +12,7 @@ use std::time::Duration;
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use compressors::{CompressionStream, Resources, gzip};
-use tick::{Clock, ClockControl, PeriodicTimer};
+use tick::{Clock, ClockControl, Timer};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
@@ -29,7 +29,7 @@ fn body(clock: Clock, resources: Resources) -> impl Stream<Item = Result<BytesVi
     let (sender, receiver) = mpsc::channel(4);
 
     tokio::spawn(async move {
-        let mut arrivals = PeriodicTimer::new(&clock, ARRIVAL_PERIOD);
+        let mut arrivals = Timer::new(&clock, ARRIVAL_PERIOD);
 
         for event in 0..200 {
             let _tick = arrivals.next().await;

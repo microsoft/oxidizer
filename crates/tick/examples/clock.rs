@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 //! This example shows advanced use of the `Clock` API, including
-//! `Stopwatch`, `PeriodicTimer`, and timeouts.
+//! `Stopwatch`, `Timer`, and timeouts.
 
 use std::time::Duration;
 
 use tick::fmt::Iso8601;
-use tick::{Clock, FutureExt, PeriodicTimer};
+use tick::{Clock, FutureExt, Timer};
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
@@ -22,7 +22,7 @@ async fn main() -> Result<(), ohno::AppError> {
     api.do_something().await?;
 
     // Wait for three timer ticks.
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_secs(2));
+    let mut timer = Timer::new(&clock, Duration::from_secs(2));
     for _ in 0..3 {
         let tick = timer.next().await;
         println!("Timer fired at {:?}!", tick.observed_at());
@@ -46,7 +46,7 @@ impl MyApi {
         Self { clock: clock.clone() }
     }
 
-    pub(crate) async fn do_something(&self) -> tick::Result<()> {
+    pub(crate) async fn do_something(&self) -> Result<(), tick::Error> {
         // Start measuring elapsed time.
         let watch = self.clock.stopwatch();
 

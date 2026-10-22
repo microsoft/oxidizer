@@ -76,12 +76,12 @@ normalized production clock data. See [docs/tick-api-decisions.md](docs/tick-api
 
 ## Tick periodic timer API
 
-`PeriodicTimer` uses the inherent async `next` method and returns `TimerTick`.
+`Timer` uses the inherent async `next` method and returns `TimerTick`.
 Do not implement `futures_core::Stream` for it or add `futures-core` to `tick`'s
 public dependencies. Applications that need stream combinators can use the
-downstream adapter documented on `PeriodicTimer`.
+downstream adapter documented on `Timer`.
 
-**Open this when**: changing `PeriodicTimer`, `TimerTick`, or timer iteration;
+**Open this when**: changing `Timer`, `TimerTick`, or timer iteration;
 adding an async-stream dependency to `tick`.
 
 ## Optional Dependencies in Test Builds

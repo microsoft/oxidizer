@@ -26,14 +26,14 @@ that `system_time_as` accepts representative normalized production clock data.
 
 ## Periodic timers do not implement `futures_core::Stream`
 
-`PeriodicTimer::next` is the public iteration API. It returns a `TimerTick`.
+`Timer::next` is the public iteration API. It returns a `TimerTick`.
 The tick contains the clock instant observed when the timer completed.
 
-`PeriodicTimer` must not implement `futures_core::Stream`. A public dependency
+`Timer` must not implement `futures_core::Stream`. A public dependency
 on a 0.x futures crate couples each `tick` consumer to that API.
 
 Applications can use `futures::stream::unfold` to adapt a timer locally. The
-`PeriodicTimer` rustdoc shows this adapter.
+`Timer` rustdoc shows this adapter.
 
 Keep `futures` as a development dependency when examples or tests need it. It
 must not be a normal dependency of `tick`.

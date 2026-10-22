@@ -41,7 +41,7 @@
 //! # }
 //! let builder = ThreadBuilder::default();
 //! let source = builder.build(std::thread::current().id());
-//! let root = InactiveClock::default();
+//! let root = InactiveClock::new_isolated();
 //!
 //! let ready = Arc::new(Barrier::new(3));
 //! let first = {
@@ -103,7 +103,7 @@
 //! #     fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }
 //! # }
 //! let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
-//! let (clock, driver) = InactiveClock::default().activate(driver_waker);
+//! let (clock, driver) = InactiveClock::new_isolated().activate(driver_waker);
 //!
 //! // Share `clock` across threads (it is Clone + Send + Sync)
 //! // Keep `driver` on a single thread to advance timers
