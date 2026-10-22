@@ -9,8 +9,8 @@ use thread_aware::Thread;
 ///
 /// Obtain this view from
 /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
-/// Each item is borrowed from the runtime and can be passed directly to
-/// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
+/// Each item is a reference into this view, which is owned by the runtime, and
+/// can be passed directly to [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
 #[derive(Debug)]
 pub struct Workers {
     inner: Box<[Thread]>,
