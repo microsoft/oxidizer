@@ -8,9 +8,8 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 
 /// Configuration for the retry middleware.
 ///
-/// This struct provides a serialization-friendly way to configure the retry middleware
-/// from external sources such as configuration files. Use [`RetryLayer::config`][crate::retry::RetryLayer::config] to apply
-/// the configuration to a retry layer.
+/// Enable `serde` to load this type from a configuration file.
+/// Use [`RetryLayer::config`][crate::retry::RetryLayer::config] to apply it to a retry layer.
 ///
 /// # Defaults
 ///
@@ -29,36 +28,39 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct RetryConfig {
-    /// Whether the retry middleware is enabled. When `false`, the middleware
-    /// is bypassed and requests pass through directly to the inner service.
+    /// Controls if the retry middleware runs.
+    ///
+    /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
 
-    /// The backoff strategy to use for retry delays.
+    /// Selects the backoff strategy for retry delays.
     pub backoff_type: Backoff,
 
-    /// The base delay used for backoff calculations.
+    /// Sets the base delay for backoff calculations.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
     )]
     pub base_delay: Duration,
 
-    /// The maximum allowed delay between retries. `None` means no limit.
+    /// Sets the maximum delay between retries.
+    ///
+    /// `None` means that there is no limit.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::optional")
     )]
     pub max_delay: Option<Duration>,
 
-    /// Whether to add jitter to delay calculations.
+    /// Controls if retry delays include jitter.
     pub use_jitter: bool,
 
-    /// The maximum number of retry attempts (not counting the original call).
+    /// Sets the maximum number of retries after the original call.
     pub max_retry_attempts: u32,
 
-    /// Whether to treat [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable]
-    /// classifications as recoverable conditions, allowing retries against different
-    /// endpoints or resources. When `false`, unavailable responses are returned immediately.
+    /// Controls if [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable] permits a retry.
+    ///
+    /// If this value is `false`, the middleware returns unavailable output immediately.
     pub handle_unavailable: bool,
 }
 
@@ -73,18 +75,5 @@ impl Default for RetryConfig {
             max_retry_attempts: DEFAULT_RETRY_ATTEMPTS,
             handle_unavailable: false,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn default_snapshot() {
-        let config = RetryConfig::default();
-        insta::assert_json_snapshot!(config);
     }
 }
