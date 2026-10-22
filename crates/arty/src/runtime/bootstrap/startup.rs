@@ -606,7 +606,7 @@ mod tests {
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
             },
-            &InactiveClock::default(),
+            &InactiveClock::new_isolated(),
             sink,
             &ThreadBuilder::default(),
             processors,
