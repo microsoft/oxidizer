@@ -14,7 +14,6 @@ use performables::arc::Arc;
 #[cfg(test)]
 use performables::sync::channel;
 
-use crate::runtime::Error;
 #[cfg(test)]
 use crate::runtime::blocking_worker::BlockingPool;
 use crate::runtime::blocking_worker::BlockingWorker;
@@ -23,6 +22,7 @@ use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 #[cfg(test)]
 use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -57,6 +57,10 @@ impl DispatcherClient {
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.core.worker_index(thread_id)
+    }
+
+    pub(crate) fn workers(&self) -> &Workers {
+        self.core.workers()
     }
 
     pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
@@ -102,6 +106,15 @@ impl DispatcherClient {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
 
+    pub(crate) fn spawn_at_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_at_worker(worker_index, future_factory)
+    }
+
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -109,16 +122,6 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
-    }
-
-    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, make_factory: M) -> Vec<JoinHandle<R>>
-    where
-        M: FnMut() -> FF,
-        FF: FnOnce(Builtins) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.core.spawn_everywhere(make_factory)
     }
 
     pub(crate) fn stop_with_error(&self, error: Error) {

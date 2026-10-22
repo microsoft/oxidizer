@@ -57,7 +57,7 @@ fn can_suspend(cycle_outcome: CycleOutcome, batch_exhausted: bool) -> bool {
 /// 4. Dead - the worker has completed its shutdown process and the thread has terminated.
 ///
 /// Once in the Running state, workers keep running until they receive a stop command (i.e. until
-/// something calls [`request_stop()`][crate::runtime::RuntimeOperations::request_stop]
+/// something calls [`request_stop()`][crate::runtime::RuntimeControl::request_stop]
 /// or stops or drops the runtime owner).
 ///
 /// # Thread safety

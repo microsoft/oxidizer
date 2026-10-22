@@ -1,7 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use arty::runtime::{Runtime, RuntimeControl};
 use arty::task::{JoinError, JoinHandle};
+
+pub(crate) fn runtime_control(runtime: &Runtime) -> RuntimeControl {
+    runtime
+        .scheduler()
+        .block_on(async |builtins| builtins.control().clone())
+        .expect("runtime remains active while acquiring test control")
+}
+
+const _: fn(&Runtime) -> RuntimeControl = runtime_control;
 
 pub(crate) trait JoinHandleExt {
     type Output;
@@ -19,3 +29,5 @@ where
         futures::executor::block_on(self)
     }
 }
+
+const _: fn(JoinHandle<()>) -> Result<(), JoinError> = <JoinHandle<()> as JoinHandleExt>::join;

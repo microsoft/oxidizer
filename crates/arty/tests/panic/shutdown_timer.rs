@@ -3,13 +3,7 @@
 
 //! A timer installed during cancellation runs only after task retirement.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
 #![cfg(not(miri))] // This contract exercises the native timer driver and process boundary.
-
-mod panic_support;
-
-mod support;
 
 use std::pin::Pin;
 use std::sync::{Arc, mpsc};
@@ -17,12 +11,11 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
 use arty::time::Clock;
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support::JoinHandleExt as _;
 
 struct PanicWake;
 

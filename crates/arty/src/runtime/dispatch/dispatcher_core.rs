@@ -15,11 +15,11 @@ use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 use thread_aware::Thread;
 
-use crate::runtime::Error;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
+use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -64,6 +64,7 @@ pub(crate) struct DispatcherCore {
     shutdown_error: Mutex<Option<Error>>,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
+    workers: Workers,
 
     // Immutable, runtime-local lookup for placement and relocation; ordinary spawn uses a
     // cached index. IDs come only from registered workers, so a non-cryptographic hasher fits.
@@ -101,6 +102,13 @@ impl DispatcherCore {
             .enumerate()
             .map(|(index, endpoint)| (endpoint.thread.id(), WorkerIndex(index)))
             .collect();
+        let workers = Workers::new(
+            worker_endpoints
+                .iter()
+                .map(|endpoint| endpoint.thread.clone())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
         assert_eq!(
             worker_indices.len(),
             worker_endpoints.len(),
@@ -112,6 +120,7 @@ impl DispatcherCore {
             stopped_reported: AtomicBool::new(false),
             shutdown_error: Mutex::new(None),
             worker_endpoints,
+            workers,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             sink,
@@ -173,16 +182,8 @@ impl DispatcherCore {
         self.worker_indices.get(&thread_id).copied()
     }
 
-    pub(crate) fn spawn_everywhere<M, FF, F, R>(&self, mut make_factory: M) -> Vec<JoinHandle<R>>
-    where
-        M: FnMut() -> FF,
-        FF: FnOnce(Builtins) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        (0..self.worker_endpoints.len())
-            .map(|index| self.enqueue(WorkerIndex(index), TaskPlacement::Any, make_factory()))
-            .collect()
+    pub(crate) const fn workers(&self) -> &Workers {
+        &self.workers
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
@@ -252,6 +253,15 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue(worker_index, TaskPlacement::SpecificThread, future_factory)
     }
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>

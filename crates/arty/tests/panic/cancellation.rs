@@ -3,13 +3,6 @@
 
 //! Shutdown must finish task destruction despite a sole cancellation Drop panic.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
-mod support;
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,13 +11,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll};
 
-use arty::runtime::RuntimeOperations;
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support::JoinHandleExt as _;
 
 struct PendingDropPanic {
     started: Cell<Option<mpsc::Sender<()>>>,
@@ -110,7 +101,7 @@ fn borrowing_cancellation_drop_panic_releases_caller_storage() {
         .scheduler()
         .block_on(async move |cx| {
             let guard = borrowed;
-            RuntimeOperations::from(&cx).request_stop();
+            cx.control().request_stop();
             std::future::pending::<()>().await;
             drop(guard);
         })

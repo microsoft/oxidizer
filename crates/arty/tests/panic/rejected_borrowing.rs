@@ -3,18 +3,11 @@
 
 //! A rejected borrowing factory releases caller storage even when its Drop unwinds.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use arty::runtime::RuntimeOperations;
-use panic_support::runtime;
-
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support;
 
 struct BorrowedCapture<'a>(&'a AtomicUsize);
 
@@ -28,7 +21,8 @@ impl Drop for BorrowedCapture<'_> {
 #[test]
 fn stopped_borrowing_factory_is_destroyed_before_its_drop_unwind_escapes() {
     let runtime = runtime();
-    RuntimeOperations::from(&runtime).request_stop();
+    let control = support::runtime_control(&runtime);
+    control.request_stop();
     let drops = AtomicUsize::new(0);
     let invoked = AtomicUsize::new(0);
     let invoked = &invoked;

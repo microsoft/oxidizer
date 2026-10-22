@@ -4,14 +4,41 @@
 //! Root-task panics propagate through the runtime test entry point.
 
 #![cfg(feature = "rt")]
-#![cfg(feature = "macros")]
+#![cfg(test)]
 
 testing_aids::init_tracing!();
 
+#[path = "../panic_support/mod.rs"]
+mod runtime_support;
+#[path = "../support/mod.rs"]
+mod support;
+
+mod abandoned;
+mod abandoned_panics;
+mod abandoned_payload_drop;
+mod blocking_shutdown;
+mod borrowed_wakers;
+mod cancellation;
+mod completion;
+mod factory_disposal;
+mod join_notifications;
+mod owner_drop;
+mod payload_chain;
+mod rejected_borrowing;
+mod relocation;
+mod scoped;
+mod self_wake;
+mod shutdown_timer;
+mod stop_race;
+mod waker_lifetimes;
+
+#[cfg(feature = "macros")]
 use arty::task::Builtins;
+#[cfg(feature = "macros")]
 use arty::test;
 
 // The macro boundary preserves root-task panic payloads, unlike ordinary task joins.
+#[cfg(feature = "macros")]
 #[test]
 #[should_panic(expected = "this is a panic and we expect it to be visible in the test output")]
 async fn main(cx: Builtins) {

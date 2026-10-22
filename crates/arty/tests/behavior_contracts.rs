@@ -16,7 +16,7 @@ use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use arty::task::{Builtins, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
@@ -38,7 +38,15 @@ fn worker_scheduler(runtime: &Runtime) -> Scheduler {
 }
 
 fn count_workers(runtime: &Runtime) -> usize {
-    let tasks = worker_scheduler(runtime).spawn_everywhere((), |()| async { thread::current().id() });
+    let (scheduler, control) = runtime
+        .scheduler()
+        .block_on(async |cx| (cx.scheduler().clone(), cx.control().clone()))
+        .unwrap();
+    let tasks: Vec<_> = control
+        .workers()
+        .into_iter()
+        .map(|worker| scheduler.spawn_at(worker, (), |()| async { thread::current().id() }))
+        .collect();
     let count = tasks.len();
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), count);
@@ -256,18 +264,25 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
 fn builtins_publish_the_same_services_on_every_worker() {
     let runtime = runtime(2);
     let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-    let tasks = builtins.scheduler().spawn_everywhere(builtins.clone(), |cx: Builtins| async move {
-        let scheduler: &Scheduler = cx.as_ref();
-        let clock: &Clock = cx.as_ref();
-        let sink: &Sink = cx.as_ref();
-        assert!(std::ptr::eq(scheduler, cx.scheduler()));
-        assert!(std::ptr::eq(clock, cx.clock()));
-        assert!(std::ptr::eq(sink, cx.sink()));
-        assert!(sink.is_noop());
-        assert_eq!(cx.thread().id(), thread::current().id());
-        assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
-        cx.thread().id()
-    });
+    let tasks: Vec<_> = builtins
+        .control()
+        .workers()
+        .into_iter()
+        .map(|worker| {
+            builtins.scheduler().spawn_at(worker, builtins.clone(), |cx: Builtins| async move {
+                let scheduler: &Scheduler = cx.as_ref();
+                let clock: &Clock = cx.as_ref();
+                let sink: &Sink = cx.as_ref();
+                assert!(std::ptr::eq(scheduler, cx.scheduler()));
+                assert!(std::ptr::eq(clock, cx.clock()));
+                assert!(std::ptr::eq(sink, cx.sink()));
+                assert!(sink.is_noop());
+                assert_eq!(cx.thread().id(), thread::current().id());
+                assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
+                cx.thread().id()
+            })
+        })
+        .collect();
     assert_eq!(tasks.len(), 2);
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), 2);
@@ -380,7 +395,7 @@ fn stopping_one_runtime_does_not_stop_another() {
     let first_worker = first_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     let second_worker = second_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     assert_ne!(first_worker, second_worker);
-    RuntimeOperations::from(&first).request_stop();
+    support::runtime_control(&first).request_stop();
     first.stop().unwrap();
     assert!(first_scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     assert_eq!(second_scheduler.spawn(async |_| 42).join().unwrap(), 42);
@@ -452,7 +467,7 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
 #[test]
 fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     let runtime = runtime(1);
-    RuntimeOperations::from(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     let mut task = Box::pin(runtime.scheduler().spawn_anywhere((), |_, ()| async {}));
     let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
         panic!("a rejected submission must be immediately ready");

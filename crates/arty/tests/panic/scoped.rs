@@ -3,11 +3,6 @@
 
 //! Borrowing factories and pinned futures are destroyed before a root join returns.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
 use std::cell::Cell;
 use std::error::Error as _;
 use std::marker::PhantomPinned;
@@ -15,9 +10,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use panic_support::runtime;
-
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
 
 struct BorrowedTask<'a> {
     drops: &'a AtomicUsize,

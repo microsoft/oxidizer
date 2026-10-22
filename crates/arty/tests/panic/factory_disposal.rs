@@ -3,21 +3,11 @@
 
 //! Accepted factories remain task-owned until invocation or shutdown disposal.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use arty::runtime::RuntimeOperations;
-use panic_support::runtime;
-use support::JoinHandleExt as _;
-
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support::JoinHandleExt as _;
 
 struct CaptureDropPanic(Arc<AtomicUsize>);
 
@@ -48,7 +38,7 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
                 drop(capture);
                 std::future::ready(())
             });
-            RuntimeOperations::from(&cx).request_stop();
+            cx.control().request_stop();
             queued
         })
         .unwrap();

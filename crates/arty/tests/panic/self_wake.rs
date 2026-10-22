@@ -3,9 +3,6 @@
 
 //! Self-wake notifications queued before a panic cannot repoll a completed future.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,8 +11,6 @@ use std::task::{Context, Poll};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use thread_aware::Unaware;
-
-testing_aids::init_tracing!();
 
 struct SelfWakePanic {
     polls: Arc<AtomicUsize>,
@@ -62,19 +57,33 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
             let drops = Arc::clone(&drops);
             async move |cx| {
                 for _ in 0..repetitions {
-                    let tasks = cx.scheduler().spawn_everywhere(
-                        (cx.clone(), Unaware((Arc::clone(&polls), Arc::clone(&drops)))),
-                        |(child, Unaware((polls, drops)))| SelfWakePanic {
-                            polls,
-                            drops,
-                            owner: child.thread().id(),
-                            _local: Rc::new(()),
-                        },
-                    );
+                    let tasks: Vec<_> = cx
+                        .control()
+                        .workers()
+                        .into_iter()
+                        .map(|worker| {
+                            cx.scheduler().spawn_at(
+                                worker,
+                                (cx.clone(), Unaware((Arc::clone(&polls), Arc::clone(&drops)))),
+                                |(child, Unaware((polls, drops)))| SelfWakePanic {
+                                    polls,
+                                    drops,
+                                    owner: child.thread().id(),
+                                    _local: Rc::new(()),
+                                },
+                            )
+                        })
+                        .collect();
                     for task in tasks {
                         assert!(task.await.unwrap_err().is_panic());
                     }
-                    for task in cx.scheduler().spawn_everywhere((), |()| async { 42 }) {
+                    let tasks: Vec<_> = cx
+                        .control()
+                        .workers()
+                        .into_iter()
+                        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { 42 }))
+                        .collect();
+                    for task in tasks {
                         assert_eq!(task.await.unwrap(), 42);
                     }
                 }
