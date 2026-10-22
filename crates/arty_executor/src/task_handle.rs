@@ -266,6 +266,21 @@ mod tests {
     }
 
     #[test]
+    fn embedded_handle_template_debug_is_non_recursive() {
+        let pool = MultiPool::new();
+        let handle = allocate_test_task_in(&pool);
+        let template = handle
+            .inner
+            .as_ref()
+            .get_ref()
+            .handle_slot()
+            .get()
+            .unwrap();
+
+        assert_eq!(format!("{:?}", &**template), "TaskHandleTemplate { .. }");
+    }
+
+    #[test]
     fn mixed_owners_release_the_allocation_exactly_once() {
         let pool = MultiPool::new();
         let original = allocate_test_task_in(&pool);
