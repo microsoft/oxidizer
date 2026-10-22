@@ -3,12 +3,10 @@
 
 use std::time::Duration;
 
-/// Default maximum hedged attempts: 1.
+/// Sets the default maximum to one hedged attempt.
 ///
-/// One additional hedged attempt beyond the original request, resulting in 2 total
-/// concurrent attempts. This provides basic hedging benefits while
-/// limiting resource overhead.
+/// This permits two concurrent attempts in total.
 pub(super) const DEFAULT_MAX_HEDGED_ATTEMPTS: u8 = 1;
 
-/// Default delay between launching hedged requests: 500 milliseconds.
+/// Sets the default delay between hedged attempts to 500 milliseconds.
 pub(super) const DEFAULT_HEDGING_DELAY: Duration = Duration::from_millis(500);

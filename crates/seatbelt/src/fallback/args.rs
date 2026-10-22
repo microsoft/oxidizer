@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Arguments passed to the [`fallback`][super::FallbackLayer::fallback] and
+/// Provides data to the [`fallback`][super::FallbackLayer::fallback] and
 /// [`fallback_async`][super::FallbackLayer::fallback_async] actions.
 ///
-/// This type is `#[non_exhaustive]` so that additional fields can be added in the
-/// future without a breaking change.
+/// This type is `#[non_exhaustive]`, so later versions can add fields.
 #[derive(Debug)]
 #[non_exhaustive]
 #[expect(

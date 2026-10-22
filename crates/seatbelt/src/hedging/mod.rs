@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Hedging resilience middleware for reducing tail latency via additional concurrent execution.
+//! Hedging middleware that starts concurrent attempts to reduce tail latency.
 //!
-//! This module provides hedging capabilities that launch additional concurrent requests
-//! to reduce the impact of slow responses. The primary types are [`Hedging`] and [`HedgingLayer`]:
+//! Hedging starts more requests when earlier requests are slow.
+//! It provides these main types:
 //!
-//! - [`Hedging`] is the middleware that wraps an inner service and launches parallel hedging requests
-//! - [`HedgingLayer`] is used to configure and construct the hedging middleware
+//! - [`Hedging`] wraps an inner service and starts concurrent attempts.
+//! - [`HedgingLayer`] configures and creates the hedging middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -39,85 +39,78 @@
 //! # async fn my_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 //!
-//! # How It Works
+//! # How it works
 //!
 //! Hedging sends the original request immediately. Based on the configured delay:
 //!
-//! - **Zero delay**: All hedged requests launch at once (via `hedging_delay(Duration::ZERO)`)
-//! - **Fixed delay**: Each hedging attempt launches after a fixed delay if no acceptable result
-//!   has arrived (via [`hedging_delay`][HedgingLayer::hedging_delay])
-//! - **Dynamic delay**: The delay is computed per hedging attempt via a user-provided callback
-//!   that also receives a reference to the input (via
-//!   [`hedging_delay_with`][HedgingLayer::hedging_delay_with])
+//! - Zero delay: All attempts start at once with `hedging_delay(Duration::ZERO)`.
+//! - Fixed delay: Each attempt starts after a fixed delay if no acceptable result arrives.
+//!   Use [`hedging_delay`][HedgingLayer::hedging_delay].
+//! - Dynamic delay: A callback calculates the delay for each attempt from the input.
+//!   Use
+//!   [`hedging_delay_with`][HedgingLayer::hedging_delay_with].
 //!
 //! The first result classified as non-recoverable (via the recovery callback) is returned
 //! immediately. Any remaining in-flight requests are cancelled.
 //! [`RecoveryKind::Unknown`][crate::RecoveryKind::Unknown] is treated as non-recoverable
 //! and accepted immediately.
 //!
-//! # When to Use Hedging
+//! # When to use hedging
 //!
-//! Hedging increases overall load on the downstream service because it sends additional
-//! concurrent requests. The downstream service **must be able to handle this extra load**
-//! without degradation. If the downstream service is already under pressure, hedging can
-//! amplify the problem rather than reduce latency.
+//! Hedging adds load because it sends concurrent requests.
+//! The downstream service must have capacity for this load.
+//! Do not use hedging when the service is already under pressure.
 //!
-//! If the downstream service cannot tolerate additional load, prefer [`retry`][crate::retry]
-//! instead - it only sends a new request after the previous one has completed or failed,
-//! keeping the total request rate bounded.
+//! If the service cannot accept more load, use [`retry`][crate::retry].
+//! Retry starts a new request only after the previous request finishes.
 //!
 //! # Configuration
 //!
-//! The [`HedgingLayer`] uses a type state pattern to enforce that all required properties are
-//! configured before the layer can be built. This compile-time safety ensures that you cannot
-//! accidentally create a hedging layer without properly specifying input cloning and recovery logic:
+//! [`HedgingLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these properties:
 //!
-//! - [`clone_input_with`][HedgingLayer::clone_input_with]: Required function to clone inputs for
-//!   hedged attempts (Rust ownership requirement)
-//! - [`recovery`][HedgingLayer::recovery]: Required function to classify whether an output is
-//!   acceptable
+//! - [`clone_input_with`][HedgingLayer::clone_input_with] provides input for hedged attempts.
+//! - [`recovery`][HedgingLayer::recovery] classifies output.
 //!
-//! Each hedging layer requires an identifier for telemetry purposes. This identifier should use
-//! `snake_case` naming convention to maintain consistency across the codebase.
+//! Each hedging layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Hedging`] type is thread-safe and implements both `Send` and `Sync` as enforced by
-//! the `Service` trait it implements. This allows hedging middleware to be safely shared
-//! across multiple threads and used in concurrent environments.
+//! [`Hedging`] implements `Send` and `Sync` as required by its `Service` implementation.
+//! You can share the middleware across threads.
 //!
 //! # Defaults
 //!
-//! The hedging middleware uses the following default values when optional configuration is not
-//! provided:
+//! Hedging uses these values when you do not provide optional configuration:
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
-//! | Max hedged attempts | `1` (2 total) | Additional hedging requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
+//! | Maximum hedged attempts | `1` (2 total) | Additional attempts after the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
 //! | Hedging delay | `500ms` | Wait 500 milliseconds before each hedging attempt | [`hedging_delay`][HedgingLayer::hedging_delay], [`hedging_delay_with`][HedgingLayer::hedging_delay_with] |
 //! | Handle unavailable | `false` | Unavailable responses are returned immediately | [`handle_unavailable`][HedgingLayer::handle_unavailable] |
 //! | Enable condition | Always enabled | Hedging is applied to all requests | [`enable_if`][HedgingLayer::enable_if], [`enable_always`][HedgingLayer::enable_always], [`disable`][HedgingLayer::disable] |
 //!
 //! # Telemetry
 //!
-//! Hedging telemetry is **drop-safe**: it is emitted even for in-flight futures that are
-//! cancelled when an acceptable result arrives. Each launched attempt carries a telemetry
-//! guard that reports on drop.
+//! Hedging emits telemetry when an in-flight future is dropped.
+//! Each attempt has a telemetry guard that reports the drop.
 //!
 //! Telemetry is emitted when:
-//! - A result is **recoverable**: reported with the actual [`RecoveryKind`][crate::RecoveryKind]
-//! - A future is **abandoned** (dropped before completing): reported with recovery kind `"abandoned"`
+//! - A result is recoverable. It reports the [`RecoveryKind`][crate::RecoveryKind].
+//! - A future is abandoned. It reports the recovery kind `"abandoned"`.
 //!
-//! Telemetry is **not** emitted for non-recoverable (accepted) results.
+//! Telemetry is not emitted for accepted results.
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted for recoverable and abandoned attempts
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: For recoverable and abandoned attempts
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Hedging identifier from [`Hedging::layer`]
-//!   - `resilience.event.name`: Always `hedging`
+//!   - `resilience.event.name`: `hedging`
 //!   - `resilience.attempt.index`: Attempt index (0 for original, 1 and more for hedging attempts)
 //!   - `resilience.attempt.is_last`: Whether this is the last attempt
 //!   - `resilience.attempt.recovery.kind`: The recovery classification (`retry`, `unavailable`, or `abandoned`)
@@ -129,9 +122,9 @@
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
-//! This example demonstrates the basic usage of configuring and using hedging middleware.
+//! This example configures and uses hedging middleware.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -144,9 +137,9 @@
 //!
 //! let stack = (
 //!     Hedging::layer("my_hedging", &context)
-//!         // Required: how to clone inputs for hedged attempts
+//!         // Clone input for each hedged attempt.
 //!         .clone_input()
-//!         // Required: determine if we should keep waiting for hedging attempts
+//!         // Decide whether to wait for another attempt.
 //!         .recovery_with(|output: &Result<String, String>, _args| match output {
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(msg) if msg.contains("transient") => RecoveryInfo::retry(),
@@ -163,10 +156,9 @@
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 //!
-//! ## Advanced Usage
+//! ## Advanced use
 //!
-//! This example demonstrates advanced usage of the hedging middleware, including dynamic
-//! delays and on-execute callbacks.
+//! This example uses dynamic delays and execution callbacks.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -184,12 +176,12 @@
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(_) => RecoveryInfo::retry(),
 //!         })
-//!         // Optional configuration
+//!         // Set optional configuration.
 //!         .max_hedged_attempts(3)
 //!         .hedging_delay_with(|_input, args| {
 //!             Duration::from_millis(100 * u64::from(args.attempt().index()))
 //!         })
-//!         // Callback called just before each execute operation
+//!         // Run a callback before each operation.
 //!         .on_execute(|_input, args| {
 //!             println!("launching attempt: {}", args.attempt());
 //!         }),
