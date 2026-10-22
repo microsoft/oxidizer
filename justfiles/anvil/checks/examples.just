@@ -9,6 +9,7 @@
 # Affected tier.
 
 # Build examples, or run selected examples locally with `--run`.
+[group("anvil")]
 [arg("run", long, value="true")]
 [arg("package", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
 [arg("example", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
@@ -127,9 +128,9 @@ anvil-examples run="false" package="" example="" timeout="30": anvil-examples-va
     if ($failed) { exit 1 }
 
 # Install prerequisites for the `anvil-examples` recipe.
-[group("anvil-setup")]
+[private]
 anvil-examples-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-examples` recipe.
-[group("anvil-setup")]
+[private]
 anvil-examples-validate-prereqs: anvil-tool-rustc-validate-prereqs

@@ -9,6 +9,7 @@
 # Unscoped (consults external advisory DB; reads Cargo.lock).
 
 # Audit dependencies for known security vulnerabilities.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-audit: anvil-audit-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -16,9 +17,9 @@ anvil-audit: anvil-audit-validate-prereqs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-audit` recipe.
-[group("anvil-setup")]
+[private]
 anvil-audit-setup installer="install": (anvil-tool-cargo-audit-install installer)
 
 # Validate prerequisites for the `anvil-audit` recipe.
-[group("anvil-setup")]
+[private]
 anvil-audit-validate-prereqs: anvil-tool-cargo-audit-validate-prereqs

@@ -17,6 +17,7 @@
 # affected leg. Coverage on the other three legs is unchanged.
 
 # Run mutation testing for changes relative to the base branch.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -58,9 +59,9 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
 # --- pr-mutants members ---
 
 # Install prerequisites for the `anvil-mutants-diff` recipe.
-[group("anvil-setup")]
+[private]
 anvil-mutants-diff-setup installer="install": (anvil-tool-cargo-mutants-install installer)
 
 # Validate prerequisites for the `anvil-mutants-diff` recipe.
-[group("anvil-setup")]
+[private]
 anvil-mutants-diff-validate-prereqs: anvil-tool-cargo-mutants-validate-prereqs

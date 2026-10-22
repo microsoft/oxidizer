@@ -111,16 +111,18 @@ _anvil-readme mode: anvil-readme-check-validate-prereqs
     if ($hadFailure) { exit 1 }
 
 # Check README files, or regenerate them with `--fix`.
+[group("anvil")]
 [arg("fix", long, value="true")]
 anvil-readme fix="false": (_anvil-readme if fix == "true" { "generate" } else { "check" })
 
 # Check that crate README files are up to date.
+[group("anvil")]
 anvil-readme-check: (_anvil-readme "check")
 
 # Install prerequisites for the `anvil-readme-check` recipe.
-[group("anvil-setup")]
+[private]
 anvil-readme-check-setup installer="install": (anvil-tool-cargo-doc2readme-install installer)
 
 # Validate prerequisites for the `anvil-readme-check` recipe.
-[group("anvil-setup")]
+[private]
 anvil-readme-check-validate-prereqs: anvil-tool-cargo-doc2readme-validate-prereqs
