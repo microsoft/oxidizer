@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::fmt::{self, Debug, Display, Formatter};
+use std::num::IntErrorKind;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
@@ -139,7 +140,13 @@ impl FromStr for UnixSeconds {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let secs: u64 = s.parse()?;
+        let secs: u64 = s.parse().map_err(|error: std::num::ParseIntError| {
+            if matches!(error.kind(), IntErrorKind::PosOverflow | IntErrorKind::NegOverflow) {
+                Error::out_of_range("the value is greater than the maximum value that can be represented by `UnixSeconds`")
+            } else {
+                Error::other(error)
+            }
+        })?;
         Self::from_secs(secs)
     }
 }
@@ -179,7 +186,10 @@ impl TryFrom<SystemTime> for UnixSeconds {
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         // Instants before the Unix epoch are rejected rather than clamped: the offset is
         // unsigned, so there is no honest way to represent them.
-        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH)?)
+        let duration = value
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_error| Error::out_of_range("the system time is before the Unix epoch and cannot be represented by `UnixSeconds`"))?;
+        Self::try_from(duration)
     }
 }
 

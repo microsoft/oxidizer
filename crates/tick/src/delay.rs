@@ -41,6 +41,7 @@ pub struct Delay {
     // Currently scheduled timer. This value is not initialized before
     // actually calling the `Future::poll` method.
     current_timer: Option<TimerKey>,
+    current_waker: Option<Waker>,
     clock: Clock,
     duration: Duration,
 }
@@ -74,6 +75,7 @@ impl Delay {
         Self {
             duration,
             current_timer: None,
+            current_waker: None,
             clock: clock.clone(),
         }
     }
@@ -83,12 +85,14 @@ impl Delay {
 
         if let Some(when) = when {
             self.current_timer = Some(self.clock.register_timer(when, waker.clone()));
+            self.current_waker = Some(waker.clone());
         } else {
             // We have moved past the maximum instant value; this delay never completes.
             self.duration = Duration::MAX;
             if let Some(key) = self.current_timer.take() {
                 self.clock.unregister_timer(key);
             }
+            self.current_waker = None;
         }
 
         Poll::Pending
@@ -108,6 +112,7 @@ impl Future for Delay {
             None => this.register_timer(cx.waker()),
             Some(key) if key.tick() <= this.clock.timer_instant() => {
                 this.current_timer = None;
+                this.current_waker = None;
 
                 // Unregister the timer, just in case this call was explicit
                 // and not due to timers advancing.
@@ -116,8 +121,18 @@ impl Future for Delay {
                 Poll::Ready(())
             }
             Some(key) => {
-                this.clock.update_timer_waker(key, cx.waker());
-                Poll::Pending
+                if this.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
+                    return Poll::Pending;
+                }
+
+                if this.clock.update_timer_waker(key, cx.waker()) {
+                    this.current_waker = Some(cx.waker().clone());
+                    Poll::Pending
+                } else {
+                    this.current_timer = None;
+                    this.current_waker = None;
+                    Poll::Ready(())
+                }
             }
         }
     }
@@ -134,6 +149,8 @@ impl Drop for Delay {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::ClockControl;
 
@@ -152,5 +169,29 @@ mod tests {
 
         assert_eq!(delay.current_timer, None);
         assert_eq!(clock.clock_state().timers_len(), 0);
+    }
+
+    #[test]
+    fn missing_timer_is_treated_as_fired_when_the_task_changes() {
+        #[derive(Debug)]
+        struct CountingWake(std::sync::atomic::AtomicUsize);
+
+        impl std::task::Wake for CountingWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+
+        let clock = ClockControl::new().to_clock();
+        let mut delay = Delay::new(&clock, Duration::from_millis(1));
+        let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut first_context = Context::from_waker(&first_waker);
+        assert_eq!(Pin::new(&mut delay).poll(&mut first_context), Poll::Pending);
+        clock.unregister_timer(delay.current_timer.unwrap());
+
+        let second_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut second_context = Context::from_waker(&second_waker);
+
+        assert_eq!(Pin::new(&mut delay).poll(&mut second_context), Poll::Ready(()));
     }
 }

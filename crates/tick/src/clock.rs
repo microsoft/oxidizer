@@ -42,11 +42,11 @@ use crate::timers::TimerKey;
 /// # Clock construction
 ///
 /// The clock requires a runtime to drive the registered timers. This crate provides built-in support
-/// for Tokio via [`Clock::new_tokio`] (available with the `tokio` feature). For other async runtimes,
+/// for Tokio via [`Clock::new_tokio()`] (available with the `tokio` feature). For other async runtimes,
 /// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
 ///
-/// In tests, the clock can be constructed directly using [`ClockControl`] or via
-/// [`Clock::new_frozen`](https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_frozen)
+/// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via
+/// [`Clock::new_frozen`][crate::Clock::new_frozen]
 /// (available with the `test-util` feature) because the passage of time is controlled manually.
 ///
 /// See the [Testing](#testing) section for more information.
@@ -102,10 +102,10 @@ use crate::timers::TimerKey;
 ///
 /// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
 ///   controlled time state regardless of which thread they are on. This is intentional, a single
-///   [`ClockControl`] controls time for all clocks derived from it, even
+///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
 ///   across threads.
 ///
-/// - **Tokio clocks** (created via [`Clock::new_tokio`]): Relocation is a no-op. The Tokio clock
+/// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
 ///   is driven by a single background task that advances a shared set of timers, so all clones
 ///   share the same timer storage regardless of which thread they are on. Per-thread relocation
 ///   would create independent timer storage on the destination thread that the background driver
@@ -181,9 +181,6 @@ use crate::timers::TimerKey;
 /// }
 /// # }
 /// ```
-///
-/// [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
-/// [`Clock::new_tokio`]: https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
@@ -490,12 +487,15 @@ impl Clock {
         }
     }
 
-    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) {
-        match self.clock_state() {
+    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) -> bool {
+        let replacement = waker.clone();
+        let (exists, displaced) = match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => control.update_timer_waker(key, waker),
-            ClockState::System(timers) => timers.with_timers(|timers| timers.update_waker(key, waker)),
-        }
+            ClockState::ClockControl(control) => control.update_timer_waker(key, replacement),
+            ClockState::System(timers) => timers.with_timers(|timers| timers.update_waker(key, replacement)),
+        };
+        drop(displaced);
+        exists
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {

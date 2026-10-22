@@ -9,7 +9,7 @@ use futures::executor::block_on;
 use tick::ClockControl;
 
 fn main() -> Result<(), std::time::SystemTimeError> {
-    let control = ClockControl::new_auto_advancing();
+    let control = ClockControl::new().auto_advance_timers(true);
     let clock = control.to_clock();
 
     // Retrieve the current time.

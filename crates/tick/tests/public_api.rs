@@ -39,10 +39,10 @@ fn system_clock_reads_current_system_time() {
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
-fn simple_clock_system_time_as_converts_successfully() {
+fn simple_clock_try_system_time_as_converts_successfully() {
     let before = SystemTime::now();
     let clock = SimpleClock::new_system();
-    let converted = clock.system_time_as::<SystemTime>();
+    let converted = clock.try_system_time_as::<SystemTime>().unwrap();
     let after = SystemTime::now();
 
     assert!((before..=after).contains(&converted));
@@ -74,10 +74,10 @@ fn system_clocks_can_toggle_fast_instant_retrieval() {
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
-fn system_time_as_converts_to_a_supported_public_type() {
-    let clock = SimpleClock::new_system();
+fn try_system_time_as_converts_to_a_supported_public_type() {
+    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
 
-    let converted: SystemTime = clock.system_time_as();
+    let converted: SystemTime = clock.try_system_time_as().unwrap();
 
     assert!(converted <= SystemTime::now());
 }
@@ -101,16 +101,6 @@ fn stopwatch_accepts_every_public_time_source_shape() {
     let _ = Stopwatch::new(clock);
     let _ = Stopwatch::new(&simple_clock);
     let _ = Stopwatch::new(simple_clock);
-}
-
-#[test]
-fn stopwatch_into_instant_returns_its_start() {
-    let (clock, _driver) = InactiveClock::default().activate(Waker::noop().clone());
-    let watch = clock.stopwatch();
-
-    let start: Instant = watch.into();
-
-    assert!(start <= clock.instant());
 }
 
 #[cfg_attr(miri, ignore)] // Uses real elapsed time.

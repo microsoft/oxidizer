@@ -85,6 +85,7 @@ pub struct PeriodicTimer {
     // Currently scheduled timer. This value is not initialized until
     // the first call to the `Stream::poll_next` method.
     current_timer: Option<TimerKey>,
+    current_waker: Option<Waker>,
 }
 
 impl PeriodicTimer {
@@ -100,22 +101,22 @@ impl PeriodicTimer {
             // The timer is not registered yet; it will be registered on the first
             // call to `Stream::poll_next`.
             current_timer: None,
+            current_waker: None,
             period,
             clock: clock.clone(),
         }
     }
 
-    fn register_timer(&mut self, waker: Waker) {
-        match self.clock.timer_instant().checked_add(self.period) {
-            Some(when) => {
-                self.current_timer = Some(self.clock.register_timer(when, waker));
-            }
-            None => {
-                // The timer would tick so far in the future that we can assume
-                // it never fires. For this reason, there is no point in registering it.
-                // The period is set to Duration::MAX to prevent further registrations.
-                self.period = Duration::MAX;
-            }
+    fn register_timer(&mut self, waker: &Waker) {
+        if let Some(when) = self.clock.timer_instant().checked_add(self.period) {
+            self.current_timer = Some(self.clock.register_timer(when, waker.clone()));
+            self.current_waker = Some(waker.clone());
+        } else {
+            // The timer would tick so far in the future that we can assume
+            // it never fires. For this reason, there is no point in registering it.
+            // The period is set to Duration::MAX to prevent further registrations.
+            self.period = Duration::MAX;
+            self.current_waker = None;
         }
     }
 }
@@ -135,6 +136,7 @@ impl Stream for PeriodicTimer {
             Some(key) if key.tick() <= this.clock.timer_instant() => {
                 // Reset the timer. It will be registered again on the next poll.
                 this.current_timer = None;
+                this.current_waker = None;
 
                 // Unregister the timer, just in case this call was explicit and not due to
                 // timers advancing.
@@ -144,8 +146,18 @@ impl Stream for PeriodicTimer {
             }
             // Timer is registered and will fire later in the future.
             Some(key) => {
-                this.clock.update_timer_waker(key, cx.waker());
-                Poll::Pending
+                if this.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
+                    return Poll::Pending;
+                }
+
+                if this.clock.update_timer_waker(key, cx.waker()) {
+                    this.current_waker = Some(cx.waker().clone());
+                    Poll::Pending
+                } else {
+                    this.current_timer = None;
+                    this.current_waker = None;
+                    Poll::Ready(Some(()))
+                }
             }
 
             // Timer is not registered yet; let's register it.
@@ -153,7 +165,7 @@ impl Stream for PeriodicTimer {
             // that the work between two ticks is not taken into account when scheduling
             // the next tick. When the thread is busy, the timer may tick later than expected.
             None => {
-                this.register_timer(cx.waker().clone());
+                this.register_timer(cx.waker());
                 Poll::Pending
             }
         }
@@ -165,5 +177,38 @@ impl Drop for PeriodicTimer {
         if let Some(key) = self.current_timer {
             self.clock.unregister_timer(key);
         }
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::ClockControl;
+
+    #[test]
+    fn missing_timer_is_treated_as_fired_when_the_task_changes() {
+        #[derive(Debug)]
+        struct CountingWake(std::sync::atomic::AtomicUsize);
+
+        impl std::task::Wake for CountingWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+
+        let clock = ClockControl::new().to_clock();
+        let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+        let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut first_context = Context::from_waker(&first_waker);
+        assert_eq!(Pin::new(&mut timer).poll_next(&mut first_context), Poll::Pending);
+        clock.unregister_timer(timer.current_timer.unwrap());
+
+        let second_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut second_context = Context::from_waker(&second_waker);
+
+        assert_eq!(Pin::new(&mut timer).poll_next(&mut second_context), Poll::Ready(Some(())));
     }
 }

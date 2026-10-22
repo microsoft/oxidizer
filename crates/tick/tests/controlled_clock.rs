@@ -5,6 +5,7 @@
 
 #![cfg(feature = "test-util")]
 
+use std::error::Error as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
@@ -16,7 +17,7 @@ use futures::StreamExt as _;
 use futures::{FutureExt as _, Stream};
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
-use tick::{Clock, ClockControl, Delay, FutureExt as _, PeriodicTimer, SimpleClock, Stopwatch};
+use tick::{Clock, ClockControl, Delay, FutureExt as _, PeriodicTimer, SimpleClock};
 
 #[derive(Debug)]
 struct WakeCounter(AtomicUsize);
@@ -121,8 +122,8 @@ fn frozen_clock_constructors_preserve_time() {
 }
 
 #[test]
-#[should_panic(expected = "target type cannot represent the current SystemTime")]
-fn system_time_as_panics_when_the_target_rejects_the_time() {
+fn try_system_time_as_reports_when_the_target_rejects_the_time() {
+    #[derive(Debug)]
     struct AlwaysFailsConversion;
 
     impl TryFrom<SystemTime> for AlwaysFailsConversion {
@@ -133,7 +134,9 @@ fn system_time_as_panics_when_the_target_rejects_the_time() {
         }
     }
 
-    let _: AlwaysFailsConversion = Clock::new_frozen().system_time_as();
+    let error = Clock::new_frozen().try_system_time_as::<AlwaysFailsConversion>().unwrap_err();
+
+    assert_eq!(error, "conversion always fails");
 }
 
 #[test]
@@ -215,17 +218,6 @@ fn simple_clock_conversions_preserve_controlled_time() {
         ],
         [expected; 4]
     );
-}
-
-#[test]
-fn stopwatch_into_duration_reports_controlled_elapsed_time() {
-    let control = ClockControl::new();
-    let watch = Stopwatch::new(control.to_simple_clock());
-    control.advance(Duration::from_secs(1));
-
-    let elapsed: Duration = watch.into();
-
-    assert_eq!(elapsed, Duration::from_secs(1));
 }
 
 #[test]
@@ -418,7 +410,10 @@ fn timeout_reports_error_with_controlled_time() {
     let Poll::Ready(Err(error)) = future.poll_unpin(&mut context) else {
         panic!("the future must time out on the second poll");
     };
+    assert!(error.is_timeout());
     assert_eq!(error.to_string(), "future timed out");
+    let source = error.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
 }
 
 #[test]

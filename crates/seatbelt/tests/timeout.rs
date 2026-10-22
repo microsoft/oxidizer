@@ -63,10 +63,9 @@ async fn no_timeout(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn timeout(#[case] use_tower: bool) {
-    let clock = ClockControl::builder()
+    let clock = ClockControl::default()
         .auto_advance(Duration::from_millis(200))
         .auto_advance_limit(Duration::from_millis(500))
-        .build()
         .to_clock();
     let context = ResilienceContext::new(clock.clone());
     let called = Arc::new(AtomicBool::new(false));
@@ -102,10 +101,9 @@ async fn timeout(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn timeout_override_ensure_respected(#[case] use_tower: bool) {
-    let clock = ClockControl::builder()
+    let clock = ClockControl::default()
         .auto_advance(Duration::from_millis(200))
         .auto_advance_limit(Duration::from_secs(5))
-        .build()
         .to_clock();
 
     let stack = (
@@ -142,7 +140,7 @@ async fn timeout_override_ensure_respected(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn no_timeout_if_disabled(#[case] use_tower: bool) {
-    let clock = ClockControl::new_auto_advancing().to_clock();
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let stack = (
         Timeout::layer("test_timeout", &ResilienceContext::new(&clock))
             .timeout_output(|_args| Ok::<_, String>("timed out".to_string()))
