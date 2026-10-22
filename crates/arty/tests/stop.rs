@@ -10,7 +10,7 @@ testing_aids::init_tracing!();
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use arty::runtime::{Runtime, RuntimeOperations};
+use arty::runtime::Runtime;
 use events_once::{BoxedReceiver, Event};
 use testing_aids::execute_or_abandon;
 use thread_aware::Unaware;
@@ -60,7 +60,7 @@ fn stop_via_async_task() {
         runtime
             .scheduler()
             .spawn_anywhere(Unaware(requested), |cx, Unaware(requested)| async move {
-                RuntimeOperations::from(&cx).request_stop();
+                cx.control().request_stop();
                 requested.send(());
             });
 

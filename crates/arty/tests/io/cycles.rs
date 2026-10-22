@@ -154,6 +154,7 @@ fn secondaries_execute_before_the_primary() {
 #[test]
 fn primary_wait_is_interrupted_by_new_runtime_work() {
     let runtime = runtime(1);
+    let control = support::runtime_control(&runtime);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_primary.store(true, Ordering::SeqCst);
@@ -174,7 +175,7 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker.spawn(async move |_| completed.send(()).unwrap());
     let result = completion.recv_timeout(DRIVER_PROGRESS_TIMEOUT);
     if let Err(error) = result {
-        RuntimeOperations::from(&runtime).request_stop();
+        control.request_stop();
         scenario.wake_driver_interrupts();
         runtime.stop().unwrap();
         panic!("new runtime work did not interrupt the primary wait: {error}");

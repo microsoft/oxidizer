@@ -3,13 +3,6 @@
 
 //! Safe task wakers outlive pinned task storage after success, panic, or shutdown.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
-mod support;
-
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -18,12 +11,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support::{self, JoinHandleExt as _};
 
 #[derive(Clone, Copy, Debug)]
 enum Finish {
@@ -184,7 +176,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         }
 
         let runtime = runtime();
-        let operations = arty::runtime::RuntimeOperations::from(&runtime);
+        let control = support::runtime_control(&runtime);
         let (started, received) = mpsc::channel();
         let finish = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));
@@ -202,7 +194,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         let stopper = std::thread::spawn(move || {
             stop_barrier.wait();
             for _ in 0..8 {
-                operations.request_stop();
+                control.request_stop();
             }
         });
         let finish_barrier = Arc::clone(&barrier);

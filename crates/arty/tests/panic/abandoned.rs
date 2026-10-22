@@ -3,22 +3,14 @@
 
 //! A dropped join neither cancels its task nor transfers task panics to the caller.
 
-#![cfg(feature = "rt")]
-#![cfg(test)]
-
-mod panic_support;
-
-mod support;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
-use panic_support::runtime;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
+use crate::runtime_support::runtime;
+use crate::support::JoinHandleExt as _;
 
 struct ResultDropPanic {
     drops: Arc<AtomicUsize>,

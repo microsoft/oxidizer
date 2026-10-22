@@ -322,6 +322,27 @@ fn same_worker_spawn_reports_same_thread_placement() {
 }
 
 #[test]
+fn targeted_spawn_reports_specific_thread_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let destination = cx.control().workers().into_iter().next().unwrap();
+            cx.scheduler().spawn_at(destination, (), |()| async {}).await.unwrap();
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    assert!(
+        events_named(&processor.events(), "arty.rt.task.spawned")
+            .iter()
+            .any(|event| dimension(event, "placement") == Some("specific_thread".into()))
+    );
+}
+
+#[test]
 fn panicking_task_emits_panicked_event() {
     let (sink, processor) = test_emitter(TEST_ID);
 

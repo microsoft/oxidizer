@@ -268,15 +268,13 @@ fn relocated_builtins_initializes_io_on_the_destination_worker() {
             let initialized = Arc::clone(&initialized);
             async move |cx| {
                 let here = cx.thread().clone();
-                let there = join_all(
-                    cx.scheduler()
-                        .spawn_everywhere(cx.clone(), |worker| async move { worker.thread().clone() }),
-                )
-                .await
-                .into_iter()
-                .map(Result::unwrap)
-                .find(|worker| worker != &here)
-                .expect("two-worker runtime exposes a relocation destination");
+                let there = cx
+                    .control()
+                    .workers()
+                    .into_iter()
+                    .find(|worker| worker != &&here)
+                    .cloned()
+                    .expect("two-worker runtime exposes a relocation destination");
                 let mut relocated = cx.clone();
                 relocated.relocate(Some(&here), &there);
                 let destination = there.id();
