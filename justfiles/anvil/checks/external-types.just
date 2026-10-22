@@ -20,6 +20,7 @@
 # crate. Hard-fails on errors (no tolerance, unlike semver-check).
 
 # Check public APIs for unapproved external types.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-external-types: anvil-external-types-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -89,9 +90,9 @@ anvil-external-types: anvil-external-types-validate-prereqs anvil-impact
     if ($failed) { exit 1 }
 
 # Install prerequisites for the `anvil-external-types` recipe.
-[group("anvil-setup")]
+[private]
 anvil-external-types-setup installer="install": anvil-toolchain-nightly-external-types-install (anvil-tool-cargo-check-external-types-install installer)
 
 # Validate prerequisites for the `anvil-external-types` recipe.
-[group("anvil-setup")]
+[private]
 anvil-external-types-validate-prereqs: anvil-toolchain-nightly-external-types-validate-prereqs anvil-tool-cargo-check-external-types-validate-prereqs

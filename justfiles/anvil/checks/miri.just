@@ -29,6 +29,7 @@
 # ANVIL_MIRI_JOBS overrides the default of one artifact worker per logical processor.
 
 # Run Miri tests for affected workspace packages.
+[group("anvil")]
 [arg("package", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
 [arg("test", long, pattern='(?:[A-Za-z0-9_.:-]+)?')]
 [arg("example", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
@@ -371,9 +372,9 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
 # --- pr-runtime-analysis members ---
 
 # Install prerequisites for the `anvil-miri` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 # Validate prerequisites for the `anvil-miri` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
