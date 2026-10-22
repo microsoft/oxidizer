@@ -8,6 +8,8 @@
 mod support;
 
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
@@ -271,6 +273,17 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
 
 #[test]
 fn spawn_at_rejects_a_worker_from_another_runtime() {
+    struct RejectionProbe {
+        relocations: Arc<AtomicUsize>,
+        invocations: Arc<AtomicUsize>,
+    }
+
+    impl ThreadAware for RejectionProbe {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+            self.relocations.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     let runtime = Runtime::builder()
         .workers(arty::runtime::WorkersPolicy::exactly(1))
         .build()
@@ -287,12 +300,16 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .scheduler()
         .block_on(async |cx| cx.operations().workers().into_iter().next().unwrap().clone())
         .unwrap();
-    let invoked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let relocations = Arc::new(AtomicUsize::new(0));
+    let invocations = Arc::new(AtomicUsize::new(0));
     let task = scheduler.spawn_at(
         &destination,
-        thread_aware::Unaware(std::sync::Arc::clone(&invoked)),
-        |thread_aware::Unaware(invoked)| {
-            invoked.store(true, std::sync::atomic::Ordering::SeqCst);
+        RejectionProbe {
+            relocations: Arc::clone(&relocations),
+            invocations: Arc::clone(&invocations),
+        },
+        |probe| {
+            probe.invocations.fetch_add(1, Ordering::SeqCst);
             async {}
         },
     );
@@ -304,7 +321,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert!(!error.is_shutdown());
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
-    assert!(!invoked.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));
     assert_eq!(operations.workers().into_iter().len(), 1);
     runtime.stop().unwrap();
     other.stop().unwrap();
