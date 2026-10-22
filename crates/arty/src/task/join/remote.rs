@@ -7,9 +7,16 @@ use std::task::{self, Poll};
 use arty_executor::remote::{JoinHandle as RemoteJoinHandle, Pool as RemotePool};
 use performables::arc::Arc;
 use pin_project::pin_project;
+use thread_aware::{Thread, ThreadAware};
 
 use super::JoinError;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
+use crate::task::Scheduler;
+
+struct ResultRelocation<R> {
+    source: Thread,
+    relocate: fn(&mut R, Option<&Thread>, &Thread),
+}
 
 /// A handle for receiving an async or blocking task's result.
 ///
@@ -22,11 +29,18 @@ use crate::runtime::blocking_worker::is_current_blocking_pool;
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
+/// A result from [`Scheduler::spawn_anywhere`] is relocated to the joining
+/// Arty worker before it is returned. Joining from outside an Arty worker
+/// leaves its association unchanged. Other submission methods do not relocate
+/// their results.
+///
 /// # Panics
 ///
 /// Panics if polled again after its result has been received. A blocking
 /// handle also panics if it is polled directly from a callback running in the
 /// same blocking pool.
+/// Result relocation also propagates a panic if its `ThreadAware`
+/// implementation violates the trait's non-panicking contract.
 ///
 /// # Examples
 ///
@@ -51,6 +65,8 @@ where
     inner: RemoteJoinHandle<R>,
     invalid_destination: bool,
     blocking_pool: Option<Arc<()>>,
+    #[debug(ignore)]
+    relocation: Option<ResultRelocation<R>>,
     completed: bool,
 }
 
@@ -63,6 +79,7 @@ where
             inner,
             invalid_destination: false,
             blocking_pool: None,
+            relocation: None,
             completed: false,
         }
     }
@@ -82,6 +99,17 @@ where
 
     pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
         self.blocking_pool = Some(pool);
+        self
+    }
+
+    pub(crate) fn relocate_result_from(mut self, source: Thread) -> Self
+    where
+        R: ThreadAware,
+    {
+        self.relocation = Some(ResultRelocation {
+            source,
+            relocate: R::relocate,
+        });
         self
     }
 
@@ -116,7 +144,13 @@ where
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;
-                Poll::Ready(result.map_err(JoinError::from_executor))
+                let mut result = result.map_err(JoinError::from_executor);
+                if let (Some(relocation), Ok(value)) = (this.relocation.as_ref(), &mut result)
+                    && let Some(destination) = Scheduler::current_thread()
+                {
+                    (relocation.relocate)(value, Some(&relocation.source), &destination);
+                }
+                Poll::Ready(result)
             }
             Poll::Pending => Poll::Pending,
         }

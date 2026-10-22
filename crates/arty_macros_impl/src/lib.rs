@@ -29,13 +29,12 @@ struct Args {
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        if self.workers.is_none() && clock.is_none() && !test {
+    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+        if self.workers.is_none() && clock.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
-        let workers = self.workers.as_ref().map(worker_count).transpose()?;
-        let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
-        let workers = workers.map(|count| quote!(.workers(#runtime_path::runtime::WorkersPolicy::exactly(#count))));
+        let workers = self.workers.as_ref().map(|value| worker_policy(value, runtime_path)).transpose()?;
+        let workers = workers.map(|policy| quote!(.workers(#policy)));
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #clock .build()))
     }
@@ -58,7 +57,7 @@ fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
     }
 }
 
-fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
+fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<TokenStream> {
     while let Expr::Group(group) = value {
         value = &group.expr;
     }
@@ -66,11 +65,16 @@ fn worker_count(mut value: &Expr) -> syn::Result<&syn::LitInt> {
         && !count.base10_digits().starts_with('-')
         && matches!(count.suffix(), "" | "usize")
     {
-        return Ok(count);
+        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::exactly(#count)));
+    }
+    if let Expr::Path(syn::ExprPath { qself: None, path, .. }) = value
+        && path.is_ident("all")
+    {
+        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::all()));
     }
     Err(syn::Error::new_spanned(
         value,
-        "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`; use explicit runtime construction for expressions or processor policies",
+        "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`, or `all`; use explicit runtime construction for expressions or other processor policies",
     ))
 }
 
@@ -190,7 +194,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -293,9 +297,7 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::exactly(1))
-                .build()
+            let __arty_runtime = ::arty::runtime::Runtime::new()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
@@ -339,6 +341,38 @@ mod tests {
     }
 
     #[test]
+    fn all_workers_selects_all_available_processors() {
+        for expand in [main, test] {
+            let expansion = expand(
+                quote!(workers = all),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            )
+            .to_string();
+            assert!(!expansion.contains("compile_error"), "{expansion}");
+            assert!(
+                expansion.contains("workers (:: arty :: runtime :: WorkersPolicy :: all ())"),
+                "{expansion}"
+            );
+        }
+    }
+
+    #[test]
+    fn controlled_test_can_select_all_workers() {
+        let expansion = test(
+            quote!(workers = all),
+            quote! {
+                async fn run(cx: Builtins, time: ClockControl) {}
+            },
+        )
+        .to_string();
+        assert!(!expansion.contains("compile_error"), "{expansion}");
+        assert!(expansion.contains("workers (:: arty :: runtime :: WorkersPolicy :: all ())"));
+        assert!(expansion.contains("clock (:: core :: clone :: Clone :: clone (& __arty_clock_control))"));
+    }
+
+    #[test]
     fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
         let expansion = test(
             quote!(workers = 1),
@@ -379,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_test_without_workers_defaults_to_one_worker() {
+    fn controlled_test_without_workers_uses_the_runtime_default() {
         let expansion = test(
             TokenStream::new(),
             quote! {
@@ -391,8 +425,8 @@ mod tests {
         let expansion = expansion.to_string();
         assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
         assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
-        assert!(expansion.contains("workers"));
-        assert!(expansion.contains("WorkersPolicy :: exactly (1)"));
+        assert!(expansion.contains("clock (:: core :: clone :: Clone :: clone (& __arty_clock_control))"));
+        assert!(!expansion.contains("workers"));
     }
 
     #[test]
@@ -417,19 +451,22 @@ mod tests {
     }
 
     #[test]
-    fn worker_count_unwraps_nested_expression_groups() {
-        let mut value: Expr = parse_quote!(4usize);
-        for _ in 0..2 {
-            value = Expr::Group(syn::ExprGroup {
-                attrs: Vec::new(),
-                group_token: syn::token::Group::default(),
-                expr: Box::new(value),
-            });
-        }
+    fn worker_policy_unwraps_nested_expression_groups() {
+        for (mut value, expected) in [
+            (parse_quote!(4usize), quote!(::arty::runtime::WorkersPolicy::exactly(4usize))),
+            (parse_quote!(all), quote!(::arty::runtime::WorkersPolicy::all())),
+        ] {
+            for _ in 0..2 {
+                value = Expr::Group(syn::ExprGroup {
+                    attrs: Vec::new(),
+                    group_token: syn::token::Group::default(),
+                    expr: Box::new(value),
+                });
+            }
 
-        let count = worker_count(&value).unwrap();
-        assert_eq!(count.base10_digits(), "4");
-        assert_eq!(count.suffix(), "usize");
+            let policy = worker_policy(&value, &quote!(::arty)).unwrap();
+            assert_eq!(policy.to_string(), expected.to_string());
+        }
     }
 
     #[test]
@@ -442,6 +479,14 @@ mod tests {
             quote!(1u32),
             quote!(1.5),
             quote!("2"),
+            quote!("ALL"),
+            quote!(""),
+            quote!("all"),
+            quote!(ALL),
+            quote!(module::all),
+            quote!(::all),
+            quote!(all::<usize>),
+            quote!(<T>::all),
             quote!(true),
             quote!(COUNT),
             quote!(1 + 1),

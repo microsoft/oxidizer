@@ -13,6 +13,7 @@ use nonempty::NonEmpty;
 use performables::arc::Arc;
 #[cfg(test)]
 use performables::sync::channel;
+use thread_aware::ThreadAware;
 
 #[cfg(test)]
 use crate::runtime::blocking_worker::BlockingPool;
@@ -124,6 +125,28 @@ impl DispatcherClient {
         self.core.spawn(future_factory)
     }
 
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_relocating(future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(
+        &self,
+        worker_index: WorkerIndex,
+        future_factory: FF,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_at_worker_relocating(worker_index, future_factory)
+    }
+
     pub(crate) fn stop_with_error(&self, error: Error) {
         self.core.stop_with_error(error);
     }
@@ -162,7 +185,7 @@ impl Debug for DispatcherClient {
 mod tests {
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
-    use thread_aware::{Thread, ThreadAware};
+    use thread_aware::Thread;
 
     use super::*;
     use crate::runtime::dispatch::test_threads;
