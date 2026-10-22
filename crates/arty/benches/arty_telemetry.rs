@@ -92,17 +92,25 @@ impl Case {
 }
 
 #[metabench::benchmark(NOOP, "arty_telemetry/spawn", "noop")]
-#[bench::one(&mut Case::new(1, false))]
-#[bench::hundred(&mut Case::new(100, false))]
-fn noop(case: &mut Case) {
-    case.spawn();
+#[bench::one(Box::new(Case::new(1, false)))]
+#[bench::hundred(Box::new(Case::new(100, false)))]
+fn noop<S: std::borrow::BorrowMut<Case>>(mut owned_input: S) -> ((), S) {
+    {
+        let case = owned_input.borrow_mut();
+        case.spawn();
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(ACTIVE, "arty_telemetry/spawn", "active")]
-#[bench::one(&mut Case::new(1, true))]
-#[bench::hundred(&mut Case::new(100, true))]
-fn active(case: &mut Case) {
-    case.spawn();
+#[bench::one(Box::new(Case::new(1, true)))]
+#[bench::hundred(Box::new(Case::new(100, true)))]
+fn active<S: std::borrow::BorrowMut<Case>>(mut owned_input: S) -> ((), S) {
+    {
+        let case = owned_input.borrow_mut();
+        case.spawn();
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(LIFECYCLE_NOOP, "arty_telemetry/lifecycle", "noop")]
@@ -111,9 +119,13 @@ fn lifecycle_noop() {
 }
 
 #[metabench::benchmark(LIFECYCLE_ACTIVE, "arty_telemetry/lifecycle", "active")]
-#[bench::one(&active_sink())]
-fn lifecycle_active(sink: &Sink) {
-    drop(runtime(sink.clone()));
+#[bench::one(Box::new(active_sink()))]
+fn lifecycle_active<S: std::borrow::Borrow<Sink>>(owned_input: S) -> ((), S) {
+    {
+        let sink = owned_input.borrow();
+        drop(runtime(sink.clone()));
+    }
+    ((), owned_input)
 }
 
 fn configured_criterion() -> Criterion {
@@ -129,11 +141,11 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
         group.bench_function(BenchmarkId::new(NOOP.benchmark_name(), name), |bencher| {
             let mut case = Case::new(count, false);
-            bencher.iter(|| noop(&mut case));
+            bencher.iter(|| noop(&mut case).0);
         });
         group.bench_function(BenchmarkId::new(ACTIVE.benchmark_name(), name), |bencher| {
             let mut case = Case::new(count, true);
-            bencher.iter(|| active(&mut case));
+            bencher.iter(|| active(&mut case).0);
         });
     }
     group.finish();
@@ -141,7 +153,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     lifecycle.bench_function(LIFECYCLE_NOOP.benchmark_name(), |bencher| bencher.iter(lifecycle_noop));
     lifecycle.bench_function(BenchmarkId::new(LIFECYCLE_ACTIVE.benchmark_name(), "one"), |bencher| {
         let sink = active_sink();
-        bencher.iter(|| lifecycle_active(&sink));
+        bencher.iter(|| lifecycle_active(&sink).0);
     });
     lifecycle.finish();
 }

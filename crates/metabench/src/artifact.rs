@@ -18,9 +18,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use either_or_both::EitherOrBoth;
-use gungraun_runner::api::ValgrindTool;
-use gungraun_runner::metrics::model::{Metric as GungraunMetric, MetricsSummary};
-use gungraun_runner::summary::model::{BenchmarkSummary, ToolMetricSummary};
+use gungraun_runner::api::Tool;
+use gungraun_runner::metrics::model::{Metric as GungraunMetric, MetricResults};
+use gungraun_runner::summary::model::{BenchmarkSummary, SCHEMA_VERSION, ToolMetricResults};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -311,10 +311,16 @@ pub(crate) fn parse_gungraun(root: &Path, artifact_root: &Path, identities: &[Be
             },
             error => error,
         })?;
-        if summary.version != "6" {
+        if summary.version != SCHEMA_VERSION {
             return Err(Error::ArtifactFormat {
                 path,
                 message: format!("unsupported Gungraun summary schema {}", summary.version),
+            });
+        }
+        if summary.profiles.0.is_empty() {
+            return Err(Error::ArtifactFormat {
+                path,
+                message: "Gungraun summary contains no supported measurement profiles".to_owned(),
             });
         }
 
@@ -326,11 +332,11 @@ pub(crate) fn parse_gungraun(root: &Path, artifact_root: &Path, identities: &[Be
             if !is_benchmark_tool(profile.tool) {
                 return Err(Error::ArtifactFormat {
                     path,
-                    message: format!("Gungraun {tool} is not a benchmark measurement tool"),
+                    message: format!("Gungraun {tool} is not a supported benchmark measurement tool"),
                 });
             }
             let source = format!("gungraun.{tool}");
-            let metrics = tool_metrics(&source, &profile.summaries.total.summary).ok_or_else(|| Error::ArtifactFormat {
+            let metrics = tool_metrics(&source, &profile.data.total.metrics).ok_or_else(|| Error::ArtifactFormat {
                 path: path.clone(),
                 message: format!("Gungraun {tool} summary contains no benchmark metrics"),
             })?;
@@ -598,14 +604,9 @@ fn gungraun_native_identity(summary: &BenchmarkSummary) -> String {
 }
 
 fn gungraun_canonical_identity(summary: &BenchmarkSummary) -> String {
-    let mut parts = summary.module_path.split("::").collect::<Vec<_>>();
-    if parts.last().copied() == Some(summary.function_name.as_str()) {
-        parts.pop();
-    }
-    let group = parts.last().copied().unwrap_or("gungraun");
     match &summary.id {
-        Some(id) => format!("{group}/{}/{id}", summary.function_name),
-        _ => format!("{group}/{}", summary.function_name),
+        Some(id) => format!("{}/{}/{id}", summary.group, summary.function_name),
+        _ => format!("{}/{}", summary.group, summary.function_name),
     }
 }
 
@@ -655,34 +656,39 @@ impl CanonicalIdentityIndex {
     }
 }
 
-fn tool_name(tool: ValgrindTool) -> &'static str {
+fn tool_name(tool: Tool) -> &'static str {
     match tool {
-        ValgrindTool::Callgrind => "callgrind",
-        ValgrindTool::Cachegrind => "cachegrind",
-        ValgrindTool::DHAT => "dhat",
-        ValgrindTool::Memcheck => "memcheck",
-        ValgrindTool::Helgrind => "helgrind",
-        ValgrindTool::DRD => "drd",
-        ValgrindTool::Massif => "massif",
-        ValgrindTool::BBV => "bbv",
+        Tool::Callgrind => "callgrind",
+        Tool::Cachegrind => "cachegrind",
+        Tool::DHAT => "dhat",
+        Tool::Memcheck => "memcheck",
+        Tool::Helgrind => "helgrind",
+        Tool::DRD => "drd",
+        Tool::Massif => "massif",
+        Tool::BBV => "bbv",
+        Tool::Perf => "perf",
     }
 }
 
-const fn is_benchmark_tool(tool: ValgrindTool) -> bool {
-    matches!(tool, ValgrindTool::Callgrind | ValgrindTool::Cachegrind | ValgrindTool::DHAT)
+const fn is_benchmark_tool(tool: Tool) -> bool {
+    matches!(tool, Tool::Callgrind | Tool::Cachegrind | Tool::DHAT)
 }
 
-fn tool_metrics(source: &str, summary: &ToolMetricSummary) -> Option<BTreeMap<String, Metric>> {
+fn tool_metrics(source: &str, summary: &ToolMetricResults) -> Option<BTreeMap<String, Metric>> {
     let metrics = match summary {
-        ToolMetricSummary::Dhat(metrics) => Some(copy_metrics(source, metrics)),
-        ToolMetricSummary::Callgrind(metrics) => Some(copy_metrics(source, metrics)),
-        ToolMetricSummary::Cachegrind(metrics) => Some(copy_metrics(source, metrics)),
-        ToolMetricSummary::None | ToolMetricSummary::ErrorTool(_) => None,
+        ToolMetricResults::Dhat(metrics) => Some(copy_metrics(source, metrics)),
+        ToolMetricResults::Callgrind(metrics) => Some(copy_metrics(source, metrics)),
+        ToolMetricResults::Cachegrind(metrics) => Some(copy_metrics(source, metrics)),
+        ToolMetricResults::None
+        | ToolMetricResults::Memcheck(_)
+        | ToolMetricResults::Helgrind(_)
+        | ToolMetricResults::DRD(_)
+        | ToolMetricResults::Perf(_) => None,
     };
     metrics.filter(|metrics| !metrics.is_empty())
 }
 
-fn copy_metrics<K>(source: &str, summary: &MetricsSummary<K>) -> BTreeMap<String, Metric>
+fn copy_metrics<K>(source: &str, summary: &MetricResults<K>) -> BTreeMap<String, Metric>
 where
     K: Debug + Eq + Hash + Serialize,
 {
@@ -690,7 +696,7 @@ where
         .0
         .iter()
         .filter_map(|(kind, value)| {
-            let current = match value.metrics {
+            let current = match value.values {
                 EitherOrBoth::Left(current) | EitherOrBoth::Both(current, _) => current,
                 EitherOrBoth::Right(_) => return None,
             };
@@ -1250,16 +1256,10 @@ mod tests {
 
     #[test]
     fn accepts_only_performance_measurement_tools() {
-        for tool in [ValgrindTool::Callgrind, ValgrindTool::Cachegrind, ValgrindTool::DHAT] {
+        for tool in [Tool::Callgrind, Tool::Cachegrind, Tool::DHAT] {
             assert!(is_benchmark_tool(tool));
         }
-        for tool in [
-            ValgrindTool::Memcheck,
-            ValgrindTool::Helgrind,
-            ValgrindTool::DRD,
-            ValgrindTool::Massif,
-            ValgrindTool::BBV,
-        ] {
+        for tool in [Tool::Memcheck, Tool::Helgrind, Tool::DRD, Tool::Massif, Tool::BBV, Tool::Perf] {
             assert!(!is_benchmark_tool(tool));
         }
     }
@@ -1479,13 +1479,14 @@ mod tests {
 
     #[test]
     fn parses_gungraun_schema_and_strips_native_diffs() {
-        let source = fs::read_to_string(fixture("gungraun/minimal/summary.json")).unwrap();
+        let mut summary: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        summary["module_path"] = "unrelated::path".into();
+        summary["profiles"][0]["data"]["total"]["metrics"]["Ir"] = serde_json::json!({
+            "change": {"diff_pct": "42.0", "factor": "1.42"},
+            "values": {"new": 100, "old": 70},
+        });
         let directory = tempfile::tempdir().unwrap();
-        fs::write(
-            directory.path().join("summary.json"),
-            source.replace(r#""diffs": null"#, r#""diffs":{"diff_pct":"42.0","factor":"1.42"}"#),
-        )
-        .unwrap();
+        write_json(&directory.path().join("summary.json"), &summary).unwrap();
 
         let results = parse_gungraun(directory.path(), directory.path(), &[]).unwrap();
         assert_eq!(results.len(), 1);
@@ -1498,6 +1499,66 @@ mod tests {
     }
 
     #[test]
+    fn gungraun_preserves_current_metric_types_and_ignores_old_values() {
+        let mut summary: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        summary["profiles"][0]["data"]["total"]["metrics"] = serde_json::json!({
+            "Ir": {"values": {"new": u64::MAX, "old": 1}},
+            "L1HitRate": {"values": {"new": 99.5}},
+            "RamHits": {"values": {"old": 5}},
+        });
+        let directory = tempfile::tempdir().unwrap();
+        write_json(&directory.path().join("summary.json"), &summary).unwrap();
+
+        let results = parse_gungraun(directory.path(), directory.path(), &[]).unwrap();
+        let metrics = &results[0].metrics;
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics["Ir"].value, crate::report::MetricValue::Integer(u64::MAX));
+        assert_eq!(metrics["L1HitRate"].value, crate::report::MetricValue::Float(99.5));
+        assert_eq!(metrics["L1HitRate"].direction, MetricDirection::HigherIsBetter);
+        assert!(!metrics.contains_key("RamHits"));
+    }
+
+    #[test]
+    fn gungraun_rejects_other_schema_versions_and_missing_profiles() {
+        let source: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        for version in ["6", "8"] {
+            let mut summary = source.clone();
+            summary["version"] = version.into();
+            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            assert!(matches!(
+                parse_gungraun(directory.path(), directory.path(), &[]),
+                Err(Error::ArtifactFormat { message, .. }) if message == format!("unsupported Gungraun summary schema {version}")
+            ));
+        }
+        for profiles in [serde_json::json!([]), serde_json::json!([{"tool": "FutureTool"}])] {
+            let mut summary = source.clone();
+            summary["profiles"] = profiles;
+            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            assert!(matches!(
+                parse_gungraun(directory.path(), directory.path(), &[]),
+                Err(Error::ArtifactFormat { message, .. }) if message.contains("no supported measurement profiles")
+            ));
+        }
+    }
+
+    #[test]
+    fn gungraun_rejects_unsupported_measurement_tools() {
+        let source: serde_json::Value = read_json(&fixture("gungraun/minimal/summary.json")).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        for tool in ["Memcheck", "Helgrind", "DRD", "Massif", "BBV", "Perf"] {
+            let mut summary = source.clone();
+            summary["profiles"][0]["tool"] = tool.into();
+            summary["profiles"][0]["data"]["total"]["metrics"] = serde_json::json!({});
+            write_json(&directory.path().join("summary.json"), &summary).unwrap();
+            assert!(matches!(
+                parse_gungraun(directory.path(), directory.path(), &[]),
+                Err(Error::ArtifactFormat { message, .. }) if message.contains("not a supported benchmark measurement tool")
+            ));
+        }
+    }
+
+    #[test]
     fn gungraun_rejects_malformed_input() {
         assert!(matches!(
             parse_gungraun(&fixture("gungraun/malformed"), Path::new(""), &[]),
@@ -1507,7 +1568,7 @@ mod tests {
 
         let source = fs::read_to_string(fixture("gungraun/minimal/summary.json")).unwrap();
         let directory = tempfile::tempdir().unwrap();
-        fs::write(directory.path().join("summary.json"), source.replace(r#""Left""#, r#""Right""#)).unwrap();
+        fs::write(directory.path().join("summary.json"), source.replace(r#""new""#, r#""old""#)).unwrap();
         assert!(matches!(
             parse_gungraun(directory.path(), directory.path(), &[]),
             Err(Error::ArtifactFormat { message, .. }) if message.contains("contains no benchmark metrics")

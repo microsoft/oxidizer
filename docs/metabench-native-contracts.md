@@ -1,9 +1,12 @@
 # Metabench native contracts
 
 The repository-specific **Metabench native contracts (Linux)** CI job installs
-Valgrind and `gungraun-runner` 0.19.4, matching the workspace's Gungraun version.
-It runs the native listing and default-engine smoke contracts and is required
-by the stable **Required repository checks** fan-in. These are correctness
+Valgrind and the `gungraun-runner` version selected by `just setup-callgrind`,
+matching the workspace's Gungraun version (currently 0.20.0).
+It runs the native listing, default-engine smoke, and report-generation
+contracts and is required by the stable **Required repository checks** fan-in.
+The report contract runs Callgrind and checks that schema-v7 summaries produce
+JSON and Markdown reports with instruction counts. These are correctness
 checks, not timed performance measurements.
 
 To run the same required tier locally on Linux:
@@ -12,18 +15,20 @@ To run the same required tier locally on Linux:
 mkdir -p target/metabench-contract-scratch
 export TMPDIR="$PWD/target/metabench-contract-scratch"
 export CARGO_BUILD_JOBS=2 METABENCH_REQUIRE_NATIVE_CONTRACTS=1
-cargo install --locked --version 0.19.4 gungraun-runner
+just setup-callgrind
 # Install Valgrind using your Linux distribution's package manager.
 gungraun-runner --version
 valgrind --version
-cargo test --package metabench --test spawned_benchmark --locked gungraun_listing_is_forwarded -- --exact --nocapture
-cargo test --package metabench --test spawned_benchmark --locked default_engine_smoke_checks_do_not_publish_measurements -- --exact --nocapture
+cargo test --package metabench --test spawned_benchmark --locked -- --exact --nocapture \
+  gungraun_listing_is_forwarded \
+  gungraun_measurements_write_report \
+  default_engine_smoke_checks_do_not_publish_measurements
 ```
 
 `METABENCH_REQUIRE_NATIVE_CONTRACTS` makes missing prerequisites a test failure,
 not a successful skip. Without this setting, ordinary local test runs retain
-the optional skip when `gungraun-runner` is unavailable. The Linux smoke contract
-is not compiled on Windows; Windows' unsupported native-mode behavior is
+the optional skip when `gungraun-runner` is unavailable. The Linux smoke and report
+contracts are not compiled on Windows; Windows' unsupported native-mode behavior is
 unchanged. Test output reports each executed contract by name.
 
 Unit regressions also check collector activation, report boundary values,
