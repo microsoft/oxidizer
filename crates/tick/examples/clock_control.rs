@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to use `ClockControl` to control the passage of time.
+//! This example shows how `ClockControl` controls time in a test.
 
 use std::time::Duration;
 
@@ -12,34 +12,30 @@ fn main() -> Result<(), std::time::SystemTimeError> {
     let control = ClockControl::new().auto_advance_timers(true);
     let clock = control.to_clock();
 
-    // Retrieve the current time.
+    // Read the current time twice.
     let now = clock.system_time();
-
-    // Retrieve the time again later.
     let later = clock.system_time();
 
-    // Notice that the time is the same.
+    // Time does not move until the control advances it.
     assert_eq!(now, later);
 
     // Advance the clock by 1 second.
     control.advance(Duration::from_secs(1));
 
-    // Verify that time has advanced by 1 second.
+    // Make sure that time advanced by 1 second.
     assert_eq!(clock.system_time().duration_since(later)?, Duration::from_secs(1));
 
     // Create a stopwatch.
     let stopwatch = clock.stopwatch();
 
-    // Notice that time does not move on its own.
+    // The stopwatch also stays frozen.
     assert_eq!(stopwatch.elapsed(), Duration::from_secs(0));
 
     // Advance the clock by 2 seconds.
     control.advance(Duration::from_secs(2));
     assert_eq!(stopwatch.elapsed(), Duration::from_secs(2));
 
-    // Delay for 1000 seconds. The clock automatically advances to complete this timer
-    // because `auto_advance_timers` is set to true.
-    // The delay finishes immediately.
+    // Auto-advance completes this 1000-second simulated delay without a real wait.
     block_on(clock.delay(Duration::from_secs(1000)));
 
     Ok(())

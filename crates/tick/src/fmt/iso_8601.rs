@@ -12,37 +12,35 @@ use crate::fmt::ensure_system_time_representable;
 
 /// Parser and formatter for system time in ISO 8601 format.
 ///
-/// The ISO 8601 standard is used worldwide in various applications, ranging
-/// from software and digital formats to international communication, ensuring
-/// consistency across different systems and regions.
+/// This type also parses
+/// [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339) timestamps. Output
+/// uses ISO 8601. For years `0000` through `9999`, the output is also valid RFC
+/// 3339. An earlier time uses an expanded year, such as
+/// `-000500-01-01T00:00:00Z`. RFC 3339 does not support that form.
 ///
-/// This type also supports parsing [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339)
-/// timestamps. Output is ISO 8601, and is also valid RFC 3339 for years `0000` through `9999`.
-/// An earlier instant uses an ISO 8601 expanded year, such as `-000500-01-01T00:00:00Z`, which
-/// is not RFC 3339.
-///
-/// Examples:
+/// Examples include:
 ///
 /// - `2024-08-06T21:30:00Z` (UTC)
 /// - `2024-08-06T14:30:00-07:00` (UTC offset)
 ///
-/// The [`Iso8601`] format is defined in [ISO 8601](https://www.iso.org/obp/ui/#iso:std:iso:8601:-1:ed-1:v1:en).
+/// [ISO 8601](https://www.iso.org/obp/ui/#iso:std:iso:8601:-1:ed-1:v1:en)
+/// defines this format.
 ///
 /// # UTC and time zones
 ///
-/// While ISO 8601 can include a UTC offset, the resulting [`Iso8601`] is always represented in the
-/// UTC time zone with an offset of `Z`.
+/// Input can include a UTC offset. The stored value and output always use UTC
+/// with the `Z` designator.
 ///
 /// # Serialization and deserialization
 ///
-/// `Iso8601` implements the `Serialize` and `Deserialize` traits from the `serde_core` crate.
-/// The system time is serialized as a string using ISO 8601 format.
+/// `Iso8601` implements `Serialize` and `Deserialize` from `serde_core`.
+/// Serialization writes an ISO 8601 string.
 ///
-/// The serialization support is available when `serde` feature is enabled.
+/// Enable the `serde` feature to use this support.
 ///
 /// # Leap seconds
 ///
-/// If an ISO 8601 string contains a leap second, parsing will succeed and the leap second will be trimmed.
+/// Parsing accepts a leap second and changes it to second 59.
 ///
 /// ```
 /// use tick::fmt::Iso8601;
@@ -55,14 +53,14 @@ use crate::fmt::ensure_system_time_representable;
 ///
 /// # Representable range
 ///
-/// The upper bound is [`Iso8601::MAX`] (`9999-12-30T22:00:00.9999999Z`). How far back the
-/// type reaches depends on the platform: an instant is accepted only if the platform's
-/// [`SystemTime`] can represent it, and rejected otherwise, so converting an `Iso8601` back
-/// into a [`SystemTime`] always succeeds.
+/// The upper bound is [`Iso8601::MAX`]:
+/// `9999-12-30T22:00:00.9999999Z`. The platform defines the lower bound.
+/// Creation fails if [`SystemTime`] cannot represent the value. Therefore,
+/// conversion back to [`SystemTime`] always succeeds.
 ///
 /// # Examples
 ///
-/// ## Formatting and parsing - UTC
+/// ## Parse and format UTC
 /// ```
 /// use std::time::SystemTime;
 ///
@@ -76,17 +74,17 @@ use crate::fmt::ensure_system_time_representable;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// ### Formatting and parsing - With UTC offset
+/// ### Parse a UTC offset
 ///
-/// This example demonstrates that the UTC offset is applied to the resulting [`Iso8601`].
-/// Note that when formatting the absolute time, the UTC offset is not included in the formatted string.
+/// Parsing applies the UTC offset. Formatting then writes the absolute time in
+/// UTC without the input offset.
 /// ```
 /// use std::time::SystemTime;
 ///
 /// use tick::fmt::Iso8601;
 ///
 /// let iso = "2024-08-06T23:30:00+02:00".parse::<Iso8601>()?;
-/// assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z"); // Note that the UTC offset is applied
+/// assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
 ///
 /// let system_time: SystemTime = iso.into();
 ///
@@ -98,7 +96,7 @@ pub struct Iso8601(Timestamp);
 crate::thread_aware_move!(Iso8601);
 
 impl Iso8601 {
-    /// The largest value that can be represented by `Iso8601`.
+    /// The largest value that `Iso8601` can represent.
     ///
     /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`, which
     /// [`Display`] writes as `9999-12-30T22:00:00.9999999Z` at 100-nanosecond resolution.

@@ -10,31 +10,31 @@ use crate::Error;
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
-/// Examples:
+/// Examples include:
 ///
 /// - `0` is equal to `Thu, 1 Jan 1970 00:00:00 -0000`
 /// - `951786000` is equal to `Tue, 29 Feb 2000 01:00:00 -0000`
 ///
 /// # UTC and time zones
 ///
-/// The seconds are always represented in the UTC time zone.
+/// The value always uses UTC.
 ///
 /// # Serialization and deserialization
 ///
-/// `UnixSeconds` implements the `Serialize` and `Deserialize` traits from the `serde_core` crate.
-/// The system time is serialized as whole seconds. Fractional seconds are rounded down.
+/// `UnixSeconds` implements `Serialize` and `Deserialize` from `serde_core`.
+/// Serialization writes whole seconds and discards fractional seconds.
 ///
-/// The serialization support is available when `serde` feature is enabled.
+/// Enable the `serde` feature to use this support.
 ///
 /// # Leap seconds
 ///
-/// This value represents the number of non-leap seconds since the Unix epoch.
+/// The value counts non-leap seconds since the Unix epoch.
 ///
 /// # Representable range
 ///
-/// The offset from the Unix epoch is unsigned, so this type spans
-/// [`UnixSeconds::UNIX_EPOCH`] (`0`) through [`UnixSeconds::MAX`] (`253402207200`). A
-/// [`SystemTime`] before the Unix epoch is rejected rather than clamped.
+/// The offset from the Unix epoch is unsigned. The range starts at
+/// [`UnixSeconds::UNIX_EPOCH`] (`0`) and ends at [`UnixSeconds::MAX`]
+/// (`253402207200`). Conversion rejects a [`SystemTime`] before the Unix epoch.
 ///
 /// ```
 /// use std::time::{Duration, SystemTime};
@@ -48,9 +48,9 @@ use crate::Error;
 ///
 /// # Examples
 ///
-/// ### Parsing and formatting
+/// ### Parse and format a value
 ///
-/// This example demonstrates how to parse Unix seconds and convert them to [`SystemTime`].
+/// This example parses Unix seconds and converts them to [`SystemTime`].
 ///
 /// ```
 /// use std::time::{Duration, SystemTime};
@@ -74,7 +74,7 @@ pub struct UnixSeconds(Duration);
 crate::thread_aware_move!(UnixSeconds);
 
 impl UnixSeconds {
-    /// The largest value that can be represented by `UnixSeconds`.
+    /// The largest value that `UnixSeconds` can represent.
     ///
     /// This represents `253402207200`, or `9999-12-30T22:00:00Z`.
     pub const MAX: Self = Self(Duration::from_hours(70_389_502));
@@ -85,11 +85,11 @@ impl UnixSeconds {
     /// offset from the epoch is unsigned, this is also the smallest representable value.
     pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
-    /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
+    /// Creates `UnixSeconds` from a number of seconds since the Unix epoch.
     ///
     /// # Errors
     ///
-    /// Returns an error if the provided seconds are out of range.
+    /// Returns an error if `seconds` is outside the supported range.
     ///
     /// ```
     /// use tick::fmt::UnixSeconds;
@@ -126,11 +126,11 @@ impl UnixSeconds {
         self.0.as_secs()
     }
 
-    /// Drops any sub-second component so the stored value is canonical.
+    /// Removes the subsecond part.
     ///
-    /// `UnixSeconds` formats and serializes as whole seconds, so retaining only
-    /// whole seconds internally keeps equality, ordering, and hashing in
-    /// agreement with `Display` and serde.
+    /// `UnixSeconds` displays and serializes whole seconds. Storing only whole
+    /// seconds keeps equality, ordering, hashing, display, and serialization
+    /// consistent.
     fn canonicalize(duration: Duration) -> Self {
         Self(Duration::from_secs(duration.as_secs()))
     }

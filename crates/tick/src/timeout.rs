@@ -9,7 +9,7 @@ use pin_project_lite::pin_project;
 use crate::{Delay, Error};
 
 pin_project! {
-    /// A future that races between an inner future and a deadline.
+    /// A future that completes with an inner future or a timeout.
     ///
     /// - If the inner future completes before the deadline, the future's output is returned.
     /// - If the deadline is reached before the inner future completes, an error is returned.

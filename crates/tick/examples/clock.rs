@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates advanced usage of the `Clock` API, including
+//! This example shows advanced use of the `Clock` API, including
 //! `Stopwatch`, `PeriodicTimer`, and timeouts.
 
 use std::time::Duration;
@@ -14,22 +14,21 @@ async fn main() -> Result<(), ohno::AppError> {
     // Create a clock for the Tokio runtime.
     let clock = Clock::new_tokio();
 
-    // Use the clock in your APIs. We recommend passing it into the constructor of your API.
-    // When the API requires the clock, you can clone it. This preserves the internal link
-    // between the clocks.
+    // Pass the clock to API constructors. Clone it when an API stores the clock.
+    // The clones share the same clock state.
     let api = MyApi::new(&clock);
 
-    // Execute some operation that uses the clock.
+    // Run an operation that uses the clock.
     api.do_something().await?;
 
-    // Execute a periodic timer.
+    // Wait for three timer ticks.
     let mut timer = PeriodicTimer::new(&clock, Duration::from_secs(2));
     for _ in 0..3 {
         let tick = timer.next().await;
         println!("Timer fired at {:?}!", tick.observed_at());
     }
 
-    // Apply a timeout to long operations.
+    // Apply a timeout to a long operation.
     match clock.delay(Duration::from_secs(30)).timeout(&clock, Duration::from_secs(2)).await {
         Ok(()) => println!("Background job completed within the timeout."),
         Err(error) => println!("Background job timed out. Error: {error}"),
@@ -48,10 +47,10 @@ impl MyApi {
     }
 
     pub(crate) async fn do_something(&self) -> tick::Result<()> {
-        // Start the measurement.
+        // Start measuring elapsed time.
         let watch = self.clock.stopwatch();
 
-        // Simulate some work with a delay.
+        // Use a delay to simulate work.
         self.clock.delay(Duration::from_millis(10)).await;
 
         println!(

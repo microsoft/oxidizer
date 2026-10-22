@@ -18,8 +18,7 @@
     )
 )]
 
-//! Primitives for obtaining, working with, and mocking system
-//! time and timers, enabling faster and more robust testing.
+//! Time and timer types for production code and tests.
 //!
 //! # Quick Start
 //!
@@ -53,70 +52,60 @@
 //!
 //!     #[tokio::test]
 //!     async fn test_produce_value() {
-//!         // Automatically advance timers for instant, deterministic testing
+//!         // Advance timers automatically without a real wait.
 //!         let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
 //!         assert_eq!(produce_value(&clock).await, 123);
 //!     }
 //! }
 //! ```
 //!
-//! # Why?
+//! # Purpose
 //!
-//! This crate provides a unified API for working with time that:
+//! This crate provides one API for production and controlled test time:
 //!
-//! - **Easy async runtime integration** - Provides built-in support for Tokio and can be extended
-//!   to work with other runtimes without tight coupling to any specific implementation.
-//! - **Enables deterministic testing** - With the `test-util` feature, [`ClockControl`] lets you
-//!   manipulate the passage of time: advance it instantly, pause it, or jump forward. No waiting
-//!   for a 1-minute periodic job in your tests.
-//! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
-//!   without relying on wall-clock time.
+//! - The `tokio` feature provides Tokio integration. The [`runtime`] module
+//!   supports other async runtimes.
+//! - The `test-util` feature provides [`ClockControl`]. Tests can freeze or
+//!   advance time without a real wait.
+//! - Production and test code use the same [`Clock`] API.
 //!
-//! The testability features are transparent to consuming code, as using [`Clock`] works identically
-//! in production and tests, with zero runtime overhead when `test-util` is disabled.
+//! If `test-util` is disabled, its support adds no runtime overhead.
 //!
 //! # Overview
 //!
-//! - [`Clock`] - Provides an abstraction for time-related operations. Returns absolute time
-//!   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
-//!   time primitives.
-//! - [`SimpleClock`] - A simplified, driver-free clock for time retrieval only (no timers).
-//!   Shared by all clock kinds via [`AsRef<SimpleClock>`], so time-only APIs accept either a
-//!   [`Clock`] or a `SimpleClock`.
-//! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
-//!   is enabled.
-//! - [`Stopwatch`] - Measures elapsed time.
-//! - [`Delay`] - Delays the execution for a specified duration.
-//! - [`PeriodicTimer`] - Schedules a task to run periodically.
-//! - [`Error`] - Represents an error that can occur when working with time. Provides limited
-//!   introspection capabilities.
-//! - [`fmt`] - Utilities for formatting `SystemTime` into various formats. Available when
-//!   the `fmt` feature is enabled.
-//! - [`runtime`] - Infrastructure for integrating time primitives into async runtimes.
+//! - [`Clock`] provides time, delays, and timers.
+//! - [`SimpleClock`] reads time without a runtime or timer driver. All clock
+//!   types share this interface through [`AsRef<SimpleClock>`].
+//! - [`ClockControl`] controls test time. Enable `test-util` to use it.
+//! - [`Stopwatch`] measures elapsed time.
+//! - [`Delay`] completes after a duration.
+//! - [`PeriodicTimer`] produces periodic ticks.
+//! - [`Error`] reports failures and provides limited error inspection.
+//! - [`fmt`] parses and displays `SystemTime`. Enable `fmt` to use it.
+//! - [`runtime`] connects clocks to async runtimes.
 //!
 //! # Extensions
 //!
-//! - [`FutureExt`] - Extensions for the `Future` trait, providing timeout functionality.
-//! - [`SystemTimeExt`] - Extensions for [`SystemTime`][`std::time::SystemTime`].
+//! - [`FutureExt`] adds timeouts to `Future`.
+//! - [`SystemTimeExt`] adds display formats to
+//!   [`SystemTime`][`std::time::SystemTime`].
 //!
 //! # Time retrieval without timers
 //!
-//! Many call sites only need to *read* the current time and never schedule timers. For these,
-//! [`SimpleClock`] is a simplified clock that exposes time retrieval only. Unlike [`Clock`], it
-//! carries no timers, so it needs **no async runtime and no driver** —
-//! [`SimpleClock::new_system`] returns a ready-to-use clock backed by real OS time.
+//! Use [`SimpleClock`] when an API only reads time. It has no timers, so it
+//! needs no async runtime or driver. [`SimpleClock::new_system`] creates a
+//! ready-to-use clock that reads operating system time.
 //!
-//! [`SimpleClock`] is the common abstraction shared by every clock kind:
+//! Each clock type provides the `SimpleClock` interface:
 //!
 //! - [`Clock`] implements [`AsRef<SimpleClock>`] and exposes
-//!   [`simple_clock()`][Clock::simple_clock], so a timer-capable clock can be used wherever a
-//!   `SimpleClock` is expected.
+//!   [`simple_clock()`][Clock::simple_clock]. You can pass a timer-capable clock
+//!   to an API that accepts `SimpleClock`.
 //! - With the `test-util` feature, [`ClockControl::to_simple_clock`] creates a controlled
-//!   `SimpleClock` driven by the same [`ClockControl`] as its [`Clock`] counterpart, so both
-//!   observe identical controlled time.
+//!   `SimpleClock`. A [`Clock`] from the same control observes the same time.
 //!
-//! As a result, time-only APIs accept either clock seamlessly. [`Stopwatch`], for example,
-//! takes any [`AsRef<SimpleClock>`]:
+//! A time-only API can accept either clock. For example, [`Stopwatch`] accepts
+//! any [`AsRef<SimpleClock>`]:
 //!
 //! ```
 //! use tick::{SimpleClock, Stopwatch};
@@ -131,21 +120,18 @@
 //! let _elapsed = stopwatch.elapsed();
 //! ```
 //!
-//! # Machine-Centric vs. Human-Centric Time
+//! # Machine time and human time
 //!
-//! When working with time, two different use cases are considered:
+//! Time has two common uses:
 //!
-//! - **Machine-Centric** - Measuring time intervals such as timeouts, periodic activities,
-//!   cache TTLs, etc. For persistent data, this includes storing, retrieving, and manipulating
-//!   timestamps, as well as parsing timestamps in well-known formats such as ISO 8601.
-//!   Machine-centric time has little ambiguity.
-//! - **Human-Centric** - Wall clock time, formatting, parsing, time zones, calendars.
-//!   Dealing with human-centric time involves significant ambiguity.
+//! - Machine time measures intervals, timeouts, periodic work, and cache
+//!   lifetimes. It also stores and parses timestamps.
+//! - Human time uses calendars, local clock time, and time zones. These values
+//!   can be ambiguous.
 //!
-//! This crate is designed for machine-centric time. For human-centric time manipulation,
-//! consider using other crates such as [jiff], [chrono], or [time]. The time primitives in
-//! this crate are designed for easy interoperability with these crates. See the `time_interop*`
-//! examples for more details.
+//! This crate focuses on machine time. Use [jiff], [chrono], or [time] for
+//! human time. `tick` values can convert to types from these crates. See the
+//! `interop_*` examples.
 //!
 //! [jiff]: https://crates.io/crates/jiff
 //! [chrono]: https://crates.io/crates/chrono
@@ -153,35 +139,33 @@
 //!
 //! # Thread-aware relocation
 //!
-//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-thread
-//! timer isolation in thread-isolated runtime architectures.
+//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware).
+//! Thread-isolated runtimes can use it to isolate timers.
 //!
-//! When an [`InactiveClock`][runtime::InactiveClock] is
-//! [relocated](thread_aware::ThreadAware::relocate) between coordinates owned by the same runtime,
-//! the underlying timer storage is duplicated per thread. After activation, each thread's
-//! [`Clock`] and [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with
-//! no cross-thread lock contention. A cross-owner relocation remains functional but retains the
-//! existing timer storage, so it does not establish destination-local state.
+//! If an [`InactiveClock`][runtime::InactiveClock] moves between coordinates
+//! with the same runtime owner, each destination thread gets separate timer
+//! storage. After activation, each thread has an independent [`Clock`] and
+//! [`ClockDriver`][runtime::ClockDriver]. A move to another owner keeps the
+//! existing storage instead.
 //!
-//! [`ClockControl`] clocks are unaffected by relocation, all clones always share the same
-//! controlled time state regardless of thread, so a single `ClockControl` can drive time for
-//! the entire test.
+//! Relocation does not change a [`ClockControl`] clock. Its clones share one
+//! controlled time state across threads.
 //!
 //! See the [`runtime`] module documentation for setup examples.
 //!
 //! # Testing
 //!
-//! This crate provides a way to control the passage of time in tests via the `ClockControl`
-//! type, which is exposed when the `test-util` feature is enabled.
+//! Enable `test-util` to use [`ClockControl`] in tests.
 //!
-//! > **Important**: Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
+//! Do not enable `test-util` in production dependencies. Enable it only in
+//! `dev-dependencies`. The feature adds test support that reduces production
+//! performance.
 //!
 //! # Examples
 //!
 //! ## Use `Clock` to retrieve absolute time
 //!
-//! The clock provides absolute time as `SystemTime`. See [`Clock`] documentation for detailed
-//! information.
+//! A clock returns absolute time as `SystemTime`. See [`Clock`] for details.
 //!
 //! ```
 //! use std::time::{Duration, SystemTime};
@@ -189,19 +173,18 @@
 //! use tick::Clock;
 //!
 //! # fn retrieve_absolute_time(clock: &Clock) {
-//! // Using SystemTime for basic absolute time needs
+//! // Read two absolute times.
 //! let time1: SystemTime = clock.system_time();
 //! let time2: SystemTime = clock.system_time();
 //!
-//! // Time is always moving forward. Note that system time might be
-//! // adjusted by the operating system between calls.
+//! // The operating system can adjust system time between these calls.
 //! assert!(time1 <= time2);
 //! # }
 //! ```
 //!
 //! ## Use `Clock` to retrieve relative time
 //!
-//! The clock provides relative time via [`Clock::instant`] and [`Stopwatch`].
+//! A clock provides relative time through [`Clock::instant`] and [`Stopwatch`].
 //!
 //! ```
 //! use std::time::{Duration, Instant};
@@ -209,12 +192,12 @@
 //! use tick::Clock;
 //!
 //! # fn retrieve_relative_time(clock: &Clock) {
-//! // Using clock.stopwatch() for convenient elapsed time measurement
+//! // Use a stopwatch to measure elapsed time.
 //! let stopwatch = clock.stopwatch();
 //! // Perform some operation...
 //! let elapsed: Duration = stopwatch.elapsed();
 //!
-//! // Using Clock::instant for lower-level access to monotonic time
+//! // Use `Clock::instant` for direct access to monotonic time.
 //! let start: Instant = clock.instant();
 //! // Perform some operation...
 //! let end: Instant = clock.instant();
@@ -243,47 +226,49 @@
 //! use tick::{Clock, PeriodicTimer};
 //!
 //! # async fn periodic_timer_example(clock: &Clock) {
-//! // Delay for 10ms before the timer starts ticking
+//! // Wait 10 milliseconds before the first timer starts.
 //! clock.delay(Duration::from_millis(10)).await;
 //!
 //! let mut timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 //!
 //! for _ in 0..3 {
 //!     timer.next().await;
-//!     // Do something every 1ms
+//!     // Run periodic work.
 //! }
 //! # }
 //! ```
 //!
 //! # Features
 //!
-//! This crate provides several optional features that can be enabled in your `Cargo.toml`:
+//! You can enable these features in `Cargo.toml`:
 //!
-//! - **`tokio`** - Integration with the [Tokio](https://tokio.rs/) runtime. Enables
-//!   [`Clock::new_tokio`] for creating clocks that use Tokio's time facilities.
-//! - **`test-util`** - Enables the [`ClockControl`] type for controlling the passage of time
-//!   in tests. This allows you to pause time, advance it manually, or automatically advance
-//!   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
-//! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
-//! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
-//!   various formats (e.g., ISO 8601, RFC 2822).
-//! - **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
-//!   lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer
-//!   scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`]. Clocks
-//!   remain precise by default.
+//! - `tokio` adds [Tokio](https://tokio.rs/) integration and
+//!   [`Clock::new_tokio`].
+//! - `test-util` adds [`ClockControl`] for deterministic tests. It can freeze
+//!   time, advance time, or advance timers automatically. Enable it only in
+//!   `dev-dependencies`.
+//! - `serde` adds serialization through [serde](https://serde.rs/).
+//! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
+//! - `fast-instant` lets each clock clone select a lower-overhead,
+//!   lower-precision instant source on Linux and Windows. Timer scheduling stays
+//!   precise. Other platforms use [`std::time::Instant::now`]. Precise reads
+//!   remain the default.
 //!
 //! ## Fast instant contract
 //!
-//! Fast instant retrieval is disabled by default and configured independently on each clock clone.
-//! Its values are monotonically non-decreasing, but consecutive reads may be equal and precision is
-//! platform-dependent. Stopwatches inherit the configured retrieval source. `system_time()`,
-//! controlled clocks, and precise timer scheduling for delays and periodic timers are unaffected.
-//! On unsupported platforms, enabling the option preserves the standard instant source.
+//! Fast instant reads are disabled by default. Each clock clone has its own
+//! setting. Values do not decrease, but consecutive reads can be equal. The
+//! platform defines their precision. A stopwatch keeps the source setting of
+//! its clock.
+//!
+//! This option does not affect `system_time()`, controlled clocks, or precise
+//! timer scheduling. On an unsupported platform, it keeps the standard instant
+//! source.
 //!
 //! ## Using precise and fast clocks together
 //!
-//! A component that already receives a [`Clock`] can derive a fast clone locally instead of
-//! requiring a separate application-level dependency. The original clock remains precise:
+//! A component can create a fast clone from an existing [`Clock`]. It does not
+//! need a separate application dependency. The original clock stays precise:
 //!
 //! ```
 //! # fn main() {
@@ -295,17 +280,17 @@
 //!
 //!     let decision_time = clock.instant();
 //!     let telemetry_time = fast_clock.instant();
-//!     // Use `decision_time` for logic and `telemetry_time` for debug instrumentation.
+//!     // Use precise time for logic and fast time for debug data.
 //! #   let _ = (decision_time, telemetry_time);
 //! }
 //! # }
 //! # }
 //! ```
 //!
-//! # Additional Examples
+//! # More examples
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
-//! contain additional examples of how to use the time primitives.
+//! show more uses of these types.
 
 mod clock;
 #[cfg(any(feature = "test-util", test))]
@@ -344,7 +329,8 @@ pub use stopwatch::Stopwatch;
 pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
 
-/// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.
+/// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that need no
+/// special relocation work.
 macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(

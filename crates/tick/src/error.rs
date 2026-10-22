@@ -5,7 +5,7 @@ use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fmt;
 use std::time::SystemTimeError;
 
-/// The result type for fallible operations in this crate.
+/// The result type for operations that can fail.
 ///
 /// # Examples
 ///
@@ -19,13 +19,12 @@ use std::time::SystemTimeError;
 /// ```
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// An error that can occur in the `tick` crate.
+/// An error from the `tick` crate.
 ///
-/// The most common type of error results from overflow, but other errors
-/// also exist:
+/// Overflow is the most common cause. Other causes include:
 ///
-/// * Parsing and formatting errors.
-/// * Validation problems.
+/// - Parsing or formatting errors.
+/// - Invalid values.
 ///
 /// # Examples
 ///

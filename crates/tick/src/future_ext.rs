@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use super::{Clock, Delay, Timeout};
 
-/// Extensions for the [`Future`] trait.
+/// Adds time operations to the [`Future`] trait.
 pub trait FutureExt: Future {
-    /// Applies a timeout to the future.
+    /// Applies a timeout to this future.
     ///
-    /// This extension uses a [`Clock`] to control the passage of time and enables
-    /// easy testability.
+    /// The supplied [`Clock`] controls the timeout. A controlled clock makes the
+    /// timeout deterministic in tests.
     ///
     /// # Example
     ///
@@ -20,7 +20,7 @@ pub trait FutureExt: Future {
     /// use tick::{Clock, FutureExt};
     ///
     /// # async fn timeout_example(clock: &Clock) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Create a long-running future and apply a timeout
+    /// // Apply a timeout to a long-running future.
     /// let timeout_error = clock
     ///     .delay(Duration::from_millis(700))
     ///     .timeout(&clock, Duration::from_millis(200))
