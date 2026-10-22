@@ -280,7 +280,7 @@ impl Scheduler {
     /// Submits a task to `destination` and relocates its payload there.
     ///
     /// The destination must be a worker coordinate returned by this runtime's
-    /// [`RuntimeOperations::workers`](crate::runtime::RuntimeOperations::workers).
+    /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
     /// Before calling `f`, Arty relocates `data` from this scheduler's worker to
     /// the destination.
     ///
@@ -294,7 +294,7 @@ impl Scheduler {
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
     /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    /// let destination = cx.operations().workers().into_iter().next().unwrap();
+    /// let destination = cx.control().workers().into_iter().next().unwrap();
     /// let task = cx
     ///     .scheduler()
     ///     .spawn_at(destination, cx.clone(), |worker| async move {
@@ -316,7 +316,7 @@ impl Scheduler {
     /// let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     /// let destination = runtime
     ///     .scheduler()
-    ///     .block_on(async |cx| cx.operations().workers().into_iter().next().unwrap().clone())
+    ///     .block_on(async |cx| cx.control().workers().into_iter().next().unwrap().clone())
     ///     .unwrap();
     /// scheduler.spawn_at(&destination, (), |()| async { SendOnly });
     /// ```

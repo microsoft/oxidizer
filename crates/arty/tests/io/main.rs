@@ -21,7 +21,7 @@ use std::{fmt, thread};
 
 use arty::core::{Thread, ThreadAware};
 use arty::io::Io;
-use arty::runtime::{Runtime, RuntimeBuilder, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
@@ -561,11 +561,8 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
-fn runtime_operations(runtime: &Runtime) -> RuntimeOperations {
-    runtime
-        .scheduler()
-        .block_on(async |builtins| builtins.operations().clone())
-        .unwrap()
+fn runtime_control(runtime: &Runtime) -> RuntimeControl {
+    runtime.scheduler().block_on(async |builtins| builtins.control().clone()).unwrap()
 }
 
 fn runtime_with_telemetry(workers: usize) -> (Runtime, MockProcessor) {

@@ -43,7 +43,7 @@ fn queued_remote_factory_drop_panic_does_not_interrupt_shutdown() {
                 drop(capture);
                 std::future::ready(())
             });
-            cx.operations().request_stop();
+            cx.control().request_stop();
             queued
         })
         .unwrap();

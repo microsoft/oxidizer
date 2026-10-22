@@ -137,8 +137,8 @@ impl Runtime {
     /// `Ok(())` means shutdown has completed. A calling-context error does not
     /// mean the workers have stopped.
     ///
-    /// Use [`Builtins::operations`](crate::task::Builtins::operations) to obtain
-    /// runtime operations and request shutdown without consuming the owner or
+    /// Use [`Builtins::control`](crate::task::Builtins::control) to obtain
+    /// runtime control and request shutdown without consuming the owner or
     /// blocking the caller.
     ///
     /// # Errors
@@ -161,7 +161,7 @@ impl Runtime {
     ///
     /// let runtime = Runtime::new()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     cx.operations().request_stop();
+    ///     cx.control().request_stop();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await

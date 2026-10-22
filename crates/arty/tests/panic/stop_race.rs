@@ -61,7 +61,7 @@ fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
     let repetitions = if cfg!(miri) { 2 } else { 24 };
     for _ in 0..repetitions {
         let runtime = runtime();
-        let operations = support::runtime_operations(&runtime);
+        let control = support::runtime_control(&runtime);
         let (first, received) = mpsc::channel();
         let ready = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));
@@ -83,7 +83,7 @@ fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
         let stopper = std::thread::spawn(move || {
             stop_barrier.wait();
             for _ in 0..8 {
-                operations.request_stop();
+                control.request_stop();
             }
         });
         let panic_barrier = Arc::clone(&barrier);

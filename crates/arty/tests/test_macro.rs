@@ -46,7 +46,7 @@ async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
 async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     let home = cx.thread().id();
     let tasks: Vec<_> = cx
-        .operations()
+        .control()
         .workers()
         .into_iter()
         .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))

@@ -28,7 +28,7 @@ owns the complete endpoint set and maps runtime thread IDs to worker indexes.
 it does not own a separate runtime or worker set.
 
 `Runtime` owns the dispatcher and the worker-shutdown waiter. Scheduler,
-`Builtins`, join, clock, and operations handles can outlive individual tasks,
+`Builtins`, join, clock, and control handles can outlive individual tasks,
 but they do not keep the runtime running. `Runtime::stop` and `Runtime::drop`
 request shutdown through the dispatcher; the waiter joins async workers, and
 each worker closes its blocking queue and joins every owned blocking thread

@@ -12,7 +12,7 @@
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
 //! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
 //! keeps children on their parent's worker.
-//! [`Builtins::operations`](crate::task::Builtins::operations) exposes worker
+//! [`Builtins::control`](crate::task::Builtins::control) exposes worker
 //! coordinates and can request shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
@@ -40,10 +40,10 @@ pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
+mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
-mod operations;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -54,11 +54,11 @@ pub use builder::RuntimeBuilder;
 #[doc(inline)]
 pub use config::{BlockingPoolPolicy, WorkersPolicy};
 #[doc(inline)]
+pub use control::RuntimeControl;
+#[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-#[doc(inline)]
-pub use operations::RuntimeOperations;
 #[doc(inline)]
 pub use workers::Workers;
 

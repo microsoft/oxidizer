@@ -16,7 +16,7 @@
 //! Use [`spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) to let the
 //! runtime choose a worker for a new task and relocate a `ThreadAware` value.
 //! Use [`spawn_at`](crate::task::Scheduler::spawn_at) with a coordinate from
-//! [`Builtins::operations`](crate::task::Builtins::operations) to target one
+//! [`Builtins::control`](crate::task::Builtins::control) to target one
 //! worker. The runtime-wide `spawn_anywhere` also relocates its `ThreadAware`
 //! input. Pass that input separately to a non-capturing function, rather than
 //! capturing it in a closure. The order in which you submit tasks does not

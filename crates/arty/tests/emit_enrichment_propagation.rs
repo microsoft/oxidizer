@@ -297,7 +297,7 @@ fn cancelled_task_destructor_keeps_the_submission_context() {
         .unwrap();
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
 
-    support::runtime_operations(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     runtime.stop().unwrap();
 
     assert!(task.join().unwrap_err().is_shutdown());

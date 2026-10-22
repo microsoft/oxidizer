@@ -360,9 +360,9 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
-    let operations = support::runtime_operations(&runtime);
-    operations.request_stop();
-    operations.request_stop();
+    let control = support::runtime_control(&runtime);
+    control.request_stop();
+    control.request_stop();
     runtime.stop().unwrap();
     assert_eq!(
         processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),

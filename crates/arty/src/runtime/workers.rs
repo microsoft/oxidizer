@@ -8,7 +8,7 @@ use thread_aware::Thread;
 /// A runtime's worker coordinates.
 ///
 /// Obtain this view from
-/// [`RuntimeOperations::workers`](crate::runtime::RuntimeOperations::workers).
+/// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
 /// Each item is borrowed from the runtime and can be passed directly to
 /// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
 #[derive(Debug)]

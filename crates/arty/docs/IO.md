@@ -24,7 +24,7 @@ Failure to initialize or run a driver stops the runtime. `Io::context` reports
 an initialization failure by panicking.
 
 The [primary driver example](../examples/arty_io.rs) uses
-`RuntimeOperations::workers` with `Scheduler::spawn_at` to access one context
+`RuntimeControl::workers` with `Scheduler::spawn_at` to access one context
 type on every worker and perform work through each worker-local driver.
 
 During shutdown Arty cancels worker tasks before shutting down their drivers.

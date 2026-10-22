@@ -34,7 +34,7 @@ the destination worker.
 
 `spawn_anywhere` lets the runtime choose a worker.
 `Scheduler::spawn_at` targets a worker coordinate obtained from
-`Builtins::operations().workers()`. Submission order does not guarantee
+`Builtins::control().workers()`. Submission order does not guarantee
 completion order. See the
 [scheduling guide](../src/documentation/scheduling.rs) for examples.
 
@@ -71,8 +71,8 @@ implementation. Access compatible contexts through `Builtins::io()`; see
 Schedulers, joins, and `Builtins` do not keep the runtime running. Dropping a
 join handle neither cancels its task nor waits for it.
 
-`Builtins::operations()` is the only source of `RuntimeOperations`.
-`RuntimeOperations::request_stop` requests shutdown without waiting.
+`Builtins::control()` is the only source of `RuntimeControl`.
+`RuntimeControl::request_stop` requests shutdown without waiting.
 `Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
 Dropping the owner also requests shutdown and normally waits, but cannot return
 errors. Neither waits when called from an async Arty worker or the runtime's own

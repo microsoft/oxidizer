@@ -33,7 +33,7 @@ impl Drop for CaptureDropPanic {
 #[test]
 fn queued_blocking_capture_drop_panic_still_completes_its_join() {
     let runtime = runtime();
-    let operations = support::runtime_operations(&runtime);
+    let control = support::runtime_control(&runtime);
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let running = runtime.scheduler().spawn_blocking(move || {
@@ -54,7 +54,7 @@ fn queued_blocking_capture_drop_panic_still_completes_its_join() {
         captured_invoked.fetch_add(1, Ordering::SeqCst);
         drop(capture);
     });
-    operations.request_stop();
+    control.request_stop();
     release.send(()).unwrap();
     assert_eq!(running.join().unwrap(), 42);
     runtime.stop().unwrap();
@@ -84,7 +84,7 @@ fn running_blocking_capture_drop_panic_is_a_join_error() {
 #[test]
 fn stop_waits_for_running_blocking_panic_and_retains_its_error() {
     let runtime = runtime();
-    let operations = support::runtime_operations(&runtime);
+    let control = support::runtime_control(&runtime);
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let (finished, observed) = mpsc::channel();
@@ -95,7 +95,7 @@ fn stop_waits_for_running_blocking_panic_and_retains_its_error() {
         panic!("running blocking callback at shutdown");
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    operations.request_stop();
+    control.request_stop();
     release.send(()).unwrap();
     runtime.stop().unwrap();
     observed.recv_timeout(TEST_TIMEOUT).unwrap();

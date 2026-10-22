@@ -204,9 +204,9 @@ async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving
         many_cpus::SystemHardware::current().processors().len().min(2)
     };
     let home = cx.thread().id();
-    let destinations: Vec<_> = cx.operations().workers().into_iter().map(Thread::id).collect();
+    let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();
     let tasks: Vec<_> = cx
-        .operations()
+        .control()
         .workers()
         .into_iter()
         .map(|worker| {
@@ -253,13 +253,13 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
         .workers(arty::runtime::WorkersPolicy::at_most(2))
         .build()
         .unwrap();
-    let (scheduler, operations) = runtime
+    let (scheduler, control) = runtime
         .scheduler()
-        .spawn_anywhere((), |cx, ()| async move { (cx.scheduler().clone(), cx.operations().clone()) })
+        .spawn_anywhere((), |cx, ()| async move { (cx.scheduler().clone(), cx.control().clone()) })
         .join()
         .unwrap();
-    operations.request_stop();
-    let tasks: Vec<_> = operations
+    control.request_stop();
+    let tasks: Vec<_> = control
         .workers()
         .into_iter()
         .map(|worker| scheduler.spawn_at::<(), _, ()>(worker, (), |()| async { panic!("rejected factories must not run") }))
@@ -288,9 +288,9 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .workers(arty::runtime::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
-    let (scheduler, operations) = runtime
+    let (scheduler, control) = runtime
         .scheduler()
-        .block_on(async |cx| (cx.scheduler().clone(), cx.operations().clone()))
+        .block_on(async |cx| (cx.scheduler().clone(), cx.control().clone()))
         .unwrap();
     let other = Runtime::builder()
         .workers(arty::runtime::WorkersPolicy::exactly(1))
@@ -298,7 +298,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .unwrap();
     let destination = other
         .scheduler()
-        .block_on(async |cx| cx.operations().workers().into_iter().next().unwrap().clone())
+        .block_on(async |cx| cx.control().workers().into_iter().next().unwrap().clone())
         .unwrap();
     let relocations = Arc::new(AtomicUsize::new(0));
     let invocations = Arc::new(AtomicUsize::new(0));
@@ -322,7 +322,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));
-    assert_eq!(operations.workers().into_iter().len(), 1);
+    assert_eq!(control.workers().into_iter().len(), 1);
     runtime.stop().unwrap();
     other.stop().unwrap();
 }

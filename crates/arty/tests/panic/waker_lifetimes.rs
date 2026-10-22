@@ -181,7 +181,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         }
 
         let runtime = runtime();
-        let operations = support::runtime_operations(&runtime);
+        let control = support::runtime_control(&runtime);
         let (started, received) = mpsc::channel();
         let finish = Arc::new(AtomicBool::new(false));
         let drops = Arc::new(AtomicUsize::new(0));
@@ -199,7 +199,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         let stopper = std::thread::spawn(move || {
             stop_barrier.wait();
             for _ in 0..8 {
-                operations.request_stop();
+                control.request_stop();
             }
         });
         let finish_barrier = Arc::clone(&barrier);

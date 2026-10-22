@@ -329,7 +329,7 @@ fn targeted_spawn_reports_specific_thread_placement() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            let destination = cx.operations().workers().into_iter().next().unwrap();
+            let destination = cx.control().workers().into_iter().next().unwrap();
             cx.scheduler().spawn_at(destination, (), |()| async {}).await.unwrap();
         })
         .unwrap();

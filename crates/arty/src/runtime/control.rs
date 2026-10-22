@@ -7,18 +7,18 @@ use crate::task::Scheduler;
 
 /// A handle for requesting runtime shutdown.
 ///
-/// Borrow this handle through [`Builtins::operations`](crate::task::Builtins::operations).
+/// Borrow this handle through [`Builtins::control`](crate::task::Builtins::control).
 /// It can be cloned and used from any thread without keeping the runtime alive
 /// or retaining an association with the task's worker.
 ///
 /// [`workers`](Self::workers) exposes the runtime's worker coordinates, and
 /// [`request_stop`](Self::request_stop) initiates shutdown without waiting.
 #[derive(Debug, Clone)]
-pub struct RuntimeOperations {
+pub struct RuntimeControl {
     dispatcher: DispatcherClient,
 }
 
-impl RuntimeOperations {
+impl RuntimeControl {
     pub(crate) const fn new(dispatcher: DispatcherClient) -> Self {
         Self { dispatcher }
     }
@@ -36,7 +36,7 @@ impl RuntimeOperations {
     /// # #[arty::main]
     /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
     /// let tasks: Vec<_> = cx
-    ///     .operations()
+    ///     .control()
     ///     .workers()
     ///     .into_iter()
     ///     .map(|worker| {
@@ -69,10 +69,10 @@ impl RuntimeOperations {
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
-    /// let operations = runtime
+    /// let control = runtime
     ///     .scheduler()
-    ///     .block_on(async |cx| cx.operations().clone())?;
-    /// operations.request_stop();
+    ///     .block_on(async |cx| cx.control().clone())?;
+    /// control.request_stop();
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

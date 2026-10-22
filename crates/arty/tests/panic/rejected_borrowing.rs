@@ -26,8 +26,8 @@ impl Drop for BorrowedCapture<'_> {
 #[test]
 fn stopped_borrowing_factory_is_destroyed_before_its_drop_unwind_escapes() {
     let runtime = runtime();
-    let operations = support::runtime_operations(&runtime);
-    operations.request_stop();
+    let control = support::runtime_control(&runtime);
+    control.request_stop();
     let drops = AtomicUsize::new(0);
     let invoked = AtomicUsize::new(0);
     let invoked = &invoked;

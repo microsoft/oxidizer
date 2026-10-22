@@ -11,9 +11,9 @@
 //!
 //! # Requesting and waiting for shutdown
 //!
-//! [`Builtins::operations`](crate::task::Builtins::operations) exposes
-//! [`RuntimeOperations`](crate::runtime::RuntimeOperations), whose
-//! [`request_stop`](crate::runtime::RuntimeOperations::request_stop) method
+//! [`Builtins::control`](crate::task::Builtins::control) exposes
+//! [`RuntimeControl`](crate::runtime::RuntimeControl), whose
+//! [`request_stop`](crate::runtime::RuntimeControl::request_stop) method
 //! requests shutdown without waiting and can be called repeatedly. Keep the
 //! runtime owner until you are ready to wait for its workers.
 //!
@@ -40,7 +40,7 @@
 //!
 //! let runtime = Runtime::new()?;
 //! let error = runtime.scheduler().block_on(async |cx| {
-//!     cx.operations().request_stop();
+//!     cx.control().request_stop();
 //!     cx.scheduler()
 //!         .spawn(async |_| 42)
 //!         .await

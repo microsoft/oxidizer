@@ -1,17 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty::runtime::{Runtime, RuntimeOperations};
+use arty::runtime::{Runtime, RuntimeControl};
 use arty::task::{JoinError, JoinHandle};
 
-pub(crate) fn runtime_operations(runtime: &Runtime) -> RuntimeOperations {
+pub(crate) fn runtime_control(runtime: &Runtime) -> RuntimeControl {
     runtime
         .scheduler()
-        .block_on(async |builtins| builtins.operations().clone())
-        .expect("runtime remains active while acquiring test operations")
+        .block_on(async |builtins| builtins.control().clone())
+        .expect("runtime remains active while acquiring test control")
 }
 
-const _: fn(&Runtime) -> RuntimeOperations = runtime_operations;
+const _: fn(&Runtime) -> RuntimeControl = runtime_control;
 
 pub(crate) trait JoinHandleExt {
     type Output;

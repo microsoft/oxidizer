@@ -269,7 +269,7 @@ fn relocated_builtins_initializes_io_on_the_destination_worker() {
             async move |cx| {
                 let here = cx.thread().clone();
                 let there = cx
-                    .operations()
+                    .control()
                     .workers()
                     .into_iter()
                     .find(|worker| worker != &&here)

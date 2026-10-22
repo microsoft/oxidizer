@@ -110,7 +110,7 @@ fn external_access_from_a_running_futures_executor_uses_the_bound_worker() {
 fn shutdown_during_external_initialization_unblocks_without_io_failure() {
     let runtime = runtime(1);
     let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
-    let operations = builtins.operations().clone();
+    let control = builtins.control().clone();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
 
@@ -124,7 +124,7 @@ fn shutdown_during_external_initialization_unblocks_without_io_failure() {
         })
     };
     scenario.wait_until_driver_blocked();
-    operations.request_stop();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(external.join().unwrap(), "the runtime is shutting down");
@@ -136,7 +136,7 @@ fn shutdown_during_external_initialization_unblocks_without_io_failure() {
 fn external_access_racing_shutdown_returns_shutdown() {
     let runtime = runtime(1);
     let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
-    let operations = builtins.operations().clone();
+    let control = builtins.control().clone();
     let worker = builtins.scheduler().clone();
     let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
     let (release_blocker_tx, release_blocker_rx) = mpsc::channel();
@@ -155,7 +155,7 @@ fn external_access_racing_shutdown_returns_shutdown() {
             .unwrap_err()
             .to_string()
     });
-    operations.request_stop();
+    control.request_stop();
     release_blocker_tx.send(()).unwrap();
 
     assert_eq!(external.join().unwrap(), "the runtime is shutting down");

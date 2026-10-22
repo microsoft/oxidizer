@@ -48,7 +48,7 @@ impl Driver for ExampleDriver {
 #[arty::main(workers = 2)]
 async fn main(builtins: Builtins) -> Result<(), JoinError> {
     let tasks: Vec<_> = builtins
-        .operations()
+        .control()
         .workers()
         .into_iter()
         .map(|worker| {

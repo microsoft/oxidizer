@@ -79,7 +79,7 @@ fn worker_input_relocation_panics_are_join_errors() {
                 std::future::ready(())
             });
             assert!(task.await.unwrap_err().is_panic());
-            let destination = cx.operations().workers().into_iter().next().unwrap();
+            let destination = cx.control().workers().into_iter().next().unwrap();
             let task = cx.scheduler().spawn_at(destination, data, |data| {
                 data.factories.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(())

@@ -75,7 +75,7 @@ fn remote_panicking_join_waker_on_cancellation_is_contained() {
     }));
     assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
-    support::runtime_operations(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     runtime.stop().unwrap();
 
     assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_ready());
@@ -135,7 +135,7 @@ fn blocking_panicking_join_waker_on_cancellation_is_contained() {
     }));
     assert!(queued.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
-    support::runtime_operations(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     release_tx.send(()).unwrap();
     running.join().unwrap();
     runtime.stop().unwrap();

@@ -105,7 +105,7 @@ fn blocking_thread_local_owner_drop_returns_without_self_joining() {
     testing_aids::execute_or_abandon(|| {
         let runtime = runtime();
         let dispatcher = runtime.scheduler.dispatcher.clone();
-        let operations = runtime.scheduler().block_on(async |cx| cx.operations().clone()).unwrap();
+        let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let scheduler = runtime
             .scheduler()
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
@@ -129,7 +129,7 @@ fn blocking_thread_local_owner_drop_returns_without_self_joining() {
             .join()
             .unwrap();
 
-        operations.request_stop();
+        control.request_stop();
         dispatcher.wait().unwrap();
         received.try_recv().unwrap();
     })

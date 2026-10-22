@@ -63,7 +63,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
             async move |cx| {
                 for _ in 0..repetitions {
                     let tasks: Vec<_> = cx
-                        .operations()
+                        .control()
                         .workers()
                         .into_iter()
                         .map(|worker| {
@@ -83,7 +83,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
                         assert!(task.await.unwrap_err().is_panic());
                     }
                     let tasks: Vec<_> = cx
-                        .operations()
+                        .control()
                         .workers()
                         .into_iter()
                         .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { 42 }))
