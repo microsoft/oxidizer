@@ -20,6 +20,9 @@
 //! clones before timing and retains another owner. These two groups include
 //! output buffering overhead (which depends on handle size), not output
 //! destruction; their times should not be added to predict clone-and-drop.
+//!
+//! Native clone inputs are boxed during setup and returned with the result so
+//! source ownership and cleanup stay outside the measured operation.
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![expect(
@@ -159,41 +162,84 @@ fn drop_input<T: Clone>(value: T) -> (T, T) {
 }
 
 #[metabench::benchmark(ARC_CLONE_ONLY, CLONE_ONLY, "arc")]
-#[bench::std(&configured(standard(), Recording::Disabled))]
-#[bench::per_process(&configured(per_process(), Recording::Disabled))]
-#[bench::per_thread_empty(&configured(per_thread(0, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_1(&configured(per_thread(1, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_8(&configured(per_thread(8, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_64(&configured(per_thread(64, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_shared_64(&configured(per_thread(64, Allocations::Shared), Recording::Disabled))]
-#[cfg_attr(feature = "seismograph", bench::std_recording(&configured(standard(), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_process_recording(&configured(per_process(), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_empty_recording(&configured(per_thread(0, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_1_recording(&configured(per_thread(1, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_8_recording(&configured(per_thread(8, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_64_recording(&configured(per_thread(64, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_shared_64_recording(&configured(per_thread(64, Allocations::Shared), Recording::Enabled)))]
-fn clone_only<T: Clone>(value: &T) -> T {
-    black_box(black_box(value).clone())
+#[bench::std(Box::new(configured(standard(), Recording::Disabled)))]
+#[bench::per_process(Box::new(configured(per_process(), Recording::Disabled)))]
+#[bench::per_thread_empty(Box::new(configured(per_thread(0, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_1(Box::new(configured(per_thread(1, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_8(Box::new(configured(per_thread(8, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_64(Box::new(configured(per_thread(64, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_shared_64(Box::new(configured(per_thread(64, Allocations::Shared), Recording::Disabled)))]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::std_recording(Box::new(configured(standard(), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_process_recording(Box::new(configured(per_process(), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_empty_recording(Box::new(configured(per_thread(0, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_1_recording(Box::new(configured(per_thread(1, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_8_recording(Box::new(configured(per_thread(8, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_64_recording(Box::new(configured(per_thread(64, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_shared_64_recording(Box::new(configured(per_thread(64, Allocations::Shared), Recording::Enabled)))
+)]
+fn clone_only<T: Clone, P: std::ops::Deref<Target = T>>(value: P) -> (T, P) {
+    let cloned = black_box(black_box(&*value).clone());
+    (cloned, value)
 }
 
 #[metabench::benchmark(ARC_CLONE_DROP, CLONE_DROP, "arc")]
-#[bench::std(&configured(standard(), Recording::Disabled))]
-#[bench::per_process(&configured(per_process(), Recording::Disabled))]
-#[bench::per_thread_empty(&configured(per_thread(0, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_1(&configured(per_thread(1, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_8(&configured(per_thread(8, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_distinct_64(&configured(per_thread(64, Allocations::Distinct), Recording::Disabled))]
-#[bench::per_thread_shared_64(&configured(per_thread(64, Allocations::Shared), Recording::Disabled))]
-#[cfg_attr(feature = "seismograph", bench::std_recording(&configured(standard(), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_process_recording(&configured(per_process(), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_empty_recording(&configured(per_thread(0, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_1_recording(&configured(per_thread(1, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_8_recording(&configured(per_thread(8, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_distinct_64_recording(&configured(per_thread(64, Allocations::Distinct), Recording::Enabled)))]
-#[cfg_attr(feature = "seismograph", bench::per_thread_shared_64_recording(&configured(per_thread(64, Allocations::Shared), Recording::Enabled)))]
-fn clone_drop<T: Clone>(value: &T) -> &T {
-    drop(black_box(black_box(value).clone()));
+#[bench::std(Box::new(configured(standard(), Recording::Disabled)))]
+#[bench::per_process(Box::new(configured(per_process(), Recording::Disabled)))]
+#[bench::per_thread_empty(Box::new(configured(per_thread(0, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_1(Box::new(configured(per_thread(1, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_8(Box::new(configured(per_thread(8, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_distinct_64(Box::new(configured(per_thread(64, Allocations::Distinct), Recording::Disabled)))]
+#[bench::per_thread_shared_64(Box::new(configured(per_thread(64, Allocations::Shared), Recording::Disabled)))]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::std_recording(Box::new(configured(standard(), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_process_recording(Box::new(configured(per_process(), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_empty_recording(Box::new(configured(per_thread(0, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_1_recording(Box::new(configured(per_thread(1, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_8_recording(Box::new(configured(per_thread(8, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_distinct_64_recording(Box::new(configured(per_thread(64, Allocations::Distinct), Recording::Enabled)))
+)]
+#[cfg_attr(
+    feature = "seismograph",
+    bench::per_thread_shared_64_recording(Box::new(configured(per_thread(64, Allocations::Shared), Recording::Enabled)))
+)]
+fn clone_drop<T: Clone, P: std::ops::Deref<Target = T>>(value: P) -> P {
+    drop(black_box(black_box(&*value).clone()));
     value
 }
 
@@ -244,7 +290,7 @@ fn benchmark_case<T: Clone>(group: &mut BenchmarkGroup<'_, WallTime>, operation:
     let id = BenchmarkId::new(operation.identity().benchmark_name(), case);
     group.bench_function(id, |bencher| match operation {
         Operation::CloneOnly => {
-            bencher.iter_batched(|| (), |()| clone_only(&value), BATCH_SIZE);
+            bencher.iter_batched(|| (), |()| clone_only(&value).0, BATCH_SIZE);
         }
         Operation::CloneDrop => bencher.iter(|| clone_drop(&value)),
         Operation::DropNonfinal => {

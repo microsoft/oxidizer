@@ -138,18 +138,19 @@ fn gungraun_runner_available() -> bool {
         assert!(available, "required native contracts need the matching gungraun-runner on PATH");
         assert_eq!(
             String::from_utf8_lossy(&version.unwrap().stdout).trim(),
-            "gungraun-runner 0.19.4",
+            "gungraun-runner 0.20.0",
             "required native contracts must match the workspace Gungraun version"
         );
-        assert!(
-            Command::new("valgrind")
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| output.status.success()),
-            "required native contracts need Valgrind on PATH"
-        );
+        assert!(valgrind_available(), "required native contracts need Valgrind on PATH");
     }
     available
+}
+
+fn valgrind_available() -> bool {
+    Command::new("valgrind")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 #[test]
@@ -172,7 +173,7 @@ edition = "2024"
 [dependencies]
 metabench = {{ path = {dependency} }}
 criterion = {{ version = "0.8.2", default-features = false }}
-gungraun = "=0.19.4"
+gungraun = "=0.20.0"
 "#
             ),
         )
@@ -628,6 +629,48 @@ fn gungraun_listing_is_forwarded() {
             .any(|line| { line.contains("_checksums") && line.contains("_rolling") })
     );
     assert!(!stdout.contains("Running gungraun benchmarks"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gungraun_measurements_write_report() {
+    if !gungraun_runner_available() || !valgrind_available() {
+        eprintln!("skipping Gungraun measurements because gungraun-runner or Valgrind is unavailable");
+        return;
+    }
+
+    for test_option in [None, Some("--gungraun-arg=--test=false")] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        let markdown = directory.path().join("report.md");
+        let mut arguments: Vec<&std::ffi::OsStr> = vec![
+            "--gungraun".as_ref(),
+            "--show-engine-output".as_ref(),
+            "--no-baseline".as_ref(),
+            "--export-json".as_ref(),
+            json.as_os_str(),
+            "--export-md".as_ref(),
+            markdown.as_os_str(),
+        ];
+        if let Some(option) = test_option {
+            arguments.push(option.as_ref());
+        }
+        let output = run_target("metabench_basic", &arguments);
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        let entries = report["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["identity"], "basic/checksum/rolling");
+        let result = &entries[0]["results"]["gungraun.callgrind"];
+        assert!(result["metrics"]["Ir"]["value"].as_u64().is_some_and(|value| value > 0));
+        assert!(!result["raw_artifacts"].as_array().unwrap().is_empty());
+        assert!(std::fs::read_to_string(&markdown).unwrap().contains("basic/checksum/rolling"));
+    }
 }
 
 #[test]
@@ -1341,16 +1384,21 @@ fn default_engine_smoke_checks_do_not_publish_measurements() {
     if !gungraun_runner_available() {
         return;
     }
-    let directory = tempfile::tempdir().unwrap();
-    let json = directory.path().join("report.json");
-    std::fs::write(&json, b"existing baseline").unwrap();
-    let output = run_target(
-        "measurement_boundaries",
-        &["--test".as_ref(), "--export-json".as_ref(), json.as_os_str()],
-    );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    for options in [
+        &["--test"][..],
+        &["--gungraun", "--gungraun-arg=--test=true"][..],
+        &["--gungraun", "--test", "--gungraun-arg=--test=false"][..],
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        std::fs::write(&json, b"existing baseline").unwrap();
+        let mut arguments: Vec<&std::ffi::OsStr> = options.iter().map(std::ffi::OsStr::new).collect();
+        arguments.extend(["--export-json".as_ref(), json.as_os_str()]);
+        let output = run_target("measurement_boundaries", &arguments);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    }
     with_cargo_lock(|| {
         let root = cargo_target().join("metabench/measurement_boundaries");
         let reports = ["report.json", "report.md"].map(|name| ReportSnapshot::new(root.join(name)));
