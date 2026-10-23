@@ -142,7 +142,7 @@ impl JoinError {
 impl JoinError {
     pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
         match error {
-            arty_executor::JoinError::Shutdown(error) => Self::shutdown(error),
+            arty_executor::JoinError::Shutdown(cause) => Self::shutdown(cause.into_error()),
             arty_executor::JoinError::Panicked(panic) => Self::panicked(panic),
         }
     }

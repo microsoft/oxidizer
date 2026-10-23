@@ -10,7 +10,7 @@ use std::task;
 
 use events_once::{LocalEventLake, PooledLocalReceiver};
 
-use crate::{ShutdownCause, ShutdownError, TaskPanicPayload};
+use crate::{ShutdownCause, TaskPanicPayload};
 
 /// A task failed to return its result.
 ///
@@ -21,7 +21,7 @@ pub enum JoinError {
     Panicked(TaskPanicPayload),
 
     /// Executor shutdown cancelled the task or rejected its submission.
-    Shutdown(Option<ShutdownError>),
+    Shutdown(ShutdownCause),
 }
 
 impl PartialEq for JoinError {
@@ -38,7 +38,7 @@ impl Eq for JoinError {}
 impl JoinError {
     #[must_use]
     pub(crate) fn shutdown(cause: ShutdownCause) -> Self {
-        Self::Shutdown(cause.into_error())
+        Self::Shutdown(cause)
     }
 
     pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
@@ -72,8 +72,8 @@ impl Debug for JoinError {
 impl Error for JoinError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Shutdown(Some(error)) => Some(error),
-            Self::Panicked(_) | Self::Shutdown(None) => None,
+            Self::Shutdown(cause) => cause.as_error().map(|error| error as &(dyn Error + 'static)),
+            Self::Panicked(_) => None,
         }
     }
 }
@@ -142,7 +142,7 @@ mod tests {
 
         let error = JoinError::shutdown(ShutdownCause::default());
 
-        assert!(matches!(error, JoinError::Shutdown(None)));
+        assert!(matches!(&error, JoinError::Shutdown(cause) if cause.as_error().is_none()));
         assert_eq!(error.to_string(), "runtime is shutting down");
         assert!(format!("{error:?}").contains("shutdown"));
         assert!(error.source().is_none());

@@ -447,7 +447,7 @@ fn dropping_remote_sender_contains_panicking_join_notification() {
     assert!(wake.0.load(Ordering::Acquire));
     assert!(matches!(
         Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
-        Poll::Ready(Err(JoinError::Shutdown(None)))
+        Poll::Ready(Err(JoinError::Shutdown(cause))) if cause.as_error().is_none()
     ));
 }
 

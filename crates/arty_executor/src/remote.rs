@@ -193,7 +193,10 @@ mod tests {
 
         drop(sender);
 
-        assert!(matches!(poll_ready(handle), Err(JoinError::Shutdown(None))));
+        assert!(matches!(
+            poll_ready(handle),
+            Err(JoinError::Shutdown(cause)) if cause.as_error().is_none()
+        ));
     }
 
     #[test]
