@@ -215,3 +215,5 @@ fn latency_configuration_serialization_roundtrips() {
         config
     );
 }
+
+testing_aids::init_tracing!();

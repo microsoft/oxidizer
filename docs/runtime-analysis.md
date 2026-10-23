@@ -23,9 +23,9 @@ suite continues to run natively and under `cargo careful`.
 
 Package-level exclusions enforce the absence of unsafe code with
 `#![forbid(unsafe_code)]`. `cachet` applies the prohibition to non-test builds
-because its test-only tracing initializer expands through `ctor`, which carries
-an internal `allow(unsafe_code)` attribute. Its shipped library remains unable
-to introduce unsafe code.
+because its test-only tracing initializer uses `ctor`, which carries an internal
+`allow(unsafe_code)` attribute. Its shipped library retains the prohibition.
+See [the tracing initialization rule](tracing-tests.md).
 
 Prefer a test-level `#[cfg_attr(miri, ignore = "...")]` when only one
 integration scenario lacks Miri-specific value. The reason must name the

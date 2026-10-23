@@ -5,8 +5,6 @@
 
 #![cfg(all(feature = "rt", feature = "macros"))]
 
-testing_aids::init_tracing!();
-
 use std::pin::Pin;
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};

@@ -414,3 +414,5 @@ async fn hedging_does_not_clone_unsafe_methods() {
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(calls.get(), 1, "unsafe method should not produce a hedged attempt");
 }
+
+testing_aids::init_tracing!();

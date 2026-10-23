@@ -56,7 +56,6 @@ loom = { workspace = true }
 [dev-dependencies]
 alloc_tracker.workspace = true
 criterion.workspace = true
-ctor.workspace = true
 many_cpus.workspace = true
 metabench.workspace = true
 mutants.workspace = true

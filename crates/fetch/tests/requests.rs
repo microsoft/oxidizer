@@ -222,3 +222,5 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
 
     mock_server
 }
+
+testing_aids::init_tracing!();

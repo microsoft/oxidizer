@@ -166,3 +166,5 @@ fn fallback_builder_nested_fallback() {
         assert_eq!(*entry.unwrap().value(), 42);
     });
 }
+
+testing_aids::init_tracing!();

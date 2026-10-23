@@ -9,11 +9,6 @@
 
 #![cfg(windows)]
 
-// The standard pipeline exercised here emits `tracing` events through `fetch`'s logging
-// handler, and integration binaries link the library with `cfg(test)` false, so no crate-root
-// initialization runs. Install it directly. See docs/tracing-tests.md.
-testing_aids::init_tracing!();
-
 use std::future::Future as _;
 use std::task::{Context, Poll};
 use std::time::Duration;

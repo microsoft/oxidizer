@@ -687,3 +687,5 @@ async fn invoke_on_execute_actually_calls_callback(#[case] use_tower: bool) {
         "on_execute callback must be invoked at least once"
     );
 }
+
+testing_aids::init_tracing!();

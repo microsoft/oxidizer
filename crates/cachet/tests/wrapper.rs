@@ -254,3 +254,5 @@ async fn wrapper_tier_ttl_expires_entry_without_per_entry_ttl() {
     let result = cache.get(&key).await.unwrap();
     assert!(result.is_none(), "entry should be expired by tier TTL alone");
 }
+
+testing_aids::init_tracing!();

@@ -6,8 +6,6 @@
 //! Integration tests verifying that enrichment context propagates automatically
 //! through all spawn paths when the runtime is built with `.sink()`.
 
-testing_aids::init_tracing!();
-
 mod support;
 
 use std::future::{pending, poll_fn};

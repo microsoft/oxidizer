@@ -12,8 +12,6 @@
 
 // Native runs use real processors; Miri uses the test-util processor model.
 
-testing_aids::init_tracing!();
-
 mod support;
 
 use std::pin::Pin;

@@ -136,3 +136,5 @@ async fn send_request() {
         "Request endpoint should use the client endpoint"
     );
 }
+
+testing_aids::init_tracing!();
