@@ -194,7 +194,7 @@ impl DispatcherCore {
     }
 
     fn runtime_shutting_down_error(&self) -> Error {
-        Error::from_shutdown(self.shutdown()).expect("runtime_shutting_down_error is called only after shutdown starts")
+        Error::from_shutdown(self.shutdown()).unwrap_or_else(Error::runtime_shutting_down)
     }
 
     pub(crate) const fn shutdown(&self) -> &Shutdown {
