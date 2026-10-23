@@ -57,5 +57,3 @@ fn hash_set_with_capacity_preallocates() {
     set.insert(7);
     assert!(set.contains(&7));
 }
-
-testing_aids::init_tracing!();

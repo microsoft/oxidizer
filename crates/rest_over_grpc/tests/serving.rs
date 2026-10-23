@@ -397,5 +397,3 @@ fn capped_service_skips_trailer_frames() {
     assert_eq!(response.status(), http::StatusCode::OK);
     assert_eq!(body_bytes(response).as_ref(), b"ok");
 }
-
-testing_aids::init_tracing!();

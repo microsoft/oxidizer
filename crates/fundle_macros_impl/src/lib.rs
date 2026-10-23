@@ -18,6 +18,3 @@ mod newtype;
 pub use bundle::bundle;
 pub use deps::deps;
 pub use newtype::newtype;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

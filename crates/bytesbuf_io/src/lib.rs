@@ -46,6 +46,3 @@ pub use write_ext::WriteExt;
 
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

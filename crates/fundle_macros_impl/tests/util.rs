@@ -77,5 +77,3 @@ macro_rules! expand_fundle_newtype {
         testing_aids::render_expansion(&output)
     }};
 }
-
-testing_aids::init_tracing!();

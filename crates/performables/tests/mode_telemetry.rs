@@ -164,5 +164,3 @@ fn synchronization_modes_preserve_public_object_identity() {
         }
     }
 }
-
-testing_aids::init_tracing!();

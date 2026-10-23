@@ -5,8 +5,6 @@
 
 #![cfg(all(feature = "rt", feature = "macros"))]
 
-testing_aids::init_tracing!();
-
 use std::cell::RefCell;
 
 use arty::task::{Builtins, Scheduler};

@@ -441,5 +441,3 @@ fn trailing_elements_rejected_by_generated_guard_not_the_format() {
     assert_eq!(lexicon.resolve(ok.0), "key");
     assert_eq!(ok.1, 1);
 }
-
-testing_aids::init_tracing!();

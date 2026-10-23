@@ -460,5 +460,3 @@ fn typed_static_and_dynamic_agree_on_coercion() {
         assert_eq!(expected, actual, "typed coercion disagreement on `{method} {path}`");
     });
 }
-
-testing_aids::init_tracing!();

@@ -132,5 +132,3 @@ fn empty_input_round_trips() {
 
     assert!(plain.is_empty());
 }
-
-testing_aids::init_tracing!();

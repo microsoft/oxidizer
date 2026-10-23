@@ -124,5 +124,3 @@ fn remote_spawn_reuses_cross_thread_result_channel_storage() {
     executor.begin_shutdown();
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
-
-testing_aids::init_tracing!();

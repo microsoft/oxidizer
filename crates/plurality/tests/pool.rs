@@ -718,5 +718,3 @@ fn a_full_pool_hands_out_a_slot_a_reentrant_allocation_left_free() {
     drop(nested);
     assert_eq!(pool.len(), 0);
 }
-
-testing_aids::init_tracing!();

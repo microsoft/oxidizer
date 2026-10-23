@@ -142,5 +142,3 @@ async fn serve_http_wires_a_streaming_transcode_impl() {
     let body = response.into_body().collect().await.expect("body collects").to_bytes();
     assert_eq!(body.as_ref(), b"[{\"n\":9}]");
 }
-
-testing_aids::init_tracing!();

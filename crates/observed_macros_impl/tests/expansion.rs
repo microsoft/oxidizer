@@ -769,5 +769,3 @@ fn an_event_field_may_hold_a_shared_reference() {
         ",
     ));
 }
-
-testing_aids::init_tracing!();

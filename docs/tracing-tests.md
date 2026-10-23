@@ -3,36 +3,41 @@
 Prefer `observed` for new telemetry. Its events do not use the process-global
 callsite-interest cache in `tracing-core`. Tests that capture `observed` events
 do not need tracing initialization for those events.
-The dependency rule below still applies if the executable also depends on `tracing`.
+The initialization rule below still applies to packages with a direct tracing
+dependency and to tests that explicitly exercise tracing through a dependency.
 
-This repository has one initialization rule for test executables that depend on
-`tracing` (section 1), followed by optional recipes for when you want
-to inspect `tracing` output (sections 2 and 3).
+This guide defines the tracing initialization rule for test executables (section 1).
+It also gives optional recipes to inspect tracing output (sections 2 and 3).
 
 ## 1. Required: initialize tracing so trace-event lines are counted as covered
 
-For a test executable, its runtime dependency graph contains its dependencies
-and their dependencies.
-Every Cargo unit-test or integration-test executable whose runtime dependency graph
-contains `tracing`, directly or transitively, must initialize tracing before tests run.
-The rule applies even when the target does not call tracing or inspect logs itself.
+If a package declares `tracing` as a direct normal or dev-dependency, every Cargo
+unit-test and integration-test executable in that package must initialize tracing.
+This includes the package's own procedural-macro unit tests.
+Build-only dependencies and procedural-macro host dependencies do not qualify a
+consumer package.
 
-Start with the target package's normal and dev-dependencies, then follow only normal
-dependency edges. Do not follow dependencies' dev-dependencies, build-dependencies,
-or procedural-macro host dependencies. Those graphs do not run in the test process.
-For a procedural-macro package's own unit tests, start with that package as the root.
+Also initialize a specific test executable that explicitly exercises or captures
+tracing through a dependency, even without a direct tracing dependency.
+Using other `testing_aids` helpers does not qualify a target.
+Do not add a direct tracing dependency just to qualify for initialization.
 
-Use the union of all supported features and platforms, including supported custom
-configurations such as `cfg(loom)`. If any configuration reaches `tracing`, initialize
-the target in every configuration where its tests run. Do not gate the initializer
-on the feature or platform that introduces tracing. An existing whole-target gate
-can remain because it also disables that target's tests.
+Apply the package rule across all declared features and platforms.
+If any supported configuration declares the dependency, initialize every target
+where its tests run. Do not gate initialization on that dependency's configuration.
+An existing whole-target gate can remain because it also disables that target's tests.
 
-This rule keeps coverage and mutation testing independent of test order.
-Without an interested subscriber, tracing can skip field expressions and formatting
-even when tests execute the surrounding code.
-Dependency changes require a fresh audit of affected test targets, not a search
-for direct tracing calls.
+Tracing caches interest in event locations within each process.
+Without an interested subscriber, tracing can skip field expressions and formatting.
+Initialization keeps these paths active for coverage and mutation testing in the
+executables covered by this rule.
+A dependency's unit-test initialization does not run in a consumer's test executable.
+Each executable that explicitly tests tracing therefore needs its own initialization.
+
+A dependency's internal tracing belongs in that dependency's tests.
+A transitive tracing dependency alone creates no consumer testing obligation.
+Consumer tests do not need initialization just because an operation happens to emit
+events inside a dependency.
 
 Initialize `testing_aids` tracing before any test runs, via the
 `testing_aids::init_tracing!()` macro. It expands to a `#[ctor::ctor]`
@@ -53,7 +58,7 @@ testing_aids::init_tracing!();
 **Integration-test binaries** (`tests/*.rs`) link the library's normal (non-test)
 build, in which `#[cfg(test)]` items - including the crate-root initialization - are
 excluded. So the crate-root initialization never runs for them. Invoke the macro
-directly in each integration-test target root covered by the dependency rule.
+directly in each integration-test target root covered by the initialization rule.
 This includes nested roots such as `tests/io/main.rs` and explicit `[[test]]` paths:
 
 ```rust
@@ -95,16 +100,22 @@ Use Cargo target isolation, not subprocesses launched by tests.
 ### Auditing target roots
 
 Use `cargo metadata --format-version 1 --all-features` without `--filter-platform`
-to include optional and target-specific dependency edges.
-Read `resolve.nodes[].deps[].dep_kinds` to distinguish normal, dev, and build edges.
-Apply the traversal rule above rather than following every edge in the resolved graph.
+to include optional and target-specific dependency declarations.
+Read each workspace package's `dependencies` array.
+Select direct `tracing` declarations whose `kind` is normal (`null`) or `dev`.
+Do not traverse dependency graphs or select build-only declarations.
 
 Enumerate workspace `packages[].targets[]` with `test = true` and a library,
 binary, procedural-macro, or integration-test kind.
 Use each target's `src_path`, not a `tests/*.rs` filename search.
-For every target that reaches tracing, inspect its root for initialization or a
+For every target in a selected package, inspect its root for initialization or a
 documented exception. Also inspect the gates on the initializer and the helper dependencies.
 An integration executable cannot inherit a library's `#[cfg(test)]` initializer.
+
+Inspect the remaining tests for explicit tracing use or capture through dependencies.
+Follow nested modules, generated test inputs, and `include!` files, not just target roots.
+Initialize each target that explicitly tests tracing.
+Do not treat a telemetry test for another library, such as `observed`, as a tracing test.
 
 If features are mutually exclusive, collect metadata for each supported combination
 and audit the union instead of relying on `--all-features`.

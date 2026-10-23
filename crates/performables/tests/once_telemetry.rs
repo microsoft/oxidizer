@@ -44,5 +44,3 @@ fn initialized_access_drops_the_unused_initializer_before_recording_access() {
         .collect::<Vec<_>>();
     assert_eq!((value, events), (7, vec![EventKind::ArcDrop, EventKind::OnceAccess]));
 }
-
-testing_aids::init_tracing!();

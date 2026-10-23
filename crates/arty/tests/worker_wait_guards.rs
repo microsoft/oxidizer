@@ -23,8 +23,6 @@ use support::JoinHandleExt as _;
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
-
 thread_local! {
     static BLOCKING_THREAD_EXIT: RefCell<Option<BlockingThreadExit>> = const { RefCell::new(None) };
 }

@@ -29,17 +29,11 @@ allowed_external_types = [
     "layered::service::Service",
 ]
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [dependencies]
 cachet_tier = { workspace = true }
 layered = { workspace = true }
 
 [dev-dependencies]
-ctor = { workspace = true }
-testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 # >>> anvil-managed: anvil-lints

@@ -258,5 +258,3 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     }
     chain
 }
-
-testing_aids::init_tracing!();

@@ -39,5 +39,3 @@ fn generics_inline_bound() {
 
     insta::assert_snapshot!(expand_fundle_newtype!(item));
 }
-
-testing_aids::init_tracing!();

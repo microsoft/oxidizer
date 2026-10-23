@@ -42,5 +42,3 @@ fn no_std_serde_round_trips_strings_and_handles() {
     let decoded: internity::Sym = target.deserialize_in(&mut serde_json::Deserializer::from_str(&encoded)).unwrap();
     assert_eq!(target.resolve(decoded), "café");
 }
-
-testing_aids::init_tracing!();

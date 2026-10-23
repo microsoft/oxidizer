@@ -7515,5 +7515,3 @@ mod public_surface_behavior_4 {
         );
     }
 }
-
-testing_aids::init_tracing!();

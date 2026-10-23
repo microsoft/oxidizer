@@ -52,5 +52,3 @@ fn test_derive_error_constructors() {
     assert_eq!(val_err_with_error.field, "email");
     assert_error_message!(val_err_with_error, "Invalid format");
 }
-
-testing_aids::init_tracing!();

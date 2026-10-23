@@ -291,5 +291,3 @@ fn concurrent_free_and_alloc_with_non_send_values() {
     assert_eq!(shared.get(), expected);
     assert_eq!(StdRc::strong_count(&shared), 1);
 }
-
-testing_aids::init_tracing!();

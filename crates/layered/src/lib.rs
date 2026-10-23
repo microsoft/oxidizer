@@ -145,6 +145,3 @@ pub mod tower;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 pub(crate) mod testing;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

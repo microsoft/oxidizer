@@ -258,5 +258,3 @@ fn transcode_response_from_conversions_pick_the_variant() {
     let streaming: TranscodeResponse = StreamingResponse::encode(empty, StreamEncoding::JsonArray).into();
     assert!(matches!(streaming, TranscodeResponse::Streaming(_)));
 }
-
-testing_aids::init_tracing!();

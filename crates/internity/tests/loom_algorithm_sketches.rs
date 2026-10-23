@@ -117,5 +117,3 @@ fn snapshot_is_a_consistent_prefix_during_interning() {
         assert!(snapshot == ["first"] || snapshot == ["first", "second"]);
     });
 }
-
-testing_aids::init_tracing!();

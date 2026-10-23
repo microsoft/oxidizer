@@ -1322,5 +1322,3 @@ fn once_initialization_publishes_exactly_one_value() {
         assert_eq!(initializations.load(Ordering::Relaxed), 1);
     });
 }
-
-testing_aids::init_tracing!();

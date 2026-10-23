@@ -237,5 +237,3 @@ mod zstd {
         assert_eq!(WindowLog::MAX.get(), expected);
     }
 }
-
-testing_aids::init_tracing!();

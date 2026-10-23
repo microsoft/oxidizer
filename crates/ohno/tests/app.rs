@@ -16,5 +16,3 @@ mod app {
     mod into_trait;
     mod root_cause;
 }
-
-testing_aids::init_tracing!();

@@ -262,5 +262,3 @@ mod from_coverage_extras_bytesbuf {
         assert!(result.is_err(), "expected bytesbuf reserve to fail eventually");
     }
 }
-
-testing_aids::init_tracing!();

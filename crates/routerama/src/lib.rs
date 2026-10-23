@@ -262,6 +262,3 @@ pub mod __rt {
     pub use crate::raw_resolver::RawResolver;
     pub use crate::route_match::RouteMatch;
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

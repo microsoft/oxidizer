@@ -257,6 +257,3 @@ pub(crate) mod testing;
 
 #[cfg(any(doc, test))]
 pub mod documentation;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

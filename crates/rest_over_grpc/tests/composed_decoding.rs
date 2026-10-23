@@ -307,5 +307,3 @@ fn direct_decode_enforces_query_work_budget_without_a_bounded_parser() {
     assert_eq!(error.code(), Code::InvalidArgument);
     assert!(error.to_string().contains("query exceeds"), "{error}");
 }
-
-testing_aids::init_tracing!();

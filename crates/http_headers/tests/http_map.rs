@@ -281,5 +281,3 @@ fn validated_map_uses_optimized_token_list_decoders() {
     map.insert(http::header::ALLOW, HeaderValue::from_static("GET, bad token"));
     Allow::owned(&map).expect_err("a token-list member cannot contain a space");
 }
-
-testing_aids::init_tracing!();

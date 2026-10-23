@@ -110,5 +110,3 @@ mod stats_tests {
         assert_eq!(pool.stats(), grown);
     }
 }
-
-testing_aids::init_tracing!();

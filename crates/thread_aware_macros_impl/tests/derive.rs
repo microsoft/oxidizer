@@ -376,5 +376,3 @@ fn generics_lifetime_and_const_params_untouched() {
     };
     assert_snapshot!(expand(input));
 }
-
-testing_aids::init_tracing!();

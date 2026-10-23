@@ -1002,5 +1002,3 @@ fn protocol_regression_seeds() {
         assert_eq!(http_headers_simd::find_interesting(value.as_bytes()), None);
     }
 }
-
-testing_aids::init_tracing!();

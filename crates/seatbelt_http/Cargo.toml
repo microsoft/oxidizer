@@ -31,10 +31,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 timeout = ["seatbelt/timeout", "dep:tick"]
 retry = ["seatbelt/retry", "dep:tick"]
@@ -49,14 +45,12 @@ templated_uri = { workspace = true, optional = true }
 tick = { workspace = true, optional = true }
 
 [dev-dependencies]
-ctor = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 layered = { path = "../layered" }
 mutants = { workspace = true }
 ohno = { path = "../ohno" }
 templated_uri = { path = "../templated_uri" }
-testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints

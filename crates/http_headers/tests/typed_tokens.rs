@@ -220,5 +220,3 @@ fn http_conversions_and_round_trips_preserve_typed_members() {
         "Accept-Encoding"
     );
 }
-
-testing_aids::init_tracing!();

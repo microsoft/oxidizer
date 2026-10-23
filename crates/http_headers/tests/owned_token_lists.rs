@@ -66,5 +66,3 @@ fn vary_construction_preserves_wildcards_names_and_spelling_across_storage_bound
         assert!(!names.contains_wildcard());
     }
 }
-
-testing_aids::init_tracing!();

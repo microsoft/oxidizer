@@ -82,5 +82,3 @@ fn malformed_user_agents_return_bad_request() {
     assert_eq!(cache_control, None);
     assert_eq!(body, "invalid user-agent header: unexpected multiple values");
 }
-
-testing_aids::init_tracing!();

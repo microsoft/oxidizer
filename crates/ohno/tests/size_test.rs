@@ -31,5 +31,3 @@ fn test_result_with_inner_error_is_reasonable_size() {
     // So around 32 bytes total
     assert!(size <= 32, "Result size should be reasonable: {size} bytes");
 }
-
-testing_aids::init_tracing!();

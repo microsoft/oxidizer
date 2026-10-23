@@ -642,5 +642,3 @@ fn unsized_raw_round_trips_preserve_metadata() {
     assert_eq!(&*slice, &[1, 2, 3]);
     drop(slice);
 }
-
-testing_aids::init_tracing!();

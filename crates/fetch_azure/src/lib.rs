@@ -36,6 +36,3 @@
 mod client;
 
 pub use client::HttpClient;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

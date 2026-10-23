@@ -81,5 +81,3 @@ fn resolve_error_accessors_display_and_source_are_consistent() {
     assert_eq!(capture.to_string(), "failed to parse capture for field `book`");
     assert!(capture.source().is_none());
 }
-
-testing_aids::init_tracing!();

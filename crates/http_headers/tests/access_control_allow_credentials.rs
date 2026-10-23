@@ -62,5 +62,3 @@ fn owned_and_borrowed_distinguish_absence_and_duplicate_values() {
         );
     }
 }
-
-testing_aids::init_tracing!();

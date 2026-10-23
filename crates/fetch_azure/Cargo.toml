@@ -29,10 +29,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [dependencies]
 
 # external
@@ -49,8 +45,6 @@ layered = { workspace = true }
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 anyspawn_azure = { path = "../anyspawn_azure", features = ["azure-identity"] }
-ctor = { workspace = true }
-testing_aids = { path = "../testing_aids" }
 
 # external
 async-trait = { workspace = true }

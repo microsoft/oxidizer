@@ -142,5 +142,3 @@ fn shared_cors_tokens_convert_to_http_names_and_methods() {
         );
     }
 }
-
-testing_aids::init_tracing!();

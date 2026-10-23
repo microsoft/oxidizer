@@ -5,8 +5,6 @@
 
 #![cfg(feature = "rt")]
 
-testing_aids::init_tracing!();
-
 mod support;
 
 use std::sync::{Arc, Mutex, PoisonError};

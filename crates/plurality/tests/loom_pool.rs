@@ -175,5 +175,3 @@ fn value_dropped_exactly_once() {
         drop(pool);
     });
 }
-
-testing_aids::init_tracing!();

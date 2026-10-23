@@ -181,5 +181,3 @@ fn steady_state_fill_and_drop_does_not_over_allocate() {
         "steady-state fill/drop cycles must reuse chunks, not over-allocate from the system"
     );
 }
-
-testing_aids::init_tracing!();

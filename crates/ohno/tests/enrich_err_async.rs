@@ -273,5 +273,3 @@ async fn enrich_err_on_future_poll() {
     assert_eq!(lines.first(), Some(&"poll error"));
     assert_enrichment!(error, "custom future poll failed");
 }
-
-testing_aids::init_tracing!();

@@ -996,5 +996,3 @@ mod alloc_unsized_extras {
         assert!(r.is_err());
     }
 }
-
-testing_aids::init_tracing!();

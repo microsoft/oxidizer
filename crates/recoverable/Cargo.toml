@@ -20,14 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/recoverable
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [dependencies]
 
 [dev-dependencies]
-ctor = { workspace = true }
 insta = { workspace = true }
 ohno = { path = "../ohno" }
 static_assertions = { workspace = true }

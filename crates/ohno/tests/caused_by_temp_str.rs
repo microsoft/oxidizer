@@ -29,5 +29,3 @@ fn test() {
     let debug_str = format!("{error:?}");
     assert!(debug_str.contains("source: Transparent("), "{debug_str}");
 }
-
-testing_aids::init_tracing!();

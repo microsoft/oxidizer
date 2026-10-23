@@ -354,6 +354,3 @@ macro_rules! thread_aware_move {
 }
 
 pub(crate) use thread_aware_move;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

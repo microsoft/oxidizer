@@ -509,5 +509,3 @@ mod arc_assume_init_slice_drops_each_element {
         assert_eq!(counter.load(Ordering::Relaxed), 2);
     }
 }
-
-testing_aids::init_tracing!();

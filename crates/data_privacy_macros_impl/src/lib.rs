@@ -19,6 +19,3 @@
 pub mod classified;
 pub mod derive;
 pub mod taxonomy;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

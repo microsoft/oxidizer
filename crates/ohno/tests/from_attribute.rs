@@ -134,5 +134,3 @@ fn test_from_attribute_initializer_reaches_an_outer_item() {
     assert_eq!(shadow_err.first, 1);
     assert_eq!(shadow_err.second, 99);
 }
-
-testing_aids::init_tracing!();

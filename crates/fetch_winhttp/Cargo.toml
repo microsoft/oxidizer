@@ -33,12 +33,6 @@ allowed_external_types = [
 all-features = true
 default-target = "x86_64-pc-windows-msvc"
 
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 # The benchmark bodies are Windows-only, so on other platforms these two are
 # reached from no surviving code path and `cargo-udeps` reports them as unused.
 # `alloc_tracker` and `criterion` are not listed because the benchmark harness
@@ -57,8 +51,6 @@ all_the_time = { workspace = true }
 alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
-ctor = { workspace = true }
-testing_aids = { path = "../testing_aids" }
 
 [target.'cfg(windows)'.dev-dependencies]
 bytes = { workspace = true }

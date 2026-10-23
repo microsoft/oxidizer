@@ -78,5 +78,3 @@ fn location_and_user_agent_use_public_construction_and_decode() {
         DecodeErrorKind::InvalidSyntax
     );
 }
-
-testing_aids::init_tracing!();

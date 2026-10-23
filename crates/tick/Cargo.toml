@@ -28,10 +28,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 default = []
 # Allows clocks to use lower-overhead, lower-precision instants on Linux and Windows
@@ -67,7 +63,6 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-ctor = { workspace = true }
 
 #external
 chrono = { workspace = true, features = ["clock"] }

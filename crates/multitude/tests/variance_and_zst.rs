@@ -70,5 +70,3 @@ fn zst_alloc_box_succeeds() {
     assert_eq!(*a, ());
     assert_eq!(*b, ());
 }
-
-testing_aids::init_tracing!();

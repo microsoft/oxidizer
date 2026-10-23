@@ -23,8 +23,6 @@ use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
-
 #[cfg(test)]
 fn runtime_builder() -> RuntimeBuilder {
     Runtime::builder()

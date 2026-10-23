@@ -57,5 +57,3 @@ fn core_api_examples_compile() {
         assert!(UserAgent::view(&map).unwrap().is_some());
     }
 }
-
-testing_aids::init_tracing!();

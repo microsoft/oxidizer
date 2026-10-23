@@ -139,5 +139,3 @@ fn attacker_controlled_paths_remain_bounded_and_non_recursive() {
     assert_eq!(matched.captures().count(), 64);
     assert_eq!(routerama::__rt::RouteMatch::capture(&matched, "capture63"), Some("value63"));
 }
-
-testing_aids::init_tracing!();

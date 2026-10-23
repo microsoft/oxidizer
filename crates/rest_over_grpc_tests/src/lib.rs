@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// The test-only tracing constructor uses unsafe attributes. See docs/tracing-tests.md.
-#![cfg_attr(not(test), forbid(unsafe_code))]
+#![forbid(unsafe_code)]
 
 //! Build-time generated fixtures exercised by this crate's benchmarks and the
 //! `rest_over_grpc` end-to-end / correctness tests.
@@ -47,6 +46,3 @@ pub mod coverage {
 
     include!(concat!(env!("OUT_DIR"), "/coverage_router.rs"));
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

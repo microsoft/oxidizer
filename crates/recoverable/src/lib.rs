@@ -632,6 +632,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

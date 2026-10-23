@@ -117,5 +117,3 @@ fn dst_box_at_max_normal_alloc_boundary_routes_consistently() {
     assert_eq!(b[0], 0);
     assert_eq!(b[4093], 4093);
 }
-
-testing_aids::init_tracing!();

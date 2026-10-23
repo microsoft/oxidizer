@@ -272,5 +272,3 @@ fn mixed_dynamic_extractors_do_not_require_route_covariance() {
         })
     );
 }
-
-testing_aids::init_tracing!();

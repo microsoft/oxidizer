@@ -182,6 +182,3 @@ pub use pool::Pool;
 pub use pool_stats::PoolStats;
 pub use rc::Rc;
 pub use sync::Arc;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

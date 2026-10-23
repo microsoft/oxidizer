@@ -187,5 +187,3 @@ fn http_views_still_exempt_the_retained_adapter_from_all_custom_budgets() {
     unlimited!(AcceptEncoding, http::header::ACCEPT_ENCODING, "gzip;q=1");
     unlimited!(AcceptLanguage, http::header::ACCEPT_LANGUAGE, "en;q=1");
 }
-
-testing_aids::init_tracing!();

@@ -17,17 +17,18 @@ macro_rules! assert_panic {
 /// `tracing` for a test binary.
 ///
 /// `tracing` subscribers and the `tracing-core` callsite-interest cache are
-/// process-global. Every unit-test and integration-test executable whose runtime
-/// dependency graph contains `tracing`, directly or transitively, must invoke
-/// this macro at module scope so a silent, always-interested subscriber is installed
+/// process-global. Every unit-test and integration-test executable in a package
+/// with a direct normal or dev-dependency on `tracing` must invoke this macro.
+/// A target that explicitly tests tracing through a dependency must also invoke it.
+/// Invoke it at module scope so a silent, always-interested subscriber is installed
 /// before any test runs. Without it, `tracing` emission lines may be reported as lacking
 /// test coverage even though they execute, and log capture may silently observe nothing.
 /// The subscriber evaluates field expressions and formats events and span fields
 /// synchronously even with no output enabled, including during mutation testing.
-/// Start with the root package's normal and dev-dependencies, then follow normal
-/// edges only. Exclude build and procedural-macro host dependencies. Consider all
-/// supported features and platforms. See `docs/tracing-tests.md` for the audit
-/// procedure and isolated exceptions for disabled tracing and custom subscribers.
+/// Apply the rule across declared features and platforms. Build-only dependencies,
+/// procedural-macro host dependencies, and transitive presence alone do not qualify
+/// a consumer. See `docs/tracing-tests.md` for the audit procedure and isolated
+/// exceptions for disabled tracing and custom subscribers.
 ///
 /// The invoking crate must have a dev-dependency on the [`ctor`](https://docs.rs/ctor)
 /// crate, which supplies the expanded `#[ctor::ctor]` attribute.

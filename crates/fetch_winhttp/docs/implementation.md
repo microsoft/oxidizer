@@ -246,11 +246,12 @@ crates/fetch_winhttp/tests/
   non_windows.rs       // keeps package-scoped test runs nonempty off Windows
 ```
 
-Every unit-test and integration-test target initializes tracing because its
-runtime dependency graph reaches `tracing` in a supported configuration.
-Each integration target invokes `testing_aids::init_tracing!()` at module scope.
-It cannot inherit the library's `#[cfg(test)]` initializer because Cargo links the
-normal library build into integration tests.
+These tests exercise transport behavior, not tracing output.
+The package declares no direct normal or dev-dependency on `tracing`, so its test
+targets do not initialize tracing.
+Tracing emitted inside the standard `fetch` pipeline remains the responsibility
+of the `fetch` tests.
+If a target explicitly tests tracing, it must initialize tracing itself.
 See [the repository tracing rule](../../../docs/tracing-tests.md).
 
 ### 1.3 Examples

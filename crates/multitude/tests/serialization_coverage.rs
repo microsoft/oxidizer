@@ -337,5 +337,3 @@ fn ordinary_serde_seed_default_and_deserialize_paths_are_covered() {
     let seed = DeserializeInSeed::<u64, _>::new(&arena);
     assert_eq!(seed.deserialize(U64Deserializer::<ValueError>::new(43)).unwrap(), 43);
 }
-
-testing_aids::init_tracing!();

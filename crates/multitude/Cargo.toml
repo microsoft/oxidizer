@@ -37,10 +37,6 @@ allowed_external_types = [
 rustdoc-args = ["--cfg", "docsrs"]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 default = ["std"]
 std = []
@@ -94,7 +90,6 @@ bytemuck = { workspace = true, features = ["derive"] }
 bytes = { workspace = true }
 bytesbuf = { path = "../bytesbuf" }
 criterion = { workspace = true }
-ctor = { workspace = true }
 # Workspace dep declares `default-features = false`; re-enable `default` here
 # because metabench emits the same Gungraun registration code on every
 # platform, while Valgrind/Callgrind execution remains a Linux-only runtime
@@ -107,7 +102,6 @@ multitude_macros = { path = "../multitude_macros" }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["alloc", "derive"] }
 serde_json = { workspace = true, features = ["alloc", "raw_value"] }
-testing_aids = { path = "../testing_aids" }
 widestring = { workspace = true, features = ["alloc"] }
 zerocopy = { workspace = true, features = ["derive"] }
 

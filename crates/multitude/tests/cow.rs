@@ -181,5 +181,3 @@ fn cow_delegates_common_value_traits() {
     "a".hash(&mut str_hasher);
     assert_eq!(left_hasher.finish(), str_hasher.finish());
 }
-
-testing_aids::init_tracing!();

@@ -99,5 +99,3 @@ fn permitted_empty_collections_are_empty_borrowed_iterators() {
     check!(AccessControlExposeHeadersOwned);
     check!(AccessControlAllowMethodsOwned);
 }
-
-testing_aids::init_tracing!();

@@ -249,6 +249,3 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
     }
     Ok(())
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

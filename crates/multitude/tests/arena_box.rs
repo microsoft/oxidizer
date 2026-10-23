@@ -390,5 +390,3 @@ fn box_drop_panic_releases_refcount() {
 
     assert!(DROPS.load(Ordering::SeqCst) >= 1, "at least the panicking drop should have run");
 }
-
-testing_aids::init_tracing!();

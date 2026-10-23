@@ -1939,5 +1939,3 @@ fn allocator_reentry_during_chunk_growth_yields_distinct_slots() {
         "returned slots are reused rather than grown past"
     );
 }
-
-testing_aids::init_tracing!();

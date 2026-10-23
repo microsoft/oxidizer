@@ -24,10 +24,6 @@ allowed_external_types = ["allocator_api2::alloc::Allocator", "allocator_api2::a
 rustdoc-args = ["--cfg", "docsrs"]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 default = ["std"]
 std = ["allocator-api2/std"]
@@ -52,13 +48,11 @@ alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc", "std"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
-ctor = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
-testing_aids = { path = "../testing_aids" }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }

@@ -94,5 +94,3 @@ fn reentrant_delivery_records_signal_before_access() {
         [EventKind::NotifyContention, EventKind::NotifySignal, EventKind::NotifyAccess]
     );
 }
-
-testing_aids::init_tracing!();

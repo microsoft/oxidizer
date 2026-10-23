@@ -54,5 +54,3 @@ fn display_diagnostics() {
     // An unbalanced brace is reported rather than parsed into a different, valid template.
     t.compile_fail("tests/ui/display_unbalanced_brace.rs");
 }
-
-testing_aids::init_tracing!();

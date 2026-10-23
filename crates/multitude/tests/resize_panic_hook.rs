@@ -48,5 +48,3 @@ fn resize_guard_drop_uses_subtraction() {
         .unwrap_or_default();
     assert!(s.contains("planned clone panic"), "unexpected panic payload: {s:?}");
 }
-
-testing_aids::init_tracing!();

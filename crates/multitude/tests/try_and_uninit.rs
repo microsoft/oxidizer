@@ -1057,5 +1057,3 @@ mod zeroed_slice_arc_zeroes_payload {
         }
     }
 }
-
-testing_aids::init_tracing!();

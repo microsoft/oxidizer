@@ -838,5 +838,3 @@ fn an_unparsable_derive_input_is_reported() {
     ));
     insta::assert_snapshot!(output);
 }
-
-testing_aids::init_tracing!();

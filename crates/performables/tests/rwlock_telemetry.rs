@@ -88,5 +88,3 @@ fn recording_enabled_while_held_preserves_release_and_poison_events() {
         )
     );
 }
-
-testing_aids::init_tracing!();

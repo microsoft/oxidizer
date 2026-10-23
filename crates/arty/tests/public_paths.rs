@@ -5,8 +5,6 @@
 
 #![cfg(feature = "rt")]
 
-testing_aids::init_tracing!();
-
 use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::io;

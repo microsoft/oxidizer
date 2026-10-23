@@ -61,5 +61,3 @@ fn raw_identifier_uses_unraw_wire_name() {
 
     assert_eq!(lexicon.resolve(value.r#type), "keyword");
 }
-
-testing_aids::init_tracing!();

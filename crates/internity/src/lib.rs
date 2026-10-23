@@ -231,6 +231,3 @@ pub use symbol_map::{SymMap, SymSet};
 pub use threaded_lexicon::ThreadedLexicon;
 #[cfg(feature = "std")]
 pub use threaded_reader::ThreadedReader;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

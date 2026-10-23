@@ -247,5 +247,3 @@ mod from_coverage_extras_zerocopy {
         let _ = arena.zerocopy().alloc_slice_box::<u32>(4);
     }
 }
-
-testing_aids::init_tracing!();

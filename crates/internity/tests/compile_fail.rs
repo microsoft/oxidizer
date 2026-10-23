@@ -31,5 +31,3 @@ fn compile_fail() {
     #[cfg(feature = "std")]
     t.compile_fail("tests/compile_fail/threaded_lexicon_is_not_serialize.rs");
 }
-
-testing_aids::init_tracing!();

@@ -61,5 +61,3 @@ fn only_the_last_logical_reference_records_a_drop() {
         )
     );
 }
-
-testing_aids::init_tracing!();

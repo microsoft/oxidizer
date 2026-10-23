@@ -319,5 +319,3 @@ fn test_display_argument_calls_a_method_of_self() {
 
     assert_error_message!(error, "code 7");
 }
-
-testing_aids::init_tracing!();

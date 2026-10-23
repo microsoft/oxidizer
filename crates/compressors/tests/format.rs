@@ -11,5 +11,3 @@ use compressors::format::Format;
 fn unknown_content_encoding_is_rejected_without_format_features() {
     assert_eq!(Format::from_content_encoding("identity"), None);
 }
-
-testing_aids::init_tracing!();

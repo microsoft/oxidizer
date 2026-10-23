@@ -301,5 +301,3 @@ fn authentication_challenges_are_surfaced_without_automatic_retry() {
     assert_eq!(response.headers().get(WWW_AUTHENTICATE).unwrap(), "Basic realm=\"test\"");
     assert_eq!(server.finish().requests.len(), 1);
 }
-
-testing_aids::init_tracing!();

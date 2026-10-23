@@ -122,5 +122,3 @@ fn debug_propagates_formatter_errors_with_and_without_redaction() {
         }
     }
 }
-
-testing_aids::init_tracing!();

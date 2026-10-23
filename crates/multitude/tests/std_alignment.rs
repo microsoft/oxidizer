@@ -1094,5 +1094,3 @@ fn utf16_string_cross_type_partial_eq() {
     assert_ne!(s, ne);
     assert_ne!(ne, s);
 }
-
-testing_aids::init_tracing!();

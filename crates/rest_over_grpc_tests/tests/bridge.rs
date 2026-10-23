@@ -540,5 +540,3 @@ fn tonic_bridge_preserves_error_details_and_metadata_at_each_stage() {
         "value": "e30uLg=="
     })));
 }
-
-testing_aids::init_tracing!();

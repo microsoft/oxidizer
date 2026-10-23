@@ -566,5 +566,3 @@ fn shutdown_retires_a_batch_of_queued_tasks() {
         assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
     }
 }
-
-testing_aids::init_tracing!();

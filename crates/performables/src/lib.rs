@@ -65,6 +65,3 @@ mod error;
 mod telemetry;
 
 pub use error::Error;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

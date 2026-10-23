@@ -294,5 +294,3 @@ mod drop_behavior {
     #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 }
-
-testing_aids::init_tracing!();

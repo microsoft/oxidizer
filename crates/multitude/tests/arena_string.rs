@@ -1436,5 +1436,3 @@ mod box_str_into_box_u8_slice {
         assert_eq!(&*bytes, b"hello");
     }
 }
-
-testing_aids::init_tracing!();

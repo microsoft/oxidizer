@@ -22,9 +22,9 @@ continues to compile when selected packages depend on it, and its complete test
 suite continues to run natively and under `cargo careful`.
 
 Package-level exclusions enforce the absence of unsafe code with
-`#![forbid(unsafe_code)]`. Crates with a test-only tracing initializer apply the
-prohibition to non-test builds because `ctor` carries an internal
-`allow(unsafe_code)` attribute. Their shipped libraries retain the prohibition.
+`#![forbid(unsafe_code)]`. `cachet` applies the prohibition to non-test builds
+because its test-only tracing initializer uses `ctor`, which carries an internal
+`allow(unsafe_code)` attribute. Its shipped library retains the prohibition.
 See [the tracing initialization rule](tracing-tests.md).
 
 Prefer a test-level `#[cfg_attr(miri, ignore = "...")]` when only one

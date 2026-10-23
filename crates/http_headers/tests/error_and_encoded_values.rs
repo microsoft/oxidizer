@@ -158,5 +158,3 @@ mod encoded_values {
         assert_eq!(single_hash.finish(), vector_hash.finish());
     }
 }
-
-testing_aids::init_tracing!();

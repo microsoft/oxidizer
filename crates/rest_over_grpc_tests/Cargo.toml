@@ -21,9 +21,7 @@ allowed_external_types = ["*"]
 # These dependencies are consumed by build.rs, generated Rust included from
 # OUT_DIR, or rustdoc links, which cargo-machete's source scan cannot attribute.
 [package.metadata.cargo-machete]
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
 ignored = [
-    "ctor",
     "http-body",
     "http_path_template",
     "pbjson",
@@ -65,7 +63,6 @@ tonic-prost-build = { workspace = true }
 [dev-dependencies]
 bytes = { workspace = true }
 criterion = { workspace = true }
-ctor = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -73,7 +70,6 @@ matchit = { workspace = true }
 metabench = { workspace = true }
 protox = { workspace = true }
 rest_over_grpc = { workspace = true, features = ["build-openapi"] }
-testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["rt", "macros", "net", "sync"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tonic = { workspace = true, features = ["router", "transport"] }

@@ -468,5 +468,3 @@ fn oneshot_send_racing_receiver_drop_destroys_each_value_exactly_once() {
 mod support;
 #[path = "support/waker.rs"]
 mod waker_support;
-
-testing_aids::init_tracing!();

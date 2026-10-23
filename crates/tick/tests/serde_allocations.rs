@@ -112,5 +112,3 @@ fn textual_format_requests_string_deserialization() {
 
     assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
 }
-
-testing_aids::init_tracing!();

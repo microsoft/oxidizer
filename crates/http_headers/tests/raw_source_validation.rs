@@ -196,5 +196,3 @@ fn sensitive_borrowed_headers_override_http_map_classification() {
         assert!(http::HeaderValue::try_from(value).unwrap().is_sensitive());
     }
 }
-
-testing_aids::init_tracing!();

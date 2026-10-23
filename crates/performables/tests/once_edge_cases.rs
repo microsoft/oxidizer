@@ -297,5 +297,3 @@ fn many_threads_force_one_lazy_initializer() {
     }
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
-
-testing_aids::init_tracing!();

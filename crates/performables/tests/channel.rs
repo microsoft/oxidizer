@@ -789,5 +789,3 @@ fn channel_operations_share_runtime_telemetry_identity() {
     seismograph::recorder(Configuration::default());
     drop(watch_sender);
 }
-
-testing_aids::init_tracing!();

@@ -539,5 +539,3 @@ fn sym_keyed_collections_round_trip() {
     names.sort_unstable();
     assert_eq!(names, ["green", "red"]);
 }
-
-testing_aids::init_tracing!();

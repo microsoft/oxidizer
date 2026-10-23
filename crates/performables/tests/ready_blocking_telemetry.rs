@@ -145,5 +145,3 @@ fn ready_operations_and_blocking_handoffs_preserve_events() {
     blocking_send_contention();
     seismograph::recorder(Configuration::default());
 }
-
-testing_aids::init_tracing!();

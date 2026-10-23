@@ -82,5 +82,3 @@ fn test_constructor_compatibility() {
 
     // All should compile and work correctly
 }
-
-testing_aids::init_tracing!();

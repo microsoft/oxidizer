@@ -14,8 +14,6 @@ use std::sync::mpsc;
 use panic_support::runtime;
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
-testing_aids::init_tracing!();
-
 fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
     let (completed, completion) = mpsc::channel();
     std::thread::spawn(move || {

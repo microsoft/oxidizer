@@ -32,5 +32,3 @@ fn conditional_family_includes_etag_headers() {
     assert_field::<IfUnmodifiedSince>();
     assert_field::<LastModified>();
 }
-
-testing_aids::init_tracing!();

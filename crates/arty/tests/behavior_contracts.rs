@@ -28,8 +28,6 @@ use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
-
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }

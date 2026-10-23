@@ -291,5 +291,3 @@ fn key_route() -> KeyRouteResolver {
 fn multi() -> MultiRouteResolver {
     MultiRoute::resolver()
 }
-
-testing_aids::init_tracing!();

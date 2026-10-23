@@ -405,5 +405,3 @@ fn rc_value_is_aligned() {
     // SAFETY: `read_unaligned` is sound regardless of alignment.
     assert_eq!(unsafe { core::ptr::read_unaligned(r.as_ptr()) }, 0x0102_0304_0506_0708);
 }
-
-testing_aids::init_tracing!();

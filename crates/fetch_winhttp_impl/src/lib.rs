@@ -81,6 +81,3 @@ mod linux;
 pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};
 #[cfg(windows)]
 pub use tls::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};
-
-#[cfg(test)]
-testing_aids::init_tracing!();

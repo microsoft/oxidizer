@@ -26,10 +26,6 @@ allowed_external_types = [
     "thread_aware_core::thread::Thread",
 ]
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [dependencies]
 data_privacy = { workspace = true }
 events_once = { workspace = true }
@@ -44,7 +40,6 @@ tick = { workspace = true, features = ["fast-instant"] }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
-ctor = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }

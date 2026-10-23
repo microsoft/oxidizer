@@ -352,6 +352,3 @@ pub fn compress(input: BytesView, compressor: impl Compression<Mode = Compress>)
 pub fn decompress(input: BytesView, decompressor: impl Compression<Mode = Decompress>) -> Result<BytesView> {
     process(decompressor, input)
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

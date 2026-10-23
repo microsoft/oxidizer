@@ -30,10 +30,6 @@ allowed_external_types = ["proc_macro2::*", "syn::error::*"]
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 default = []
 mockall = []
@@ -44,7 +40,6 @@ quote = { workspace = true }
 syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "parsing", "printing", "proc-macro", "visit", "visit-mut"] }
 
 [dev-dependencies]
-ctor = { workspace = true }
 insta = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 

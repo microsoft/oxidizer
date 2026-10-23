@@ -385,5 +385,3 @@ fn strict_and_relaxed_borrowed_owned_semantics_stay_in_parity() {
         assert!((case.relaxed_rejects)(&invalid), "{} invalid neighbor", case.label);
     }
 }
-
-testing_aids::init_tracing!();

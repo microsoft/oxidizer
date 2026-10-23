@@ -1168,5 +1168,3 @@ fn reader_debug_reports_length() {
     let text = format!("{:?}", lexicon.freeze());
     assert!(text.contains("ThreadedReader"), "{text}");
 }
-
-testing_aids::init_tracing!();

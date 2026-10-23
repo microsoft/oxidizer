@@ -93,5 +93,3 @@ fn racing_relocations_to_different_destinations_publish_both_values() {
         assert!(Arc::ptr_eq(stored[1].as_ref().unwrap(), &right));
     });
 }
-
-testing_aids::init_tracing!();

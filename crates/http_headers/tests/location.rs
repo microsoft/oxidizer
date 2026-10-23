@@ -933,5 +933,3 @@ fn http_forwarding_retains_original_sensitive_wire() {
     assert_eq!(owned_sink["location"], borrowed_sink["location"]);
     assert!(owned_sink["location"].is_sensitive());
 }
-
-testing_aids::init_tracing!();

@@ -29,5 +29,3 @@ fn type_system_contracts() {
     tests.pass("tests/ui/pass/*.rs");
     tests.compile_fail("tests/ui/*.rs");
 }
-
-testing_aids::init_tracing!();

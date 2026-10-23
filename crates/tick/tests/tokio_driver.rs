@@ -53,5 +53,3 @@ async fn live_tokio_clock_debug_output_reports_an_active_driver() {
         "Clock {\n    kind: \"system\",\n    timers: 0,\n    alive: true,\n    ..\n}"
     );
 }
-
-testing_aids::init_tracing!();

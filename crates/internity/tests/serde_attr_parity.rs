@@ -461,5 +461,3 @@ fn deserialize_with_colliding_helper_name_resolves_to_user_function() {
     assert_eq!(interned.tag, "HI");
     assert_eq!(lex.resolve(interned.key), "k");
 }
-
-testing_aids::init_tracing!();

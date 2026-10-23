@@ -60,6 +60,3 @@ pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
         Err(error) => error.to_compile_error(),
     }
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

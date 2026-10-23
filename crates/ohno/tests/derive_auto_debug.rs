@@ -140,5 +140,3 @@ fn test_debug_with_enrichment() {
     // The inner OhnoCore should contain the enrichment
     assert!(debug_str.contains("enrichment"));
 }
-
-testing_aids::init_tracing!();

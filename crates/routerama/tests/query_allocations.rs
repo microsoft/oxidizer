@@ -57,5 +57,3 @@ fn production_into_reserved_string_is_allocation_free() {
     assert_eq!(total_bytes_allocated(&session, "query_produce"), 0);
     assert_eq!(output, "q=rust&page=2&exact=true");
 }
-
-testing_aids::init_tracing!();

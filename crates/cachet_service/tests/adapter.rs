@@ -183,5 +183,3 @@ fn cache_response_into_entry_returns_none_for_non_get() {
     let response: CacheResponse<i32> = CacheResponse::Clear;
     assert!(response.into_entry().is_none());
 }
-
-testing_aids::init_tracing!();

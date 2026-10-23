@@ -354,5 +354,3 @@ fn auto_trait_bounds() {
     assert_send::<Box<u32>>();
     assert_send_sync::<Arc<u32>>();
 }
-
-testing_aids::init_tracing!();

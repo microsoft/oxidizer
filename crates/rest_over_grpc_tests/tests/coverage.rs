@@ -101,5 +101,3 @@ fn wildcard_does_not_match_empty_segment() {
     let matched = Route::resolve("GET", "/v1/books/42").expect("non-empty still matches");
     assert_eq!(matched, Route::GetBook { book: "42" });
 }
-
-testing_aids::init_tracing!();

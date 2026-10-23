@@ -31,10 +31,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# ctor is referenced by the tracing initializer macro expansion, not by source code.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [features]
 default = ["std"]
 # Enables the global memory pool, standard I/O adapters, and metrics. Disable for `#![no_std]`
@@ -65,7 +61,6 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
-ctor = { workspace = true }
 mutants = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
