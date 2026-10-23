@@ -17,7 +17,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::shutdown::Shutdown;
+use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
@@ -155,19 +155,17 @@ impl AsyncWorker {
     fn execute_step(&mut self) -> ControlFlow<()> {
         let batch_exhausted = self.process_commands();
 
-        if self.shutdown.is_started() {
+        if matches!(self.shutdown.state(), ShutdownState::Started) {
             self.begin_shutdown();
             let now = self.timer_now();
             _ = self.clock_driver.advance_timers(now);
             return ControlFlow::Break(());
         }
 
-        let Some(executor) = self.executor.as_mut() else {
-            // Executor drop cancels tasks before final timer callbacks can observe their state.
-            let now = self.timer_now();
-            _ = self.clock_driver.advance_timers(now);
-            return ControlFlow::Break(());
-        };
+        let executor = self
+            .executor
+            .as_mut()
+            .expect("executor removal publishes shutdown, which is handled above");
 
         let cycle_outcome = executor.execute_cycle();
 
@@ -182,7 +180,7 @@ impl AsyncWorker {
 
         let advance_now = self.timer_now();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
-        if self.shutdown.is_started() {
+        if matches!(self.shutdown.state(), ShutdownState::Started) {
             self.begin_shutdown();
             let now = self.timer_now();
             _ = self.clock_driver.advance_timers(now);
@@ -240,7 +238,7 @@ impl AsyncWorker {
         let command_rx = self.command_rx.as_ref().expect("builtins and command channel are dropped together");
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            if self.shutdown.is_started() {
+            if matches!(self.shutdown.state(), ShutdownState::Started) {
                 self.begin_shutdown();
                 return false;
             }

@@ -71,7 +71,7 @@ fn async_worker_stop_returns_without_self_joining() {
         .unwrap();
     let result = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
 
-    assert!(dispatcher.shutdown().is_started());
+    assert_eq!(dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
     dispatcher.wait().unwrap();
     assert!(result.is_err());
 }
@@ -157,8 +157,8 @@ fn cancellation_destructors_remain_worker_guarded() {
     );
 
     source.stop().unwrap();
-    assert!(block_on_dispatcher.shutdown().is_started());
-    assert!(stop_dispatcher.shutdown().is_started());
+    assert_eq!(block_on_dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
+    assert_eq!(stop_dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
     // Source cancellation requests shutdown of the nested runtimes, but does not join them.
     block_on_dispatcher.wait().unwrap();
     stop_dispatcher.wait().unwrap();

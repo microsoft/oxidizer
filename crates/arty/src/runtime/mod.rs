@@ -60,7 +60,7 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::Shutdown;
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 

@@ -130,7 +130,7 @@ impl std::error::Error for TestShutdownError {}
 
 fn shutdown_cause(message: &'static str) -> (ShutdownCause, ShutdownError) {
     let error = ShutdownError::new(TestShutdownError(message));
-    (ShutdownCause::from_error(error.clone()), error)
+    (ShutdownCause::from(error.clone()), error)
 }
 
 fn assert_same_shutdown_source(actual: &ShutdownError, expected: &ShutdownError) {
@@ -143,6 +143,25 @@ fn assert_same_shutdown_source(actual: &ShutdownError, expected: &ShutdownError)
         .downcast_ref::<TestShutdownError>()
         .expect("test shutdown cause uses TestShutdownError");
     assert!(std::ptr::eq(actual, expected));
+}
+
+#[test]
+fn shutdown_cause_exposes_the_original_error() {
+    let (cause, expected) = shutdown_cause("executor failed");
+    let actual = cause.as_error().unwrap();
+
+    assert_same_shutdown_source(actual, &expected);
+    let source = actual.source().unwrap().downcast_ref::<TestShutdownError>().unwrap();
+    let expected = expected.inner().downcast_ref::<TestShutdownError>().unwrap();
+    assert!(std::ptr::eq(source, expected));
+    assert_eq!(format!("{cause:?}"), "ShutdownCause { has_error: true }");
+}
+
+#[test]
+fn panicked_join_error_debug_identifies_its_kind() {
+    let error = JoinError::Panicked(Box::new("task panic"));
+
+    assert!(format!("{error:?}").contains("panicked"));
 }
 
 fn enrichment_keys(sink: &Sink) -> Vec<String> {
@@ -233,10 +252,14 @@ fn shutdown_during_remote_conversion_rejects_the_task() {
     let tasks = executor.tasks();
     let result_pool = RemotePool::new();
     let (result_tx, mut result) = result_pool.channel();
+    let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
+    let waker = Waker::from(Arc::clone(&wake));
+    assert!(Pin::new(&mut result).poll(&mut Context::from_waker(&waker)).is_pending());
 
     tasks.add_with_remote_result(ShutdownDuringRemoteConversion(tasks.clone()), TaskOptions::default(), result_tx);
 
     assert!(!executor.has_tasks());
+    assert!(wake.0.load(Ordering::Acquire));
     assert!(matches!(
         Pin::new(&mut result).poll(&mut Context::from_waker(Waker::noop())),
         Poll::Ready(Err(JoinError::Shutdown(_)))
@@ -410,6 +433,22 @@ impl Wake for PanickingRemoteJoinWake {
         self.0.store(true, Ordering::Release);
         panic!("remote join disconnect notification");
     }
+}
+
+#[test]
+fn dropping_remote_sender_contains_panicking_join_notification() {
+    let (result_tx, mut remote_join) = RemotePool::new().channel::<usize>();
+    let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
+    let waker = Waker::from(Arc::clone(&wake));
+    assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());
+
+    drop(result_tx);
+
+    assert!(wake.0.load(Ordering::Acquire));
+    assert!(matches!(
+        Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(JoinError::Shutdown(None)))
+    ));
 }
 
 #[test]

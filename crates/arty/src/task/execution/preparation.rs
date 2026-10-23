@@ -12,7 +12,7 @@ use observed::context::Transfer;
 use pin_project::pin_project;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
-use crate::runtime::Shutdown;
+use crate::runtime::{Shutdown, ShutdownState};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -51,15 +51,16 @@ where
             return Poll::Pending;
         }
         if this.future.as_ref().get_ref().is_none() {
-            if this
-                .factory
-                .as_ref()
-                .expect("an uninitialized deferred task retains its factory")
-                .1
-                .dispatcher()
-                .shutdown()
-                .is_started()
-            {
+            if matches!(
+                this.factory
+                    .as_ref()
+                    .expect("an uninitialized deferred task retains its factory")
+                    .1
+                    .dispatcher()
+                    .shutdown()
+                    .state(),
+                ShutdownState::Started
+            ) {
                 *this.cancelled = true;
                 return Poll::Pending;
             }

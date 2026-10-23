@@ -12,6 +12,12 @@ pub(crate) struct Shutdown {
     cause: Arc<OnceLock<ShutdownCause>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ShutdownState {
+    Running,
+    Started,
+}
+
 impl Shutdown {
     /// Starts shutdown and returns whether this call started it.
     ///
@@ -22,8 +28,12 @@ impl Shutdown {
     }
 
     #[must_use]
-    pub(crate) fn is_started(&self) -> bool {
-        self.cause.get().is_some()
+    pub(crate) fn state(&self) -> ShutdownState {
+        if self.cause.get().is_some() {
+            ShutdownState::Started
+        } else {
+            ShutdownState::Running
+        }
     }
 
     #[must_use]
@@ -73,7 +83,7 @@ mod tests {
         assert!(shutdown.begin(ShutdownCause::default()));
         assert!(!shutdown.begin(cause("later")));
 
-        assert!(shutdown.is_started());
+        assert_eq!(shutdown.state(), ShutdownState::Started);
         assert!(shutdown.error().is_none());
     }
 

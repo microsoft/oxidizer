@@ -309,7 +309,7 @@ mod tests {
 
         scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
 
-        assert!(dispatcher.shutdown().is_started());
+        assert_eq!(dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
         dispatcher.wait().unwrap();
         assert!(scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     }
@@ -327,7 +327,7 @@ mod tests {
             .join()
             .unwrap();
         scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
-        assert!(dispatcher.shutdown().is_started());
+        assert_eq!(dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
         dispatcher.wait().unwrap();
     }
 
@@ -364,7 +364,7 @@ mod tests {
             .join()
             .unwrap();
 
-        assert!(dispatcher.shutdown().is_started());
+        assert_eq!(dispatcher.shutdown().state(), crate::runtime::ShutdownState::Started);
         release.send(()).unwrap();
         assert_eq!(blocking.join().unwrap(), 42);
         dispatcher.wait().unwrap();

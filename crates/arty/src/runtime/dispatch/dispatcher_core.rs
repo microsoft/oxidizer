@@ -15,7 +15,7 @@ use performables::sync::channel;
 use thread_aware::Thread;
 
 use crate::runtime::blocking_worker::BlockingWorker;
-use crate::runtime::shutdown::Shutdown;
+use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
@@ -179,7 +179,7 @@ impl DispatcherCore {
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
-        if self.shutdown().is_started() {
+        if matches!(self.shutdown().state(), ShutdownState::Started) {
             return Err(self.runtime_shutting_down_error());
         }
         let endpoint = self
@@ -454,7 +454,7 @@ mod tests {
 
         core.stop();
 
-        assert!(shutdown.is_started());
+        assert_eq!(shutdown.state(), ShutdownState::Started);
     }
 
     #[test]

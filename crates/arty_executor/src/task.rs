@@ -1090,6 +1090,18 @@ mod tests {
     }
 
     #[test]
+    fn local_result_target_reports_cancellation_notification_panic() {
+        let event_pool = LocalEventPool::<u64>::new();
+        let (sender, mut receiver) = event_pool.rent();
+        let waker = Waker::from(Arc::new(PanickingJoinWake));
+        assert!(Pin::new(&mut receiver).poll(&mut task::Context::from_waker(&waker)).is_pending());
+
+        let panic = <PooledLocalSender<u64> as TaskResultTarget<u64>>::cancelled(sender, ShutdownCause::default()).unwrap_err();
+
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"join notification panic"));
+    }
+
+    #[test]
     fn uninitialized_poll_panics() {
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();

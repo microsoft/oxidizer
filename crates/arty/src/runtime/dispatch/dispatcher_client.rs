@@ -172,12 +172,12 @@ mod tests {
             Shutdown::default(),
         )));
         let clone = client.clone();
-        assert!(!client.shutdown().is_started());
-        assert!(!clone.shutdown().is_started());
+        assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
+        assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
 
         client.stop();
-        assert!(client.shutdown().is_started());
-        assert!(clone.shutdown().is_started());
+        assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Started);
+        assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Started);
     }
 
     #[test]

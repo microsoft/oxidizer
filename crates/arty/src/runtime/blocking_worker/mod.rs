@@ -18,7 +18,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
-use crate::runtime::shutdown::Shutdown;
+use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
@@ -203,14 +203,14 @@ impl BlockingWorker {
         let pool = self.pool.clone();
         let runtime_shutdown = self.runtime_shutdown.clone();
         let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), body);
-        if runtime_shutdown.is_started() {
+        if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
         }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
-            if runtime_shutdown.is_started() {
+            if matches!(runtime_shutdown.state(), ShutdownState::Started) {
                 drop(task);
             } else {
                 task();
@@ -219,7 +219,10 @@ impl BlockingWorker {
             completion();
         };
 
-        if !self.runtime_shutdown.is_started() && self.pool.execute(task) && self.pool.record_saturation_transition() {
+        if matches!(self.runtime_shutdown.state(), ShutdownState::Running)
+            && self.pool.execute(task)
+            && self.pool.record_saturation_transition()
+        {
             emit!(
                 &self.sink,
                 BlockingWorkerPoolSaturated {
@@ -426,7 +429,7 @@ pub(super) mod blocking_worker_tests {
     use crate::runtime::blocking_worker::{
         BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
     };
-    use crate::runtime::shutdown::Shutdown;
+    use crate::runtime::shutdown::{Shutdown, ShutdownState};
 
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
@@ -439,7 +442,7 @@ pub(super) mod blocking_worker_tests {
 
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
-        worker.runtime_shutdown.is_started()
+        matches!(worker.runtime_shutdown.state(), ShutdownState::Started)
     }
 
     #[test]
