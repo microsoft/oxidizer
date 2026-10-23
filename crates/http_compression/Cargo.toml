@@ -60,6 +60,8 @@ compressors = { path = "../compressors", features = [
     "zlib",
     "zstd",
 ] }
+# The compression unit test drives a body future without a Tokio runtime.
+futures = { workspace = true, features = ["executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
