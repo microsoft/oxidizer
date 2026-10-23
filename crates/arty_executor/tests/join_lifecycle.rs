@@ -222,7 +222,7 @@ impl IntoFuture for ShutdownDuringRemoteConversion {
     type IntoFuture = Ready<usize>;
 
     fn into_future(self) -> Self::IntoFuture {
-        self.0.begin_shutdown();
+        self.0.begin_shutdown(ShutdownCause::default());
         ready(42)
     }
 }
@@ -340,7 +340,7 @@ fn task_set_shutdown_cancels_tasks_without_executor_drop() {
     let tasks = executor.tasks();
     let mut handle = tasks.add(pending::<()>(), TaskOptions::default());
 
-    tasks.begin_shutdown();
+    tasks.begin_shutdown(ShutdownCause::default());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     assert!(!executor.has_tasks());
     drop(executor);
@@ -585,7 +585,7 @@ impl IntoFuture for ShutdownDuringIntoFuture {
     type IntoFuture = std::future::Ready<usize>;
 
     fn into_future(self) -> Self::IntoFuture {
-        self.tasks.begin_shutdown();
+        self.tasks.begin_shutdown(ShutdownCause::default());
         std::future::ready(42)
     }
 }

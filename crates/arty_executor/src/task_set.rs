@@ -50,16 +50,10 @@ impl TaskSet {
         self.shared.add_remote_task(future, options, result_tx);
     }
 
-    /// Begins executor shutdown without an error cause.
-    pub fn begin_shutdown(&self) {
-        self.begin_shutdown_with_cause(ShutdownCause::default());
-    }
-
     /// Begins executor shutdown with a cause without borrowing executor-owned polling state.
     ///
     /// The first shutdown cause remains authoritative.
-    #[doc(hidden)]
-    pub fn begin_shutdown_with_cause(&self, cause: ShutdownCause) {
+    pub fn begin_shutdown(&self, cause: ShutdownCause) {
         self.shared.request_shutdown(cause);
     }
 

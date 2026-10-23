@@ -837,7 +837,7 @@ mod tests {
         let dropped = Rc::new(Cell::new(false));
         let mut handle = tasks.add_test(DropSignalFuture(Rc::clone(&dropped)));
 
-        tasks.begin_shutdown();
+        tasks.begin_shutdown(ShutdownCause::default());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         assert!(dropped.get());
@@ -853,7 +853,7 @@ mod tests {
         let tasks = executor.tasks();
         let shutdown = tasks.clone();
         let mut handle = tasks.add_test(poll_fn(move |_| {
-            shutdown.begin_shutdown();
+            shutdown.begin_shutdown(ShutdownCause::default());
             Poll::Pending::<()>
         }));
 
