@@ -29,9 +29,9 @@
 //!
 //! let runtime = Runtime::new()?;
 //! # runtime.scheduler().block_on(async |cx| {
-//!     let spawner = Spawner::new_arty(cx.scheduler().clone());
-//!     let result = spawner.spawn(async { 1 + 1 }).await;
-//!     assert_eq!(result, 2);
+//! let spawner = Spawner::new_arty(cx.scheduler().clone());
+//! let result = spawner.spawn(async { 1 + 1 }).await;
+//! assert_eq!(result, 2);
 //! # })?;
 //! runtime.stop()?;
 //! # Ok::<(), arty::runtime::Error>(())
