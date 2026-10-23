@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use crate::context::Transfer;
-use crate::enrichment::{EnrichFutureExt, Enriched, Enrichment};
+use crate::enrichment::{ApplyState, EnrichFutureExt, Enriched, Enrichment};
 use crate::{Sink, SinkId};
 
 /// A future wrapper that restores a captured [`Transfer`]
@@ -28,6 +28,7 @@ pub struct Transferred<T> {
     #[pin]
     inner: T,
     context_transfer: Transfer,
+    apply_state: ApplyState,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Transferred<T> {
@@ -40,7 +41,12 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Transferred<T> {
 
 impl<T> Transferred<T> {
     pub(crate) fn new(inner: T, context_transfer: Transfer) -> Self {
-        Self { inner, context_transfer }
+        let apply_state = context_transfer.apply_state();
+        Self {
+            inner,
+            context_transfer,
+            apply_state,
+        }
     }
 }
 
@@ -100,7 +106,11 @@ impl<T: Future> Transferred<T> {
     /// `DESIGN.md` records this contract and the method-resolution mechanics
     /// behind it.
     pub fn enrich(self, sink: &Sink, enrichment: impl Enrichment) -> Transferred<Enriched<T>> {
-        Transferred::new(self.inner.enrich(sink, enrichment), self.context_transfer)
+        Transferred {
+            inner: self.inner.enrich(sink, enrichment),
+            context_transfer: self.context_transfer,
+            apply_state: self.apply_state,
+        }
     }
 
     /// Wraps this future so that `enrichment` is active for `target` only.
@@ -122,7 +132,11 @@ impl<T: Future> Transferred<T> {
     /// which preserves the target and is likewise order-independent, or enrich
     /// before attaching.
     pub fn enrich_for(self, sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Transferred<Enriched<T>> {
-        Transferred::new(self.inner.enrich_for(sink, target, enrichment), self.context_transfer)
+        Transferred {
+            inner: self.inner.enrich_for(sink, target, enrichment),
+            context_transfer: self.context_transfer,
+            apply_state: self.apply_state,
+        }
     }
 }
 
@@ -131,7 +145,7 @@ impl<F: Future> Future for Transferred<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.context_transfer.apply_current_thread_borrowed();
+        let _guard = this.context_transfer.apply_current_thread_borrowed(this.apply_state);
         this.inner.poll(cx)
     }
 }
