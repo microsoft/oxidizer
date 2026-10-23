@@ -14,7 +14,7 @@ anvil-pr-test: anvil-pr-test-validate-prereqs \
     anvil-examples
 
 # Install prerequisites for the `anvil-pr-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-test-setup installer="install": \
     (anvil-tool-cargo-delta-install installer) \
     (anvil-llvm-cov-setup installer) \
@@ -22,7 +22,7 @@ anvil-pr-test-setup installer="install": \
     (anvil-examples-setup installer)
 
 # Validate prerequisites for the `anvil-pr-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-test-validate-prereqs: \
     anvil-tool-cargo-delta-validate-prereqs \
     anvil-llvm-cov-validate-prereqs \

@@ -14,6 +14,7 @@
 # etc.) wrongly counts against coverage.
 
 # Measure test coverage and enforce the coverage gate.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -248,9 +249,9 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
 # --- pr-test members (shared with scheduled-test) ---
 
 # Install prerequisites for the `anvil-llvm-cov` recipe.
-[group("anvil-setup")]
+[private]
 anvil-llvm-cov-setup installer="install": anvil-component-nightly-llvm-tools-install (anvil-tool-cargo-llvm-cov-install installer) (anvil-tool-cargo-nextest-install installer) (anvil-tool-cargo-coverage-gate-install installer)
 
 # Validate prerequisites for the `anvil-llvm-cov` recipe.
-[group("anvil-setup")]
+[private]
 anvil-llvm-cov-validate-prereqs: anvil-component-nightly-llvm-tools-validate-prereqs anvil-tool-cargo-llvm-cov-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs anvil-tool-cargo-coverage-gate-validate-prereqs

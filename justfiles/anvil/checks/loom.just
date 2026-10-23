@@ -49,6 +49,7 @@
 # invocations cleanly on both pwsh/bash.
 
 # Run Loom concurrency tests for affected workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -121,9 +122,9 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
 # is the only prerequisite.
 
 # Install prerequisites for the `anvil-loom` recipe.
-[group("anvil-setup")]
+[private]
 anvil-loom-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-loom` recipe.
-[group("anvil-setup")]
+[private]
 anvil-loom-validate-prereqs: anvil-tool-rustc-validate-prereqs

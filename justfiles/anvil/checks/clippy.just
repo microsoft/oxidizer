@@ -14,6 +14,7 @@
 # rustup component; same reasoning as fmt for the require.
 
 # Lint affected workspace packages with Clippy.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-clippy: anvil-clippy-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -25,9 +26,9 @@ anvil-clippy: anvil-clippy-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-clippy` recipe.
-[group("anvil-setup")]
+[private]
 anvil-clippy-setup installer="install": anvil-component-default-clippy-install
 
 # Validate prerequisites for the `anvil-clippy` recipe.
-[group("anvil-setup")]
+[private]
 anvil-clippy-validate-prereqs: anvil-component-default-clippy-validate-prereqs

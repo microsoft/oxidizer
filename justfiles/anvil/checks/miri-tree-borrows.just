@@ -21,6 +21,7 @@
 # honors --skip.
 
 # Run Miri tests with the Tree Borrows model.
+[group("anvil")]
 anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs (_anvil-miri-test "tree-borrows")
 
 # The three nightly-miri profiles share the same toolchain prereqs
@@ -29,9 +30,9 @@ anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs (_anvil-miri-t
 # regular (groups.just can iterate without special-casing).
 
 # Install prerequisites for the `anvil-miri-tree-borrows` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-tree-borrows-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 # Validate prerequisites for the `anvil-miri-tree-borrows` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-tree-borrows-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
