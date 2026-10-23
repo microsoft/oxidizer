@@ -3887,6 +3887,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "observed_destination_core"
+version = "0.29.0"
+dependencies = [
+ "insta",
+ "jiff",
+ "log",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "performables",
+]
+
+[[package]]
 name = "observed_macros"
 version = "0.29.0"
 dependencies = [
