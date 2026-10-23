@@ -99,6 +99,21 @@ fn capture() -> Self {
 
 Attach the exclusions to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
 
+## GitHub Actions Pinning
+
+Pin GitHub Actions to full-length commit SHAs with a version comment unless
+the exact release is verified as a GitHub immutable release. For immutable
+releases, use the exact version tag instead; never use moving major/minor aliases.
+
+Verify each new release with
+`gh api repos/OWNER/REPO/releases/tags/TAG --jq .immutable`; only `true` qualifies
+for the tag exception.
+
+Preserve pinning-rationale comments when updating dependencies or addressing
+review feedback, and update their versioned links and references. Do not delete
+the rationale merely because Dependabot proposes a SHA pin: retain the exact
+version tag when the new release is still immutable.
+
 ## Required CI Checks
 
 The generated Anvil workflow publishes the `Required Anvil checks` fan-in.
