@@ -52,6 +52,7 @@ rt = [
     "dep:ohno",
     "dep:performables",
     "dep:pin-project",
+    "dep:plurality",
     "dep:thread_aware",
 ]
 time = ["dep:tick"]
@@ -73,6 +74,7 @@ observed = { workspace = true, optional = true }
 ohno = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
+plurality = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, optional = true }
@@ -100,6 +102,7 @@ observed_testing = { path = "../observed_testing" }
 ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables" }
 pin-project = { workspace = true }
+plurality = { path = "../plurality", features = ["std"] }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }

@@ -63,6 +63,37 @@ impl Slot {
         cell.replace(node)
     }
 
+    /// Installs a reusable node with one TLS lookup and one mutable borrow.
+    ///
+    /// The replacement is built before the slot changes, so an allocation
+    /// panic leaves the current chain intact.
+    fn push_reusable(&self, entries: &Arc<[EnrichmentEntry]>, node: &mut Option<Arc<EnrichmentNode>>) -> OptEnrichmentNode {
+        let cell = self.0.get_or(|| RefCell::new(None));
+        let mut current = cell.borrow_mut();
+        let parent = current.clone();
+        let pushed = if let Some(cached) = node {
+            if let Some(cached_node) = Arc::get_mut(cached) {
+                cached_node.parent = parent;
+                Arc::clone(cached)
+            } else {
+                let pushed = Arc::new(EnrichmentNode {
+                    entries: Arc::clone(entries),
+                    parent,
+                });
+                *cached = Arc::clone(&pushed);
+                pushed
+            }
+        } else {
+            let pushed = Arc::new(EnrichmentNode {
+                entries: Arc::clone(entries),
+                parent,
+            });
+            *node = Some(Arc::clone(&pushed));
+            pushed
+        };
+        current.replace(pushed)
+    }
+
     /// Pushes entries onto the enrichment chain and returns a guard.
     ///
     /// An empty layer installs no chain node and records no restoration, so the
@@ -137,13 +168,107 @@ impl Drop for Guard {
     }
 }
 
+#[derive(Debug)]
+struct PushSlot {
+    slot: Slot,
+    node: Option<Arc<EnrichmentNode>>,
+}
+
+/// Reusable enrichment nodes and restoration scratch for an enriched future.
+///
+/// Holds at most one cached node per immutable sink slot and is owned by the
+/// future. A node is evicted when another owner captures it, preserving the
+/// captured chain as an immutable snapshot.
+#[derive(Debug)]
+pub(crate) struct PushState {
+    entries: Arc<[EnrichmentEntry]>,
+    slots: SmallVec<[PushSlot; INLINE_SLOT_CAPACITY]>,
+    previous_heads: SmallVec<[OptEnrichmentNode; INLINE_SLOT_CAPACITY]>,
+}
+
+impl PushState {
+    pub(crate) fn new(entries: Arc<[EnrichmentEntry]>, slots: impl IntoIterator<Item = Slot>) -> Self {
+        let slots = if entries.is_empty() {
+            SmallVec::new()
+        } else {
+            slots
+                .into_iter()
+                .map(|slot| PushSlot {
+                    slot,
+                    node: Some(Arc::new(EnrichmentNode {
+                        entries: Arc::clone(&entries),
+                        parent: None,
+                    })),
+                })
+                .collect()
+        };
+
+        Self {
+            entries,
+            previous_heads: SmallVec::with_capacity(slots.len()),
+            slots,
+        }
+    }
+
+    pub(crate) fn apply(&mut self) -> PushedGuard<'_> {
+        debug_assert!(self.previous_heads.is_empty());
+        for slot in &mut self.slots {
+            let PushSlot { slot, node } = slot;
+            self.previous_heads.push(slot.push_reusable(&self.entries, node));
+        }
+        PushedGuard { state: self }
+    }
+}
+
+/// Restores slot heads pushed by a [`PushState`].
+#[must_use]
+pub(crate) struct PushedGuard<'a> {
+    state: &'a mut PushState,
+}
+
+impl Drop for PushedGuard<'_> {
+    fn drop(&mut self) {
+        debug_assert_eq!(self.state.slots.len(), self.state.previous_heads.len());
+        while let Some(previous) = self.state.previous_heads.pop() {
+            let slot = &mut self.state.slots[self.state.previous_heads.len()];
+            drop(slot.slot.replace(previous));
+
+            if let Some(node) = slot.node.as_mut()
+                && let Some(node) = Arc::get_mut(node)
+            {
+                node.parent = None;
+                continue;
+            }
+            slot.node = None;
+        }
+    }
+}
+
+/// Reusable restoration scratch space for an attached future.
+///
+/// Capacity is fixed from the transfer's immutable slot count and retained
+/// only until the attached future is dropped.
+#[derive(Debug)]
+pub(crate) struct ApplyState {
+    previous_heads: SmallVec<[OptEnrichmentNode; INLINE_SLOT_CAPACITY]>,
+}
+
+impl ApplyState {
+    fn new(slot_count: usize) -> Self {
+        Self {
+            previous_heads: SmallVec::with_capacity(slot_count),
+        }
+    }
+}
+
 /// Restores slot heads installed by an [`EnrichmentTransfer`].
 ///
-/// The transfer already owns every captured [`Slot`], so this guard borrows
-/// those handles instead of cloning their reference counts on every apply.
+/// Borrows reusable storage owned by the attached future so transfers with
+/// more than [`INLINE_SLOT_CAPACITY`] slots do not allocate on every poll.
 #[must_use]
 pub(crate) struct AppliedGuard<'a> {
-    slots: SmallVec<[(&'a Slot, OptEnrichmentNode); INLINE_SLOT_CAPACITY]>,
+    slots: &'a [(Slot, OptEnrichmentNode)],
+    state: &'a mut ApplyState,
 }
 
 impl std::fmt::Debug for AppliedGuard<'_> {
@@ -154,8 +279,10 @@ impl std::fmt::Debug for AppliedGuard<'_> {
 
 impl Drop for AppliedGuard<'_> {
     fn drop(&mut self) {
-        for (slot, prev) in self.slots.drain(..).rev() {
-            let _ = slot.replace(prev);
+        debug_assert_eq!(self.slots.len(), self.state.previous_heads.len());
+        while let Some(previous) = self.state.previous_heads.pop() {
+            let slot = &self.slots[self.state.previous_heads.len()].0;
+            let _ = slot.replace(previous);
         }
     }
 }
@@ -189,13 +316,18 @@ impl EnrichmentTransfer {
     ///
     /// Borrows `self` so the same transfer can be applied repeatedly (e.g.
     /// from a future's `poll` loop) without cloning the captured slots.
-    pub(crate) fn apply(&self) -> AppliedGuard<'_> {
-        let mut slots = SmallVec::with_capacity(self.slots.len());
+    pub(crate) fn apply_state(&self) -> ApplyState {
+        ApplyState::new(self.slots.len())
+    }
+
+    /// Restores captured heads using scratch storage retained by the caller.
+    pub(crate) fn apply<'a>(&'a self, state: &'a mut ApplyState) -> AppliedGuard<'a> {
+        debug_assert!(state.previous_heads.is_empty());
         for (slot, head) in &self.slots {
-            let prev = slot.replace(head.clone());
-            slots.push((slot, prev));
+            let previous = slot.replace(head.clone());
+            state.previous_heads.push(previous);
         }
-        AppliedGuard { slots }
+        AppliedGuard { slots: &self.slots, state }
     }
 
     /// Restores captured heads with an owned guard that can outlive this transfer.
@@ -344,6 +476,80 @@ mod coverage_tests {
     }
 
     #[test]
+    fn push_state_reuses_nodes_without_retaining_the_parent() {
+        let slot = Slot::new();
+        let parent_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("parent", 1_i64)]));
+        let mut state = PushState::new(Arc::from(vec![EnrichmentEntry::unclassified("pushed", 2_i64)]), [slot.clone()]);
+        let node = Arc::as_ptr(state.slots[0].node.as_ref().unwrap());
+
+        for _ in 0..2 {
+            {
+                let _guard = state.apply();
+                assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "pushed");
+            }
+
+            assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "parent");
+            assert_eq!(Arc::as_ptr(state.slots[0].node.as_ref().unwrap()), node);
+            assert!(state.slots[0].node.as_ref().unwrap().parent.is_none());
+        }
+
+        drop(parent_guard);
+    }
+
+    #[test]
+    fn push_state_restores_the_parent_during_unwind() {
+        let slot = Slot::new();
+        let parent_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("parent", 1_i64)]));
+        let parent = slot.current().unwrap();
+        let mut state = PushState::new(Arc::from(vec![EnrichmentEntry::unclassified("pushed", 2_i64)]), [slot.clone()]);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.apply();
+            panic!("exercise pushed guard unwind restoration");
+        }));
+
+        assert!(result.is_err());
+        assert!(Arc::ptr_eq(slot.current().as_ref().unwrap(), &parent));
+        drop(parent_guard);
+    }
+
+    #[test]
+    fn push_state_evicts_a_node_captured_by_a_transfer() {
+        let slot = Slot::new();
+        let mut state = PushState::new(Arc::from(vec![EnrichmentEntry::unclassified("pushed", 1_i64)]), [slot.clone()]);
+
+        let captured = {
+            let _guard = state.apply();
+            slot.current().unwrap()
+        };
+        assert!(state.slots[0].node.is_none());
+
+        {
+            let _guard = state.apply();
+            assert!(!Arc::ptr_eq(slot.current().as_ref().unwrap(), &captured));
+        }
+        assert_eq!(chain_entries(&Some(captured))[0].key().as_str(), "pushed");
+    }
+
+    #[test]
+    fn push_reusable_replaces_a_shared_cached_node() {
+        let slot = Slot::new();
+        let entries = Arc::from(vec![EnrichmentEntry::unclassified("pushed", 1_i64)]);
+        let shared = Arc::new(EnrichmentNode {
+            entries: Arc::clone(&entries),
+            parent: None,
+        });
+        let mut cached = Some(Arc::clone(&shared));
+
+        let previous = slot.push_reusable(&entries, &mut cached);
+
+        assert!(previous.is_none());
+        assert!(!Arc::ptr_eq(slot.current().as_ref().unwrap(), &shared));
+        assert!(!Arc::ptr_eq(cached.as_ref().unwrap(), &shared));
+        drop(slot.replace(previous));
+    }
+
+    #[test]
     fn transfer_captures_a_slot_and_layers_further_enrichment_onto_it() {
         let slot = Slot::new();
         let mut transfer = EnrichmentTransfer::default();
@@ -352,7 +558,8 @@ mod coverage_tests {
         transfer.push(TestEnrichment("global"));
         transfer.push_for(SinkId::new("target"), TestEnrichment("targeted"));
 
-        let guard = transfer.apply();
+        let mut state = transfer.apply_state();
+        let guard = transfer.apply(&mut state);
         let entries = chain_entries(&slot.current());
 
         assert_eq!(entries.len(), 2, "both pushes must reach the captured slot");
@@ -391,7 +598,8 @@ mod coverage_tests {
         transfer.push(EmptyEnrichment);
         transfer.push_for(SinkId::new("target"), EmptyEnrichment);
 
-        let guard = transfer.apply();
+        let mut state = transfer.apply_state();
+        let guard = transfer.apply(&mut state);
         assert!(slot.current().is_none());
 
         drop(guard);
@@ -430,10 +638,19 @@ mod coverage_tests {
             })
             .collect();
 
-        {
-            let _guard = transfer.apply();
+        let mut state = transfer.apply_state();
+        let capacity = state.previous_heads.capacity();
+        for _ in 0..2 {
+            {
+                let _guard = transfer.apply(&mut state);
+                for slot in &slots {
+                    assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "captured");
+                }
+            }
+            assert!(state.previous_heads.is_empty());
+            assert_eq!(state.previous_heads.capacity(), capacity);
             for slot in &slots {
-                assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "captured");
+                assert_eq!(chain_entries(&slot.current())[0].key().as_str(), "previous");
             }
         }
 
@@ -477,7 +694,9 @@ mod coverage_tests {
         transfer.add_slot(&slot);
         assert!(format!("{transfer:?}").contains("EnrichmentTransfer"));
 
-        let applied_guard = transfer.apply();
+        let mut state = transfer.apply_state();
+        assert!(format!("{state:?}").contains("ApplyState"));
+        let applied_guard = transfer.apply(&mut state);
         assert!(format!("{applied_guard:?}").contains("AppliedGuard"));
     }
 }

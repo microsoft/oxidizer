@@ -1,9 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::rc::Rc;
+use std::collections::VecDeque;
+use std::num::NonZeroUsize;
+use std::task;
+use std::thread::ThreadId;
+use std::time::Instant;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
+use nm::{Event, Magnitude, MetricsPusher, Push};
+use observed::Sink;
+use tick::SimpleClock;
+
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskHandle, TaskList, TaskSet, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -17,11 +25,13 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// capabilities into a single package of features offered to each thread in an Arty-based
 /// application.
 ///
+/// At most one executor may be alive on a thread. Dropping it releases that thread registration,
+/// after which a replacement executor may be created.
+///
 /// # Reentrancy and mutability
 ///
-/// The executor calls out into external code (futures of the tasks it executes), which may call
-/// back into specific methods on the executor (e.g. to enqueue more tasks). Therefore, it operates
-/// using internal mutability.
+/// Owner operations take exclusive access to the executor. Futures may still submit tasks through
+/// a [`TaskSet`], whose narrowly scoped internal mutability is released around external callbacks.
 ///
 /// Not every method can be called in a reentrant manner - see API documentation of individual
 /// methods for details.
@@ -59,7 +69,11 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// register a remote result target that receives captured panics without unwinding the worker.
 #[derive(Debug)]
 pub struct Executor {
-    core: Rc<ExecutorCore>,
+    shared: ExecutorShared,
+    active: VecDeque<TaskHandle>,
+    pending: TaskList,
+    clock: SimpleClock,
+    last_cycle_ended: Option<Instant>,
 }
 
 impl Executor {
@@ -70,15 +84,25 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(core: ExecutorCore) -> Self {
-        Self { core: Rc::new(core) }
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId) -> Self {
+        let shared = ExecutorShared::new(owner_waker, sink, thread_id);
+        let clock = SimpleClock::new_system().with_fast_instant(true);
+        // Register before creating an executor whose Drop would unregister this thread.
+        executor_context::register(thread_id);
+        Self {
+            shared,
+            active: VecDeque::new(),
+            pending: TaskList::default(),
+            clock,
+            last_cycle_ended: None,
+        }
     }
 
     /// Creates a new handle to the set of tasks registered with the executor. You can use
     /// this to register additional tasks.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
-        TaskSet::new(&self.core)
+        TaskSet::new(&self.shared)
     }
 
     /// Returns whether the executor still owns any registered tasks.
@@ -87,7 +111,7 @@ impl Executor {
     /// and retained wakers do not count as tasks and may remain alive after this returns `false`.
     #[must_use]
     pub fn has_tasks(&self) -> bool {
-        self.core.has_tasks()
+        self.shared.has_tasks()
     }
 
     /// Executes one processing cycle to progress registered tasks.
@@ -103,9 +127,20 @@ impl Executor {
     ///
     /// Panics if called in a reentrant manner (e.g. from external code called
     /// from within `execute_cycle()`).
+    ///
+    /// Panics from cleanup and notification hooks may also propagate. Continued operation
+    /// after such a panic is not guaranteed.
     #[must_use]
-    pub fn execute_cycle(&self) -> CycleOutcome {
-        self.core.execute_cycle()
+    pub fn execute_cycle(&mut self) -> CycleOutcome {
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
+        let cycle_started = self.start_cycle();
+        self.accept_new_tasks();
+        self.activate_awakened_tasks();
+        self.poll_active_tasks();
+        self.cancel_if_shutting_down();
+        let outcome = self.cycle_outcome();
+        self.finish_cycle(cycle_started);
+        outcome
     }
 
     /// Starts the executor shutdown process.
@@ -123,15 +158,274 @@ impl Executor {
     ///
     /// [1]: Self::execute_cycle
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
-    pub fn begin_shutdown(&self) {
-        self.core.begin_shutdown();
+    pub fn begin_shutdown(&mut self) {
+        self.shared.begin_shutdown();
+        let aborted_count = self.prepare_task_abort();
+        self.abort_prepared_tasks(aborted_count, true);
+    }
+
+    fn start_cycle(&self) -> Instant {
+        let started = self.clock.instant();
+        if let Some(last_ended) = self.last_cycle_ended {
+            CYCLE_GAP_MILLIS.with(|event| {
+                event.observe_millis(started.saturating_duration_since(last_ended));
+            });
+        }
+        started
+    }
+
+    fn finish_cycle(&mut self, started: Instant) {
+        let ended = self.clock.instant();
+        self.last_cycle_ended = Some(ended);
+        CYCLE_DURATION_MILLIS.with(|event| {
+            event.observe_millis(ended.saturating_duration_since(started));
+        });
+        EXECUTOR_PUSHER.with(MetricsPusher::push);
+    }
+
+    fn accept_new_tasks(&mut self) {
+        let accepted = self.shared.accept_new_tasks(&mut self.active);
+        if let Some(accepted) = NonZeroUsize::new(accepted) {
+            TASKS_ACCEPTED.with(|event| event.observe(accepted.get()));
+        }
+    }
+
+    fn cancel_if_shutting_down(&mut self) {
+        if self.shared.is_shutting_down() {
+            let aborted_count = self.prepare_task_abort();
+            self.abort_prepared_tasks(aborted_count, true);
+        }
+    }
+
+    fn cycle_outcome(&self) -> CycleOutcome {
+        if self.evaluate_shutdown_completion() {
+            CycleOutcome::Shutdown
+        } else if self.has_work_to_do() {
+            CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
+            CycleOutcome::Continue
+        } else {
+            CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
+            CycleOutcome::Suspend
+        }
+    }
+
+    fn activate_awakened_tasks(&mut self) {
+        self.shared.drain_remote_wakes();
+
+        let first_awakened = self.active.len();
+        executor_context::append_wakes(self.shared.wake().thread_id(), &mut self.active);
+        for task_handle in self.active.range(first_awakened..) {
+            // SAFETY: Retirement removes queued notifications before releasing their live tasks.
+            unsafe { task_handle.as_task() }.clear_queued_notification();
+            TASKS_ACTIVATED_VIA_AWAKENED_SET.with(Event::observe_once);
+        }
+    }
+
+    fn poll_active_tasks(&mut self) {
+        let mut completed_count: usize = 0;
+        let mut pending_count: usize = 0;
+
+        // Keep the scheduling owner queued until polling and context restoration both return.
+        // Otherwise an unwind could leave a remote waker owning a live non-Send payload.
+        while let Some(task_handle) = self.active.front() {
+            // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
+            // and retires its payload on the task's owner thread.
+            let task = unsafe { task_handle.as_task() };
+            let pointer = task_handle.as_ptr();
+            let linked = task.links().linked.get();
+
+            if self.shared.is_shutting_down() {
+                task.abort();
+                self.shared.decrement_task_count(1);
+                // SAFETY: The active owner keeps `pointer` live; a linked active task belongs to
+                // this executor's pending list, and this code runs on the task owner thread.
+                drop(unsafe { self.pending.remove(pointer) });
+                completed_count = completed_count.saturating_add(1);
+                self.active.pop_front();
+                continue;
+            }
+
+            let outcome = task.poll();
+            let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
+            match outcome {
+                task::Poll::Ready(()) => {
+                    if linked {
+                        // SAFETY: `linked` was read from the live active task, whose list ownership
+                        // belongs to this executor and is accessed on the task owner thread.
+                        drop(unsafe { self.pending.remove(pointer) });
+                    }
+                    self.shared.decrement_task_count(1);
+                    completed_count = completed_count.saturating_add(1);
+                }
+                task::Poll::Pending => {
+                    pending_count = pending_count.saturating_add(1);
+                    if linked {
+                        drop(task_handle);
+                    } else {
+                        self.pending.insert(task_handle);
+                    }
+                }
+            }
+        }
+
+        record_poll_metrics(pending_count, completed_count);
+    }
+
+    /// Whether an immediately performed cycle would do useful work.
+    #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
+    fn has_work_to_do(&self) -> bool {
+        debug_assert!(self.active.is_empty(), "active tasks are drained before deciding the next cycle");
+        self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
+    }
+
+    fn prepare_task_abort(&mut self) -> usize {
+        self.shared.close_remote_wakes();
+        executor_context::clear_wakes(self.shared.wake().thread_id());
+        for task_handle in &self.active {
+            // SAFETY: Each active owner keeps its task live; any linked task belongs to this
+            // executor's pending list, and shutdown preparation runs on the owner thread.
+            drop(unsafe { self.pending.remove(task_handle.as_ptr()) });
+        }
+        self.shared.drain_new_tasks(&mut self.active);
+        while let Some(task_handle) = self.pending.pop_front() {
+            self.active.push_back(task_handle);
+        }
+        let aborted_count = self.active.len();
+        self.shared.decrement_task_count(aborted_count);
+        match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
+            Ok(Ok(())) => {}
+            Ok(Err(_access_error)) | Err(_access_error) => {
+                // Metrics TLS may already be destroyed when an executor itself lives in TLS.
+            }
+        }
+
+        aborted_count
+    }
+
+    fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool) {
+        while let Some(task_handle) = self.active.pop_front() {
+            // SAFETY: The cancellation batch owns each pinned task on its owner thread.
+            unsafe { task_handle.as_task() }.abort();
+        }
+        if record_drop_metric && let Some(aborted_count) = NonZeroUsize::new(aborted_count) {
+            TASKS_DROPPED.with(|event| event.observe(aborted_count.get()));
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
+    #[must_use]
+    fn evaluate_shutdown_completion(&self) -> bool {
+        if !self.shared.is_shutting_down() {
+            return false;
+        }
+        debug_assert!(self.active.is_empty());
+        debug_assert!(self.pending.is_empty());
+
+        self.shared.shutdown_complete()
     }
 }
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        self.core.owner_dropped();
+        struct FinishDrop<'a>(&'a mut Executor);
+
+        impl Drop for FinishDrop<'_> {
+            #[cfg_attr(coverage_nightly, coverage(off))] // A second panic during unwinding aborts before a test can observe this safety fallback.
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    // Retire remaining payloads on their owner if cancellation unwinds.
+                    let aborted_count = self.0.prepare_task_abort();
+                    self.0.abort_prepared_tasks(aborted_count, false);
+                }
+                executor_context::unregister(self.0.shared.wake().thread_id());
+            }
+        }
+
+        self.shared.request_shutdown();
+        let guard = FinishDrop(self);
+        let aborted_count = guard.0.prepare_task_abort();
+        guard.0.abort_prepared_tasks(aborted_count, false);
+        if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
+            // Executor cleanup must remain safe after metrics TLS has been destroyed.
+        }
+        debug_assert!(guard.0.shared.shutdown_complete());
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
+fn record_poll_metrics(pending_count: usize, completed_count: usize) {
+    if pending_count != 0 {
+        TASKS_INACTIVATED.with(|event| event.observe(pending_count));
+    }
+    if completed_count != 0 {
+        TASKS_COMPLETED.with(|event| event.observe(completed_count));
+        TASKS_DROPPED.with(|event| event.observe(completed_count));
+    }
+}
+
+const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];
+const TASKS_TOUCHED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+const TASKS_MANAGED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+
+thread_local! {
+    static EXECUTOR_PUSHER: MetricsPusher = MetricsPusher::new();
+
+    static TASKS_ABORTED_ON_SHUTDOWN: Event<Push> = Event::builder()
+        .name("ae_tasks_aborted_on_shutdown")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_ACCEPTED: Event<Push> = Event::builder()
+        .name("ae_tasks_accepted_per_cycle")
+        .histogram(TASKS_MANAGED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_COMPLETED: Event<Push> = Event::builder()
+        .name("ae_tasks_completed_per_cycle")
+        .histogram(TASKS_TOUCHED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_INACTIVATED: Event<Push> = Event::builder()
+        .name("ae_tasks_inactivated_per_cycle")
+        .histogram(TASKS_TOUCHED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_DROPPED: Event<Push> = Event::builder()
+        .name("ae_tasks_dropped_per_cycle")
+        .histogram(TASKS_MANAGED_PER_CYCLE_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static TASKS_ACTIVATED_VIA_AWAKENED_SET: Event<Push> = Event::builder()
+        .name("ae_tasks_activated_via_awakened_set")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_DURATION_MILLIS: Event<Push> = Event::builder()
+        .name("ae_cycle_duration_millis")
+        .histogram(MILLIS_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_GAP_MILLIS: Event<Push> = Event::builder()
+        .name("ae_cycle_gap_millis")
+        .histogram(MILLIS_BUCKETS)
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_OUTCOME_CONTINUE: Event<Push> = Event::builder()
+        .name("ae_cycle_outcome_continue")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
+
+    static CYCLE_OUTCOME_SUSPEND: Event<Push> = Event::builder()
+        .name("ae_cycle_outcome_suspend")
+        .pusher_local(&EXECUTOR_PUSHER)
+        .build();
 }
 
 #[cfg(test)]
@@ -140,6 +434,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::{Ready, poll_fn, ready};
     use std::pin::Pin;
+    use std::rc::Rc;
     use std::sync::{Arc, atomic};
     use std::task::{Context, Poll, Waker};
 
@@ -147,8 +442,9 @@ mod tests {
     use testing_aids::YieldFuture;
 
     use super::*;
+    use crate::executor_context::AWAKENED_CAPACITY;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
-    use crate::{AWAKENED_CAPACITY, JoinHandle, TaskOptions};
+    use crate::{JoinHandle, TaskOptions};
 
     trait TestTaskSetExt {
         fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
@@ -176,10 +472,6 @@ mod tests {
 
     struct DropSignalFuture(Rc<Cell<bool>>);
 
-    struct DropOwnerOnPoll {
-        owner: Rc<RefCell<Option<Executor>>>,
-    }
-
     impl Future for DropSignalFuture {
         type Output = ();
 
@@ -191,15 +483,6 @@ mod tests {
     impl Drop for DropSignalFuture {
         fn drop(&mut self) {
             self.0.set(true);
-        }
-    }
-
-    impl Future for DropOwnerOnPoll {
-        type Output = ();
-
-        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-            drop(self.owner.borrow_mut().take());
-            Poll::Pending
         }
     }
 
@@ -244,28 +527,10 @@ mod tests {
     }
 
     #[test]
-    fn owner_drop_during_active_cycle_defers_cancellation_to_the_cycle() {
-        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
-        let executor_core = Rc::clone(&owner.borrow().as_ref().unwrap().core);
-        let mut task = owner
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .tasks()
-            .add_test(DropOwnerOnPoll { owner: Rc::clone(&owner) });
-
-        assert_eq!(executor_core.execute_cycle(), CycleOutcome::Shutdown);
-
-        assert!(owner.borrow().is_none());
-        let mut cx = Context::from_waker(Waker::noop());
-        assert!(matches!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
-    }
-
-    #[test]
     fn smoke_test() {
         // Create the executor, run a task to completion, and shut the executor down - basic stuff.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let task_completed = Rc::new(Cell::new(false));
@@ -307,7 +572,7 @@ mod tests {
         // Creates an executor with no tasks, executes it for a cycle,
         // then observes the universe still exists and goes home.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     }
@@ -316,7 +581,7 @@ mod tests {
     fn two_tasks_complete_together() {
         // Create the executor, run a task to completion, and shut the executor down - basic stuff.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future1 = async move { 42 };
@@ -350,7 +615,7 @@ mod tests {
         // A task is polled and immediately awakens itself, causing the executor to request a new
         // execution cycle from the caller immediately after the current cycle completes.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -376,7 +641,7 @@ mod tests {
         // Two tasks are polled, both suspending immediately and the second one awakens the first
         // one. We expect this to result in a `Continue` outcome.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future1 = TestSubjectFuture::new();
@@ -408,7 +673,7 @@ mod tests {
 
     #[test]
     fn task_completes_after_external_awaken() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -440,7 +705,7 @@ mod tests {
         // inactive task remains suspended when the executor probes all embedded wake signals.
         const AWAKENED_TASK_COUNT: usize = AWAKENED_CAPACITY + 1;
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let mut join_handles = Vec::with_capacity(AWAKENED_TASK_COUNT);
@@ -484,7 +749,7 @@ mod tests {
 
     #[test]
     fn task_not_polled_when_inactive() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -538,7 +803,7 @@ mod tests {
 
         let drop_signal = Rc::new(Cell::new(false));
 
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
@@ -556,7 +821,7 @@ mod tests {
 
     #[test]
     fn shutdown_without_tasks_is_immediate() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
 
         executor.begin_shutdown();
 
@@ -564,8 +829,52 @@ mod tests {
     }
 
     #[test]
+    fn task_set_shutdown_is_applied_by_the_next_cycle() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let dropped = Rc::new(Cell::new(false));
+        let mut handle = tasks.add_test(DropSignalFuture(Rc::clone(&dropped)));
+
+        tasks.begin_shutdown();
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(dropped.get());
+        assert!(matches!(
+            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Err(error)) if error.is_shutdown()
+        ));
+    }
+
+    #[test]
+    fn shutdown_requested_during_poll_cancels_the_pending_task() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let shutdown = tasks.clone();
+        let mut handle = tasks.add_test(poll_fn(move |_| {
+            shutdown.begin_shutdown();
+            Poll::Pending::<()>
+        }));
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+        assert!(matches!(
+            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Err(error)) if error.is_shutdown()
+        ));
+    }
+
+    #[test]
+    fn finishing_a_cycle_records_its_end() {
+        let mut executor = Executor::builder().build();
+        let started = executor.start_cycle();
+
+        executor.finish_cycle(started);
+
+        assert!(executor.last_cycle_ended.is_some());
+    }
+
+    #[test]
     fn shutdown_with_unreferenced_tasks_is_immediate() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         // We add the task but do not keep any references to its join handle.
@@ -579,7 +888,7 @@ mod tests {
 
     #[test]
     fn join_handle_reports_shutdown_without_delaying_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let mut join_handle = tasks.add_test(TestSubjectFuture::new());
@@ -595,7 +904,7 @@ mod tests {
 
     #[test]
     fn enqueue_after_shutdown_reports_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         executor.begin_shutdown();
@@ -618,12 +927,51 @@ mod tests {
     }
 
     #[test]
+    fn direct_drop_drains_remote_wakes_while_task_set_is_retained() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let retained = Rc::new(RefCell::new(None));
+        tasks.add_test(poll_fn({
+            let retained = Rc::clone(&retained);
+            move |cx| {
+                *retained.borrow_mut() = Some(cx.waker().clone());
+                Poll::<()>::Pending
+            }
+        }));
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+        let waker = retained.borrow_mut().take().unwrap();
+        std::thread::spawn(move || waker.wake()).join().unwrap();
+        assert!(executor.shared.wake().has_remote_wakes());
+
+        drop(executor);
+
+        assert!(tasks.task_storage_is_empty());
+    }
+
+    #[test]
+    fn direct_drop_unlinks_a_woken_pending_task() {
+        let mut executor = Executor::builder().build();
+        let future = TestSubjectFuture::new();
+        let retained = future.waker();
+        let mut handle = executor.tasks().add_test(future);
+
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        retained.borrow().as_ref().unwrap().wake_by_ref();
+        executor.activate_awakened_tasks();
+        drop(executor);
+
+        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
+        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+    }
+
+    #[test]
     fn task_wake_also_wakes_owner() {
         // If something (our test) triggers the waker of a task, this also causes the
         // owner's waker to be triggered.
         let owner_waker = Arc::new(TestWaker::new());
 
-        let executor = new_guarded_executor(Arc::clone(&owner_waker).into());
+        let mut executor = new_guarded_executor(Arc::clone(&owner_waker).into());
         let tasks = executor.tasks();
 
         let future = TestSubjectFuture::new();
@@ -647,7 +995,7 @@ mod tests {
     fn task_awaits_yield_future() {
         // A task awaits a future that yields (Pending on first poll, then immediately completes).
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let future = async {
@@ -668,7 +1016,7 @@ mod tests {
     fn reentrant_task_addition() {
         // We add a new task while already executing another task.
 
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
         let inner_task_completed = Rc::new(Cell::new(false));
@@ -700,7 +1048,7 @@ mod tests {
 
     #[test]
     fn reentrant_tasks_wait_for_next_cycle_in_registration_order() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
         let polls = Rc::new(RefCell::new(Vec::new()));
         let mut cycles = Vec::new();
@@ -735,7 +1083,7 @@ mod tests {
 
     #[test]
     fn new_tasks_precede_awakened_tasks() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
         let polls = Rc::new(RefCell::new(Vec::new()));
 
@@ -767,7 +1115,7 @@ mod tests {
 
     #[test]
     fn completed_task_waker_is_noop_after_executor_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let waker = Rc::new(RefCell::new(None));
         let polls = Rc::new(Cell::new(0));
         executor.tasks().add_test(poll_fn({
@@ -791,7 +1139,7 @@ mod tests {
 
     #[test]
     fn duplicate_wakes_keep_first_notification_order() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let polls = Rc::new(RefCell::new(Vec::new()));
         let mut wakers = Vec::new();
         for index in 0..3 {
@@ -820,7 +1168,7 @@ mod tests {
 
     #[test]
     fn cross_thread_waker_clone_wake_and_drop() {
-        let executor = new_guarded_executor(Waker::noop().clone());
+        let mut executor = new_guarded_executor(Waker::noop().clone());
         let future = TestSubjectFuture::new();
         let future_waker = future.waker();
         let completes = future.completes_on_next_poll();
@@ -844,7 +1192,7 @@ mod tests {
 
     #[test]
     fn retained_waiter_does_not_delay_shutdown() {
-        let executor = Executor::builder().build();
+        let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
         let retained_waiter = Rc::new(RefCell::new(None));
@@ -872,5 +1220,16 @@ mod tests {
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(Executor: Send, Sync);
+    }
+
+    #[test]
+    fn only_one_live_executor_is_allowed_per_thread() {
+        let executor = Executor::builder().build();
+
+        let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Executor::builder().build()));
+        duplicate.unwrap_err();
+
+        drop(executor);
+        drop(Executor::builder().build());
     }
 }

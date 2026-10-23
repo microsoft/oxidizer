@@ -11,7 +11,7 @@ use performables::arc::Arc;
 
 use super::entry::EnrichmentEntry;
 use crate::context::{Transfer, Transferred};
-use crate::enrichment::Enrichment;
+use crate::enrichment::{Enrichment, PushState};
 use crate::{Sink, SinkId};
 
 /// A future wrapper that pushes/pops enrichment on every poll.
@@ -23,8 +23,9 @@ use crate::{Sink, SinkId};
 pub struct Enriched<T> {
     #[pin]
     inner: T,
-    sink: Sink,
-    entries: Option<Arc<[EnrichmentEntry]>>,
+    // Keep the sink's processors and other state alive for the wrapper's lifetime.
+    _sink: Sink,
+    push_state: Option<PushState>,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Enriched<T> {
@@ -40,7 +41,7 @@ impl<F: Future> Future for Enriched<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.entries.as_ref().map(|entries| this.sink.push_enrichment(Arc::clone(entries)));
+        let _guard = this.push_state.as_mut().map(PushState::apply);
         this.inner.poll(cx)
     }
 }
@@ -63,22 +64,22 @@ fn targeted_entries(sink: &Sink, target: SinkId, enrichment: impl Enrichment) ->
 pub trait EnrichFutureExt: Future + Sized {
     /// Wraps this future so that `enrichment` entries are active on every poll.
     fn enrich(self, sink: &Sink, enrichment: impl Enrichment) -> Enriched<Self> {
-        let entries = entries(sink, enrichment);
+        let push_state = entries(sink, enrichment).map(|entries| sink.enrichment_push_state(entries));
         Enriched {
             inner: self,
-            entries,
-            sink: sink.clone(),
+            _sink: sink.clone(),
+            push_state,
         }
     }
 
     /// Wraps this future so that `enrichment` entries are active as targeted enrichments
     /// for `target` on every poll.
     fn enrich_for(self, sink: &Sink, target: SinkId, enrichment: impl Enrichment) -> Enriched<Self> {
-        let entries = targeted_entries(sink, target, enrichment);
+        let push_state = targeted_entries(sink, target, enrichment).map(|entries| sink.enrichment_push_state(entries));
         Enriched {
             inner: self,
-            entries,
-            sink: sink.clone(),
+            _sink: sink.clone(),
+            push_state,
         }
     }
 

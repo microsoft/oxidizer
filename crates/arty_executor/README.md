@@ -30,8 +30,10 @@ with this crate.
 ## Design tenets
 
 The executor is single-threaded. If you want to execute tasks on multiple threads, you need to
-run multiple executors on different threads. The [`remote`][__link1] module provides pooled channels for
-the common runtime-integration scenario of returning task results to a different thread.
+run one executor on each thread. At most one executor may be alive on a thread; a replacement
+may be created after the previous executor is dropped. The [`remote`][__link1] module provides pooled
+channels for the common runtime-integration scenario of returning task results to a different
+thread.
 
 Tasks cannot be taken out of the executor - the only way for them to end is to either end
 naturally (with the future returning `Poll::Ready`) or for the executor to be shut down. Not
@@ -53,7 +55,7 @@ A panic in a directly registered executor task remains fail-fast.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2d-tu4PqXUsbYuzt22_JPvsb_N4PPHTp9a8brx0b6bmSDYFhZIKCaUpvaW5FcnJvcvaCbWFydHlfZXhlY3V0b3JlMC41LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0ssyKW-xaUMbwa94lbEFLS8b7HHmDeDdLXQbs87lzXXXrvxhZIKCaUpvaW5FcnJvcvaCbWFydHlfZXhlY3V0b3JlMC41LjA
  [__link0]: https://docs.rs/arty
  [__link1]: https://docs.rs/arty_executor/0.5.0/arty_executor/remote/index.html
  [__link2]: https://crates.io/crates/JoinError

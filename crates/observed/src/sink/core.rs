@@ -11,7 +11,7 @@ use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
-use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
+use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, PushState, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
@@ -260,8 +260,8 @@ impl Sink {
     // External sources call this on their hot path; allow cross-crate inlining.
     #[inline]
     pub fn is_interested(&self, description: &EventDescription) -> bool {
-        self.sinks_with_shift()
-            .any(|(sink, _)| sink.processors.iter().any(|processor| processor.is_interested(description)))
+        self.active_sinks()
+            .any(|sink| sink.processors.iter().any(|processor| processor.is_interested(description)))
     }
 
     /// Forces buffered telemetry out by calling
@@ -339,6 +339,14 @@ impl Sink {
         }
     }
 
+    pub(crate) fn enrichment_push_state(&self, entries: PerformableArc<[EnrichmentEntry]>) -> PushState {
+        match &*self.inner {
+            SinkInner::Single(state) => PushState::new(entries, [state.enrichment.clone()]),
+            SinkInner::Composite { children } => PushState::new(entries, children.iter().map(|child| child.enrichment.clone())),
+            SinkInner::Noop => PushState::new(entries, std::iter::empty()),
+        }
+    }
+
     /// Dispatches the event that `build` returns to the processors that want
     /// it, unless an attached [`EventSampler`] drops it. `build` runs only if
     /// at least one processor receives the event.
@@ -354,19 +362,31 @@ impl Sink {
     ///
     /// It's automatically called by the `emit!` macro expansion, and can be called directly for
     /// [`DynEvent`s](DynEvent)
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "sink construction limits the processor count to the 64-bit dispatch mask"
+    )]
     pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
         if self.is_noop() {
             return;
         }
+        let sinks = self.sinks();
 
         let description = state.description();
         let bitmask = {
             let Some(_guard) = super::try_acquire_reentrancy_guard() else {
                 return;
             };
-            self.sinks_with_shift().fold(0, |bitmask, (sink, shift)| {
-                bitmask | sink.sample_and_ask_processors(&description) << shift
-            })
+            let mut bitmask = 0;
+            let mut shift = 0;
+            for sink in sinks {
+                if sink.processors.is_empty() {
+                    continue;
+                }
+                bitmask |= sink.sample_and_ask_processors(&description) << shift;
+                shift += sink.processors.len();
+            }
+            bitmask
         };
         if bitmask == 0 {
             return;
@@ -375,22 +395,26 @@ impl Sink {
         let event = state.evaluate();
 
         let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot should be free again once the event is built");
-        for (sink, shift) in self.sinks_with_shift() {
-            sink.dispatch(&event, bitmask >> shift);
+        let mut remaining_bitmask = bitmask;
+        for sink in sinks {
+            if sink.processors.is_empty() {
+                continue;
+            }
+            sink.dispatch(&event, remaining_bitmask);
+            remaining_bitmask = remaining_bitmask.checked_shr(sink.processors.len() as u32).unwrap_or(0);
         }
     }
 
-    fn sinks_with_shift(&self) -> impl Iterator<Item = (&SingleSinkState, usize)> {
-        let sinks = match &*self.inner {
+    fn sinks(&self) -> &[SingleSinkState] {
+        match &*self.inner {
             SinkInner::Single(state) => slice::from_ref(state),
-            SinkInner::Composite { children } => children.as_slice(),
+            SinkInner::Composite { children } => children,
             SinkInner::Noop => &[],
-        };
-        sinks.iter().filter(|sink| !sink.processors.is_empty()).scan(0, |next_shift, sink| {
-            let shift = *next_shift;
-            *next_shift += sink.processors.len();
-            Some((sink, shift))
-        })
+        }
+    }
+
+    fn active_sinks(&self) -> impl Iterator<Item = &SingleSinkState> {
+        self.sinks().iter().filter(|sink| !sink.processors.is_empty())
     }
 
     /// Returns a `Vec` of all enrichment entries from outermost to innermost scope.
@@ -545,6 +569,17 @@ mod tests {
         drop(transfer.apply_current_thread());
     }
 
+    #[test]
+    fn noop_sink_enrichment_push_state_applies_nothing() {
+        let sink = Sink::noop();
+        let entries = PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]);
+        let mut state = sink.enrichment_push_state(entries);
+
+        let _guard = state.apply();
+
+        assert!(sink.current_enrichments().is_empty());
+    }
+
     struct DummyDyn;
 
     impl crate::interop::DynEvent for DummyDyn {
@@ -571,6 +606,55 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct DescriptionCountingDyn {
+        description_calls: AtomicUsize,
+    }
+
+    impl crate::interop::DynEvent for DescriptionCountingDyn {
+        fn name(&self) -> &'static str {
+            "description-counting"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+        fn description(&self) -> EventDescription {
+            self.description_calls.fetch_add(1, Ordering::Relaxed);
+            EventDescription::new("description-counting", None, None, None, false, false)
+        }
+    }
+
+    #[test]
+    fn processor_free_sinks_do_not_read_dynamic_event_metadata() {
+        let event = DescriptionCountingDyn::default();
+        let sinks = [
+            Sink::noop(),
+            Sink::builder("single").clock(SimpleClock::new_frozen()).build(),
+            Sink::composite([
+                Sink::builder("first").clock(SimpleClock::new_frozen()).build(),
+                Sink::builder("second").clock(SimpleClock::new_frozen()).build(),
+            ]),
+        ];
+
+        for sink in &sinks {
+            crate::interop::emit_dyn_event(sink, &event);
+        }
+
+        assert_eq!(event.description_calls.load(Ordering::Relaxed), 0);
+    }
+
     #[test]
     fn current_enrichments_on_composite_is_empty() {
         // A composite carries no enrichment of its own, so the accessor short-circuits.
@@ -584,7 +668,7 @@ mod tests {
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
 
-        assert_eq!(noop.sinks_with_shift().count(), 0);
+        assert_eq!(noop.active_sinks().count(), 0);
         noop.flush().expect("noop flush should succeed");
     }
 

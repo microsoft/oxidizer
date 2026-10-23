@@ -7,9 +7,10 @@
 
 mod support;
 
+use std::marker::PhantomPinned;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
@@ -119,6 +120,63 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
         .join()
         .unwrap();
     assert_eq!((created, polled), (associated, associated));
+}
+
+#[test]
+fn queued_factory_outlives_its_submitting_thread_and_accepts_non_unpin_captures() {
+    struct Capture {
+        dropped: mpsc::Sender<thread::ThreadId>,
+        _pin: PhantomPinned,
+    }
+
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.dropped.send(thread::current().id()).unwrap();
+        }
+    }
+
+    static_assertions::assert_impl_all!(Capture: Send);
+    static_assertions::assert_not_impl_any!(Capture: Unpin);
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::at_most(1))
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let (started, worker_started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let release = scopeguard::guard(release, |release| {
+        _ = release.send(());
+    });
+    let blocker = scheduler.spawn(move |_| {
+        started.send(()).unwrap();
+        released.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+        std::future::ready(())
+    });
+    worker_started.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+    let (dropped, drop_thread) = mpsc::channel();
+    let capture = Capture {
+        dropped,
+        _pin: PhantomPinned,
+    };
+    let queued = thread::spawn(move || {
+        scheduler.spawn(move |cx| {
+            let value = Rc::new(42);
+            async move {
+                YieldFuture::default().await;
+                drop(capture);
+                (*value, cx.thread().id())
+            }
+        })
+    })
+    .join()
+    .unwrap();
+    // The source thread and its factory pool are gone before the worker can register the task.
+    drop(release);
+    blocker.join().unwrap();
+    let (value, owner) = queued.join().unwrap();
+    assert_eq!(value, 42);
+    assert_eq!(drop_thread.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(), owner);
+    runtime.stop().unwrap();
 }
 
 #[test]
