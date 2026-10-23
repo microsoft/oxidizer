@@ -55,7 +55,7 @@ impl DispatcherClient {
                 shutdown.clone(),
             ),
         };
-        Self::new(Arc::new(DispatcherCore::new_with_shutdown(
+        Self::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             observed::Sink::noop(),
@@ -181,6 +181,7 @@ mod tests {
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
+            Shutdown::default(),
         )));
         let clone = client.clone();
         assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
@@ -219,6 +220,7 @@ mod tests {
             ])
             .unwrap(),
             Sink::noop(),
+            Shutdown::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -265,6 +267,7 @@ mod tests {
             ])
             .unwrap(),
             Sink::noop(),
+            Shutdown::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -334,6 +337,7 @@ mod tests {
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
+            Shutdown::default(),
         )));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)

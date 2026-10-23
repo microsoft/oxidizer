@@ -78,12 +78,7 @@ pub(crate) struct DispatcherCore {
 }
 
 impl DispatcherCore {
-    #[cfg(test)]
-    pub(crate) fn new(wait_for_shutdown: ThreadWaiter, worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink) -> Self {
-        Self::new_with_shutdown(wait_for_shutdown, worker_endpoints, sink, Shutdown::default())
-    }
-
-    pub(crate) fn new_with_shutdown(
+    pub(crate) fn new(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
@@ -347,6 +342,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &first), endpoint(second_tx, &second)]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
     }
 
@@ -362,6 +358,7 @@ mod tests {
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
@@ -388,6 +385,7 @@ mod tests {
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
@@ -409,6 +407,7 @@ mod tests {
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         for _ in 0..4 {
@@ -428,6 +427,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         let index = dispatcher.worker_index(threads[1].id()).unwrap();
@@ -444,6 +444,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         assert!(dispatcher.worker_index(threads[1].id()).is_none());
@@ -457,6 +458,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
+            Shutdown::default(),
         ));
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
@@ -475,6 +477,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
         dispatcher.stop();
         let invoked = Arc::new(AtomicBool::new(false));
@@ -504,6 +507,7 @@ mod tests {
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
         dispatcher.stop_with_error(Error::worker_panicked());
 
@@ -531,6 +535,7 @@ mod tests {
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         assert_eq!(drain_rx(&worker1_rx).len(), 0);
@@ -561,6 +566,7 @@ mod tests {
             wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
+            Shutdown::default(),
         );
 
         dispatcher.stop();

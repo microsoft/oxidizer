@@ -633,7 +633,7 @@ mod tests {
             thread: thread.clone(),
             blocking_worker: Arc::clone(&blocking_worker),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new_with_shutdown(
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             sink.clone(),
