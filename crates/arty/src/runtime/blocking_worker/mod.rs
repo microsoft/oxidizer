@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 use std::{fmt, thread};
 
-use arty_executor::discard_task_panic_payload;
 use arty_executor::remote::Pool as RemotePool;
+use arty_executor::{ShutdownCause, discard_task_panic_payload};
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
@@ -165,7 +165,6 @@ impl fmt::Debug for JoinableThreadPool {
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
     pool: BlockingPool,
-    is_shutting_down: Arc<AtomicBool>,
     runtime_shutdown: Shutdown,
     sink: Sink,
     remote_results: RemotePool,
@@ -175,7 +174,6 @@ impl BlockingWorker {
     pub(crate) fn new(pool: BlockingPool, sink: Sink, runtime_shutdown: Shutdown) -> Arc<Self> {
         Arc::new(Self {
             pool,
-            is_shutting_down: Arc::new(AtomicBool::new(false)),
             runtime_shutdown,
             sink,
             remote_results: RemotePool::new(),
@@ -203,17 +201,16 @@ impl BlockingWorker {
     {
         let identity = Arc::clone(&self.pool.identity);
         let pool = self.pool.clone();
-        let shutdown = Arc::clone(&self.is_shutting_down);
         let runtime_shutdown = self.runtime_shutdown.clone();
         let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), body);
-        if shutdown.load(Ordering::Acquire) || runtime_shutdown.is_started() {
+        if runtime_shutdown.is_started() {
             drop(task);
             return join_handle;
         }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
-            if shutdown.load(Ordering::Acquire) || runtime_shutdown.is_started() {
+            if runtime_shutdown.is_started() {
                 drop(task);
             } else {
                 task();
@@ -222,8 +219,7 @@ impl BlockingWorker {
             completion();
         };
 
-        if !self.is_shutting_down.load(Ordering::Acquire)
-            && !self.runtime_shutdown.is_started()
+        if !self.runtime_shutdown.is_started()
             && self.pool.execute(task)
             && self.pool.record_saturation_transition()
         {
@@ -241,7 +237,7 @@ impl BlockingWorker {
 
     /// Rejects new work and cancels queued work; already-running blocking calls finish.
     pub(crate) fn shutdown(&self) {
-        self.is_shutting_down.store(true, Ordering::Release);
+        self.runtime_shutdown.begin(ShutdownCause::default());
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -451,7 +447,7 @@ pub(super) mod blocking_worker_tests {
 
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
-        worker.is_shutting_down.load(Ordering::Acquire)
+        worker.runtime_shutdown.is_started()
     }
 
     #[test]
