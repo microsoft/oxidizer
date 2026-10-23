@@ -1059,7 +1059,7 @@ impl ThreadRecorder {
         true
     }
 
-    fn retire(&self) {
+    fn retire(&'static self) {
         self.retired.store(true, Ordering::Release);
         let ring_bytes = self
             .ring_capacity
@@ -1137,7 +1137,7 @@ const fn class_index(class: EventClass) -> usize {
 }
 
 struct RetiredRings {
-    rings: VecDeque<(usize, usize)>,
+    rings: VecDeque<(&'static ThreadRecorder, usize)>,
     allocated_bytes: usize,
 }
 
@@ -1145,12 +1145,11 @@ fn retired_rings() -> std::sync::MutexGuard<'static, RetiredRings> {
     RETIRED_RINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
-    let address = ptr::from_ref(recorder) as usize;
+fn register_retired_ring(recorder: &'static ThreadRecorder, ring_bytes: usize) {
     let limit = RETIRED_RING_BUDGET_BYTES.max(ring_bytes);
     {
         let mut retired = retired_rings();
-        retired.rings.push_back((address, ring_bytes));
+        retired.rings.push_back((recorder, ring_bytes));
         retired.allocated_bytes = retired.allocated_bytes.saturating_add(ring_bytes);
     }
 
@@ -1160,27 +1159,25 @@ fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
             if retired.allocated_bytes <= limit {
                 None
             } else {
-                retired.rings.pop_front().map(|(address, bytes)| {
+                retired.rings.pop_front().map(|(recorder, bytes)| {
                     retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
-                    address
+                    recorder
                 })
             }
         };
         let Some(evicted) = evicted else {
             break;
         };
-        // SAFETY: published recorders are retained for process lifetime.
-        unsafe { &*(evicted as *const ThreadRecorder) }.release_retired_ring();
+        evicted.release_retired_ring();
     }
 }
 
 fn forget_retired_ring(recorder: &ThreadRecorder) {
-    let address = ptr::from_ref(recorder) as usize;
     let mut retired = retired_rings();
     if let Some(index) = retired
         .rings
         .iter()
-        .position(|(candidate, _)| retired_ring_matches(*candidate, address))
+        .position(|(candidate, _)| retired_ring_matches(candidate, recorder))
         && let Some((_, bytes)) = retired.rings.remove(index)
     {
         retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
@@ -1188,8 +1185,8 @@ fn forget_retired_ring(recorder: &ThreadRecorder) {
 }
 
 #[cfg_attr(test, mutants::skip)] // Inverting identity releases another recorder's allocation.
-const fn retired_ring_matches(candidate: usize, address: usize) -> bool {
-    candidate == address
+fn retired_ring_matches(candidate: &ThreadRecorder, recorder: &ThreadRecorder) -> bool {
+    ptr::eq(candidate, recorder)
 }
 
 struct Ring {
@@ -1320,8 +1317,9 @@ impl Drop for LocalRecorder {
         if recorder.is_null() {
             return;
         }
-        // SAFETY: this TLS owner is the recorder's only writer, and TLS
-        // destruction begins only after that thread has stopped recording.
+        // SAFETY: published recorders remain allocated for process lifetime,
+        // and this TLS owner is the recorder's only writer. TLS destruction
+        // begins only after that thread has stopped recording.
         unsafe { &*recorder }.retire();
     }
 }
@@ -3797,7 +3795,8 @@ mod tests {
 
     #[test]
     fn evicted_retired_ring_is_released_after_an_existing_reader() {
-        let recorder = ThreadRecorder::new();
+        static RECORDER: std::sync::LazyLock<ThreadRecorder> = std::sync::LazyLock::new(ThreadRecorder::new);
+        let recorder = &*RECORDER;
         recorder.begin_session(1, EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap());
         let ring = recorder.ring_lock();
 

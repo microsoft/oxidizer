@@ -2119,6 +2119,7 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno",
+ "performables",
  "plurality",
  "quinn",
  "rcgen",
