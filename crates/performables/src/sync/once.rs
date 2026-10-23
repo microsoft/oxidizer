@@ -57,14 +57,22 @@ impl<T> OnceLock<T> {
     where
         F: FnOnce() -> T,
     {
-        #[expect(
-            clippy::collapsible_if,
-            reason = "the initialization and contention states are intentionally evaluated independently"
-        )]
-        if self.inner.get().is_none() {
-            if self.initializing.load(Ordering::Acquire) {
-                self.record(EventKind::OnceContention);
-            }
+        if let Some(value) = self.inner.get() {
+            // Match std's unused-initializer drop before the access event.
+            drop(initialize);
+            self.record(EventKind::OnceAccess);
+            return value;
+        }
+        self.initialize(initialize)
+    }
+
+    #[cold]
+    fn initialize<F>(&self, initialize: F) -> &T
+    where
+        F: FnOnce() -> T,
+    {
+        if self.initializing.load(Ordering::Acquire) {
+            self.record(EventKind::OnceContention);
         }
 
         let value = self.inner.get_or_init(|| {

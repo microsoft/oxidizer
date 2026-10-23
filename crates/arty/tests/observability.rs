@@ -20,7 +20,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-#[cfg(all(debug_assertions, not(miri)))]
 use many_cpus::SystemHardware;
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
@@ -208,7 +207,12 @@ fn started_event_reports_worker_policy() {
     let started = events_named(&events, "arty.rt.started");
     assert_eq!(started.len(), 1, "exactly one runtime should start");
 
-    assert_eq!(dimension(started[0], "processors.used"), Some("2".into()));
+    let processors_used = if cfg!(miri) {
+        PROCESSORS
+    } else {
+        SystemHardware::current().processors().len().min(PROCESSORS)
+    };
+    assert_eq!(dimension(started[0], "processors.used"), Some(processors_used.to_string().into()));
     assert!(
         dimension(started[0], "processors.available").is_some(),
         "processors.available dimension should be present"
@@ -318,6 +322,27 @@ fn same_worker_spawn_reports_same_thread_placement() {
         events_named(&events, "arty.rt.task.spawned")
             .iter()
             .any(|event| dimension(event, "placement") == Some("same_thread".into()))
+    );
+}
+
+#[test]
+fn targeted_spawn_reports_specific_thread_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let destination = cx.control().workers().into_iter().next().unwrap();
+            cx.scheduler().spawn_at(destination, (), |()| async {}).await.unwrap();
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    assert!(
+        events_named(&processor.events(), "arty.rt.task.spawned")
+            .iter()
+            .any(|event| dimension(event, "placement") == Some("specific_thread".into()))
     );
 }
 

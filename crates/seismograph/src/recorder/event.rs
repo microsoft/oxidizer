@@ -356,6 +356,12 @@ pub enum EventKind {
     /// is the raw wake time, including notifications during a poll. The event's
     /// thread is the notifier, not evidence of a polling worker. No stack is captured.
     TaskReady,
+    /// A retained notification was consumed.
+    NotifyAccess,
+    /// A notification wait observed no immediately available permit.
+    NotifyContention,
+    /// A notification was delivered or coalesced into a stored permit.
+    NotifySignal,
 }
 
 impl EventKind {
@@ -442,6 +448,9 @@ impl EventKind {
             Self::CachePromotionFailed => 81,
             Self::CacheRefreshSuppressed => 82,
             Self::TaskReady => 83,
+            Self::NotifyAccess => 84,
+            Self::NotifyContention => 85,
+            Self::NotifySignal => 86,
         }
     }
 
@@ -471,6 +480,9 @@ impl EventKind {
             20 => Some(Self::CondvarAccess),
             21 => Some(Self::CondvarContention),
             22 => Some(Self::CondvarNotify),
+            84 => Some(Self::NotifyAccess),
+            85 => Some(Self::NotifyContention),
+            86 => Some(Self::NotifySignal),
             23 => Some(Self::OnceAccess),
             24 => Some(Self::OnceContention),
             25 => Some(Self::OnceInitialize),
@@ -922,7 +934,7 @@ mod tests {
 
     #[test]
     fn every_event_kind_round_trips_its_stable_wire_value() {
-        for value in (1..=49).chain(54..=83) {
+        for value in (1..=49).chain(54..=86) {
             let kind = EventKind::from_wire_value(value).unwrap();
             assert_eq!(kind.wire_value(), value);
         }

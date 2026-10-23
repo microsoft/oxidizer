@@ -11,8 +11,10 @@ use performables::sync::mutex::Mutex;
 ///
 /// Returned by [`JoinHandle`](super::JoinHandle) and as the source of a
 /// scheduler's `block_on` error. Use [`is_panic`](Self::is_panic) to identify a
-/// task panic or [`is_shutdown`](Self::is_shutdown) to identify cancellation or
-/// rejection.
+/// task panic, [`is_shutdown`](Self::is_shutdown) to identify cancellation or
+/// shutdown rejection, or
+/// [`is_invalid_destination`](Self::is_invalid_destination) when a requested
+/// worker is not supported by the runtime.
 ///
 /// This is separate from an error returned by the task's own code. Joining a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
@@ -24,11 +26,11 @@ use performables::sync::mutex::Mutex;
 /// A submission after shutdown reports a task error without invoking its factory:
 ///
 /// ```
-/// use arty::runtime::{Runtime, RuntimeOperations};
+/// use arty::runtime::Runtime;
 ///
 /// let runtime = Runtime::new()?;
 /// let error = runtime.scheduler().block_on(async |cx| {
-///     RuntimeOperations::from(&cx).request_stop();
+///     cx.control().request_stop();
 ///     cx.scheduler()
 ///         .spawn(async |_| 42)
 ///         .await
@@ -40,8 +42,14 @@ use performables::sync::mutex::Mutex;
 /// # Ok::<(), arty::runtime::Error>(())
 /// ```
 pub struct JoinError {
+    kind: Kind,
+}
+
+enum Kind {
     // The payload can be Send without being Sync. It is only consumed, never borrowed.
-    panic: Option<Mutex<Box<dyn Any + Send + 'static>>>,
+    Panic(Mutex<Box<dyn Any + Send + 'static>>),
+    Shutdown,
+    InvalidDestination,
 }
 
 impl JoinError {
@@ -66,7 +74,7 @@ impl JoinError {
     /// ```
     #[must_use]
     pub const fn is_panic(&self) -> bool {
-        self.panic.is_some()
+        matches!(&self.kind, Kind::Panic(_))
     }
 
     /// Returns `true` if shutdown cancelled the task or rejected its submission.
@@ -74,11 +82,11 @@ impl JoinError {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, RuntimeOperations};
+    /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     RuntimeOperations::from(&cx).request_stop();
+    ///     cx.control().request_stop();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await
@@ -90,23 +98,38 @@ impl JoinError {
     /// ```
     #[must_use]
     pub const fn is_shutdown(&self) -> bool {
-        self.panic.is_none()
+        matches!(&self.kind, Kind::Shutdown)
+    }
+
+    /// Returns `true` if the requested destination is not a worker of the runtime.
+    #[must_use]
+    pub const fn is_invalid_destination(&self) -> bool {
+        matches!(&self.kind, Kind::InvalidDestination)
     }
 
     pub(crate) fn panicked(payload: Box<dyn Any + Send + 'static>) -> Self {
         Self {
-            panic: Some(Mutex::new(payload)),
+            kind: Kind::Panic(Mutex::new(payload)),
         }
     }
 
     pub(crate) const fn shutdown() -> Self {
-        Self { panic: None }
+        Self { kind: Kind::Shutdown }
     }
 
-    /// Returns the captured panic payload, or `None` if this error represents shutdown.
+    pub(crate) const fn invalid_destination() -> Self {
+        Self {
+            kind: Kind::InvalidDestination,
+        }
+    }
+
+    /// Returns the captured panic payload, or `None` for other failure kinds.
     #[must_use]
     pub fn into_panic(self) -> Option<Box<dyn Any + Send + 'static>> {
-        self.panic.map(Mutex::into_inner)
+        match self.kind {
+            Kind::Panic(payload) => Some(payload.into_inner()),
+            Kind::Shutdown | Kind::InvalidDestination => None,
+        }
     }
 }
 
@@ -124,16 +147,17 @@ impl Debug for JoinError {
         f.debug_struct(std::any::type_name::<Self>())
             .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
+            .field("is_invalid_destination", &self.is_invalid_destination())
             .finish()
     }
 }
 
 impl Display for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(if self.is_panic() {
-            "task panicked"
-        } else {
-            "runtime is shutting down"
+        f.write_str(match &self.kind {
+            Kind::Panic(_) => "task panicked",
+            Kind::Shutdown => "runtime is shutting down",
+            Kind::InvalidDestination => "target thread is not a worker of this runtime",
         })
     }
 }
@@ -151,11 +175,13 @@ mod tests {
         let panic = JoinError::panicked(Box::new(std::cell::Cell::new(42)));
         assert!(panic.is_panic());
         assert!(!panic.is_shutdown());
+        assert!(!panic.is_invalid_destination());
         assert_eq!(panic.to_string(), "task panicked");
 
         let shutdown = JoinError::shutdown();
         assert!(!shutdown.is_panic());
         assert!(shutdown.is_shutdown());
+        assert!(!shutdown.is_invalid_destination());
         assert_eq!(shutdown.to_string(), "runtime is shutting down");
         assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
         assert!(shutdown.source().is_none());

@@ -7,9 +7,9 @@ use tick::Clock;
 
 use crate::Attempt;
 
-/// Arguments for the [`clone_input_with`][super::HedgingLayer::clone_input_with] callback function.
+/// Provides data to the [`clone_input_with`][super::HedgingLayer::clone_input_with] callback.
 ///
-/// Provides context for input cloning operations during hedging.
+/// Use this data when you clone input for a hedged attempt.
 #[derive(Debug)]
 pub struct CloneArgs {
     pub(super) attempt: Attempt,
@@ -18,16 +18,16 @@ pub struct CloneArgs {
 impl CloneArgs {
     /// Returns the current attempt information.
     ///
-    /// Index 0 is the original request, 1 is the first hedging attempt, etc.
+    /// Index 0 is the original request. Index 1 is the first hedged attempt.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
     }
 }
 
-/// Arguments for the [`recovery_with`][super::HedgingLayer::recovery_with] callback function.
+/// Provides data to the [`recovery_with`][super::HedgingLayer::recovery_with] callback.
 ///
-/// Provides context for recovery classification of hedging results.
+/// Use this data to classify output from a hedged attempt.
 #[derive(Debug)]
 pub struct RecoveryArgs<'a> {
     pub(super) clock: &'a Clock,
@@ -43,16 +43,16 @@ impl RecoveryArgs<'_> {
 
     /// Returns the attempt that produced the result being classified.
     ///
-    /// Index 0 is the original request, 1 is the first hedging attempt, etc.
+    /// Index 0 is the original request. Index 1 is the first hedged attempt.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
     }
 }
 
-/// Arguments for the [`on_execute`][super::HedgingLayer::on_execute] callback function.
+/// Provides data to the [`on_execute`][super::HedgingLayer::on_execute] callback.
 ///
-/// Provides context when a request (original or hedged) is about to be executed.
+/// Use this data before an original or hedged request starts.
 #[derive(Debug)]
 pub struct OnExecuteArgs {
     pub(super) attempt: Attempt,
@@ -62,13 +62,13 @@ pub struct OnExecuteArgs {
 impl OnExecuteArgs {
     /// Returns the current attempt information.
     ///
-    /// Attempt index 0 is the original request, 1 is the first hedging attempt, etc.
+    /// Index 0 is the original request. Index 1 is the first hedged attempt.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
     }
 
-    /// Returns the delay that was waited before this attempt was launched.
+    /// Returns the delay before this attempt started.
     ///
     /// For the original request (attempt 0) or when a zero delay is configured, this is
     /// [`Duration::ZERO`].
@@ -78,9 +78,9 @@ impl OnExecuteArgs {
     }
 }
 
-/// Arguments for the [`hedging_delay_with`][super::HedgingLayer::hedging_delay_with] callback function.
+/// Provides data to the [`hedging_delay_with`][super::HedgingLayer::hedging_delay_with] callback.
 ///
-/// Provides context for computing the delay before the next hedging attempt.
+/// Use this data to calculate the delay before the next hedged attempt.
 #[derive(Debug)]
 pub struct HedgingDelayArgs {
     pub(super) attempt: Attempt,
@@ -89,7 +89,7 @@ pub struct HedgingDelayArgs {
 impl HedgingDelayArgs {
     /// Returns the attempt information for the hedging attempt about to be launched.
     ///
-    /// Attempt index 1 is the first hedging attempt, 2 is the second hedging attempt, etc.
+    /// Index 1 is the first hedged attempt. Index 2 is the second.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt

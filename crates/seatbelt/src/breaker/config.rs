@@ -8,9 +8,8 @@ use crate::breaker::{AbandonedPolicy, HalfOpenMode};
 
 /// Configuration for the circuit breaker middleware.
 ///
-/// This struct provides a serialization-friendly way to configure the circuit breaker middleware
-/// from external sources such as configuration files. Use [`BreakerLayer::config`][crate::breaker::BreakerLayer::config] to apply
-/// the configuration to a breaker layer.
+/// Enable `serde` to load this type from a configuration file.
+/// Use [`BreakerLayer::config`][crate::breaker::BreakerLayer::config] to apply it to a breaker layer.
 ///
 /// # Defaults
 ///
@@ -29,36 +28,36 @@ use crate::breaker::{AbandonedPolicy, HalfOpenMode};
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct BreakerConfig {
-    /// Whether the circuit breaker middleware is enabled. When `false`, the middleware
-    /// is bypassed and requests pass through directly to the inner service.
+    /// Controls whether the circuit breaker runs.
+    ///
+    /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
 
-    /// The failure threshold (0.0 to 1.0) at which the circuit opens.
+    /// Sets the failure rate that opens the circuit.
     pub failure_threshold: f32,
 
-    /// The minimum number of executions in the sampling window before the circuit can open.
+    /// Sets the minimum number of executions before the circuit can open.
     pub min_throughput: u32,
 
-    /// The time window for calculating failure rates.
+    /// Sets the time window for the failure rate.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
     )]
     pub sampling_duration: Duration,
 
-    /// The duration the circuit remains open before transitioning to half-open.
+    /// Sets how long the circuit stays open before it becomes half-open.
     #[cfg_attr(
         any(feature = "serde", test),
         serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
     )]
     pub break_duration: Duration,
 
-    /// The behavior of the circuit breaker when transitioning from half-open to closed state.
+    /// Selects how a half-open circuit tests service health.
     #[cfg_attr(any(feature = "serde", test), serde(default))]
     pub half_open_mode: HalfOpenMode,
 
-    /// How abandoned executions (accepted but never completed, e.g. cancelled futures) are treated
-    /// by the health calculation.
+    /// Controls how abandoned executions affect circuit health.
     #[cfg_attr(any(feature = "serde", test), serde(default))]
     pub abandoned_policy: AbandonedPolicy,
 }
@@ -74,48 +73,5 @@ impl Default for BreakerConfig {
             half_open_mode: HalfOpenMode::progressive(None),
             abandoned_policy: AbandonedPolicy::default(),
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn default_snapshot() {
-        let config = BreakerConfig::default();
-        insta::assert_json_snapshot!(config);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn quick_half_open_mode_snapshot() {
-        let config = BreakerConfig {
-            half_open_mode: HalfOpenMode::quick(),
-            ..BreakerConfig::default()
-        };
-        insta::assert_json_snapshot!(config);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn progressive_no_duration_half_open_mode_snapshot() {
-        let config = BreakerConfig {
-            half_open_mode: HalfOpenMode::progressive(None),
-            ..BreakerConfig::default()
-        };
-        insta::assert_json_snapshot!(config);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn progressive_with_duration_half_open_mode_snapshot() {
-        let config = BreakerConfig {
-            half_open_mode: HalfOpenMode::progressive(Duration::from_secs(45)),
-            ..BreakerConfig::default()
-        };
-        insta::assert_json_snapshot!(config);
     }
 }

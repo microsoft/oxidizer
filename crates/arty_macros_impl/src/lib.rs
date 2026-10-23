@@ -35,7 +35,7 @@ impl Args {
         }
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
         let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
-        let workers = workers.map(|count| quote!(.workers(#runtime_path::runtime::WorkersPolicy::at_most(#count))));
+        let workers = workers.map(|count| quote!(.workers(#runtime_path::runtime::WorkersPolicy::exactly(#count))));
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #clock .build()))
     }
@@ -294,7 +294,7 @@ mod tests {
         #[::core::prelude::v1::test]
         fn fails() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::at_most(1))
+                .workers(::arty::runtime::WorkersPolicy::exactly(1))
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn workers_selects_at_most_the_literal_count() {
+    fn workers_selects_exactly_the_literal_count() {
         let expansion = main(
             quote!(workers = 4usize),
             quote! {
@@ -323,7 +323,7 @@ mod tests {
         let expected = quote! {
             pub fn run() -> AppResult {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::at_most(4usize))
+                    .workers(::arty::runtime::WorkersPolicy::exactly(4usize))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -357,7 +357,7 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::at_most(1))
+                    .workers(::arty::runtime::WorkersPolicy::exactly(1))
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_test_without_workers_defaults_to_one_processor() {
+    fn controlled_test_without_workers_defaults_to_one_worker() {
         let expansion = test(
             TokenStream::new(),
             quote! {
@@ -392,7 +392,7 @@ mod tests {
         assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
         assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
         assert!(expansion.contains("workers"));
-        assert!(expansion.contains("WorkersPolicy :: at_most (1)"));
+        assert!(expansion.contains("WorkersPolicy :: exactly (1)"));
     }
 
     #[test]

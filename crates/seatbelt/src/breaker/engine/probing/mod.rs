@@ -3,7 +3,7 @@
 
 //! Probing mechanisms for circuit breakers.
 //!
-//! Probing is used to test if a service has recovered after a failure.
+//! Probing tests whether a service recovered after a failure.
 //! Different probing strategies can be implemented by implementing the `ProbeOperation` trait.
 //!
 //! - Various probes can be combined in sequence using the [`Probes`] struct.
@@ -30,7 +30,7 @@ pub(crate) enum ProbingResult {
     /// Probing succeeded, no more probing needed.
     Success,
 
-    /// Probing failed, circuit should remain open.
+    /// Probing failed, so the circuit remains open.
     Failure,
 
     /// Probing is still in progress, more probes are needed.
@@ -91,7 +91,7 @@ impl ProbeOperation for Probe {
     /// Record the result of a probing attempt.
     ///
     /// Once the probe reports success or failure, it is considered complete and
-    /// should never be used again.
+    /// must not be used again.
     fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
         match self {
             Self::Single(probe) => probe.record(result, now),
@@ -170,7 +170,7 @@ mod tests {
         let mut probe = Probe::new(ProbeOptions::HealthProbe(options));
         let now = Instant::now();
 
-        // With probing_ratio=1.0, all probes should be accepted
+        // With probing_ratio=1.0, all probes are accepted.
         assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
     }
 

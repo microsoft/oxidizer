@@ -14,7 +14,7 @@ use std::future::{pending, poll_fn};
 use std::sync::mpsc;
 use std::task::Poll;
 
-use arty::runtime::{Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink, emit, event};
@@ -297,7 +297,7 @@ fn cancelled_task_destructor_keeps_the_submission_context() {
         .unwrap();
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
 
-    RuntimeOperations::from(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     runtime.stop().unwrap();
 
     assert!(task.join().unwrap_err().is_shutdown());

@@ -7,34 +7,32 @@ use std::time::Duration;
 use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_USE_JITTER};
 use crate::rnd::Rnd;
 
-/// The factor used to determine the range of jitter applied to delays.
+/// Sets the range of jitter for delays.
 const JITTER_FACTOR: f64 = 0.5;
 
-/// The default factor used for exponential backoff calculations for cases where jitter is not applied.
+/// Sets the exponential factor when jitter is disabled.
 const EXPONENTIAL_FACTOR: f64 = 2.0;
 
-/// Defines the backoff strategy used by resilience middleware for retry operations.
+/// Selects the backoff strategy for retry operations.
 ///
-/// Backoff strategies control how delays between retry attempts are calculated, providing
-/// different approaches to spacing out retries to avoid overwhelming failing systems while
-/// balancing responsiveness and resource utilization.
+/// A backoff strategy calculates the delay between retry attempts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
 pub enum Backoff {
-    /// Constant backoff strategy that maintains consistent delays between attempts.
+    /// Uses the same delay before each retry.
     ///
-    /// **Example with `2s` base delay:** `2s, 2s, 2s, 2s, ...`
+    /// Example with a `2s` base delay: `2s, 2s, 2s, 2s, ...`
     Constant,
 
-    /// Linear backoff strategy that increases delays proportionally with attempt count.
+    /// Increases the delay in proportion to the attempt number.
     ///
-    /// **Example with `2s` base delay:** `2s, 4s, 6s, 8s, 10s, ...`
+    /// Example with a `2s` base delay: `2s, 4s, 6s, 8s, 10s, ...`
     Linear,
 
-    /// Exponential backoff strategy that doubles delays with each attempt.
+    /// Doubles the delay after each attempt.
     ///
-    /// **Example with `2s` base delay:** `2s, 4s, 8s, 16s, 32s, ...`
+    /// Example with a `2s` base delay: `2s, 4s, 8s, 16s, 32s, ...`
     Exponential,
 }
 
@@ -107,11 +105,11 @@ fn duration_mul_pow2(base: Duration, attempt: u32) -> Duration {
     secs_to_duration_saturating(base.as_secs_f64() * factor)
 }
 
-/// Adds a symmetric, uniform jitter around the given delay.
+/// Adds uniform jitter above and below the given delay.
 ///
-/// - Jitter is in both directions and relative to `delay` (centered on it).
+/// - Jitter is relative to `delay` and can increase or decrease it.
 /// - With `JITTER_FACTOR = 0.5`, the result lies in `[0.75*delay, 1.25*delay]`.
-/// - Randomness comes from [`Rnd`]; conversion saturates on overflow and clamps at zero.
+/// - [`Rnd`] supplies random values. Conversion saturates on overflow and stops at zero.
 #[inline]
 fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
     let ms = delay.as_secs_f64() * 1000.0;
@@ -122,11 +120,10 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
     secs_to_duration_saturating(new_ms / 1000.0)
 }
 
-/// De-correlated jitter backoff (`v2`): smooth exponential growth with bounded randomization.
+/// Calculates de-correlated jitter backoff (`v2`).
 ///
-/// De-correlated jitter `V2` spreads retries evenly while preserving exponential backoff
-/// (with a configurable first-retry median), reducing synchronized spikes and tail-latency
-/// compared to naive random jitter.
+/// Version 2 spreads retries while it keeps exponential growth.
+/// The first retry has a configurable median.
 ///
 /// What does "de-correlated" mean?
 ///
@@ -301,7 +298,7 @@ mod tests {
         });
 
         let v: Vec<_> = backoff.delays().take(3).collect();
-        // With random value 0.0, jitter should give us 0.75 seconds
+        // A random value of 0.0 gives a delay of 0.75 seconds.
         assert_eq!(v[0], Duration::from_millis(750));
         assert_eq!(v[1], Duration::from_millis(750));
         assert_eq!(v[2], Duration::from_millis(750));
@@ -321,7 +318,7 @@ mod tests {
         });
 
         let delay = backoff.delays().next().unwrap();
-        // With random value 0.4, jitter should give us 0.95 seconds
+        // A random value of 0.4 gives a delay of 0.95 seconds.
         assert_eq!(delay, Duration::from_millis(950));
 
         // Test with random value 1.0
@@ -336,7 +333,7 @@ mod tests {
         });
 
         let delay = backoff.delays().next().unwrap();
-        // With random value 1.0, jitter should give us 1.25 seconds
+        // A random value of 1.0 gives a delay of 1.25 seconds.
         assert_eq!(delay, Duration::from_millis(1250));
     }
 
@@ -354,9 +351,9 @@ mod tests {
         });
 
         let v: Vec<_> = backoff.delays().take(3).collect();
-        // attempt 0: base_delay * 1 = 1s, with jitter 0.5 should be exactly 1s
-        // attempt 1: base_delay * 2 = 2s, with jitter 0.5 should be exactly 2s
-        // attempt 2: base_delay * 3 = 3s, with jitter 0.5 should be exactly 3s
+        // Attempt 0: base_delay * 1 = 1s. Jitter 0.5 keeps it at 1s.
+        // Attempt 1: base_delay * 2 = 2s. Jitter 0.5 keeps it at 2s.
+        // Attempt 2: base_delay * 3 = 3s. Jitter 0.5 keeps it at 3s.
         assert_eq!(v[0], Duration::from_secs(1));
         assert_eq!(v[1], Duration::from_secs(2));
         assert_eq!(v[2], Duration::from_secs(3));
@@ -489,7 +486,7 @@ mod tests {
             rnd: Rnd::default(),
         });
 
-        // Large attempt should cause overflow and return Duration::MAX
+        // A large attempt overflows and returns Duration::MAX.
         let v: Vec<_> = backoff.delays().skip(1000).take(1).collect();
         assert_eq!(v[0], Duration::MAX);
     }
@@ -506,7 +503,7 @@ mod tests {
             rnd: Rnd::default(),
         });
 
-        // Large attempt should cause overflow but be clamped to max_delay
+        // A large attempt overflows, but max_delay limits the result.
         let v: Vec<_> = backoff.delays().skip(1000).take(1).collect();
         assert_eq!(v[0], max_delay);
     }

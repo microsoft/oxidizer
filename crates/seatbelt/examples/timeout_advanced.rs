@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Advanced timeout resilience middleware example.
+//! This example uses advanced timeout middleware features.
 //!
-//! This example demonstrates advanced usage of the timeout middleware, including working with
-//! Result-based outputs, timeout callbacks, and dynamic timeout durations based on input.
+//! It uses `Result` output, timeout callbacks, and timeouts based on the input.
 
 use std::time::Duration;
 
@@ -23,27 +22,27 @@ const PROCESSING_DELAY: Duration = Duration::from_secs(1);
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    // Configure telemetry to see the timeout metrics and logs
+    // Enable timeout metrics and logs.
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
 
-    // Create service options
+    // Create the service configuration.
     let context: ResilienceContext<String, Result<(), AppError>> =
         ResilienceContext::new(&clock).name("my_pipeline").use_metrics(&meter_provider);
 
-    // Define stack with timeout layer
+    // Define a stack with a timeout layer.
     let stack = (
         Timeout::layer("my_timeout", &context)
-            // Required: specify the timeout duration
+            // Set the timeout duration.
             .timeout(TIMEOUT_DURATION)
-            // Required: create error output for timeouts
+            // Create the error output for a timeout.
             .timeout_error(|args| app_err!("timeout occurred, timeout: {}ms", args.timeout().as_millis()))
-            // Optional: callback to be invoked when a timeout occurs
+            // Run a callback when a timeout occurs.
             .on_timeout(|_out, args| {
                 println!("timeout occurred, timeout: {}ms", args.timeout().as_millis());
             })
-            // Optional: override the default timeout duration by inspecting the input
+            // Use the input to override the default timeout.
             .timeout_override(|input, _args| match input.as_str() {
                 "2" => Some(Duration::from_millis(300)),
                 _ => None,
@@ -53,7 +52,7 @@ async fn main() -> Result<(), AppError> {
             move |_input| {
                 let clock = clock.clone();
                 async move {
-                    // Simulate some processing delay so the timeout can trigger
+                    // Add enough processing delay to trigger the timeout.
                     clock.delay(PROCESSING_DELAY).await;
                     Ok(())
                 }
@@ -61,25 +60,25 @@ async fn main() -> Result<(), AppError> {
         }),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
     for i in 0..10 {
-        // Execute the service, results in a timeout error
+        // Execute the service. Some calls return a timeout error.
         match service.execute(i.to_string()).await {
             Ok(()) => println!("execute, input: {i}, result: success"),
             Err(e) => println!("execute, input: {i}, error: {e}"),
         }
     }
 
-    // Flush metrics to stdout before exiting
+    // Flush metrics to standard output before the program exits.
     meter_provider.force_flush()?;
 
     Ok(())
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()

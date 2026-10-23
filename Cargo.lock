@@ -4220,9 +4220,12 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "performables"
 version = "0.3.0"
 dependencies = [
+ "alloc_tracker",
  "criterion",
  "ctor",
+ "libc",
  "loom",
+ "many_cpus",
  "metabench",
  "mutants",
  "seismograph",
@@ -4232,7 +4235,9 @@ dependencies = [
  "testing_aids",
  "thread_aware",
  "thread_aware_core",
+ "tokio",
  "trybuild",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

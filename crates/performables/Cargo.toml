@@ -17,6 +17,14 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/performables"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[package.metadata.coverage-gate]
+# Atomic retry bookkeeping is scheduling-dependent. Keep the loops measured
+# without synthetic contention hooks solely to satisfy line coverage.
+min-lines-percent = 99.8
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::Deserialize",
@@ -39,12 +47,17 @@ seismograph = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker.workspace = true
 criterion.workspace = true
 ctor.workspace = true
+many_cpus.workspace = true
 metabench.workspace = true
 mutants.workspace = true
 seismograph = { path = "../seismograph", features = ["monitor"] }
@@ -53,6 +66,7 @@ serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
+tokio = { workspace = true, features = ["sync"] }
 trybuild.workspace = true
 
 [[bench]]
@@ -61,6 +75,14 @@ harness = false
 
 [[bench]]
 name = "performables_arc_clone"
+harness = false
+
+[[bench]]
+name = "performables_ready"
+harness = false
+
+[[bench]]
+name = "performables_watch"
 harness = false
 
 [[bench]]
@@ -81,6 +103,31 @@ required-features = ["loom"]
 name = "loom_sync_primitives"
 path = "tests/loom_sync_primitives.rs"
 required-features = ["loom"]
+
+[[test]]
+name = "mutex_telemetry"
+path = "tests/mutex_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "notify_telemetry"
+path = "tests/notify_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "once_telemetry"
+path = "tests/once_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "ready_blocking_telemetry"
+path = "tests/ready_blocking_telemetry.rs"
+required-features = ["seismograph"]
+
+[[test]]
+name = "rwlock_telemetry"
+path = "tests/rwlock_telemetry.rs"
+required-features = ["seismograph"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

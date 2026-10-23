@@ -1,18 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Chaos engineering middleware for testing resilience under failure conditions.
+//! Chaos middleware for testing failures and delays.
 //!
-//! This module provides middleware that deliberately injects faults into a
-//! service pipeline, enabling teams to verify that their systems handle
-//! failures gracefully.
+//! This middleware adds controlled faults to a service pipeline.
+//! Use it to test how the pipeline handles failures.
 //!
-//! ## Available Middleware
+//! ## Available middleware
 //!
-//! - [`injection`] - Replaces service output with a user-provided value at a
-//!   configurable probability.
-//! - [`latency`] - Injects artificial delay before the inner service call at a
-//!   configurable probability.
+//! - [`injection`] replaces service output at a configured rate.
+//! - [`latency`] adds a delay before the inner service call at a configured rate.
 
 #[cfg(any(feature = "chaos-injection", test))]
 pub mod injection;

@@ -18,17 +18,15 @@ use crate::timeout::*;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Applies a timeout to service execution for canceling long-running operations.
+/// Applies a timeout to each service call.
 ///
-/// `Timeout` wraps an inner [`Service`] and enforces a maximum duration for
-/// each call. If the operation doesn't finish in time, an output that represents
-/// the timeout is returned. This middleware is designed to be used across
-/// services, applications, and libraries to prevent operations from hanging indefinitely.
+/// `Timeout` wraps an inner [`Service`] and sets a time limit for each call.
+/// If the operation does not finish in time, it returns the configured timeout output.
 ///
-/// Timeouts are configured by calling [`Timeout::layer`](crate::timeout::Timeout::layer)
-/// and using the builder methods on the returned [`TimeoutLayer`] instance.
+/// Call [`Timeout::layer`](crate::timeout::Timeout::layer) to create a [`TimeoutLayer`].
+/// Use its builder methods to configure the timeout.
 ///
-/// For comprehensive examples and usage patterns, see the [timeout module] documentation.
+/// See the [timeout module] for examples.
 ///
 /// [timeout module]: crate::timeout
 #[derive(Debug)]
@@ -39,7 +37,7 @@ pub struct Timeout<In, Out, S> {
 
 /// Shared configuration for [`Timeout`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct TimeoutShared<In, Out> {
     pub(crate) clock: Clock,
@@ -62,12 +60,11 @@ impl<In, Out, S: Clone> Clone for Timeout<In, Out, S> {
 }
 
 impl<In, Out> Timeout<In, Out, ()> {
-    /// Creates a [`TimeoutLayer`] used to configure the timeout resilience middleware.
+    /// Creates a [`TimeoutLayer`] that configures timeout middleware.
     ///
-    /// The instance returned by this call is a builder and cannot be used to build a
-    /// service until the required properties are set: `timeout_output` and `timeout`.
-    /// The `name` identifies the timeout strategy in telemetry, while `options`
-    /// provides configuration shared across multiple resilience middleware.
+    /// Set `timeout_output` and `timeout` before you build a service.
+    /// The `name` identifies the timeout strategy in telemetry.
+    /// The `context` provides configuration that middleware can share.
     ///
     /// # Example
     ///
@@ -85,7 +82,7 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// # }
     /// ```
     ///
-    /// For comprehensive examples, see the [timeout module] documentation.
+    /// See the [timeout module] for more examples.
     ///
     /// [timeout module]: crate::timeout
     pub fn layer(name: impl Into<Cow<'static, str>>, context: &ResilienceContext<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {

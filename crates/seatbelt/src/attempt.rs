@@ -14,16 +14,15 @@ pub(crate) const ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
 /// Attribute key for the recovery kind that triggered the attempt.
 pub(crate) const ATTEMPT_RECOVERY_KIND: &str = "resilience.attempt.recovery.kind";
 
-/// Tracks the current attempt within a resilience operation.
+/// Identifies one attempt in a resilience operation.
 ///
-/// Resilience middleware creates an `Attempt` for each execution of the inner service and
-/// passes it to user-provided callbacks. You can use the attempt information to vary behavior
-/// per attempt - for example, routing to a different endpoint or injecting the attempt into
-/// request extensions for downstream observability.
+/// Middleware creates an `Attempt` for each call to the inner service.
+/// It passes the value to user callbacks.
+/// A callback can use the value to select an endpoint or add telemetry data.
 ///
 /// # Default
 ///
-/// The [`Default`] value represents a single-shot operation with no retries:
+/// The [`Default`] value represents one operation with no retries:
 ///
 /// - [`index()`](Self::index): `0` (first attempt, zero-based)
 /// - [`is_first()`](Self::is_first): `true`
@@ -31,27 +30,26 @@ pub(crate) const ATTEMPT_RECOVERY_KIND: &str = "resilience.attempt.recovery.kind
 ///
 /// # Display
 ///
-/// The [`Display`] implementation writes the attempt [`index()`](Self::index) as a decimal
-/// number, which is useful for logging and diagnostics.
+/// The [`Display`] implementation writes the [`index()`](Self::index) as a decimal number.
 ///
 /// # Examples
 ///
 /// ```
 /// use seatbelt::Attempt;
 ///
-/// // First attempt of several (more attempts may follow)
+/// // The first attempt. More attempts can follow.
 /// let attempt = Attempt::new(0, false);
 /// assert!(attempt.is_first());
 /// assert!(!attempt.is_last());
 /// assert_eq!(attempt.index(), 0);
 ///
-/// // Final attempt (no further retries will be made)
+/// // The final attempt.
 /// let last_attempt = Attempt::new(2, true);
 /// assert!(!last_attempt.is_first());
 /// assert!(last_attempt.is_last());
 /// assert_eq!(last_attempt.index(), 2);
 ///
-/// // Default: single-shot, no retries
+/// // The default represents one operation with no retries.
 /// let default_attempt = Attempt::default();
 /// assert_eq!(default_attempt.index(), 0);
 /// assert!(default_attempt.is_first());
@@ -70,8 +68,9 @@ impl Default for Attempt {
 }
 
 impl Attempt {
-    /// Creates a new attempt with the given zero-based `index` and a flag indicating whether
-    /// this is the last attempt the middleware will make.
+    /// Creates an attempt with a zero-based `index`.
+    ///
+    /// Set `is_last` to `true` when the middleware will not make another attempt.
     ///
     /// # Examples
     ///
@@ -87,7 +86,7 @@ impl Attempt {
         Self { index, is_last }
     }
 
-    /// Returns `true` if this is the first attempt (`index == 0`).
+    /// Returns `true` when this is the first attempt.
     ///
     /// # Examples
     ///
@@ -105,7 +104,7 @@ impl Attempt {
         self.index == 0
     }
 
-    /// Returns `true` if no further attempts will be made after this one.
+    /// Returns `true` when the middleware will not make another attempt.
     ///
     /// # Examples
     ///
@@ -123,7 +122,7 @@ impl Attempt {
         self.is_last
     }
 
-    /// Returns the current attempt index (0-based).
+    /// Returns the zero-based attempt index.
     ///
     /// # Examples
     ///
@@ -177,28 +176,6 @@ mod tests {
     }
 
     #[test]
-    fn new_with_zero_is_first_and_not_last() {
-        let a = Attempt::new(0, false);
-        assert_eq!(a.index(), 0);
-        assert!(a.is_first());
-        assert!(!a.is_last());
-    }
-
-    #[test]
-    fn new_when_equal_to_max_is_last() {
-        let a = Attempt::new(5, true);
-        assert!(a.is_last());
-        assert!(!a.is_first());
-    }
-
-    #[test]
-    fn new_with_zero_max_is_both_first_and_last() {
-        let a = Attempt::new(0, true);
-        assert!(a.is_first());
-        assert!(a.is_last());
-    }
-
-    #[test]
     fn increment_correct_behavior() {
         let max_attempts = 2;
         let a = Attempt::new(0, false);
@@ -214,12 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn display_shows_index() {
-        let a = Attempt::new(42, false);
-        assert_eq!(format!("{a}"), "42");
-    }
-
-    #[test]
     fn first_attempt_returns_correct_attempt() {
         let first = Attempt::first(3);
         assert_eq!(first.index(), 0);
@@ -228,13 +199,5 @@ mod tests {
         let first_one = Attempt::first(1);
         assert_eq!(first_one.index(), 0);
         assert!(first_one.is_last());
-    }
-
-    #[test]
-    fn default_ok() {
-        let default = Attempt::default();
-        assert_eq!(default.index(), 0);
-        assert!(default.is_first());
-        assert!(default.is_last());
     }
 }

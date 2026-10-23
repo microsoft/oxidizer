@@ -117,7 +117,7 @@ fn worker_driver_construction_failure_stops_an_already_registered_context() {
 #[test]
 fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
     let runtime = runtime(1);
-    let operations = RuntimeOperations::from(&runtime);
+    let control = support::runtime_control(&runtime);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
@@ -134,7 +134,7 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
         }
     });
     scenario.wait_until_driver_blocked();
-    operations.request_stop();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(
@@ -149,7 +149,7 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
 #[test]
 fn shutdown_during_late_initialization_is_observed_by_the_request() {
     let runtime = runtime(WORKERS);
-    let operations = RuntimeOperations::from(&runtime);
+    let control = support::runtime_control(&runtime);
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(2, Ordering::SeqCst);
@@ -176,7 +176,7 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
         }
     });
     scenario.wait_until_driver_blocked();
-    operations.request_stop();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(
@@ -192,6 +192,10 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
 fn concurrent_worker_initialization_failure_is_reported_consistently() {
     const CONCURRENT_WORKERS: usize = 3;
 
+    // One worker owns the context while two others initialize it concurrently.
+    if many_cpus::SystemHardware::current().processors().len() < CONCURRENT_WORKERS {
+        return;
+    }
     let runtime = runtime(CONCURRENT_WORKERS);
     let workers = worker_schedulers(&runtime, CONCURRENT_WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
@@ -290,7 +294,7 @@ fn concurrent_failures_preserve_the_first_shutdown_cause() {
 #[test]
 fn shutdown_does_not_couple_independent_worker_initialization() {
     let runtime = runtime(WORKERS);
-    let operations = RuntimeOperations::from(&runtime);
+    let control = support::runtime_control(&runtime);
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.block_driver_at.store(1, Ordering::SeqCst);
@@ -320,7 +324,7 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
         }
     });
     let second_outcome = second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT);
-    operations.request_stop();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(

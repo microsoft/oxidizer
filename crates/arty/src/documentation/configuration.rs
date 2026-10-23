@@ -9,17 +9,20 @@
 //!
 //! # Async workers
 //!
-//! [`WorkersPolicy`](crate::runtime::WorkersPolicy) selects processors, with
-//! one async worker per selected processor:
+//! [`WorkersPolicy`](crate::runtime::WorkersPolicy) selects the worker count
+//! and assigns each worker to an available processor:
 //!
 //! | Policy | Meaning |
 //! | --- | --- |
-//! | `default()` | Let Arty choose; currently uses all available processors, but that policy may evolve |
+//! | `default()` | Let Arty choose. It currently uses all available processors, but that policy can change |
 //! | `all()` | Use all available processors explicitly |
 //! | `at_most(n)` | Use no more than `n`, clamping to available processors |
-//! | `exactly(n)` | Require `n`; return `runtime::Error` if fewer are available |
+//! | `exactly(n)` | Start `n` workers; share processors when `n` exceeds the available count |
 //!
 //! The runtime rejects a count of zero when it is built.
+//! Each worker is an operating-system thread with its own stack. Large exact
+//! counts can exceed operating-system thread or memory limits. For example,
+//! `exactly(1000)` requests 1000 worker threads even on a smaller machine.
 //!
 //! ```
 //! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
@@ -65,9 +68,10 @@
 //! the runtime for you. By default, `main` chooses workers automatically and
 //! `test` uses one worker.
 //!
-//! Use `workers = N` to cap the worker count. Build the runtime explicitly for
-//! custom clocks, telemetry, blocking pools, stack sizes, or exact worker
-//! policies.
+//! Use `workers = N` to set the exact worker count. Build the runtime explicitly
+//! for custom clocks, telemetry, blocking pools, stack sizes, or an
+//! [`at_most`](crate::runtime::WorkersPolicy::at_most) or
+//! [`all`](crate::runtime::WorkersPolicy::all) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
 //! signature and worker option. Build the runtime yourself if you need to
