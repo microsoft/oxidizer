@@ -186,7 +186,7 @@ impl WorkerHandle {
     ) -> TaskPoll {
         self.worker.current_task.store(task_id.get(), Ordering::Release);
         if let Some(session) = session {
-            seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
+            seismograph::record_in_session(session, EventClass::RuntimeTask, || {
                 Some(crate::runtime_record(
                     started_at,
                     self.runtime.id(),

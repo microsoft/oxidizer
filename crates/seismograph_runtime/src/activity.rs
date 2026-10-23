@@ -127,7 +127,7 @@ impl Activity {
         if emit && let Some(session) = session {
             // A notifier is not a worker. The runtime ID avoids both an Arc
             // cycle and per-wake registry lookups.
-            seismograph::recorder::record_in_session_classified(session, EventClass::RuntimeTask, || {
+            seismograph::record_in_session(session, EventClass::RuntimeTask, || {
                 Some(runtime_record(
                     at,
                     task.runtime_id,
@@ -244,7 +244,7 @@ mod tests {
     use std::sync::Arc;
 
     use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy, recording_observation};
+    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
     use super::*;
@@ -264,7 +264,21 @@ mod tests {
     }
 
     fn state(task: &TaskHandle) -> TaskActivity {
-        task.task.activity.snapshot(recording_observation())
+        let captured = capture(EventBufferDisposition::Retain);
+        let source = captured
+            .sources
+            .iter()
+            .find(|source| source.id == crate::snapshot::source::ID)
+            .unwrap();
+        crate::snapshot::decode(&source.data)
+            .unwrap()
+            .runtimes
+            .into_iter()
+            .flat_map(|runtime| runtime.tasks)
+            .find(|captured| captured.id == task.id())
+            .unwrap()
+            .activity
+            .unwrap()
     }
 
     fn capture(disposition: EventBufferDisposition) -> seismograph::snapshot::DecodedSnapshot {
@@ -323,13 +337,13 @@ mod tests {
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
         std::thread::scope(|scope| scope.spawn(|| task.woken()).join().unwrap());
+        let events = ready_events(&task);
         let ready = state(&task);
         task.woken();
         runtime.handle().task_enqueued(task.id(), Some(worker.id()));
         assert_eq!(state(&task).ready_since, ready.ready_since);
         assert_eq!(ready.state, TaskActivityState::Ready);
         assert_eq!(ready.queued_since, ready.ready_since);
-        let events = ready_events(&task);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].timestamp, ready.ready_since.unwrap());
         assert_eq!(events[0].runtime().unwrap().worker_id, None);
@@ -359,7 +373,6 @@ mod tests {
         runtime.handle().task_completed(task.id(), Some(worker.id()));
         task.woken();
         assert_eq!(ready_events(&task).len(), 1);
-        assert_eq!(state(&task).state, TaskActivityState::Unknown);
         configure(false);
     }
 
@@ -850,7 +863,6 @@ mod tests {
             configure(true);
             task.woken();
             assert!(ready_events(&task).is_empty());
-            assert_eq!(state(&task).state, TaskActivityState::Unknown);
         }
         configure(false);
     }

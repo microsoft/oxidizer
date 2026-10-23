@@ -40,29 +40,8 @@
 //!
 //! # Live monitoring
 //!
-//! Applications built with the `monitor` feature can publish an OS-authorized local
-//! endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-//! for as long as local control should remain available. The owning user and
-//! root/elevated administrators can connect without a token. Startup creates
-//! the user's private registry automatically; no administrator setup is needed.
-//! Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
-//! fallback. Windows uses the user's local application-data directory.
-//! Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
-//! the monitor's identity, transport, discovery, persistence, and clock
-//! capability. Omitting it preserves native I/O; `seismograph_protocol`'s
-//! `test-util` feature provides an isolated in-memory implementation for
-//! application tests without host registry setup.
-//!
-//! ```no_run
-//! # #[cfg(feature = "monitor")]
-//! # {
-//! let _monitor = seismograph::monitor::Monitor::builder()
-//!     .name("worker")
-//!     .instance("west-europe")
-//!     .start()
-//!     .unwrap();
-//! # }
-//! ```
+//! Enable `monitor`, call `seismograph::monitor::Monitor::builder().start()?`, and keep the returned handle alive.
+//! Run `seismograph monitor` to connect.
 //!
 //! # Features
 //!
@@ -81,8 +60,7 @@ pub mod monitor;
 pub mod recorder;
 /// Snapshot types.
 pub mod snapshot;
-#[doc(hidden)]
-pub mod system;
+mod system;
 
 /// Opaque error reported by snapshot operations or monitor startup.
 ///
@@ -218,24 +196,16 @@ pub fn record_session(
     recorder::record_session(class, event)
 }
 
-/// Records an event only while its originating session remains active.
+/// Records an event in `class` only while its originating session remains active.
 ///
 /// Returns `false` when the closure skips the event or no event is accepted.
 #[doc(hidden)]
-pub fn record_in_session(session: recorder::RecordingSession, event: impl FnOnce() -> Option<recorder::event::Record>) -> bool {
-    recorder::record_in_session(session, event)
-}
-
-/// Records a classified event only while its originating session remains active.
-///
-/// Returns `false` when the closure skips the event or no event is accepted.
-#[doc(hidden)]
-pub fn record_in_session_classified(
+pub fn record_in_session(
     session: recorder::RecordingSession,
     class: recorder::event::EventClass,
     event: impl FnOnce() -> Option<recorder::event::Record>,
 ) -> bool {
-    recorder::record_in_session_classified(session, class, event)
+    recorder::record_in_session(session, class, event)
 }
 
 /// Captures runtime events and all registered sources using `options`.
@@ -307,15 +277,36 @@ mod tests {
             Some(Record::object(EventKind::MutexAccess, object_id))
         })
         .unwrap();
-        let runtime = recorder::select_object_for(recorder::event::EventClass::RuntimeTask, object_id).unwrap();
+        let runtime = recorder::active_recording_session().unwrap();
 
-        assert!(record_in_session(general, || {
+        assert!(record_in_session(general, recorder::event::EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, object_id))
         }));
-        assert!(record_in_session_classified(
-            runtime,
-            recorder::event::EventClass::RuntimeTask,
-            || Some(Record::runtime(
+        assert!(record_in_session(runtime, recorder::event::EventClass::RuntimeTask, || Some(
+            Record::runtime(
+                recorder::event::EventTimestamp::now(),
+                EventKind::RuntimeCreated,
+                recorder::runtime::RuntimeEvent {
+                    runtime_id: recorder::runtime::RuntimeId::from_raw(1).unwrap(),
+                    worker_id: None,
+                    subject_id: 0,
+                    related_id: 0,
+                    value_0: 0,
+                    value_1: 0,
+                },
+                recorder::event::BacktraceCapture::Never,
+            )
+        )));
+        recorder(recorder::Configuration::default());
+
+        let constructed = AtomicUsize::new(0);
+        assert!(!record_in_session(general, recorder::event::EventClass::General, || {
+            constructed.fetch_add(1, Ordering::Relaxed);
+            Some(Record::object(EventKind::MutexAccess, object_id))
+        }));
+        assert!(!record_in_session(runtime, recorder::event::EventClass::RuntimeTask, || {
+            constructed.fetch_add(1, Ordering::Relaxed);
+            Some(Record::runtime(
                 recorder::event::EventTimestamp::now(),
                 EventKind::RuntimeCreated,
                 recorder::runtime::RuntimeEvent {
@@ -328,34 +319,7 @@ mod tests {
                 },
                 recorder::event::BacktraceCapture::Never,
             ))
-        ));
-        recorder(recorder::Configuration::default());
-
-        let constructed = AtomicUsize::new(0);
-        assert!(!record_in_session(general, || {
-            constructed.fetch_add(1, Ordering::Relaxed);
-            Some(Record::object(EventKind::MutexAccess, object_id))
         }));
-        assert!(!record_in_session_classified(
-            runtime,
-            recorder::event::EventClass::RuntimeTask,
-            || {
-                constructed.fetch_add(1, Ordering::Relaxed);
-                Some(Record::runtime(
-                    recorder::event::EventTimestamp::now(),
-                    EventKind::RuntimeCreated,
-                    recorder::runtime::RuntimeEvent {
-                        runtime_id: recorder::runtime::RuntimeId::from_raw(1).unwrap(),
-                        worker_id: None,
-                        subject_id: 0,
-                        related_id: 0,
-                        value_0: 0,
-                        value_1: 0,
-                    },
-                    recorder::event::BacktraceCapture::Never,
-                ))
-            }
-        ));
         assert_eq!(constructed.load(Ordering::Relaxed), 0);
     }
 }

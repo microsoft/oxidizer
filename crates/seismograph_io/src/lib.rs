@@ -244,7 +244,7 @@ impl Drop for Operation {
 }
 
 fn record_finish(recorded: RecordedOperation, completed_bytes: u64, outcome: IoOutcome, buffer: Option<impl FnOnce() -> BufferState>) {
-    seismograph::record_in_session_classified(recorded.session, EventClass::Io, || {
+    seismograph::record_in_session(recorded.session, EventClass::Io, || {
         let buffer = buffer.map_or(
             BufferState {
                 id: recorded.buffer_id,

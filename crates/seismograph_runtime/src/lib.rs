@@ -640,7 +640,7 @@ fn resolve_runtime_addresses(runtimes: &[Runtime]) -> Vec<snapshot::AddressLooku
     addresses.sort_unstable();
     addresses.dedup();
     let _suppression = SuppressionGuard::enter();
-    seismograph::snapshot::with_snapshot_arena_suspended(|| {
+    {
         let mut cache = lock(ADDRESS_LOOKUPS.get_or_init(|| Mutex::new(HashMap::new())));
         for &address in &addresses {
             if cache.contains_key(&address) {
@@ -666,7 +666,7 @@ fn resolve_runtime_addresses(runtimes: &[Runtime]) -> Vec<snapshot::AddressLooku
             );
             cache.insert(address, lookup);
         }
-    });
+    }
     let cache = lock(ADDRESS_LOOKUPS.get_or_init(|| Mutex::new(HashMap::new())));
     addresses.into_iter().map(|address| cache[&address].clone()).collect()
 }

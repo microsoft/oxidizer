@@ -330,20 +330,12 @@ pub struct RecordingObservation {
 
 /// Returns the active generation without touching thread-local recorder state.
 ///
-/// Sources must first use [`recording_enabled_for`] and revalidate this
-/// generation after acquiring their own state synchronization.
+/// Sources must first use [`recording_enabled_for`] and make sure that this
+/// generation remains active after acquiring their own state synchronization.
 #[doc(hidden)]
 #[must_use]
 pub fn active_recording_session() -> Option<RecordingSession> {
     RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire))
-}
-
-/// Reads a coherent recording observation, or `None` if configuration is busy.
-#[doc(hidden)]
-#[must_use]
-pub fn recording_observation() -> Option<RecordingObservation> {
-    let _configuration = ConfigurationLock::acquire_until(Instant::now())?;
-    recording_observation_locked()
 }
 
 fn recording_observation_locked() -> Option<RecordingObservation> {
@@ -458,58 +450,12 @@ pub(crate) fn configuration() -> Configuration {
     }
 }
 
-/// Returns whether any event class is currently enabled.
-#[doc(hidden)]
-#[must_use]
-#[inline]
-pub fn recording_enabled() -> bool {
-    !is_suppressed()
-        && (policy_enabled(ALLOCATION_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(GENERAL_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(ARC_DEREFERENCE_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(RUNTIME_TASK_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(IO_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(CACHE_POLICY.load(Ordering::Relaxed)))
-}
-
 /// Returns whether one event class is currently enabled.
 #[doc(hidden)]
 #[must_use]
 #[inline]
 pub fn recording_enabled_for(class: EventClass) -> bool {
     policy_enabled(policy_atomic(class).load(Ordering::Relaxed)) && !is_suppressed()
-}
-
-/// Selects an object for recording and binds it to the active session.
-#[must_use]
-#[inline]
-pub fn select_object(object_id: ObjectId) -> Option<RecordingSession> {
-    select_object_for(EventClass::General, object_id)
-}
-
-/// Selects an object in one event class and binds it to the active session.
-#[doc(hidden)]
-#[must_use]
-#[inline]
-pub fn select_object_for(class: EventClass, object_id: ObjectId) -> Option<RecordingSession> {
-    let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) || is_suppressed() {
-        return None;
-    }
-    let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-    if !decode_sampling(policy).includes(object_id) {
-        return None;
-    }
-    if !selection_still_current(class, policy, session) {
-        return None;
-    }
-    RecordingSession::from_raw(session)
-}
-
-#[inline]
-#[cfg_attr(coverage_nightly, coverage(off))] // State can change only in the race window between the paired loads.
-fn selection_still_current(class: EventClass, policy: u64, session: u64) -> bool {
-    session != 0 && policy_atomic(class).load(Ordering::Acquire) == policy && ACTIVE_SESSION.load(Ordering::Acquire) == session
 }
 
 /// Reads recorder counters without copying retained events.
@@ -641,21 +587,12 @@ fn record_session_enabled(class: EventClass, event: impl FnOnce() -> Option<Reco
         .then(|| RecordingSession::from_raw(session).expect("recording requires a nonzero active session"))
 }
 
-/// Records an event only while its originating session remains active.
-///
-/// A builder returning `None` intentionally omits the event and returns `false`.
-#[inline]
-pub(crate) fn record_in_session(session: RecordingSession, event: impl FnOnce() -> Option<Record>) -> bool {
-    record_in_session_classified(session, EventClass::General, event)
-}
-
-/// Records a classified event only while its originating session remains active.
+/// Records an event in `class` only while its originating session remains active.
 ///
 /// A builder returning `None` intentionally omits the event and returns `false`
 /// without initializing a recorder.
 #[inline]
-#[doc(hidden)]
-pub fn record_in_session_classified(session: RecordingSession, class: EventClass, event: impl FnOnce() -> Option<Record>) -> bool {
+pub(crate) fn record_in_session(session: RecordingSession, class: EventClass, event: impl FnOnce() -> Option<Record>) -> bool {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
     if !policy_enabled(policy) || is_suppressed() || ACTIVE_SESSION.load(Ordering::Relaxed) != session.get() {
         return false;
@@ -779,9 +716,8 @@ fn snapshot_from_recorders_until(
 }
 
 /// Returns whether telemetry-internal work is suppressed on this thread.
-#[doc(hidden)]
 #[must_use]
-pub fn is_suppressed() -> bool {
+fn is_suppressed() -> bool {
     SUPPRESSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
 }
 
@@ -2072,7 +2008,7 @@ mod tests {
         .join()
         .unwrap();
         let before = try_activity().unwrap();
-        let source_session = recording_observation().unwrap().session;
+        let source_session = recording_observation_locked().unwrap().session;
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
         let ring = recorder.ring_lock();
@@ -2084,7 +2020,7 @@ mod tests {
                 failed,
                 before.class_events,
                 after.class_events,
-                recording_observation().unwrap().session
+                recording_observation_locked().unwrap().session
             ),
             (true, [0, 2, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], source_session)
         );
@@ -2164,10 +2100,10 @@ mod tests {
         // SAFETY: this thread owns the process-lifetime recorder and its writer context.
         let recorder = unsafe { &*local_recorder() };
         let slot = recorder.ring().unwrap().slots[1].lock_until(wait_deadline()).unwrap();
-        let accepted = record_in_session(session, || Some(event));
+        let accepted = record_in_session(session, EventClass::General, || Some(event));
         drop(slot);
         let writer_active = recorder.writer_active.load(Ordering::Acquire);
-        let resumed = record_in_session(session, || Some(event));
+        let resumed = record_in_session(session, EventClass::General, || Some(event));
         let activity = try_activity().unwrap();
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
@@ -2279,7 +2215,7 @@ mod tests {
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
         drop(ring);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_in_session(session, || Some(event));
+        let resumed = record_in_session(session, EventClass::General, || Some(event));
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
         assert_eq!(
@@ -2539,11 +2475,11 @@ mod tests {
         std::thread::spawn(move || {
             let registered = RECORDERS.load(Ordering::Acquire);
             let constructed = Cell::new(0);
-            let omitted = record_in_session(session, || {
+            let omitted = record_in_session(session, EventClass::General, || {
                 constructed.set(constructed.get() + 1);
                 None
             });
-            let omitted_classified = record_in_session_classified(session, EventClass::Cache, || {
+            let omitted_cache = record_in_session(session, EventClass::Cache, || {
                 constructed.set(constructed.get() + 1);
                 None
             });
@@ -2552,7 +2488,7 @@ mod tests {
                 (
                     constructed.get(),
                     omitted,
-                    omitted_classified,
+                    omitted_cache,
                     LOCAL_RECORDER.with(|local| local.recorder.get().is_null()),
                     RECORDERS.load(Ordering::Acquire),
                     after.statistics,
@@ -2562,10 +2498,10 @@ mod tests {
                 (2, false, false, true, registered, before, [0; 6], 0)
             );
 
-            assert!(record_in_session(session, || {
+            assert!(record_in_session(session, EventClass::General, || {
                 Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
             }));
-            assert!(record_in_session_classified(session, EventClass::Cache, || {
+            assert!(record_in_session(session, EventClass::Cache, || {
                 Some(Record::object(EventKind::CacheHit, ObjectId::new(2)))
             }));
         })
@@ -2683,7 +2619,7 @@ mod tests {
                 BacktraceCapture::Never,
             ))
         });
-        assert!(!record_in_session_classified(session, EventClass::General, || {
+        assert!(!record_in_session(session, EventClass::General, || {
             Some(Record::runtime(
                 EventTimestamp::from_ticks(2),
                 EventKind::TaskSpawned,
@@ -2956,15 +2892,15 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = timeout_configuration();
         configure(enabled);
-        let active = recording_observation().unwrap();
+        let active = recording_observation_locked().unwrap();
         assert_eq!(SESSION_STOPPED_AT.load(Ordering::Acquire), 0);
         assert_eq!(Some(active.session), active_recording_session());
 
         configure(Configuration::default());
         let configured_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
-        let first = recording_observation().unwrap();
+        let first = recording_observation_locked().unwrap();
         std::thread::sleep(Duration::from_millis(1));
-        let second = recording_observation().unwrap();
+        let second = recording_observation_locked().unwrap();
         assert_eq!(
             (configured_stop, first.observed_at.ticks(), second.observed_at.ticks()),
             (configured_stop, configured_stop, configured_stop)
@@ -2980,7 +2916,7 @@ mod tests {
     }
 
     #[test]
-    fn every_recording_class_controls_global_and_class_enablement() {
+    fn every_recording_class_controls_class_enablement() {
         let _test = TEST_LOCK.lock().unwrap();
         let cases = [
             (
@@ -3029,14 +2965,10 @@ mod tests {
 
         for (enabled_class, configuration) in cases {
             configure(configuration);
-            assert!(recording_enabled());
-            assert!(select_object_for(enabled_class, ObjectId::new(1)).is_some());
             for (class, _) in cases {
                 assert_eq!(recording_enabled_for(class), class == enabled_class);
             }
         }
-        ACTIVE_SESSION.store(0, Ordering::Release);
-        assert!(select_object_for(EventClass::Cache, ObjectId::new(1)).is_none());
         configure(Configuration::default());
     }
 
@@ -3368,7 +3300,7 @@ mod tests {
         let error = try_snapshot(crate::snapshot::EventBufferDisposition::Stop).unwrap_err();
         drop(ring);
         assert!(error.to_string().contains("clearing an event recorder"));
-        assert!(!recording_enabled());
+        assert_eq!(configuration().general_events, RecordingPolicy::default());
         assert_ne!(recorder.ring_capacity.load(Ordering::Acquire), 0);
         try_snapshot(crate::snapshot::EventBufferDisposition::Stop).unwrap();
         assert_eq!(recorder.ring_capacity.load(Ordering::Acquire), 0);
@@ -3404,7 +3336,7 @@ mod tests {
                 drop(writer);
                 assert_eq!(receiver.recv_timeout(Duration::from_secs(3)).unwrap().unwrap(), usize::from(stop));
             });
-            assert_eq!(recording_enabled(), !stop);
+            assert_eq!(recording_enabled_for(EventClass::General), !stop);
         }
         configure(Configuration::default());
     }
@@ -3871,29 +3803,23 @@ mod tests {
             general_events: RecordingPolicy::all(false),
             ..test_configuration()
         });
-        assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));
-        let session = select_object(ObjectId::new(1)).unwrap();
+        let session = active_recording_session().unwrap();
         let constructed = Cell::new(0);
         let event = || {
             constructed.set(constructed.get() + 1);
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         };
-        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert!(record_in_session(session, EventClass::General, event));
         assert_eq!(constructed.get(), 1);
         {
             let _suppression = SuppressionGuard::enter();
-            assert!(!recording_enabled());
             assert!(!recording_enabled_for(EventClass::General));
-            assert_eq!(select_object(ObjectId::new(1)), None);
-            assert!(!record_in_session(session, event));
-            assert!(!record_in_session_classified(session, EventClass::General, event));
+            assert!(!record_in_session(session, EventClass::General, event));
         }
         configure(Configuration::default());
-        assert!(!recording_enabled());
-        assert_eq!(select_object(ObjectId::new(1)), None);
-        assert!(!record_in_session(session, event));
-        assert!(!record_in_session_classified(session, EventClass::General, event));
+        assert!(!recording_enabled_for(EventClass::General));
+        assert!(!record_in_session(session, EventClass::General, event));
         assert_eq!(constructed.get(), 1);
     }
 
@@ -3911,11 +3837,14 @@ mod tests {
             event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
             ..Default::default()
         });
-        assert_eq!(select_object(skipped), None);
+        assert_eq!(
+            record_session(EventClass::General, || Some(Record::object(EventKind::MutexAccess, skipped))),
+            None
+        );
         let selected = (1..100).map(ObjectId::new).find(|object| sampling.includes(*object)).unwrap();
-        let session = select_object(selected).unwrap();
+        let session = record_session(EventClass::General, || Some(Record::object(EventKind::MutexAccess, selected))).unwrap();
         let skipped_event = Record::object(EventKind::MutexAccess, skipped);
-        assert!(!record_in_session(session, || Some(skipped_event)));
+        assert!(!record_in_session(session, EventClass::General, || Some(skipped_event)));
         let local = local_recorder();
         let policy = GENERAL_POLICY.load(Ordering::Relaxed);
         let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
@@ -3933,38 +3862,15 @@ mod tests {
             constructed.set(constructed.get() + 1);
             Some(Record::object(EventKind::MutexAccess, selected))
         };
-        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert!(record_in_session(session, EventClass::General, event));
         assert_eq!(constructed.get(), 1);
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
             event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
             ..Default::default()
         });
-        assert!(!record_in_session(session, event));
-        assert!(!record_in_session_classified(session, EventClass::General, event));
+        assert!(!record_in_session(session, EventClass::General, event));
         assert_eq!(constructed.get(), 1);
-        configure(Configuration::default());
-    }
-
-    #[test]
-    fn selection_revalidation_rejects_each_stale_dimension() {
-        let _test = TEST_LOCK.lock().unwrap();
-        configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            ..Default::default()
-        });
-        let policy = GENERAL_POLICY.load(Ordering::Relaxed);
-        let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-
-        assert!(selection_still_current(EventClass::General, policy, session));
-        assert!(!selection_still_current(EventClass::General, policy, 0));
-        assert!(!selection_still_current(
-            EventClass::General,
-            policy ^ u64::from(RECORDING_ENABLED),
-            session,
-        ));
-        assert!(!selection_still_current(EventClass::General, policy, session + 1));
-
         configure(Configuration::default());
     }
 
@@ -4008,7 +3914,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_policy_participates_in_global_enablement() {
+    fn cache_policy_controls_class_enablement() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration::default());
         configure(Configuration {
@@ -4016,7 +3922,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!((recording_enabled(), recording_enabled_for(EventClass::Cache)), (true, true));
+        assert!(recording_enabled_for(EventClass::Cache));
         configure(Configuration::default());
     }
 

@@ -146,18 +146,16 @@ impl EventClock {
         }
     }
 
-    #[doc(hidden)]
     #[must_use]
-    pub const fn wire_value(self) -> u16 {
+    pub(crate) const fn wire_value(self) -> u16 {
         match self {
             Self::Unspecified => 0,
             Self::ProcessMonotonic => 1,
         }
     }
 
-    #[doc(hidden)]
     #[must_use]
-    pub const fn from_wire_value(value: u16) -> Option<Self> {
+    pub(crate) const fn from_wire_value(value: u16) -> Option<Self> {
         match value {
             0 => Some(Self::Unspecified),
             1 => Some(Self::ProcessMonotonic),
@@ -454,9 +452,8 @@ impl EventKind {
         }
     }
 
-    #[doc(hidden)]
     #[must_use]
-    pub const fn from_wire_value(value: u8) -> Option<Self> {
+    pub(crate) const fn from_wire_value(value: u8) -> Option<Self> {
         match value {
             1 => Some(Self::ArcDeref),
             2 => Some(Self::ArcClone),

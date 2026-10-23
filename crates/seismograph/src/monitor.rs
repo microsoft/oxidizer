@@ -1559,7 +1559,14 @@ mod tests {
         let bytes = snapshot_bytes(connected_response(&Request::CaptureSnapshotAndStop));
         let decoded = crate::snapshot::decode(&bytes).unwrap();
         assert_eq!(decoded.events.events.len(), 1);
-        assert!(!crate::recorder::recording_enabled());
+        assert_eq!(
+            crate::recorder::configuration(),
+            Configuration {
+                general_events: RecordingPolicy::default(),
+                cache: RecordingPolicy::default(),
+                ..configuration
+            }
+        );
         crate::recorder::configure(Configuration::default());
     }
 

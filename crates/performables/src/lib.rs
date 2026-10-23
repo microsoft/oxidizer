@@ -13,21 +13,6 @@
 //! Synchronization supports blocking callers and executor-independent async
 //! waits.
 //!
-//! [`sync::notify::Notify`] retains one coalesced notification for a later wait,
-//! with blocking and executor-independent async support through the same modes.
-//! Ready blocking channel operations do not allocate waiter storage. Queue
-//! payload storage and enabled telemetry may allocate independently. Final
-//! arrivals at an async-capable barrier do not allocate their own waiter storage;
-//! releasing other participants can still execute their wakers.
-//!
-//! With recording disabled, watch registration and cancellation reuse their
-//! reserved waiter slots after warm-up, up to the retained capacity. A
-//! single-participant barrier wait and condition-variable notifications with no
-//! waiters also allocate no primitive-owned storage on the owned Windows/Linux
-//! backends. These properties exclude construction, payload allocation and
-//! user-provided waker behavior; they do not promise stable object sizes or a
-//! particular memory layout.
-//!
 //! # Why use this instead of `std` or `tokio`?
 //!
 //! The crate offers:
@@ -46,17 +31,6 @@
 //!   process-wide value as `std::sync::Arc` does.
 //!
 //! See [`arc`] and [`sync`] for the available types and their full APIs.
-//!
-//! # Live monitor integration workload
-//!
-//! Run `cargo +1.95.0 test -p performables --features seismograph --test seismograph_monitor live_monitor -- --ignored --nocapture`
-//! in one terminal, then `cargo +1.95.0 run -p seismograph_cli -- monitor`
-//! in another terminal using the same checkout and OS environment.
-//! Select `performables-integration`,
-//! press Enter to connect, and press `s` to capture. The Primitives and Threads
-//! tabs show real mutex and Arc activity from three named worker threads.
-//! Press Enter in the workload terminal to stop it and remove its endpoint.
-//! No administrator setup or application changes are required.
 
 pub mod arc;
 pub mod sync;
