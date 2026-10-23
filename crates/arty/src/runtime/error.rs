@@ -8,6 +8,8 @@ use arty_executor::ShutdownError;
 use arty_io_core::DriverError;
 use performables::arc::Arc;
 
+use crate::runtime::shutdown::Shutdown;
+
 /// An error constructing or operating a runtime.
 ///
 /// You may receive this error when building a runtime with an invalid worker
@@ -65,6 +67,14 @@ impl Error {
 
     pub(crate) fn shutdown_failure(error: ShutdownError) -> Self {
         Self::new(ShutdownFailure::caused_by(error))
+    }
+
+    pub(crate) fn from_shutdown(shutdown: &Shutdown) -> Option<Self> {
+        shutdown.cause().map(|cause| {
+            cause
+                .into_error()
+                .map_or_else(Self::runtime_shutting_down, Self::shutdown_failure)
+        })
     }
 
     pub(crate) fn worker_panicked() -> Self {

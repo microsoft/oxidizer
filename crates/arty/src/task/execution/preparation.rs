@@ -12,7 +12,7 @@ use observed::context::Transfer;
 use pin_project::pin_project;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
-use crate::runtime::Shutdown;
+use crate::runtime::shutdown::Shutdown;
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 

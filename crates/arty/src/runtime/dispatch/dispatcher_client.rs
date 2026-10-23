@@ -23,7 +23,8 @@ use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 #[cfg(test)]
 use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::{Error, Shutdown, Workers};
+use crate::runtime::shutdown::Shutdown;
+use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
 
@@ -174,7 +175,7 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
         let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
@@ -198,7 +199,7 @@ mod tests {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             wfs,
@@ -241,7 +242,7 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default());
+        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
         let destination_shutdown = Shutdown::default();
         let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), destination_shutdown.clone());
         destination_shutdown.begin(ShutdownCause::default());
@@ -327,7 +328,7 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),

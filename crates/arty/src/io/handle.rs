@@ -149,12 +149,7 @@ impl ThreadAware for Io {
 }
 
 pub(super) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
-    dispatcher.shutdown().is_started().then(|| {
-        dispatcher
-            .shutdown()
-            .error()
-            .map_or_else(Error::runtime_shutting_down, Error::shutdown_failure)
-    })
+    Error::from_shutdown(dispatcher.shutdown())
 }
 
 pub(super) fn fail_runtime(dispatcher: &DispatcherClient, error: DriverError) -> Error {

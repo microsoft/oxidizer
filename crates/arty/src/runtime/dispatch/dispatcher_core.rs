@@ -18,7 +18,8 @@ use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
-use crate::runtime::{Error, Shutdown, Workers};
+use crate::runtime::shutdown::Shutdown;
+use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
@@ -198,9 +199,7 @@ impl DispatcherCore {
     }
 
     fn runtime_shutting_down_error(&self) -> Error {
-        self.shutdown()
-            .error()
-            .map_or_else(Error::runtime_shutting_down, Error::shutdown_failure)
+        Error::from_shutdown(self.shutdown()).expect("runtime_shutting_down_error is called only after shutdown starts")
     }
 
     pub(crate) const fn shutdown(&self) -> &Shutdown {
@@ -331,7 +330,7 @@ mod tests {
             blocking_worker: BlockingWorker::new(
                 BlockingPool::new(None),
                 observed::Sink::noop(),
-                crate::runtime::Shutdown::default(),
+                Shutdown::default(),
             ),
         }
     }

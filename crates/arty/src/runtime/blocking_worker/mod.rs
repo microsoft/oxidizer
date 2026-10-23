@@ -18,7 +18,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
-use crate::runtime::Shutdown;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
@@ -426,7 +426,7 @@ pub(super) mod blocking_worker_tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use crate::runtime::Shutdown;
+    use crate::runtime::shutdown::Shutdown;
     use crate::runtime::blocking_worker::{
         BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
     };

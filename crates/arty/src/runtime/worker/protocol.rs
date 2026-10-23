@@ -143,7 +143,7 @@ mod tests {
             |_| async { 42 },
             sink.transfer_context(),
             TaskPlacement::Any,
-            crate::runtime::Shutdown::default(),
+            crate::runtime::shutdown::Shutdown::default(),
         );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
