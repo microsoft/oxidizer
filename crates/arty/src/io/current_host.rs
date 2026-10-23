@@ -107,9 +107,16 @@ mod tests {
     use std::error::Error as _;
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions};
+    use nonempty::NonEmpty;
+    use performables::arc::Arc;
+    use performables::sync::channel;
     use thread_aware::{ThreadAware, ThreadBuilder};
 
     use super::*;
+    use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
+    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::shutdown::Shutdown;
+    use crate::runtime::thread::waiter::ThreadWaiter;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct TestContext {
@@ -167,7 +174,20 @@ mod tests {
     fn host() -> (IoRuntime, Thread, InstalledHost) {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
-        let dispatcher = DispatcherClient::for_test(&thread);
+        let (command_tx, _command_rx) = channel::unbounded();
+        let shutdown = Shutdown::default();
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: thread.clone(),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop(), shutdown.clone()),
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            observed::Sink::noop(),
+            shutdown,
+        )));
         let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
         (runtime, thread, InstalledHost)
     }

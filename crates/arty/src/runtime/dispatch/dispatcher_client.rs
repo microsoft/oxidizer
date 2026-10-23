@@ -3,25 +3,13 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-#[cfg(test)]
-use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
-#[cfg(test)]
-use nonempty::NonEmpty;
 use performables::arc::Arc;
-#[cfg(test)]
-use performables::sync::channel;
 
-#[cfg(test)]
-use crate::runtime::blocking_worker::BlockingPool;
 use crate::runtime::blocking_worker::BlockingWorker;
-#[cfg(test)]
-use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-#[cfg(test)]
-use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
@@ -36,30 +24,6 @@ pub(crate) struct DispatcherClient {
 impl DispatcherClient {
     pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
-    }
-
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
-        let (command_tx, _command_rx) = channel::unbounded();
-        let shutdown = Shutdown::default();
-        let endpoint = WorkerEndpoint {
-            command_tx,
-            waker: Waker::noop().clone(),
-            thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(
-                BlockingPool::new(None),
-                observed::Sink::noop(),
-                shutdown.clone(),
-            ),
-        };
-        Self::new(Arc::new(DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
-            NonEmpty::new(endpoint),
-            observed::Sink::noop(),
-            shutdown,
-        )))
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
