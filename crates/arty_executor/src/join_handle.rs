@@ -153,6 +153,7 @@ mod tests {
         let error = JoinError::panicked(Box::new(42_u64));
 
         assert_eq!(error.to_string(), "task panicked");
+        assert!(error.source().is_none());
         assert!(matches!(&error, JoinError::Panicked(_)));
         let JoinError::Panicked(payload) = error else {
             return;
