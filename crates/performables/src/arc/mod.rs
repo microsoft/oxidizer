@@ -1155,6 +1155,8 @@ mod tests {
 
     use super::*;
 
+    mod warm_relocation;
+
     #[test]
     fn per_process_has_standard_arc_size() {
         assert_eq!(size_of::<Arc<u64, PerProcess>>(), size_of::<StdArc<u64>>());
@@ -1556,42 +1558,6 @@ mod tests {
         assert_eq!(*value, 10);
         ThreadAware::relocate(&mut value, Some(&source), &destination);
         assert_eq!(*value, 20);
-    }
-
-    #[test]
-    fn warm_relocation_drops_unregistered_value_outside_storage_lock() {
-        #[derive(Clone)]
-        struct Probe {
-            selected: StdArc<std::sync::Mutex<Option<Arc<Self, PerThread>>>>,
-            unlocked_drops: StdArc<AtomicUsize>,
-        }
-
-        impl Drop for Probe {
-            fn drop(&mut self) {
-                if let Some(selected) = self.selected.lock().unwrap().as_ref()
-                    && selected.state.shared.inner.try_read().is_ok()
-                {
-                    self.unlocked_drops.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-        }
-
-        let selected = StdArc::new(std::sync::Mutex::new(None));
-        let unlocked_drops = StdArc::new(AtomicUsize::new(0));
-        let mut original = Arc::<Probe, PerThread>::from_unaware(Probe {
-            selected: StdArc::clone(&selected),
-            unlocked_drops: StdArc::clone(&unlocked_drops),
-        });
-        let mut relocated = original.clone();
-        let (_, destination) = Relocator::between_threads().relocate(&mut ());
-        relocated.relocate(None, &destination);
-        *selected.lock().unwrap() = Some(relocated);
-
-        original.relocate(None, &destination);
-        let observed = unlocked_drops.load(Ordering::Relaxed);
-        let retained = selected.lock().unwrap().take();
-        drop(retained);
-        assert_eq!(observed, 1);
     }
 
     #[test]
