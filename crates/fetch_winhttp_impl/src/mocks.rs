@@ -34,10 +34,11 @@
 //! narrows the caller's obligations, it does not discharge them.
 
 use std::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use future_assert::FutureTestExt;
+use performables::sync::mutex::{Mutex, MutexGuard};
 use plurality::Pool;
 use windows::Win32::Networking::WinHttp::{
     ERROR_WINHTTP_INCORRECT_HANDLE_STATE, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
@@ -330,7 +331,7 @@ fn installed_contexts() -> MutexGuard<'static, Vec<ContextRecord>> {
     static INSTALLED_CONTEXTS: Mutex<Vec<ContextRecord>> = Mutex::new(Vec::new());
 
     INSTALLED_CONTEXTS
-        .lock()
+        .lock_result()
         .expect("the harness runs nothing that can panic while this lock is held, so it cannot be poisoned")
 }
 
