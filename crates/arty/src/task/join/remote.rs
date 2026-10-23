@@ -56,8 +56,22 @@ where
     R: Send + 'static,
 {
     Pending(RemoteJoinHandle<R>),
-    Error(Option<JoinError>),
+    Error(Option<ImmediateError>),
     Completed,
+}
+
+enum ImmediateError {
+    Shutdown(ShutdownCause),
+    InvalidDestination,
+}
+
+impl ImmediateError {
+    fn into_join_error(self) -> JoinError {
+        match self {
+            Self::Shutdown(cause) => JoinError::shutdown(cause.into_error()),
+            Self::InvalidDestination => JoinError::invalid_destination(),
+        }
+    }
 }
 
 impl<R> JoinHandle<R>
@@ -73,7 +87,7 @@ where
 
     pub(crate) fn shutdown(cause: ShutdownCause) -> Self {
         Self {
-            state: State::Error(Some(JoinError::shutdown(cause.into_error()))),
+            state: State::Error(Some(ImmediateError::Shutdown(cause))),
             blocking_pool: None,
         }
     }
@@ -84,7 +98,7 @@ where
 
     pub(crate) fn invalid_destination() -> Self {
         Self {
-            state: State::Error(Some(JoinError::invalid_destination())),
+            state: State::Error(Some(ImmediateError::InvalidDestination)),
             blocking_pool: None,
         }
     }
@@ -122,8 +136,11 @@ where
                 Poll::Ready(result) => Poll::Ready(result.map_err(JoinError::from_executor)),
                 Poll::Pending => Poll::Pending,
             },
-            State::Error(error) => Poll::Ready(Err(error.take().expect("an immediate join error is returned exactly once"))),
-            State::Completed => panic!("JoinHandle polled after completion"),
+            State::Error(error) => Poll::Ready(Err(error
+                .take()
+                .expect("an immediate join error is returned exactly once")
+                .into_join_error())),
+            State::Completed => unreachable!("JoinHandle polled after completion"),
         };
         if result.is_ready() {
             this.state = State::Completed;

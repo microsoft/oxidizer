@@ -15,9 +15,9 @@ use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::shutdown::Shutdown;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
 use crate::task::{Builtins, Scheduler};
@@ -107,7 +107,7 @@ impl AsyncWorker {
         thread: Thread,
         sink: Sink,
         io: Io,
-        blocking_worker: Arc<BlockingWorker>,
+        blocking_worker: &BlockingWorker,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> Self {
@@ -644,7 +644,7 @@ mod tests {
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        AsyncWorker::new(command_rx, dispatcher, thread, sink, io, blocking_worker, clock, signal)
+        AsyncWorker::new(command_rx, dispatcher, thread, sink, io, blocking_worker.as_ref(), clock, signal)
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {

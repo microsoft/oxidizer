@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 use std::{fmt, thread};
 
-use arty_executor::remote::Pool as RemotePool;
 use arty_executor::discard_task_panic_payload;
+use arty_executor::remote::Pool as RemotePool;
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
@@ -219,10 +219,7 @@ impl BlockingWorker {
             completion();
         };
 
-        if !self.runtime_shutdown.is_started()
-            && self.pool.execute(task)
-            && self.pool.record_saturation_transition()
-        {
+        if !self.runtime_shutdown.is_started() && self.pool.execute(task) && self.pool.record_saturation_transition() {
             emit!(
                 &self.sink,
                 BlockingWorkerPoolSaturated {
@@ -426,10 +423,10 @@ pub(super) mod blocking_worker_tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use crate::runtime::shutdown::Shutdown;
     use crate::runtime::blocking_worker::{
         BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
     };
+    use crate::runtime::shutdown::Shutdown;
 
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()

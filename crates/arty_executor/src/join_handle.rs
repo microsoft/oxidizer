@@ -18,7 +18,6 @@ use crate::{ShutdownCause, ShutdownError, TaskPanicPayload};
 /// because of an error. A panic payload need not implement [`Error`].
 pub enum JoinError {
     /// The task panicked.
-    ///
     // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
     // thread-safe error while preserving the original payload for `into_panic`.
     Panicked(Mutex<TaskPanicPayload>),
@@ -47,7 +46,6 @@ impl JoinError {
     pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
         Self::Panicked(Mutex::new(panic))
     }
-
 }
 
 impl Display for JoinError {

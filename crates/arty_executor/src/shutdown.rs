@@ -114,12 +114,13 @@ impl Debug for ShutdownCause {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::fmt::{self, Display};
+    use std::error::Error;
+    use std::fmt::{self, Debug, Display};
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use static_assertions::assert_impl_all;
 
-    use super::*;
+    use super::{ShutdownCause, ShutdownError};
 
     #[derive(Debug)]
     struct SourceError;

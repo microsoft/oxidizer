@@ -15,10 +15,10 @@ use performables::sync::channel;
 use thread_aware::Thread;
 
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
-use crate::runtime::shutdown::Shutdown;
 use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
@@ -315,11 +315,7 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(
-                BlockingPool::new(None),
-                observed::Sink::noop(),
-                Shutdown::default(),
-            ),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop(), Shutdown::default()),
         }
     }
 

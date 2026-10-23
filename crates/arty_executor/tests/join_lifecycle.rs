@@ -638,10 +638,7 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     let mut submitted_handle = submitted.borrow_mut().take().expect("future destructor submitted a task");
-    assert!(matches!(
-        poll_once(&mut submitted_handle),
-        Poll::Ready(Err(JoinError::Shutdown(_)))
-    ));
+    assert!(matches!(poll_once(&mut submitted_handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]

@@ -26,6 +26,30 @@ impl DispatcherClient {
         Self { core }
     }
 
+    #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
+        let (command_tx, _command_rx) = performables::sync::channel::unbounded();
+        let shutdown = Shutdown::default();
+        let endpoint = crate::runtime::dispatch::WorkerEndpoint {
+            command_tx,
+            waker: std::task::Waker::noop().clone(),
+            thread: thread.clone(),
+            blocking_worker: BlockingWorker::new(
+                crate::runtime::blocking_worker::BlockingPool::new(None),
+                observed::Sink::noop(),
+                shutdown.clone(),
+            ),
+        };
+        Self::new(Arc::new(DispatcherCore::new(
+            crate::runtime::thread::waiter::ThreadWaiter::new(Vec::new()),
+            nonempty::NonEmpty::new(endpoint),
+            observed::Sink::noop(),
+            shutdown,
+        )))
+    }
+
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.core.worker_index(thread_id)
     }
@@ -119,12 +143,17 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::task::Waker;
+
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
+    use performables::sync::channel;
     use thread_aware::{Thread, ThreadAware};
 
     use super::*;
-    use crate::runtime::dispatch::test_threads;
+    use crate::runtime::blocking_worker::BlockingPool;
+    use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
+    use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::scheduler::Scheduler;
 
     #[test]

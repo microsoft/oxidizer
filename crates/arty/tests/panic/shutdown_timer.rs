@@ -94,12 +94,14 @@ fn worker_panic_cause_reaches_other_task() {
             });
         ready.recv_timeout(TEST_TIMEOUT).unwrap();
         let (panicked, panic_observed) = mpsc::channel();
-        let timer = runtime.scheduler().spawn_anywhere(Unaware(panicked), |cx, Unaware(panicked)| async move {
-            let mut timer = cx.clock().delay(Duration::from_millis(2));
-            let waker = Waker::from(Arc::new(WorkerPanicWake(panicked)));
-            assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
-            std::mem::forget(timer);
-        });
+        let timer = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(panicked), |cx, Unaware(panicked)| async move {
+                let mut timer = cx.clock().delay(Duration::from_millis(2));
+                let waker = Waker::from(Arc::new(WorkerPanicWake(panicked)));
+                assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
+                std::mem::forget(timer);
+            });
         timer.join().unwrap();
         panic_observed.recv_timeout(TEST_TIMEOUT).unwrap();
 

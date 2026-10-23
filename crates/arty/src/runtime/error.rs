@@ -70,11 +70,9 @@ impl Error {
     }
 
     pub(crate) fn from_shutdown(shutdown: &Shutdown) -> Option<Self> {
-        shutdown.cause().map(|cause| {
-            cause
-                .into_error()
-                .map_or_else(Self::runtime_shutting_down, Self::shutdown_failure)
-        })
+        shutdown
+            .cause()
+            .map(|cause| cause.into_error().map_or_else(Self::runtime_shutting_down, Self::shutdown_failure))
     }
 
     pub(crate) fn worker_panicked() -> Self {

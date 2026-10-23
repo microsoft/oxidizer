@@ -15,13 +15,13 @@ use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::shutdown::Shutdown;
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
@@ -235,16 +235,7 @@ impl AsyncWorkerStartInfo {
         let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        let mut worker = AsyncWorker::new(
-            command_rx,
-            dispatcher.clone(),
-            current,
-            sink,
-            io,
-            Arc::clone(&blocking_worker),
-            clock,
-            signal,
-        );
+        let mut worker = AsyncWorker::new(command_rx, dispatcher.clone(), current, sink, io, &blocking_worker, clock, signal);
 
         emit!(
             worker_sink,
