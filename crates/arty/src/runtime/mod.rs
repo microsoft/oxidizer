@@ -44,7 +44,7 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
-pub(crate) mod shutdown;
+mod shutdown;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -60,11 +60,13 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
+pub(crate) use shutdown::Shutdown;
 #[doc(inline)]
 pub use workers::Workers;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]
+#[doc(hidden)]
 pub mod __private {
     use std::error::Error as _;
 
