@@ -54,6 +54,45 @@ fn do_something(sink: &Sink) {
 }
 ```
 
+## Whole-event metric bindings
+
+Metric destinations register an event type at startup. The event macro
+supplies a static field inventory, including instrument metadata:
+
+```rust
+use observed::processing::MetricBindings;
+use observed::{Event, event};
+
+#[event("request.completed")]
+#[counter(bytes_sent, name = "bytes_sent", unit = "By")]
+struct RequestCompleted {
+    #[unredacted]
+    bytes_sent: u32,
+}
+
+let mut bindings = MetricBindings::new();
+// A destination prepares one target for each declared instrument.
+bindings
+    .bind_event::<RequestCompleted>(|metric| metric.instrument_name())
+    .unwrap();
+let instrument = RequestCompleted::DESCRIPTION.fields()[0]
+    .metric()
+    .unwrap()
+    .instrument_description()
+    .unwrap();
+assert_eq!(instrument.unit(), "By");
+```
+
+Destination processors use [`MetricBindings`][__link4]
+to associate complete events with prepared targets. Numeric recording selects event
+identities and stable field indices without string matching, hashing, or allocating.
+The field visitor enumerates routed fields but evaluates only bound numeric getters,
+without redaction or enrichment visits. Events emitted through a sink follow
+that sink’s timestamp, context, and sampling rules.
+Each instrument declares a [`MetricValueKind`][__link5].
+Binding delivers the existing [`Value`][__link6] type, normalizing unsigned measurements
+to `Value::U64` and retaining signed integers and floats without losing precision.
+
 ## Enrichment
 
 Enrichment attaches key-value context to **every event** emitted within a scope.
@@ -62,8 +101,8 @@ should appear on all telemetry without being passed explicitly to each event.
 
 ### Scoped enrichment
 
-Use the [`EnrichFutureExt::enrich`][__link4] or
-[`EnrichFnExt::enrich`][__link5] extension
+Use the [`EnrichFutureExt::enrich`][__link7] or
+[`EnrichFnExt::enrich`][__link8] extension
 methods to attach entries to a future or closure. The entries are pushed onto
 the thread-local slot on every poll (or call) and popped when the poll
 completes:
@@ -98,9 +137,9 @@ a spawner, a `tower` layer, or similar middleware.
 
 Integrators transfer it explicitly:
 
-* [`Sink::transfer_context`][__link6] snapshots the current thread’s enrichment into a
-  plain, sendable [`Transfer`][__link7] value.
-* [`EnrichFutureExt::attach`][__link8] wraps a
+* [`Sink::transfer_context`][__link9] snapshots the current thread’s enrichment into a
+  plain, sendable [`Transfer`][__link10] value.
+* [`EnrichFutureExt::attach`][__link11] wraps a
   future so the captured enrichment is restored **on every poll** and removed
   again before the future yields.
 
@@ -109,15 +148,15 @@ lifetime of the returned guard, so any emission made through the original sink
 on that thread also sees the transferred entries.
 
 To add entries of your own, put them **in the transfer** with
-[`Transfer::with_enrichment`][__link9] or
-[`Transfer::with_enrichment_for`][__link10].
+[`Transfer::with_enrichment`][__link12] or
+[`Transfer::with_enrichment_for`][__link13].
 That is what an integration wants: it is independent of wrapper order, so it
 keeps working once the future is boxed or wrapped again further out - both of
 which happen in real integrations.
 
-Wrapping [`enrich`][__link11] around
+Wrapping [`enrich`][__link14] around
 `attach` also works for a single `attach` on a plain, non-boxed future, since
-[`Transferred::enrich`][__link12] re-orders the two.
+[`Transferred::enrich`][__link15] re-orders the two.
 That is a convenience for hand-written code, not a general guarantee - see its
 docs for the shapes it does not cover.
 
@@ -138,11 +177,11 @@ let _ = task;
 ```
 
 For synchronous work you can instead apply the low-level guard directly via
-[`Transfer::apply_current_thread`][__link13].
+[`Transfer::apply_current_thread`][__link16].
 **Never hold that guard across an `.await`**: because it mutates a thread-local,
 the enrichment would stay active while the task is suspended and leak into
 unrelated tasks that the runtime schedules on the same thread. Use
-[`attach`][__link14] for async code so the
+[`attach`][__link17] for async code so the
 guard is scoped to a single poll.
 
 ### Resolution at emission time
@@ -156,19 +195,22 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKjbIWh5Saasb3Q6nH8YFiegbx_otY0Te-H0b2d0E4ceQ9gVhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjGCaG9ic2VydmVkZjAuMjkuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvsAocyHvvI4bs42yJTPARtgbqNpls1iA0rgbtN4v3H8TaIRhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjGCaG9ic2VydmVkZjAuMjkuMA
  [__link0]: `emit!`
  [__link1]: https://docs.rs/data_privacy/0.13.1/data_privacy/?search=RedactionEngine
- [__link10]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::with_enrichment_for
- [__link11]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::enrich
- [__link12]: https://docs.rs/observed/0.29.0/observed/?search=context::Transferred::enrich
- [__link13]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::apply_current_thread
- [__link14]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::attach
+ [__link10]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer
+ [__link11]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::attach
+ [__link12]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::with_enrichment
+ [__link13]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::with_enrichment_for
+ [__link14]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::enrich
+ [__link15]: https://docs.rs/observed/0.29.0/observed/?search=context::Transferred::enrich
+ [__link16]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::apply_current_thread
+ [__link17]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::attach
  [__link2]: https://docs.rs/observed/0.29.0/observed/?search=EventSampler
  [__link3]: https://docs.rs/observed/0.29.0/observed/?search=processing::EventProcessor
- [__link4]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::enrich
- [__link5]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFnExt::enrich
- [__link6]: https://docs.rs/observed/0.29.0/observed/?search=Sink::transfer_context
- [__link7]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer
- [__link8]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::attach
- [__link9]: https://docs.rs/observed/0.29.0/observed/?search=context::Transfer::with_enrichment
+ [__link4]: https://docs.rs/observed/0.29.0/observed/?search=processing::MetricBindings
+ [__link5]: https://docs.rs/observed/0.29.0/observed/?search=metadata::MetricValueKind
+ [__link6]: https://docs.rs/observed/0.29.0/observed/?search=Value
+ [__link7]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFutureExt::enrich
+ [__link8]: https://docs.rs/observed/0.29.0/observed/?search=enrichment::EnrichFnExt::enrich
+ [__link9]: https://docs.rs/observed/0.29.0/observed/?search=Sink::transfer_context

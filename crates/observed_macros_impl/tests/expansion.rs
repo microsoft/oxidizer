@@ -71,6 +71,64 @@ fn report(rows: impl IntoIterator<Item = (String, String)>) -> String {
 /// struct-level attributes rather than the fields.
 const ONE_FIELD: &str = "struct Subject { #[unredacted] v: u64 }";
 
+#[test]
+fn pointer_sized_metric_access_uses_explicit_widening() {
+    insta::assert_snapshot!(expand_event(
+        r#""pointer.metrics""#,
+        r"
+        #[counter(bytes)]
+        #[updown_counter(delta)]
+        struct PointerMetrics {
+            #[unredacted]
+            bytes: usize,
+            #[unredacted]
+            delta: isize,
+        }
+        ",
+    ));
+}
+
+#[test]
+fn whole_event_metadata_does_not_generate_conflicting_associated_keys() {
+    insta::assert_snapshot!(expand_event(
+        r#""request""#,
+        r#"
+        #[counter(name = "bytes_sent")]
+        #[counter(bytes_sent)]
+        struct Request {
+            #[unredacted]
+            bytes_sent: u32,
+        }
+        "#,
+    ));
+}
+
+#[test]
+fn whole_event_metadata_preserves_raw_fields_and_instrument_names() {
+    insta::assert_snapshot!(expand_event(
+        r#""request""#,
+        r#"
+        #[counter(name = "123.total")]
+        #[counter(r#type, name = "kind")]
+        struct Request {
+            #[unredacted]
+            r#type: u32,
+        }
+        "#,
+    ));
+}
+
+#[test]
+fn whole_event_metadata_preserves_non_identifier_counter_names() {
+    insta::assert_snapshot!(expand_event(
+        r#""request""#,
+        r#"
+        #[counter(name = "!")]
+        struct Request;
+        "#,
+    ));
+}
+
 // ============================================================================================
 // #[event(...)]
 // ============================================================================================

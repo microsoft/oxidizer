@@ -141,7 +141,7 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
 pub(crate) struct NoopEvent;
 
 impl Event for NoopEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new("noop", None, None, None, false, false);
+    const DESCRIPTION: EventDescription = EventDescription::new("noop");
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -157,7 +157,7 @@ mod tests {
     struct TestEvent;
 
     impl Event for TestEvent {
-        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
+        const DESCRIPTION: EventDescription = EventDescription::new("test.event");
 
         fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())

@@ -14,9 +14,8 @@ pub struct SourceLocation {
 }
 
 impl SourceLocation {
-    /// Creates a new source location.
     #[must_use]
-    pub const fn new(crate_name: &'static str, file: &'static str, line: u32) -> Self {
+    pub(crate) const fn new(crate_name: &'static str, file: &'static str, line: u32) -> Self {
         Self { crate_name, file, line }
     }
 

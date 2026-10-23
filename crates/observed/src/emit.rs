@@ -48,7 +48,7 @@ macro_rules! emit {
     ($sink:expr, $event:expr $(,)?) => {{
         ::core::convert::AsRef::<$crate::Sink>::as_ref(&$sink).emit::<_, _>(
             || $event,
-            $crate::metadata::SourceLocation::new(::core::env!("CARGO_PKG_NAME"), ::core::file!(), ::core::line!()),
+            $crate::__private::source_location(::core::env!("CARGO_PKG_NAME"), ::core::file!(), ::core::line!()),
         );
     }};
 }

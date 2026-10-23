@@ -1,4 +1,15 @@
 +
+Perflib
+Perflib's
+V2
+DLL
+UUID
+UUIDs
+NUL
+PerfMon
+PDH
+PERFLIBREQUEST
+metacharacters
 ACL
 IPC
 UID
@@ -244,6 +255,7 @@ DQUOTE
 Fetch
 Fetch's
 GUID
+GUIDs
 HSTS
 HTAB
 HTTP's
