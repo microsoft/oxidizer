@@ -18,7 +18,6 @@
 //! - Cross-thread context transfer (`Sink::transfer_context`)
 
 use std::cell::RefCell;
-use std::future::Future;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
