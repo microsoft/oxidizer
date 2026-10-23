@@ -123,6 +123,35 @@ pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
 }
 
+struct PendingResult<R: Send + 'static> {
+    sender: Option<RemoteSender<R>>,
+    shutdown: Shutdown,
+}
+
+impl<R: Send + 'static> PendingResult<R> {
+    fn new(sender: RemoteSender<R>, shutdown: Shutdown) -> Self {
+        Self {
+            sender: Some(sender),
+            shutdown,
+        }
+    }
+
+    fn into_sender(mut self) -> RemoteSender<R> {
+        self.sender.take().expect("a pending result sender is consumed exactly once")
+    }
+}
+
+impl<R: Send + 'static> Drop for PendingResult<R> {
+    fn drop(&mut self) {
+        let Some(sender) = self.sender.take() else {
+            return;
+        };
+        if let Err(panic) = sender.shutdown(self.shutdown.cause().unwrap_or_default()) {
+            discard_task_panic_payload(panic);
+        }
+    }
+}
+
 #[must_use]
 pub(crate) struct RegisteredRemoteTask;
 
@@ -167,7 +196,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = result_pool.channel();
-    let join_shutdown = shutdown.clone();
+    let result_tx = PendingResult::new(result_tx, shutdown);
     let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
@@ -177,9 +206,9 @@ where
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
         let options = TaskOptions::observed(parent_task_enrichment, placement);
-        tasks.add_with_remote_result(inner, options, result_tx);
+        tasks.add_with_remote_result(inner, options, result_tx.into_sender());
     });
-    (future_factory, JoinHandle::new(result_rx, join_shutdown))
+    (future_factory, JoinHandle::new(result_rx))
 }
 
 pub(crate) fn prepare_blocking<F, R>(
@@ -194,12 +223,14 @@ where
     let (result_tx, result_rx) = result_pool.channel();
     let task = BlockingTask {
         pending: Some((body, result_tx)),
+        shutdown,
     };
-    (move || task.run(), JoinHandle::new(result_rx, shutdown))
+    (move || task.run(), JoinHandle::new(result_rx))
 }
 
 struct BlockingTask<F, R: Send + 'static> {
     pending: Option<(F, RemoteSender<R>)>,
+    shutdown: Shutdown,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -225,7 +256,9 @@ impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
             return;
         };
         discard_panicking_drop(body);
-        discard_panicking_drop(result_tx);
+        if let Err(panic) = result_tx.shutdown(self.shutdown.cause().unwrap_or_default()) {
+            discard_task_panic_payload(panic);
+        }
     }
 }
 
@@ -233,6 +266,7 @@ impl<F, R: Send + 'static> Drop for BlockingTask<F, R> {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
     use std::cell::RefCell;
+    use std::error::Error as _;
     use std::panic::panic_any;
     use std::pin::pin;
     use std::rc::Rc;
@@ -404,7 +438,9 @@ mod tests {
     #[test]
     fn discarded_preparation_reports_shutdown() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), || 42);
+        let shutdown = Shutdown::default();
+        shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
+        let (task, handle) = prepare_blocking(&result_pool, shutdown, || 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
@@ -413,6 +449,27 @@ mod tests {
             panic!("discarded work must report shutdown");
         };
         assert!(error.is_shutdown());
+        assert_eq!(error.source().unwrap().to_string(), "blocking shutdown");
+    }
+
+    #[test]
+    fn discarded_remote_factory_reports_the_shutdown_cause() {
+        let result_pool = RemotePool::new();
+        let shutdown = Shutdown::default();
+        shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("queued shutdown")).into());
+        let (factory, handle) = prepare_remote(
+            &result_pool,
+            |_| async { 42 },
+            Sink::noop().transfer_context(),
+            TaskPlacement::Any,
+            shutdown,
+        );
+
+        drop(factory);
+
+        let error = block_on(handle).unwrap_err();
+        assert!(error.is_shutdown());
+        assert_eq!(error.source().unwrap().to_string(), "queued shutdown");
     }
 
     #[test]

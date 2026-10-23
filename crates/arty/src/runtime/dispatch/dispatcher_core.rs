@@ -267,7 +267,10 @@ impl DispatcherCore {
     {
         if self.shutdown().is_started() {
             drop(future_factory);
-            return JoinHandle::shutdown(&self.remote_results, self.shutdown.clone());
+            return JoinHandle::shutdown(
+                &self.remote_results,
+                self.shutdown().cause().unwrap_or_default(),
+            );
         }
         let endpoint = self
             .worker_endpoints

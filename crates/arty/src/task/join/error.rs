@@ -8,8 +8,6 @@ use std::fmt::{self, Debug, Display};
 use arty_executor::ShutdownError;
 use performables::sync::mutex::Mutex;
 
-use crate::runtime::Shutdown;
-
 /// A task failed to return its result.
 ///
 /// Returned by [`JoinHandle`](super::JoinHandle) and as the source of a
@@ -142,11 +140,11 @@ impl JoinError {
 }
 
 impl JoinError {
-    pub(crate) fn from_executor(error: arty_executor::JoinError, shutdown: &Shutdown) -> Self {
+    pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
         if error.is_panic() {
             return Self::panicked(error.into_panic().expect("the executor join error was checked as a panic"));
         }
-        Self::shutdown(error.into_shutdown_error().or_else(|| shutdown.error()))
+        Self::shutdown(error.into_shutdown_error())
     }
 }
 

@@ -125,7 +125,12 @@ impl<R: Send + 'static> Sender<R> {
         self.send(TaskResult::Panicked(panic))
     }
 
-    pub(crate) fn shutdown(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
+    /// Sends executor shutdown as the task outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns a panic payload if notifying the result receiver panics.
+    pub fn shutdown(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Shutdown(cause))
     }
 }

@@ -5,11 +5,11 @@ use std::pin::Pin;
 use std::task::{self, Poll};
 
 use arty_executor::remote::{JoinHandle as RemoteJoinHandle, Pool as RemotePool};
+use arty_executor::{ShutdownCause, discard_task_panic_payload};
 use performables::arc::Arc;
 use pin_project::pin_project;
 
 use super::JoinError;
-use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
 
 /// A handle for receiving an async or blocking task's result.
@@ -53,33 +53,35 @@ where
     invalid_destination: bool,
     blocking_pool: Option<Arc<()>>,
     completed: bool,
-    shutdown: Shutdown,
 }
 
 impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(crate) fn new(inner: RemoteJoinHandle<R>, shutdown: Shutdown) -> Self {
+    pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
         Self {
             inner,
             invalid_destination: false,
             blocking_pool: None,
             completed: false,
-            shutdown,
         }
     }
 
-    pub(crate) fn shutdown(pool: &RemotePool, shutdown: Shutdown) -> Self {
+    pub(crate) fn shutdown(pool: &RemotePool, cause: ShutdownCause) -> Self {
         let (sender, inner) = pool.channel();
-        drop(sender);
-        Self::new(inner, shutdown)
+        if let Err(panic) = sender.shutdown(cause) {
+            discard_task_panic_payload(panic);
+        }
+        Self::new(inner)
     }
 
-    pub(crate) fn invalid_destination(pool: &RemotePool, shutdown: Shutdown) -> Self {
+    pub(crate) fn invalid_destination(pool: &RemotePool) -> Self {
+        let (sender, inner) = pool.channel();
+        drop(sender);
         Self {
             invalid_destination: true,
-            ..Self::shutdown(pool, shutdown)
+            ..Self::new(inner)
         }
     }
 
@@ -119,7 +121,7 @@ where
         match this.inner.poll(cx) {
             Poll::Ready(result) => {
                 *this.completed = true;
-                Poll::Ready(result.map_err(|error| JoinError::from_executor(error, this.shutdown)))
+                Poll::Ready(result.map_err(JoinError::from_executor))
             }
             Poll::Pending => Poll::Pending,
         }
