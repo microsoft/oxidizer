@@ -329,7 +329,11 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                observed::Sink::noop(),
+                crate::runtime::Shutdown::default(),
+            ),
         }
     }
 

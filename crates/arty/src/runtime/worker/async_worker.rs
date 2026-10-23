@@ -339,6 +339,10 @@ mod tests {
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::RemoteFutureFactory;
 
+    fn test_blocking_worker() -> Arc<BlockingWorker> {
+        BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default())
+    }
+
     #[test]
     fn suspend_budget_requires_suspend_outcome_and_non_exhausted_batch() {
         assert!(can_suspend(CycleOutcome::Suspend, false));
@@ -376,7 +380,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::from(control.clone()),
             Arc::clone(&signal),
         );
@@ -410,7 +414,7 @@ mod tests {
             let mut worker = test_worker(
                 command_tx.clone(),
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_worker(),
                 InactiveClock::default(),
                 Arc::clone(&signal),
             );
@@ -459,7 +463,7 @@ mod tests {
             let mut worker = test_worker(
                 command_tx.clone(),
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_worker(),
                 InactiveClock::default(),
                 signal,
             );
@@ -512,7 +516,7 @@ mod tests {
             let mut worker = test_worker(
                 command_tx,
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_worker(),
                 control.clone().into(),
                 Arc::clone(&signal),
             );
@@ -689,7 +693,7 @@ mod tests {
             let worker = test_worker(
                 command_tx.clone(),
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_worker(),
                 control.clone().into(),
                 Arc::clone(&signal),
             );
@@ -869,7 +873,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             control.clone().into(),
             Arc::new(WorkerSignal::default()),
         );
@@ -907,7 +911,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::clone(&signal),
         );
@@ -938,7 +942,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::clone(&signal),
         );
@@ -978,7 +982,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -1005,7 +1009,7 @@ mod tests {
             let worker_signal = Arc::clone(&signal);
 
             let async_worker_thread = thread::spawn(move || {
-                let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+                let blocking_worker = test_blocking_worker();
 
                 let mut worker = test_worker(
                     worker_command_tx,
@@ -1070,7 +1074,7 @@ mod tests {
                 let mut worker = test_worker(
                     worker_command_tx,
                     command_rx,
-                    BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                    test_blocking_worker(),
                     InactiveClock::default(),
                     worker_signal,
                 );
@@ -1121,7 +1125,7 @@ mod tests {
             let mut worker = test_worker(
                 worker_command_tx,
                 command_rx,
-                BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+                test_blocking_worker(),
                 InactiveClock::default(),
                 worker_signal,
             );
@@ -1158,7 +1162,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -1183,7 +1187,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx,
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -1206,7 +1210,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -1239,7 +1243,7 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            test_blocking_worker(),
             InactiveClock::default(),
             Arc::new(WorkerSignal::default()),
         );
@@ -1268,7 +1272,7 @@ mod tests {
     #[test]
     fn dropping_worker_without_run_cleans_up_safely() {
         let (commands, receiver) = channel::unbounded();
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let blocking_worker = test_blocking_worker();
         let worker = test_worker(
             commands,
             receiver,
@@ -1285,7 +1289,7 @@ mod tests {
     #[test]
     fn explicit_executor_shutdown_completes_worker_shutdown() {
         let (commands, receiver) = channel::unbounded();
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let blocking_worker = test_blocking_worker();
         let signal = Arc::new(WorkerSignal::default());
         let mut worker = test_worker(
             commands.clone(),

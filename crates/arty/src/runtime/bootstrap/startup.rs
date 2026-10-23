@@ -215,7 +215,7 @@ impl AsyncWorkerStartInfo {
         clock.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker = BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), shutdown);
+        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone(), shutdown);
 
         let signal = Arc::new(WorkerSignal::default());
         let worker_waker = WorkerSignal::waker(&signal);

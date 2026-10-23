@@ -241,7 +241,7 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default()),
         };
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
@@ -259,7 +259,7 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default()),
         };
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
