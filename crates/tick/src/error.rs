@@ -122,7 +122,6 @@ impl Error {
     ///
     /// The status is [`BacktraceStatus::Disabled`](std::backtrace::BacktraceStatus::Disabled)
     /// when backtrace capture is disabled.
-    #[must_use]
     pub const fn backtrace(&self) -> &Backtrace {
         &self.backtrace
     }
