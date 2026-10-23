@@ -20,15 +20,21 @@ categories = ["asynchronous"]
 private-api = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["observed::context::transfer::Transfer", "observed::sink::core::Sink"]
+allowed_external_types = [
+    "observed::context::transfer::Transfer",
+    "observed::sink::core::Sink",
+    "thread_aware_core::thread::Thread",
+]
 
 [dependencies]
 data_privacy = { workspace = true }
 events_once = { workspace = true }
 nm = { workspace = true }
 observed = { workspace = true }
+performables = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
+thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
@@ -38,7 +44,6 @@ derive_more = { workspace = true, features = ["debug"] }
 foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
-mockall = { workspace = true }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 scopeguard = { workspace = true }

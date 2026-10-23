@@ -3,6 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
+use arty_executor::remote::Pool as RemotePool;
 use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
@@ -28,6 +29,8 @@ struct CurrentWorker {
     thread: Thread,
     builtins: Builtins,
     tasks: TaskSet,
+    // Child submissions must not contend with every other worker's result-channel rentals.
+    results: RemotePool,
 }
 
 /// A worker-bound handle for submitting async and blocking tasks.
@@ -88,6 +91,7 @@ impl Scheduler {
                 thread: builtins.thread().clone(),
                 builtins,
                 tasks,
+                results: RemotePool::new(),
             });
         });
     }
@@ -211,12 +215,11 @@ impl Scheduler {
             if current.thread != self.binding.thread {
                 return Err(future_factory);
             }
-            let sink = current.builtins.sink().clone();
+            let sink = current.builtins.sink();
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
-            let (result_tx, result_rx) = self.dispatcher.remote_results().channel();
-            let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
-            let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
+            let (result_tx, result_rx) = current.results.channel();
+            let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);

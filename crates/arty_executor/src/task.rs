@@ -3,10 +3,9 @@
 
 #[cfg(all(debug_assertions, test))]
 use std::backtrace::Backtrace;
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::fmt::Debug;
-use std::marker::{PhantomData, PhantomPinned};
-use std::mem::ManuallyDrop;
+use std::marker::PhantomPinned;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 #[cfg(all(debug_assertions, test))]
@@ -15,11 +14,22 @@ use std::task;
 
 use events_once::PooledLocalSender;
 use observed::Sink;
+use pin_project::{pin_project, pinned_drop};
+use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
 #[cfg(all(debug_assertions, test))]
 use crate::{DiagnosticWaker, DiagnosticWakerRegistry};
-use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, discard_task_panic_payload};
+use crate::{
+    TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal, discard_task_panic_payload,
+};
+
+#[derive(Debug, Default)]
+pub(crate) struct TaskLinks {
+    pub(crate) previous: Cell<Option<TaskPtr>>,
+    pub(crate) next: Cell<Option<TaskPtr>>,
+    pub(crate) linked: Cell<bool>,
+}
 
 /// A task registered with the async task executor, in its fully typed form.
 ///
@@ -27,7 +37,7 @@ use crate::{TaskCreatedReporter, TaskOptions, TaskPanicPayload, WakeSignal, disc
 /// The executor itself typically handles the task in obscured form, as a [`TypeErasedTask`],
 /// as it does not care about the specific type information - only the task itself does.
 #[derive(Debug)]
-pub(crate) struct Task<F, R, T = PooledLocalSender<R>>
+struct Task<F, R, T = PooledLocalSender<R>>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
@@ -43,30 +53,48 @@ where
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     payload: UnsafeCell<Option<Payload<F, R, T>>>,
 
-    /// `None` if the task has not been initialized yet.
-    ///
-    /// We use `UnsafeCell` to allow the `Task` to be accessed from multiple viewpoints, with the
-    /// executor using both the payload and the wake signal, and the wakers emitted by the
-    /// wake signal using the wake signal. All access is via shared references to ensure no
-    /// aliasing violations, with `UnsafeCell` used when mutation of the contents is needed.
-    /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
-    wake_signal: UnsafeCell<Option<WakeSignal>>,
+    /// Initialized once on the owner, before any waker is exposed. The signal is never replaced.
+    wake_signal: OnceCell<WakeSignal>,
+
+    handle_slot: TaskHandleSlot,
 
     options: TaskOptions,
 
     sink: Sink,
 
     poll_count: Cell<u64>,
+    links: TaskLinks,
 
     /// Unit tests store backtraces of waker clones here to exercise leak diagnostics.
     #[cfg(all(debug_assertions, test))]
     diagnostic_waker_registry: Arc<DiagnosticWakerRegistry>,
 
-    // Technically, the wakers also touch the wake signal from other threads but that is
-    // private business of the wake signal and nothing that is visible to this type.
-    _single_threaded: PhantomData<*const ()>,
-
     _requires_pin: PhantomPinned,
+}
+
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "remote owners retain only the allocation; the executor retires non-Send payloads on their owner thread"
+)]
+// SAFETY: Task cells may be retained and reference-counted from remote threads, but task access is
+// private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
+// metadata. Completion and cancellation empty the non-Send payload before the owner releases its
+// final scheduling reference, so remote final reclamation cannot drop user state.
+unsafe impl<F, R, T> Send for Task<F, R, T>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskResultTarget<R>,
+{
+}
+
+// SAFETY: Same invariant as `Send`; shared remote access never reaches task payload fields.
+unsafe impl<F, R, T> Sync for Task<F, R, T>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskResultTarget<R>,
+{
 }
 
 impl<F, R> Task<F, R>
@@ -81,7 +109,7 @@ where
     }
 
     #[must_use]
-    pub(crate) fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
+    fn new_with_options(future: F, result_tx: PooledLocalSender<R>, options: TaskOptions, sink: Sink) -> Self {
         Self::new_with_target(future, result_tx, options, sink)
     }
 
@@ -99,7 +127,7 @@ where
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteSender<R>) -> Self {
+    fn new_remote(future: F, options: TaskOptions, sink: Sink, remote_result_tx: RemoteSender<R>) -> Self {
         Self::new_with_target(future, remote_result_tx, options, sink)
     }
 }
@@ -116,16 +144,57 @@ where
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
             })),
-            wake_signal: UnsafeCell::new(None),
+            wake_signal: OnceCell::new(),
+            handle_slot: TaskHandleSlot::new(),
             options,
             sink,
             poll_count: Cell::new(0),
+            links: TaskLinks::default(),
             #[cfg(all(debug_assertions, test))]
             diagnostic_waker_registry: Arc::new(DiagnosticWakerRegistry::new()),
-            _single_threaded: PhantomData,
             _requires_pin: PhantomPinned,
         }
     }
+}
+
+pub(crate) fn allocate_task<F, R>(
+    pool: &MultiPool,
+    future: F,
+    result_tx: PooledLocalSender<R>,
+    options: TaskOptions,
+    sink: Sink,
+) -> TaskHandle
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+{
+    TaskHandle::new(pool.alloc_arc_pin(Task::new_with_options(future, result_tx, options, sink)))
+}
+
+pub(crate) fn allocate_remote_task<F, R>(
+    pool: &MultiPool,
+    future: F,
+    options: TaskOptions,
+    sink: Sink,
+    remote_result_tx: RemoteSender<R>,
+) -> TaskHandle
+where
+    F: Future<Output = R> + 'static,
+    R: Send + 'static,
+{
+    TaskHandle::new(pool.alloc_arc_pin(Task::new_remote(future, options, sink, remote_result_tx)))
+}
+
+#[cfg(test)]
+pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
+    let events = events_once::LocalEventPool::<()>::new();
+    let (sender, _receiver) = events.rent();
+    TaskHandle::new(pool.alloc_arc_pin(Task::new(std::future::pending(), sender)))
+}
+
+#[cfg(test)]
+pub(crate) fn allocate_test_task() -> TaskHandle {
+    allocate_test_task_in(&MultiPool::new())
 }
 
 impl<F, R, T> TypeErasedTask for Task<F, R, T>
@@ -139,58 +208,35 @@ where
         self.options.with_context(|| self.poll_in_context())
     }
 
-    fn created_reporter(&self) -> TaskCreatedReporter {
+    fn created_reporter(&self) -> Option<TaskCreatedReporter> {
         self.options.created_reporter(self.sink.clone())
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn consume_awakened(&self) -> bool {
-        // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
-        // shared references to the wake signal, so creating a shared reference here is valid.
-        // Before initialization, we do not create any escaping references to the wake signal.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before consume_awakened()")
-                .consume_awakened()
-        }
+    fn links(&self) -> &TaskLinks {
+        &self.links
     }
 
-    fn is_awakened(&self) -> bool {
-        // SAFETY: The task owner reads initialized wake metadata only on its owning thread.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before checking its wake state")
-                .is_awakened()
-        }
+    fn handle_slot(&self) -> &TaskHandleSlot {
+        &self.handle_slot
     }
 
     fn clear_queued_notification(&self) {
-        // SAFETY: The executor calls this only for a live initialized task while draining its
-        // wake queue.
-        unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before clearing a wake notification")
-                .clear_queued_notification();
-        }
+        self.wake_signal
+            .get()
+            .expect("task must be initialized before clearing a wake notification")
+            .clear_queued_notification();
+    }
+
+    fn promote_remote_notification(&self) -> bool {
+        self.wake_signal
+            .get()
+            .expect("remote notifications retain initialized tasks")
+            .promote_remote_notification()
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>) {
-        // SAFETY: Initialized wake metadata is retired only by the task's owner.
-        let wake_signal = unsafe { &*self.wake_signal.get() };
-        if let Some(wake_signal) = wake_signal {
+        if let Some(wake_signal) = self.wake_signal.get() {
             wake_signal.retire();
         }
 
@@ -204,17 +250,7 @@ where
     }
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
-        // SAFETY: The `Task` is single-threaded and before initialization, we do not create any
-        // escaping references to the wake signal, so we have exclusive access here. We rely on
-        // the caller's safety guarantees that this is not called more than once.
-        let maybe_wake_signal = unsafe { self.wake_signal.get().as_mut().expect("UnsafeCell pointer cannot be null") };
-
-        assert!(maybe_wake_signal.is_none(), "task must be initialized exactly once");
-
-        // SAFETY: initialization is called once, so the slot contains None and
-        // owns no previous signal. Writing avoids generating drop glue for an
-        // impossible old Some value on every task registration.
-        unsafe { std::ptr::write(maybe_wake_signal, Some(wake_signal)) };
+        self.wake_signal.set(wake_signal).expect("task must be initialized exactly once");
     }
 
     #[cfg(all(debug_assertions, test))]
@@ -229,6 +265,12 @@ where
     R: 'static,
     T: TaskResultTarget<R>,
 {
+    fn pinned_wake_signal(self: Pin<&Self>) -> Pin<&WakeSignal> {
+        let signal = self.get_ref().wake_signal.get().expect("task must be initialized before poll()");
+        // SAFETY: OnceCell never removes or replaces the signal, which stays pinned with Task.
+        unsafe { Pin::new_unchecked(signal) }
+    }
+
     fn poll_in_context(self: Pin<&Self>) -> task::Poll<()> {
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
@@ -243,25 +285,12 @@ where
         // `Pin` annotation just gets lost in the type layering. We add it back here.
         let future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
 
-        // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
-        // shared references to the wake signal, so creating a shared reference here is valid.
-        // Before initialization, we do not create any escaping references to the wake signal.
-        let wake_signal = unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-                .expect("task must be initialized before poll()")
-        };
-
-        // SAFETY: It is pinned together with the `Task` that contains it, the `Pin` wrapper just
-        // goes lost in the whole `UnsafeCell` and `Option` layering.
-        let wake_signal = unsafe { Pin::new_unchecked(wake_signal) };
+        let wake_signal = self.pinned_wake_signal();
 
         let poll_result = {
             // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
-            // independently pooled state and may outlive both the poll and the task.
+            // pinned pooled task allocation; owner retirement empties its payload before a remote
+            // clone can release the final reference.
             let waker = unsafe { wake_signal.waker_ref() };
 
             // Unit tests wrap the waker to exercise clone backtrace diagnostics.
@@ -329,9 +358,8 @@ where
             // SAFETY: The future is pinned with Task and destroyed in place.
             unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err()
         };
-        // SAFETY: The future and result target were retired above, so clearing the payload cannot
-        // run user code.
-        unsafe { Pin::new_unchecked(maybe_payload) }.set(None);
+        // Assignment drops the retired storage in place without moving its pinned future.
+        *maybe_payload = None;
 
         match outcome {
             TerminalOutcome::Succeeded(result) => {
@@ -459,49 +487,39 @@ impl<R: Send + 'static> TaskResultTarget<R> for RemoteSender<R> {
     }
 }
 
+#[pin_project(PinnedDrop)]
 struct FutureStorage<F> {
-    inner: ManuallyDrop<F>,
-    live: bool,
-    _pinned: PhantomPinned,
+    #[pin]
+    inner: Option<F>,
 }
 
 impl<F> FutureStorage<F> {
     fn new(inner: F) -> Self {
-        Self {
-            inner: ManuallyDrop::new(inner),
-            live: true,
-            _pinned: PhantomPinned,
-        }
+        Self { inner: Some(inner) }
     }
 
     fn destroy_pinned(self: Pin<&mut Self>) -> Result<(), TaskPanicPayload> {
-        // SAFETY: destruction leaves the retired value in place and never moves it.
-        let this = unsafe { self.get_unchecked_mut() };
-        Self::destroy(&mut this.inner, &mut this.live)
-    }
-
-    fn destroy(inner: &mut ManuallyDrop<F>, live: &mut bool) -> Result<(), TaskPanicPayload> {
-        if !std::mem::replace(live, false) {
+        let mut inner = self.project().inner;
+        if inner.is_none() {
             return Ok(());
         }
-        catch_unwind(AssertUnwindSafe(|| {
-            // SAFETY: the live value stays in place and is retired before its destructor runs.
-            unsafe { ManuallyDrop::drop(inner) };
-        }))
+        catch_unwind(AssertUnwindSafe(|| inner.set(None)))
     }
 }
 
 impl<F: Future> Future for FutureStorage<F> {
     type Output = F::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        // SAFETY: no operation moves inner after pinning.
-        let this = unsafe { self.get_unchecked_mut() };
-        assert!(this.live, "task future polled after completion");
-        // SAFETY: inner occupies the same pinned storage throughout its lifetime.
-        let outcome = unsafe { Pin::new_unchecked(&mut *this.inner) }.poll(cx);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+        let outcome = self
+            .as_mut()
+            .project()
+            .inner
+            .as_pin_mut()
+            .expect("task future must not be polled after completion")
+            .poll(cx);
         if outcome.is_ready()
-            && let Err(panic) = Self::destroy(&mut this.inner, &mut this.live)
+            && let Err(panic) = self.destroy_pinned()
         {
             std::panic::resume_unwind(panic);
         }
@@ -509,16 +527,18 @@ impl<F: Future> Future for FutureStorage<F> {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
-impl<F> Drop for FutureStorage<F> {
-    fn drop(&mut self) {
-        if let Err(panic) = Self::destroy(&mut self.inner, &mut self.live) {
+#[pinned_drop]
+impl<F> PinnedDrop for FutureStorage<F> {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
+    #[cfg_attr(test, mutants::skip)] // A no-op differs only in the process-terminating panicking-destructor fallback.
+    fn drop(self: Pin<&mut Self>) {
+        if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
         }
     }
 }
 
-pub(crate) trait TypeErasedTask {
+pub(crate) trait TypeErasedTask: Send + Sync {
     /// Polls the task's future, enabling it to make progress.
     ///
     /// There is no result type here - the expectation is that the task itself will deliver any
@@ -535,25 +555,24 @@ pub(crate) trait TypeErasedTask {
     fn poll(self: Pin<&Self>) -> task::Poll<()>;
 
     /// Captures independently owned data for task-created telemetry.
-    fn created_reporter(&self) -> TaskCreatedReporter;
+    fn created_reporter(&self) -> Option<TaskCreatedReporter>;
 
-    /// Swaps the task's "is awakened" flag to false and returns its previous value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the task has not been initialized.
-    fn consume_awakened(&self) -> bool;
+    /// Returns owner-thread intrusive-list links for this task.
+    fn links(&self) -> &TaskLinks;
 
-    /// Returns whether a wake arrived without consuming it.
-    fn is_awakened(&self) -> bool;
+    /// Returns storage for the immutable handle template embedded in this task.
+    fn handle_slot(&self) -> &TaskHandleSlot;
 
     /// Records that the executor drained this task's queued wake notification.
     fn clear_queued_notification(&self);
 
+    /// Promotes an active remote notification to local scheduling.
+    fn promote_remote_notification(&self) -> bool;
+
     /// Clears the inner state of the task, entering a form where no further polling is possible
     /// and any future-specific state is dropped.
     ///
-    /// Independently pooled wakers remain valid but become inert.
+    /// Retained wakers keep the empty task allocation alive but become inert.
     fn abort(self: Pin<&Self>);
 
     /// Initializes the task, providing it the wake signal that it needs to enable polling
@@ -582,12 +601,20 @@ mod tests {
 
     use events_once::{Disconnected, LocalEventPool};
     use observed_testing::{TEST_ID, test_emitter};
-    use static_assertions::assert_not_impl_any;
+    use static_assertions::assert_impl_all;
     use testing_aids::assert_panic;
 
     use super::*;
     use crate::remote::Pool as RemotePool;
     use crate::testing::TestSubjectFuture;
+
+    fn fake_wake_owner() -> TaskHandle {
+        crate::testing::new_test_task_handle()
+    }
+
+    fn fake_wake_signal(owner: &TaskHandle) -> WakeSignal {
+        WakeSignal::new_for_test(Waker::noop().clone(), owner)
+    }
 
     struct PinnedDropFuture {
         polled_at: Cell<*const Self>,
@@ -617,6 +644,7 @@ mod tests {
     }
 
     fn check_pinned_future_destruction(completes: bool) {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
         let dropped = Rc::new(Cell::new(false));
@@ -630,7 +658,7 @@ mod tests {
             tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         let result = task.poll();
         if completes {
@@ -652,29 +680,49 @@ mod tests {
     }
 
     #[test]
-    fn clear_queued_notification_forwards_to_the_wake_signal() {
+    fn wake_signal_is_initialized_exactly_once() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let task = pin!(Task::new(pending::<u64>(), tx));
         let task = task.as_ref();
-        // SAFETY: Tests use this only as an opaque identity.
-        let fake_task_ref = unsafe { crate::TaskRef::fake() };
-        let queue = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(1)));
-        let signal = WakeSignal::new_with_parts(
-            Arc::clone(&queue),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            Waker::noop().clone(),
-            fake_task_ref,
-        );
+        task.initialize(fake_wake_signal(&wake_owner));
+
+        assert_panic!(task.initialize(fake_wake_signal(&wake_owner)));
+
+        assert!(task.wake_signal.get().is_some());
+        task.abort();
+    }
+
+    #[test]
+    fn task_rejects_remote_promotion_without_a_remote_notification() {
+        let wake_owner = fake_wake_owner();
+        let event_pool = LocalEventPool::<u64>::new();
+        let (tx, _rx) = event_pool.rent();
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        task.initialize(fake_wake_signal(&wake_owner));
+
+        assert!(!task.promote_remote_notification());
+    }
+
+    #[test]
+    fn clear_queued_notification_forwards_to_the_wake_signal() {
+        let _executor = crate::Executor::builder().build();
+        let fake_task_handle = fake_wake_owner();
+        let event_pool = LocalEventPool::<u64>::new();
+        let (tx, _rx) = event_pool.rent();
+        let task = pin!(Task::new(pending::<u64>(), tx));
+        let task = task.as_ref();
+        let signal = WakeSignal::new_for_test(Waker::noop().clone(), &fake_task_handle);
         task.initialize(signal);
-        // SAFETY: Initialization populated the pinned wake-signal slot.
-        let signal = unsafe { &*task.wake_signal.get() }.as_ref().unwrap();
-        // SAFETY: The signal remains pinned with the task.
-        let signal = unsafe { Pin::new_unchecked(signal) };
+        let signal = task.pinned_wake_signal();
         // SAFETY: The pinned signal remains alive for this borrow.
         let waker = unsafe { signal.waker_ref() };
         waker.wake_by_ref();
         assert!(signal.has_queued_notification());
+        let mut queued = std::collections::VecDeque::new();
+        signal.append_test_wakes(&mut queued);
 
         task.clear_queued_notification();
 
@@ -730,6 +778,41 @@ mod tests {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn future_storage_retires_a_panicking_destructor_exactly_once() {
+        struct PanickingDropFuture(std::sync::Arc<AtomicUsize>);
+
+        impl Future for PanickingDropFuture {
+            type Output = ();
+
+            fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+                task::Poll::Ready(())
+            }
+        }
+
+        impl Drop for PanickingDropFuture {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("future destructor panic");
+            }
+        }
+
+        for completes in [false, true] {
+            let drops = std::sync::Arc::new(AtomicUsize::new(0));
+            {
+                let mut storage = pin!(FutureStorage::new(PanickingDropFuture(std::sync::Arc::clone(&drops))));
+                if completes {
+                    assert_panic!(storage.as_mut().poll(&mut task::Context::from_waker(Waker::noop())));
+                } else {
+                    storage.as_mut().destroy_pinned().unwrap_err();
+                }
+                assert_eq!(drops.load(Ordering::Relaxed), 1);
+                storage.as_mut().destroy_pinned().unwrap();
+            }
+            assert_eq!(drops.load(Ordering::Relaxed), 1);
+        }
+    }
+
     struct PanicOnDropFuture(Ready<u64>);
 
     impl Future for PanicOnDropFuture {
@@ -764,6 +847,7 @@ mod tests {
 
     #[test]
     fn smoke_test() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
@@ -772,7 +856,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert!(task.has_payload());
 
@@ -792,6 +876,7 @@ mod tests {
 
     #[test]
     fn observed_task_reports_aggregate_poll_count_on_completion() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let (sink, processor) = test_emitter(TEST_ID);
@@ -813,8 +898,8 @@ mod tests {
             sink,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.initialize(fake_wake_signal(&wake_owner));
+        task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -827,6 +912,7 @@ mod tests {
 
     #[test]
     fn observed_remote_panic_reports_aggregate_poll_count() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let polls = Rc::new(Cell::new(0));
@@ -844,8 +930,8 @@ mod tests {
             result_tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.initialize(fake_wake_signal(&wake_owner));
+        task.created_reporter().unwrap().report();
 
         assert!(task.poll().is_pending());
         assert!(task.poll().is_ready());
@@ -866,6 +952,7 @@ mod tests {
 
     #[test]
     fn cancellation_emits_no_terminal_task_event() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
         let (sink, processor) = test_emitter(TEST_ID);
@@ -876,8 +963,8 @@ mod tests {
             sink,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.initialize(fake_wake_signal(&wake_owner));
+        task.created_reporter().unwrap().report();
 
         task.abort();
         task.abort();
@@ -901,14 +988,15 @@ mod tests {
 
     #[test]
     fn cancellation_join_notification_panic_is_not_reported_as_a_task_panic() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let (sink, processor) = test_emitter(TEST_ID);
         let waker = Waker::from(Arc::new(PanickingJoinWake));
         assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());
         let task = pin!(Task::new_remote(pending::<u64>(), TaskOptions::default(), sink, result_tx));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
-        task.created_reporter().report();
+        task.initialize(fake_wake_signal(&wake_owner));
+        task.created_reporter().unwrap().report();
 
         task.abort();
 
@@ -919,19 +1007,21 @@ mod tests {
 
     #[test]
     fn local_completion_notification_panic_follows_fail_fast_path() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (result_tx, mut result_rx) = event_pool.rent();
         let waker = Waker::from(Arc::new(PanickingJoinWake));
         assert!(Pin::new(&mut result_rx).poll(&mut task::Context::from_waker(&waker)).is_pending());
         let task = pin!(Task::new(std::future::ready(42), result_tx));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
     }
 
     #[test]
     fn remote_poll_and_destructor_panics_are_both_contained() {
+        let wake_owner = fake_wake_owner();
         let (result_tx, mut result_rx) = RemotePool::new().channel::<u64>();
         let task = pin!(Task::new_remote(
             PanicOnPollAndDropFuture,
@@ -940,7 +1030,7 @@ mod tests {
             result_tx,
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert!(task.poll().is_ready());
 
@@ -953,6 +1043,7 @@ mod tests {
 
     #[test]
     fn plain_task_panic_remains_unhandled() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<()>::new();
         let (tx, mut rx) = event_pool.rent();
         let task = pin!(Task::new(
@@ -962,7 +1053,7 @@ mod tests {
             tx
         ));
         let task = task.as_ref();
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
         assert!(task.has_payload());
@@ -1000,6 +1091,7 @@ mod tests {
         use std::cell::RefCell;
         use std::future::poll_fn;
 
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1021,7 +1113,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         // Each poll will stash a waker.
         _ = task.poll();
@@ -1045,6 +1137,7 @@ mod tests {
 
     #[test]
     fn future_and_event_dropped_after_abort() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
@@ -1056,7 +1149,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         task.abort();
 
@@ -1071,6 +1164,7 @@ mod tests {
 
     #[test]
     fn future_dropped_after_poll_complete() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1082,7 +1176,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         let result = task.poll();
         assert!(matches!(result, task::Poll::Ready(())));
@@ -1093,13 +1187,14 @@ mod tests {
 
     #[test]
     fn panic_while_dropping_completed_future_is_contained() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
         let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.poll());
 
@@ -1110,13 +1205,14 @@ mod tests {
 
     #[test]
     fn panic_while_dropping_aborted_future_is_contained() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, mut rx) = event_pool.rent();
 
         let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         assert_panic!(task.abort());
 
@@ -1127,6 +1223,7 @@ mod tests {
 
     #[test]
     fn poll_after_complete_panics() {
+        let wake_owner = fake_wake_owner();
         let event_pool = LocalEventPool::<u64>::new();
         let (tx, _rx) = event_pool.rent();
 
@@ -1135,7 +1232,7 @@ mod tests {
         // Task is designed to be used via shared references.
         let task = task.as_ref();
 
-        task.initialize(WakeSignal::fake());
+        task.initialize(fake_wake_signal(&wake_owner));
 
         // The future is a trivial one that completes on the first poll.
         let task_result = task.poll();
@@ -1148,6 +1245,6 @@ mod tests {
 
     #[test]
     fn thread_safety() {
-        assert_not_impl_any!(Task<TestSubjectFuture, ()>: Send, Sync);
+        assert_impl_all!(Task<TestSubjectFuture, ()>: Send, Sync);
     }
 }
