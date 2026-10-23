@@ -4,6 +4,7 @@
 use std::task::Waker;
 use std::thread;
 
+use arty_executor::discard_task_panic_payload;
 use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
@@ -248,11 +249,16 @@ impl AsyncWorkerStartInfo {
 
         // Incomplete executor teardown fails closed. A panic after safe retirement still
         // needs to join the blocking pool before the worker's failure is reported.
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
-        if outcome.is_err() {
+        let run_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
+        let run_failed = run_outcome.is_err();
+        if run_failed {
             _ = dispatcher.stop_with_error(Error::worker_panicked());
         }
-        drop(worker);
+        let drop_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(worker)));
+        let outcome = combine_worker_outcomes(run_outcome, drop_outcome);
+        if !run_failed && outcome.is_err() {
+            _ = dispatcher.stop_with_error(Error::worker_panicked());
+        }
         if outcome.is_ok() {
             emit!(
                 worker_sink,
@@ -267,6 +273,23 @@ impl AsyncWorkerStartInfo {
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }
+    }
+}
+
+fn combine_worker_outcomes(
+    run: std::thread::Result<()>,
+    teardown: std::thread::Result<()>,
+) -> std::thread::Result<()> {
+    match (run, teardown) {
+        (Err(primary), Err(secondary)) => {
+            discard_task_panic_payload(secondary);
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), Err(panic)) => {
+            Err(panic)
+        }
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 
@@ -315,6 +338,20 @@ mod tests {
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };
+    }
+
+    #[test]
+    fn worker_run_panic_precedes_teardown_panic() {
+        let outcome = combine_worker_outcomes(Err(Box::new("run panic")), Err(Box::new("teardown panic")));
+
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "run panic");
+    }
+
+    #[test]
+    fn worker_teardown_panic_is_reported_after_successful_run() {
+        let outcome = combine_worker_outcomes(Ok(()), Err(Box::new("teardown panic")));
+
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "teardown panic");
     }
 
     #[derive(Clone)]
