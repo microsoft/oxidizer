@@ -387,7 +387,7 @@ impl RuntimeHandle {
             ready_wait_duration_nanos: AtomicU64::new(0),
             max_ready_wait_duration_nanos: AtomicU64::new(0),
         });
-        lock(&self.control.tasks).push(Arc::clone(&task));
+        lock(&self.control.tasks).insert(task_id.get(), Arc::clone(&task));
         drop(suppression);
         record_now(
             &self.control,
@@ -509,7 +509,7 @@ pub fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeRegistration {
         state: AtomicU8::new(RuntimeState::Running.wire_value()),
         counters: CounterBlock::default(),
         workers: Mutex::new(Vec::new()),
-        tasks: Mutex::new(Vec::new()),
+        tasks: Mutex::new(HashMap::new()),
     });
     lock(&registry().runtimes).push(Arc::clone(&control));
     drop(suppression);
@@ -545,7 +545,8 @@ pub(crate) struct RuntimeControl {
     state: AtomicU8,
     pub(crate) counters: CounterBlock,
     workers: Mutex<Vec<Arc<WorkerControl>>>,
-    tasks: Mutex<Vec<Arc<TaskControl>>>,
+    // Keyed by task ID so retiring a task does not scan every live task.
+    tasks: Mutex<HashMap<u64, Arc<TaskControl>>>,
 }
 
 #[derive(Debug)]
@@ -678,7 +679,8 @@ impl RuntimeControl {
             RuntimeState::Running | RuntimeState::Stopping => None,
         };
         let workers = lock(&self.workers).iter().map(|worker| worker.snapshot()).collect();
-        let tasks = lock(&self.tasks).iter().map(|task| task.snapshot(observation)).collect();
+        let mut tasks: Vec<_> = lock(&self.tasks).values().map(|task| task.snapshot(observation)).collect();
+        tasks.sort_unstable_by_key(|task| task.id.get());
         Runtime {
             id: self.id,
             name: self.name.clone(),
@@ -750,18 +752,14 @@ fn complete_task(
     let suppression = SuppressionGuard::enter();
     let removed = {
         let mut tasks = lock(&control.tasks);
-        let previous_len = tasks.len();
-        tasks.retain(|task| {
-            if task.id == task_id {
-                // Lifetime state, not a recording observation: a retained waker
-                // must not revive this task when recording is later re-enabled.
-                task.activity.terminal.store(true, Ordering::Release);
-                false
-            } else {
-                true
-            }
-        });
-        tasks.len() != previous_len
+        if let Some(task) = tasks.remove(&task_id.get()) {
+            // Lifetime state, not a recording observation: a retained waker
+            // must not revive this task when recording is later re-enabled.
+            task.activity.terminal.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
     };
     drop(suppression);
     if !removed {
@@ -1004,6 +1002,39 @@ mod tests {
             ),
             (1, 0, 1, 1)
         );
+    }
+
+    #[test]
+    fn retiring_tasks_out_of_order_preserves_other_live_tasks() {
+        let _test = test_lock();
+        let runtime = register_runtime(RuntimeMetadata::new("out-of-order-retirement", 1));
+        let handle = runtime.handle();
+        let ids: Vec<_> = (0..257).map(|_| handle.task_spawned(type_descriptor_id(1), None)).collect();
+        let retired = [128, 0, 256, 64];
+        for index in retired {
+            handle.task_completed(ids[index], None);
+            handle.task_completed(ids[index], None);
+        }
+
+        let snapshot = source_snapshot();
+        let runtime_snapshot = snapshot.runtimes.iter().find(|entry| entry.id == runtime.id()).unwrap();
+        let expected: Vec<_> = ids
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| (!retired.contains(&index)).then_some(*id))
+            .collect();
+        assert_eq!(runtime_snapshot.tasks.iter().map(|task| task.id).collect::<Vec<_>>(), expected);
+        let counters = handle.counters().snapshot();
+        assert_eq!(
+            (counters.spawned_tasks, counters.completed_tasks, counters.live_tasks),
+            (257, 4, 253)
+        );
+
+        for id in ids {
+            handle.task_completed(id, None);
+        }
+        let counters = handle.counters().snapshot();
+        assert_eq!((counters.completed_tasks, counters.live_tasks), (257, 0));
     }
 
     #[test]
