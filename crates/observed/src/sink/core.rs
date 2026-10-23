@@ -260,8 +260,8 @@ impl Sink {
     // External sources call this on their hot path; allow cross-crate inlining.
     #[inline]
     pub fn is_interested(&self, description: &EventDescription) -> bool {
-        self.sinks_with_shift()
-            .any(|(sink, _)| sink.processors.iter().any(|processor| processor.is_interested(description)))
+        self.active_sinks()
+            .any(|sink| sink.processors.iter().any(|processor| processor.is_interested(description)))
     }
 
     /// Forces buffered telemetry out by calling
@@ -413,15 +413,8 @@ impl Sink {
         }
     }
 
-    fn sinks_with_shift(&self) -> impl Iterator<Item = (&SingleSinkState, usize)> {
-        self.sinks()
-            .iter()
-            .filter(|sink| !sink.processors.is_empty())
-            .scan(0, |next_shift, sink| {
-                let shift = *next_shift;
-                *next_shift += sink.processors.len();
-                Some((sink, shift))
-            })
+    fn active_sinks(&self) -> impl Iterator<Item = &SingleSinkState> {
+        self.sinks().iter().filter(|sink| !sink.processors.is_empty())
     }
 
     /// Returns a `Vec` of all enrichment entries from outermost to innermost scope.
@@ -675,7 +668,7 @@ mod tests {
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
 
-        assert_eq!(noop.sinks_with_shift().count(), 0);
+        assert_eq!(noop.active_sinks().count(), 0);
         noop.flush().expect("noop flush should succeed");
     }
 
