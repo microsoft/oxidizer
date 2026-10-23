@@ -147,7 +147,7 @@ impl DispatcherCore {
         emit!(&self.sink, RuntimeStopping);
 
         for endpoint in &self.worker_endpoints {
-            endpoint.blocking_worker.shutdown();
+            endpoint.blocking_worker.shutdown(cause.clone());
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
             _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);

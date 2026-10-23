@@ -288,10 +288,10 @@ impl AsyncWorker {
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
 
-        self.blocking_worker.shutdown();
+        let cause = self.shutdown.cause().unwrap_or_default();
+        self.blocking_worker.shutdown(cause.clone());
 
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
-        let cause = self.shutdown.cause().unwrap_or_default();
         if let Some(mut executor) = self.executor.take() {
             executor.begin_shutdown(cause);
             drop(executor);
