@@ -3,7 +3,8 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![forbid(unsafe_code)]
+// The test-only tracing constructor uses unsafe attributes. See docs/tracing-tests.md.
+#![cfg_attr(not(test), forbid(unsafe_code))]
 #![cfg_attr(
     not(feature = "app-err"),
     expect(rustdoc::broken_intra_doc_links, reason = "AppError is only available with the 'app-err' feature")
@@ -485,3 +486,6 @@ pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
 pub use error_label::{ErrorLabel, Labeled};
 pub use ohno_macros::{Error, enrich_err, error};
+
+#[cfg(test)]
+testing_aids::init_tracing!();

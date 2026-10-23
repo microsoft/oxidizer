@@ -30,6 +30,10 @@ allowed_external_types = ["*"]
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 # Localhost server fixtures, reached as `fetch_winhttp_impl::testing`.
 #
@@ -106,6 +110,10 @@ windows = { workspace = true, features = [
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
 ] }
+
+[dev-dependencies]
+ctor = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 [target.'cfg(windows)'.dev-dependencies]
 future_assert = { path = "../future_assert" }

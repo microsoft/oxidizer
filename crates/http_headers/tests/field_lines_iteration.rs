@@ -79,3 +79,5 @@ fn http_line_iteration_preserves_repetition_and_sensitivity() {
     assert_eq!(values, lines.iter().collect::<Vec<_>>());
     assert_eq!(lines.iter().map(FieldValueRef::is_sensitive).collect::<Vec<_>>(), [true, false]);
 }
+
+testing_aids::init_tracing!();

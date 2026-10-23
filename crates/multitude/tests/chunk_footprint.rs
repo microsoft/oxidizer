@@ -166,3 +166,5 @@ fn chunk_sizes_track_size_classes() {
         assert!(s.is_power_of_two(), "chunk size {s} is not a power-of-two class size");
     }
 }
+
+testing_aids::init_tracing!();

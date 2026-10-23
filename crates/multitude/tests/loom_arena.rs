@@ -665,3 +665,5 @@ mod loom_bytesbuf {
         });
     }
 }
+
+testing_aids::init_tracing!();

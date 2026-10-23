@@ -99,3 +99,5 @@ fn pool_remains_usable_after_caught_allocation_panic() {
     assert!(result.is_err());
     assert_eq!(*pool.alloc(42), 42);
 }
+
+testing_aids::init_tracing!();

@@ -423,3 +423,5 @@ async fn error_status_carries_details() {
     assert_eq!(details.len(), 1);
     assert_eq!(details[0]["resourceName"], "shelves/missing");
 }
+
+testing_aids::init_tracing!();

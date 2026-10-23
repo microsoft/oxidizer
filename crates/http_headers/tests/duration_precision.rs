@@ -98,3 +98,5 @@ fn invalid_duration_insertion_and_append_preserve_existing_headers() {
         assert_eq!(map[header::CACHE_CONTROL].as_bytes(), format!("max-age={seconds}").as_bytes());
     }
 }
+
+testing_aids::init_tracing!();

@@ -404,3 +404,5 @@ fn steady_state_multi_mix_does_not_allocate() {
         "steady-state multi-pool fill/drop cycles must reuse slots across every layout, not allocate from the system"
     );
 }
+
+testing_aids::init_tracing!();

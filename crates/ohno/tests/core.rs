@@ -175,3 +175,5 @@ fn clone_with_inner_error() {
     let cloned_msg = cloned.to_string();
     assert_eq!(original_msg, cloned_msg);
 }
+
+testing_aids::init_tracing!();

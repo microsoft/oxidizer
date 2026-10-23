@@ -70,3 +70,6 @@ pub use http_recovery::HttpRecovery;
 mod http_clone;
 #[cfg(any(feature = "retry", feature = "hedging"))]
 pub use http_clone::HttpClone;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

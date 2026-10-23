@@ -2309,3 +2309,5 @@ mod freeze_and_slice_edges {
         assert_eq!(s[4999], 4999_u32.wrapping_mul(3));
     }
 }
+
+testing_aids::init_tracing!();

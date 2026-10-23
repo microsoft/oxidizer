@@ -92,3 +92,5 @@ fn static_verb_route_forces_dynamic_half_to_split() {
     }
     assert!(matches!(r.resolve("GET", "/docs/1:archive"), Err(ResolveError::NotFound(_))));
 }
+
+testing_aids::init_tracing!();

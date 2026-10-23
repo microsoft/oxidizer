@@ -252,3 +252,5 @@ fn notification_types_and_future_are_send_and_sync() {
 }
 #[path = "support/waker.rs"]
 mod waker_support;
+
+testing_aids::init_tracing!();

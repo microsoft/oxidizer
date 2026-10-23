@@ -2020,3 +2020,6 @@ mod tests {
         syn::parse_file(&generated).unwrap();
     }
 }
+
+#[cfg(test)]
+testing_aids::init_tracing!();

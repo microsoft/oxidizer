@@ -23,6 +23,10 @@ all-features = true
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["tower_layer::Layer", "tower_service::Service"]
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 intercept = []
@@ -38,11 +42,13 @@ tower-service = { workspace = true, optional = true }
 alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
+ctor = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 plurality = { path = "../plurality" }
 static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }
 tower-service = { workspace = true }

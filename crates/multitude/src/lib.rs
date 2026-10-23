@@ -543,3 +543,6 @@ pub use self::from_in::{FromIn, IntoIn};
 #[doc(hidden)]
 pub use self::internal::thin_dst::{HandleMetadata, MetadataPolicy, SmartPointerPointee};
 pub use self::rc::Rc;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

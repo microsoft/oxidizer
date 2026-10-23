@@ -274,3 +274,5 @@ mod from_coverage_extras_bytemuck {
         let _ = arena.bytemuck().alloc_slice_box::<u32>(4);
     }
 }
+
+testing_aids::init_tracing!();

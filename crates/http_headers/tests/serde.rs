@@ -584,3 +584,5 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
         assert_eq!(boundary.as_bytes().len(), byte_count);
     }
 }
+
+testing_aids::init_tracing!();

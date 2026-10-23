@@ -89,3 +89,5 @@ fn panicking_destructor_returns_local_slot() {
     );
     drop(pool.alloc(PanicOnce(panicked)));
 }
+
+testing_aids::init_tracing!();

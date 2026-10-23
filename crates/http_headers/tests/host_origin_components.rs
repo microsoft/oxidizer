@@ -874,3 +874,5 @@ mod origin {
         );
     }
 }
+
+testing_aids::init_tracing!();

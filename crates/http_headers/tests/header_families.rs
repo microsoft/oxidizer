@@ -93,3 +93,5 @@ fn set_cookie_preserves_boundaries_sensitivity_and_opaque_attributes() {
         Some(b"session=abc; Max-Age=0".as_slice())
     );
 }
+
+testing_aids::init_tracing!();

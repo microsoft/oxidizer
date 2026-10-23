@@ -24,6 +24,10 @@ allowed_external_types = [
     "routerama_macros::resolver",
 ]
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = ["query"]
 query = ["dep:itoa"]
@@ -47,6 +51,7 @@ bolero = { workspace = true, features = ["std"] }
 # because bolero-libfuzzer references `bolero_engine::any::run` but does
 # not itself activate that feature on `bolero-engine`.
 criterion = { workspace = true }
+ctor = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 itoa = { workspace = true }
 matchit = { workspace = true }
@@ -58,6 +63,7 @@ route-recognizer = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_html_form = { workspace = true, features = ["de", "ser", "std"] }
 serde_urlencoded = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 
 [[bench]]

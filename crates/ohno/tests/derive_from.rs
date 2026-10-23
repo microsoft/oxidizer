@@ -82,3 +82,5 @@ fn test_from_fmt_error_dbl_error() {
     assert_error_message!(custom_err, "an error occurred when formatting an argument");
     assert!(custom_err.source().is_some());
 }
+
+testing_aids::init_tracing!();

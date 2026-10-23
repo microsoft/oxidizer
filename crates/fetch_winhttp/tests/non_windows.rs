@@ -7,3 +7,5 @@
 
 #[test]
 fn package_has_a_non_windows_test_target() {}
+
+testing_aids::init_tracing!();

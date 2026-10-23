@@ -29,12 +29,17 @@ allowed_external_types = ["proc_macro2::*", "syn::*"]
 [package.metadata.docs.rs]
 all-features = true
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
 
 [dev-dependencies]
+ctor = { workspace = true }
 insta = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 

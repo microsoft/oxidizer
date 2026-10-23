@@ -140,3 +140,5 @@ fn single_participant_barriers_and_empty_notifications_do_not_allocate() {
         ((true, true), 0),
     );
 }
+
+testing_aids::init_tracing!();

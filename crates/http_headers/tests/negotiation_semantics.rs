@@ -690,3 +690,5 @@ fn http_sources_have_the_same_semantics_and_preserve_wire_forwarding() {
     assert_eq!(view_error.value_index(), None);
     assert_eq!(owned_error.value_index(), Some(1));
 }
+
+testing_aids::init_tracing!();

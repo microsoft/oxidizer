@@ -3524,3 +3524,5 @@ mod alloc_utf16_try_variants_ok {
         assert_eq!(r.len(), 2);
     }
 }
+
+testing_aids::init_tracing!();

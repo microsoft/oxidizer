@@ -20,3 +20,5 @@ fn any_trait_objects_are_supported_without_the_dst_feature() {
     let arc: Arc<dyn Any + Send + Sync> = Arc::unsize(arena.alloc_arc(9_u32), coerce!(dyn Any + Send + Sync));
     assert_eq!(arc.downcast_ref::<u32>(), Some(&9));
 }
+
+testing_aids::init_tracing!();

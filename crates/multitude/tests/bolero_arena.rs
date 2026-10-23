@@ -809,3 +809,5 @@ mod bolero_panic_safety {
         });
     }
 }
+
+testing_aids::init_tracing!();

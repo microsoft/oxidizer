@@ -277,3 +277,5 @@ fn run(input: &[u8]) {
 fn multi_pool_invariants() {
     bolero::check!().for_each(|input: &[u8]| run(input));
 }
+
+testing_aids::init_tracing!();

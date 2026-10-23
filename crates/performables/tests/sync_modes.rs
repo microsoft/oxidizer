@@ -618,3 +618,5 @@ fn async_guards_retain_cross_thread_mobility() {
     require_send(lock.read());
     require_send(lock.write());
 }
+
+testing_aids::init_tracing!();

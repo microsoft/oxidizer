@@ -191,3 +191,5 @@ fn merge_headers_preserves_existing_and_repeated_values() {
     let http = response.into_http();
     assert_eq!(http.headers().get_all(http::header::SET_COOKIE).iter().count(), 3);
 }
+
+testing_aids::init_tracing!();

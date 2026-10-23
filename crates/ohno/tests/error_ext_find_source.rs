@@ -100,3 +100,5 @@ fn test_find_source_deep_nesting() {
     let pos_err_7 = pos_err_8.find_source::<PositionalError>().unwrap();
     assert_eq!(pos_err_7.position, 7);
 }
+
+testing_aids::init_tracing!();

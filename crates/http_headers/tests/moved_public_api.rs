@@ -1672,3 +1672,5 @@ mod websocket_additional {
         assert_eq!(error.value_index(), Some(1));
     }
 }
+
+testing_aids::init_tracing!();

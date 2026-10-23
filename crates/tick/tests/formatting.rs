@@ -530,3 +530,5 @@ mod serde_tests {
         assert_eq!(serde_json::from_str::<EcmaScript>(&serialized).unwrap(), original);
     }
 }
+
+testing_aids::init_tracing!();

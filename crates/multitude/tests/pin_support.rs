@@ -351,3 +351,5 @@ fn assume_init_pin_slice_box() {
     let p: Pin<Box<[u32]>> = unsafe { Box::assume_init_pin_slice(p) };
     assert_eq!(&*p, &[10_u32, 11, 12]);
 }
+
+testing_aids::init_tracing!();

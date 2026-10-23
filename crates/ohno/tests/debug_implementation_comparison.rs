@@ -126,3 +126,5 @@ fn test_struct_with_enum_field_debug_structure() {
     let test_debug = format!("{test_struct:?}");
     assert_eq!(ref_debug, test_debug);
 }
+
+testing_aids::init_tracing!();

@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![forbid(unsafe_code)]
+// The test-only tracing constructor uses unsafe attributes. See docs/tracing-tests.md.
+#![cfg_attr(not(test), forbid(unsafe_code))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/rest_over_grpc/logo.png")]
@@ -457,3 +458,6 @@ pub mod codegen_helpers {
         }
     }
 }
+
+#[cfg(test)]
+testing_aids::init_tracing!();

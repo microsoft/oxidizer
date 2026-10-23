@@ -75,3 +75,5 @@ fn suggested_remedy_places_the_core_by_hand() {
     assert!(error.to_string().starts_with("failed for /etc/config.toml"), "got: {error}");
     assert_eq!(error.source().expect("source").to_string(), "root cause");
 }
+
+testing_aids::init_tracing!();

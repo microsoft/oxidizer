@@ -80,3 +80,5 @@ fn aliased_core_carries_no_source_when_nothing_is_wrapped() {
     assert_eq!(error.message(), "alias failed for /tmp/y");
     assert!(error.source().is_none());
 }
+
+testing_aids::init_tracing!();

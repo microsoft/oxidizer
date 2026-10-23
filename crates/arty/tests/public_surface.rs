@@ -26,3 +26,5 @@ fn time_types_are_reexported() {
 fn clock_control_is_reexported_with_both_features() {
     let _ = std::mem::size_of::<arty::time::ClockControl>();
 }
+
+testing_aids::init_tracing!();

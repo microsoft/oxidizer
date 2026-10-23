@@ -666,3 +666,6 @@ pub use view::{BytesView, BytesViewSlices};
 
 #[cfg(test)]
 mod testing;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

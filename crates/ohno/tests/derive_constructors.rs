@@ -79,3 +79,5 @@ fn test_from_infallible_exists() {
     fn accepts_from_infallible(_f: fn(Infallible) -> SimpleError) {}
     accepts_from_infallible(SimpleError::from);
 }
+
+testing_aids::init_tracing!();

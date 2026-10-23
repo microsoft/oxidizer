@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![forbid(unsafe_code)]
+// The test-only tracing constructor uses unsafe attributes. See docs/tracing-tests.md.
+#![cfg_attr(not(test), forbid(unsafe_code))]
 
 //! Worked examples for [`rest_over_grpc`].
 //!
@@ -41,3 +42,6 @@
 
 pub mod custom;
 pub mod tonic_bridge;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

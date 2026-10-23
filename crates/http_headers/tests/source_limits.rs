@@ -539,3 +539,5 @@ fn validated_http_map_values_are_not_subject_to_custom_source_limits() {
         assert_eq!(ReferrerPolicy::owned_with(&map, mode).unwrap().unwrap().tokens().count(), 1_025);
     }
 }
+
+testing_aids::init_tracing!();

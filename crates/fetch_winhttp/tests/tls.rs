@@ -51,3 +51,5 @@ fn tls_validation_relaxations_are_independent() {
     let response = futures::executor::block_on(both.client.get(wrong_name.url("/both")).fetch_text_body()).unwrap();
     assert_eq!(response, "both accepted");
 }
+
+testing_aids::init_tracing!();

@@ -38,3 +38,6 @@ pub use adapter::ServiceAdapter;
 pub use ext::CacheServiceExt;
 #[doc(inline)]
 pub use request::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
+
+#[cfg(test)]
+testing_aids::init_tracing!();

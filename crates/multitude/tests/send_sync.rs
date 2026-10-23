@@ -193,3 +193,5 @@ fn drain_and_splice_are_not_send_or_sync() {
     assert_not_send::<Splice<'static, 'static, core::iter::Empty<u64>, Global>>();
     assert_not_sync::<Splice<'static, 'static, core::iter::Empty<u64>, Global>>();
 }
+
+testing_aids::init_tracing!();

@@ -246,12 +246,12 @@ crates/fetch_winhttp/tests/
   non_windows.rs       // keeps package-scoped test runs nonempty off Windows
 ```
 
-`lifecycle.rs` is the only binary that builds a client through `fetch`'s standard
-pipeline and therefore the only one whose requests pass through `fetch`'s logging
-handler. An integration binary links the library with `cfg(test)` false, so no
-crate-root initialization runs and that binary invokes
-`testing_aids::init_tracing!()` at module scope itself
-(../../../docs/tracing-tests.md).
+Every unit-test and integration-test target initializes tracing because its
+runtime dependency graph reaches `tracing` in a supported configuration.
+Each integration target invokes `testing_aids::init_tracing!()` at module scope.
+It cannot inherit the library's `#[cfg(test)]` initializer because Cargo links the
+normal library build into integration tests.
+See [the repository tracing rule](../../../docs/tracing-tests.md).
 
 ### 1.3 Examples
 

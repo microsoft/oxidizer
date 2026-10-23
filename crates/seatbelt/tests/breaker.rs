@@ -388,3 +388,5 @@ async fn clone_service_shares_circuit_state(#[case] use_tower: bool) {
     assert_eq!(result1, Ok("circuit is open".to_string()));
     assert_eq!(result2, Ok("circuit is open".to_string()));
 }
+
+testing_aids::init_tracing!();

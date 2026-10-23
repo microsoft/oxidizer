@@ -134,3 +134,5 @@ async fn runtime_converts_into_dyn_executor() {
 
     assert!(output.status.success());
 }
+
+testing_aids::init_tracing!();

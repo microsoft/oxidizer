@@ -178,3 +178,5 @@ async fn serialize_on_one_thread_deserialize_on_another() {
 
     assert_eq!(*result.value(), "hello from another task");
 }
+
+testing_aids::init_tracing!();

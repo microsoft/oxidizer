@@ -177,3 +177,5 @@ fn public_equal_types_are_hashable() {
     media.insert(ContentTypeOwned::try_from("application/json").expect("valid media type"), "json");
     assert_eq!(media.len(), 1);
 }
+
+testing_aids::init_tracing!();

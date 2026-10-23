@@ -436,3 +436,5 @@ mod descriptor {
         assert!(manual.generate().unwrap().1[0].openapi_spec().is_none());
     }
 }
+
+testing_aids::init_tracing!();

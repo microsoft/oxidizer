@@ -30,3 +30,5 @@ fn default_threaded_corpus_preserves_64_bit_handle_fixture() {
         assert_eq!(reader.resolve(sym), word);
     }
 }
+
+testing_aids::init_tracing!();

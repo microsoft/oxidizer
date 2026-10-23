@@ -199,3 +199,5 @@ fn error_chain_contains_win32_code(error: &(dyn Error + 'static), expected_codes
 
     false
 }
+
+testing_aids::init_tracing!();

@@ -144,3 +144,5 @@ fn conflicting_dynamic_routes_are_reported_instead_of_using_registration_order()
     assert!(text.contains("conflicting routes"), "{text}");
     assert!(text.contains("First, Second"), "{text}");
 }
+
+testing_aids::init_tracing!();

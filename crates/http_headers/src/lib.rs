@@ -494,7 +494,8 @@
 //! - Supports explicit relaxed parsing options to support common malformed headers
 //! - Supports serde
 
-#![forbid(unsafe_code)]
+// The test-only tracing constructor uses unsafe attributes. See docs/tracing-tests.md.
+#![cfg_attr(not(test), forbid(unsafe_code))]
 
 mod decode_error;
 mod field;
@@ -543,3 +544,6 @@ pub use field_value::{FieldValue, FieldValueRef, InvalidFieldValue};
 pub use sink::field_encoder::FieldSensitivity;
 #[cfg(test)]
 pub(crate) use test_sink::TestSink;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

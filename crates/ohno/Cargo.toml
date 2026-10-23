@@ -28,6 +28,10 @@ allowed_external_types = ["ohno_macros::*"]
 [package.metadata.docs.rs]
 all-features = true
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 app-err = []
 test-util = []
@@ -37,6 +41,7 @@ ohno_macros = { workspace = true }
 typeid = { workspace = true }
 
 [dev-dependencies]
+ctor = { workspace = true }
 futures = { workspace = true }
 insta = { workspace = true }
 mutants = { workspace = true }

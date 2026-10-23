@@ -127,3 +127,5 @@ fn redacted_display_enum() {
 
     test_derive!(input, redacted_display);
 }
+
+testing_aids::init_tracing!();

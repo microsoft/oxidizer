@@ -225,3 +225,5 @@ fn separately_registered_executor_threads_each_receive_one_notification() {
 mod support;
 #[path = "support/waker.rs"]
 mod waker_support;
+
+testing_aids::init_tracing!();

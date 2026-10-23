@@ -39,3 +39,6 @@
 mod runtime;
 
 pub use runtime::Runtime;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

@@ -1,33 +1,49 @@
 # Testing `tracing` Events
 
-> **Prefer `observed` for telemetry.** Emitting telemetry through the `observed`
-> package sidesteps everything described here: its events are not subject to the
-> `tracing-core` process-global callsite-interest cache, so capturing and asserting
-> on them just works with no initialization, no `#[serial]`, and no
-> per-binary init function. Reach for raw `tracing` events only when you specifically
-> need them; otherwise use `observed` and skip this guide.
+Prefer `observed` for new telemetry. Its events do not use the process-global
+callsite-interest cache in `tracing-core`. Tests that capture `observed` events
+do not need tracing initialization for those events.
+The dependency rule below still applies if the executable also depends on `tracing`.
 
-This repository has one **mandatory requirement** for any test binary that touches
-`tracing` (section 1), followed by two optional **how-to** recipes for when you want
+This repository has one initialization rule for test executables that depend on
+`tracing` (section 1), followed by optional recipes for when you want
 to inspect `tracing` output (sections 2 and 3).
 
 ## 1. Required: initialize tracing so trace-event lines are counted as covered
 
-**This is mandatory for every test binary that emits or inspects `tracing` events,
-whether or not the test inspects the output.** If you skip it, `tracing` event
-emission lines (and the field expressions inside them, such as
-`cache.duration_ns = duration.as_nanos()`) may be reported as **lacking test
-coverage even though they execute during tests** - the coverage miss is
-non-deterministic and depends on test scheduling.
+For a test executable, its runtime dependency graph contains its dependencies
+and their dependencies.
+Every Cargo unit-test or integration-test executable whose runtime dependency graph
+contains `tracing`, directly or transitively, must initialize tracing before tests run.
+The rule applies even when the target does not call tracing or inspect logs itself.
+
+Start with the target package's normal and dev-dependencies, then follow only normal
+dependency edges. Do not follow dependencies' dev-dependencies, build-dependencies,
+or procedural-macro host dependencies. Those graphs do not run in the test process.
+For a procedural-macro package's own unit tests, start with that package as the root.
+
+Use the union of all supported features and platforms, including supported custom
+configurations such as `cfg(loom)`. If any configuration reaches `tracing`, initialize
+the target in every configuration where its tests run. Do not gate the initializer
+on the feature or platform that introduces tracing. An existing whole-target gate
+can remain because it also disables that target's tests.
+
+This rule keeps coverage and mutation testing independent of test order.
+Without an interested subscriber, tracing can skip field expressions and formatting
+even when tests execute the surrounding code.
+Dependency changes require a fresh audit of affected test targets, not a search
+for direct tracing calls.
 
 Initialize `testing_aids` tracing before any test runs, via the
 `testing_aids::init_tracing!()` macro. It expands to a `#[ctor::ctor]`
-process-initialization function that runs before `main`; the invoking crate needs a
-dev-dependency on the [`ctor`](https://docs.rs/ctor) crate. Where the macro goes depends
-on the binary kind.
+process-initialization function that runs before `main`.
+The invoking crate needs a dev-dependency on [`ctor`](https://docs.rs/ctor) and a
+path dev-dependency on `testing_aids`.
+Keep these dependencies unconditional across features and platforms.
+Where the macro goes depends on the binary kind.
 
-**Unit-test binary** (`#[cfg(test)]` code under `src/`) - add this at the crate
-root, gated on `test`:
+**Unit-test binary** (library, binary, or procedural-macro target) - add this at its
+Cargo target root, gated on `test`:
 
 ```rust
 #[cfg(test)]
@@ -37,11 +53,18 @@ testing_aids::init_tracing!();
 **Integration-test binaries** (`tests/*.rs`) link the library's normal (non-test)
 build, in which `#[cfg(test)]` items - including the crate-root initialization - are
 excluded. So the crate-root initialization never runs for them. Invoke the macro
-directly in each `tests/*.rs` file that emits or inspects `tracing`:
+directly in each integration-test target root covered by the dependency rule.
+This includes nested roots such as `tests/io/main.rs` and explicit `[[test]]` paths:
 
 ```rust
 testing_aids::init_tracing!();
 ```
+
+Do not add initialization to normal library builds or production startup.
+Examples, benchmarks, doctests, and compile-only fixtures are not covered by this
+unit-test and integration-test rule.
+The `ctor` expansion uses unsafe attributes. In a crate that forbids unsafe code,
+use `#![cfg_attr(not(test), forbid(unsafe_code))]` to preserve the production restriction.
 
 The initialization is idempotent. If you forget it, the `testing_aids` tracing helpers
 panic with a pointer to this guide rather than failing silently.
@@ -62,9 +85,31 @@ This also applies during mutation testing: stdout and file output are suppressed
 but field expressions and formatting still run, and explicitly requested buffers
 still capture output for assertions.
 
-> A binary that deliberately runs with no subscriber (to exercise the
-> no-subscriber code paths) must NOT initialize tracing and must own its own
-> binary; see `crates/cachet/tests/no_subscriber.rs`.
+Tests that deliberately disable tracing, require no subscriber, or own a custom
+process-global subscriber are exceptions. Give each scenario a separate Cargo test
+target and document its purpose at the target root.
+Do not initialize the shared subscriber in those targets.
+See `crates/cachet/tests/no_subscriber.rs` for a no-subscriber example.
+Use Cargo target isolation, not subprocesses launched by tests.
+
+### Auditing target roots
+
+Use `cargo metadata --format-version 1 --all-features` without `--filter-platform`
+to include optional and target-specific dependency edges.
+Read `resolve.nodes[].deps[].dep_kinds` to distinguish normal, dev, and build edges.
+Apply the traversal rule above rather than following every edge in the resolved graph.
+
+Enumerate workspace `packages[].targets[]` with `test = true` and a library,
+binary, procedural-macro, or integration-test kind.
+Use each target's `src_path`, not a `tests/*.rs` filename search.
+For every target that reaches tracing, inspect its root for initialization or a
+documented exception. Also inspect the gates on the initializer and the helper dependencies.
+An integration executable cannot inherit a library's `#[cfg(test)]` initializer.
+
+If features are mutually exclusive, collect metadata for each supported combination
+and audit the union instead of relying on `--all-features`.
+The dependency audit establishes scope. Test execution still needs the supported
+platform and feature matrix in CI.
 
 ## 2. Optional: write events to stdout, a file, or a buffer (process-global)
 

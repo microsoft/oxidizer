@@ -719,3 +719,5 @@ fn alloc_forwarding_trait_impls() {
     10_u32.hash(&mut h_value);
     assert_eq!(h_handle.finish(), h_value.finish());
 }
+
+testing_aids::init_tracing!();

@@ -96,3 +96,5 @@ fn arbitrary_raw_handles_are_range_checked() {
         }
     });
 }
+
+testing_aids::init_tracing!();

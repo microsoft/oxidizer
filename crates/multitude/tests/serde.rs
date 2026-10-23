@@ -99,3 +99,5 @@ mod from_coverage_extras_serde {
         assert_eq!(json, "\"box-str\"");
     }
 }
+
+testing_aids::init_tracing!();

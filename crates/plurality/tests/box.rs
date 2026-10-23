@@ -116,3 +116,5 @@ fn into_raw_pointer_is_stable_and_readable() {
     drop(b);
     assert_eq!(pool.len(), 0);
 }
+
+testing_aids::init_tracing!();

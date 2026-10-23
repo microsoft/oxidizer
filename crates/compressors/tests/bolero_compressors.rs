@@ -246,3 +246,5 @@ fn decompress(scenario: &Scenario, format: Format, input: BytesView, natural: u6
 
     compressors::decompress(input, decompressor).map(|view| view.to_vec())
 }
+
+testing_aids::init_tracing!();

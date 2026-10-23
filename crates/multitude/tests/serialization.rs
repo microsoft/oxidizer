@@ -1329,3 +1329,5 @@ fn arbitrary_input_does_not_break_dynamic_value_invariants() {
             let _ = <Value as DeserializeIn<'_, _>>::deserialize_in(&arena, &mut deserializer);
         });
 }
+
+testing_aids::init_tracing!();

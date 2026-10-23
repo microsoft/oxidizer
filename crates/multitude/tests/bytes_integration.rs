@@ -156,3 +156,5 @@ fn bytes_from_str_outlives_arena() {
     }
     assert_eq!(&*b, b"persist");
 }
+
+testing_aids::init_tracing!();

@@ -818,3 +818,5 @@ fn owned_strings_and_error_messages_cover_public_diagnostics() {
         Owned { value: "x".to_owned() }
     );
 }
+
+testing_aids::init_tracing!();

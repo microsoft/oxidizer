@@ -32,7 +32,8 @@ all-features = true
 # `cfg_aliases` is used only by `build.rs`. cargo-machete does not scan build
 # scripts, so it reports a false positive; ignore it here.
 [package.metadata.cargo-machete]
-ignored = ["cfg_aliases"]
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+ignored = ["ctor", "cfg_aliases"]
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -77,12 +78,14 @@ bolero = { workspace = true, features = ["std"] }
 brotli = { workspace = true, features = ["std"] }
 bytesbuf = { path = "../bytesbuf", features = ["std", "test-util"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 metabench = { path = "../metabench" }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tick = { path = "../tick", features = ["tokio", "test-util"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }

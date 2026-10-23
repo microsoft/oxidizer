@@ -422,3 +422,5 @@ fn semantic_arguments_and_build_time_validation_preserve_output() {
     assert!(!FieldSensitivity::NonSensitive.is_sensitive());
     assert!(FieldSensitivity::Sensitive.is_sensitive());
 }
+
+testing_aids::init_tracing!();

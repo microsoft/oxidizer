@@ -86,3 +86,5 @@ fn request_and_response_delegate_to_their_header_maps() {
     exercise(&mut http::Request::new(()));
     exercise(&mut http::Response::new(()));
 }
+
+testing_aids::init_tracing!();

@@ -48,3 +48,5 @@ fn misses_resolve_to_none() {
     assert!(Route::resolve("GET", "/v1/repos/rust-lang").is_none());
     assert!(Route::resolve("DELETE", "/v1/users").is_none());
 }
+
+testing_aids::init_tracing!();

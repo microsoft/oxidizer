@@ -1315,3 +1315,5 @@ fn ownership_and_lock_operations_emit_runtime_telemetry() {
 
     seismograph::recorder(Configuration::default());
 }
+
+testing_aids::init_tracing!();

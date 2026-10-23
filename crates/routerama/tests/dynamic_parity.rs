@@ -385,3 +385,5 @@ fn exotic_resolver() -> ExoticRouteResolver {
 fn ping_resolver() -> PingResolver {
     Ping::resolver()
 }
+
+testing_aids::init_tracing!();

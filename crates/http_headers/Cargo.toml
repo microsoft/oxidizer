@@ -24,6 +24,10 @@ allowed_external_types = ["bytes::bytes::Bytes", "http::*", "serde_core::de::*",
 [package.metadata.docs.rs]
 all-features = true
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = ["headers-all"]
 benchmarking = ["http_headers_simd/benchmarking"]
@@ -83,6 +87,7 @@ base64 = { workspace = true, features = ["std"] }
 bolero = { workspace = true, features = ["std"] }
 compact_str = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 fluent-uri = { workspace = true, features = ["ipv_future"] }
 headers = { workspace = true }
 http = { workspace = true }
@@ -94,6 +99,7 @@ paste = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 sha1 = { workspace = true, features = ["std"] }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tower = { workspace = true, features = ["util"] }
 zeroize = { workspace = true, features = ["alloc"] }

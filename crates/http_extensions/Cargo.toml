@@ -19,7 +19,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extens
 # `uuid` is used only by a doctest in `src/documentation/recipes.rs`, which
 # cargo-machete does not scan; ignore it to avoid a false positive.
 [package.metadata.cargo-machete]
-ignored = ["uuid"]
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+ignored = ["ctor", "uuid"]
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -83,6 +84,7 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
@@ -94,6 +96,7 @@ serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { path = "../templated_uri", features = ["uuid"] }
+testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = ["fmt", "test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }

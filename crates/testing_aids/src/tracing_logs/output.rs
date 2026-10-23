@@ -203,7 +203,7 @@ pub(crate) fn assert_initialized() {
     assert!(
         INITIALIZER.is_completed(),
         "testing_aids tracing was used before initialize() ran; every test binary that \
-         emits or inspects tracing must install the subscriber from a `#[ctor::ctor]` \
+         depends on tracing directly or transitively must install the subscriber from a `#[ctor::ctor]` \
          process-initialization function calling `testing_aids::init_tracing!()`. See \
          docs/tracing-tests.md."
     );

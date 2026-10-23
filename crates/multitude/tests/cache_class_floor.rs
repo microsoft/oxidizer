@@ -49,3 +49,5 @@ fn release_below_floor_bypasses_cache() {
 }
 
 const NUM_REFILLS: usize = 32;
+
+testing_aids::init_tracing!();

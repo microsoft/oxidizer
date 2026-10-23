@@ -36,3 +36,5 @@ fn unrelated_attr() {
 
     insta::assert_snapshot!(expand_fundle_bundle!(item));
 }
+
+testing_aids::init_tracing!();

@@ -1,4 +1,7 @@
 +
+doctests
+executables
+subprocesses
 ACL
 IPC
 UID

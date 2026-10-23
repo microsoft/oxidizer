@@ -23,6 +23,10 @@ allowed_external_types = ["bytesbuf::*", "ohno::*", "futures_core::stream::Strea
 [package.metadata.docs.rs]
 all-features = true
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 futures-stream = ["dep:futures-core"]
@@ -36,6 +40,7 @@ trait-variant = { workspace = true }
 
 [dev-dependencies]
 bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
+ctor = { workspace = true }
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }

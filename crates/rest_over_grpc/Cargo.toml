@@ -51,6 +51,10 @@ allowed_external_types = [
 rustdoc-args = ["--cfg", "docsrs"]
 all-features = true
 
+# ctor is referenced by the tracing initializer macro expansion, not by source code.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = ["serving"]
 # The `serving` module's `serve_http*` one-shot helpers, which bridge an
@@ -110,6 +114,7 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum-core = { workspace = true }
+ctor = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 heck = { workspace = true }
 http-body = { workspace = true }
@@ -127,6 +132,7 @@ routerama_build = { path = "../routerama_build" }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std", "raw_value"] }
 syn = { workspace = true, features = ["full", "parsing"] }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["rt", "macros"] }
 tower-service = { workspace = true }
 

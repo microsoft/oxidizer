@@ -73,3 +73,5 @@ async fn adapter_reports_not_found() {
     let response = service.call(request).await.expect("infallible");
     assert_eq!(response.status().as_u16(), 404);
 }
+
+testing_aids::init_tracing!();

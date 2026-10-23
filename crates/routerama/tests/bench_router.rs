@@ -78,3 +78,5 @@ fn every_benchmark_lookup_hits_both_resolvers() {
         );
     }
 }
+
+testing_aids::init_tracing!();

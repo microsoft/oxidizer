@@ -144,3 +144,5 @@ fn shared_nan_values_do_not_become_equal_through_pointer_identity() {
     assert!(!first.eq(&second));
     assert_eq!(first.partial_cmp(&second), None);
 }
+
+testing_aids::init_tracing!();

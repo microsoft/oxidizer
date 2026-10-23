@@ -417,3 +417,5 @@ fn repolling_many_barrier_waiters_does_not_duplicate_arrivals_between_generation
 mod support;
 #[path = "support/waker.rs"]
 mod waker_support;
+
+testing_aids::init_tracing!();

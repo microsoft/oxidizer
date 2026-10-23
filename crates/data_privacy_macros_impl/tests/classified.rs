@@ -108,3 +108,5 @@ fn test_success_named_field() {
 
     assert_snapshot!(pretty);
 }
+
+testing_aids::init_tracing!();

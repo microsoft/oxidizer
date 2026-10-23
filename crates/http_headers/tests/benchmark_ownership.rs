@@ -210,3 +210,5 @@ fn name_setups_reuse_immutable_corpora_and_owned_names() {
         }
     }
 }
+
+testing_aids::init_tracing!();

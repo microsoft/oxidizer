@@ -103,3 +103,5 @@ fn message_schemas_are_components() {
     assert_eq!(shelf["properties"]["theme"]["type"], "string");
     assert_eq!(doc["components"]["schemas"]["google.rpc.Status"]["type"], "object");
 }
+
+testing_aids::init_tracing!();

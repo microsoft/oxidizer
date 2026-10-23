@@ -88,3 +88,5 @@ fn rc_freed_slot_reused_as_cross_thread_arc() {
     assert_eq!(counter.load(Ordering::SeqCst), 2);
     assert_eq!(pool.len(), 0);
 }
+
+testing_aids::init_tracing!();

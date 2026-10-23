@@ -35,3 +35,6 @@ pub fn derive_enrichment(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = syn::parse2(input)?;
     enrichment::derive_enrichment(&input)
 }
+
+#[cfg(test)]
+testing_aids::init_tracing!();

@@ -484,3 +484,5 @@ fn only_vtable_metadata_handles_pay_for_metadata() {
     assert_eq!(size_of::<Arc<HeaderAndShape>>(), word * 2);
     assert_eq!(size_of::<Rc<HeaderAndShape>>(), word * 2);
 }
+
+testing_aids::init_tracing!();

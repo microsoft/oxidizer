@@ -19,3 +19,5 @@ fn basic_expansion() {
 
     insta::assert_snapshot!(expand_fundle_deps!(item));
 }
+
+testing_aids::init_tracing!();

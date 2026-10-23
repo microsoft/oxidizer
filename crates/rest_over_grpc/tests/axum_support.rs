@@ -92,3 +92,5 @@ fn adapter_response_body_is_axum_into_response() {
 
     assert_into_response::<http::Response<rest_over_grpc::serving::RestBody>>();
 }
+
+testing_aids::init_tracing!();

@@ -126,3 +126,5 @@ fn content_type_identity_keeps_case_parameters_order_and_quoting_distinct() {
         }
     }
 }
+
+testing_aids::init_tracing!();

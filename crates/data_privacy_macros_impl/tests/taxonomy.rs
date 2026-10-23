@@ -161,3 +161,5 @@ fn test_success() {
 
     assert_snapshot!(pretty);
 }
+
+testing_aids::init_tracing!();

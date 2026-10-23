@@ -91,3 +91,5 @@ fn version_thirteen_preserves_custom_source_limits() {
     source.0.push(FieldValue::from_static("13"));
     assert_error(&source, DecodeErrorKind::SourceLimitExceeded);
 }
+
+testing_aids::init_tracing!();

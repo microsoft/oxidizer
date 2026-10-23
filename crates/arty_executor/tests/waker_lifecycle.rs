@@ -259,3 +259,5 @@ fn context_restoration_panic_does_not_release_local_payload_to_remote_waker() {
     assert!(actual.is_none_or(|thread| thread == owner), "local payload was dropped remotely");
     assert!(dropped_on.lock().unwrap().is_none_or(|thread| thread == owner));
 }
+
+testing_aids::init_tracing!();

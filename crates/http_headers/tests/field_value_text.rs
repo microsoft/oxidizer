@@ -77,3 +77,5 @@ fn borrowed_to_owned_conversions_preserve_valid_bytes_and_sensitivity() {
         }
     }
 }
+
+testing_aids::init_tracing!();

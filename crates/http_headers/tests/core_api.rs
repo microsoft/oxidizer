@@ -617,3 +617,5 @@ fn field_name_recognition_only_uses_same_length_candidates() {
     let over_long = vec![b'a'; 64];
     assert_eq!(FieldName::try_from_bytes(&over_long).expect("valid").index(), None);
 }
+
+testing_aids::init_tracing!();

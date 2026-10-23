@@ -380,3 +380,5 @@ fn context_iter_chronological_order() {
         ]
     );
 }
+
+testing_aids::init_tracing!();

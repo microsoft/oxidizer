@@ -34,3 +34,5 @@ fn forward_invalid_syntax() {
 
     insta::assert_snapshot!(expand_fundle_bundle!(item));
 }
+
+testing_aids::init_tracing!();

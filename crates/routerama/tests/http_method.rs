@@ -62,3 +62,5 @@ fn validated_tokens_and_strings_convert_to_methods() {
     let error = HttpMethod::try_from("BAD METHOD".to_owned()).expect_err("owned spaces are invalid");
     assert_eq!(error.invalid_http_method_value(), Some("BAD METHOD"));
 }
+
+testing_aids::init_tracing!();

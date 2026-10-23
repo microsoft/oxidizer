@@ -163,3 +163,5 @@ fn http_websocket_versions_are_not_subject_to_custom_source_limits() {
         assert_eq!(owned.versions().collect::<Vec<_>>(), [13, 255]);
     }
 }
+
+testing_aids::init_tracing!();

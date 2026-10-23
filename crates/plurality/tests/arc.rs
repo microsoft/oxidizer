@@ -67,3 +67,5 @@ fn uninit_arc_placement() {
     drop((a, a2));
     assert_eq!(pool.len(), 0);
 }
+
+testing_aids::init_tracing!();

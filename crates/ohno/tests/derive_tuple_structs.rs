@@ -100,3 +100,5 @@ fn test_tuple_error_from_implementations() {
     println!("Error: {error}");
     assert_error_message!(error, "an error occurred when formatting an argument");
 }
+
+testing_aids::init_tracing!();

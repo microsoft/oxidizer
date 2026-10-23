@@ -52,3 +52,5 @@ fn empty_directives_do_not_supply_the_required_max_age() {
         );
     }
 }
+
+testing_aids::init_tracing!();

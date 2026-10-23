@@ -381,3 +381,5 @@ fn unwinding_a_value_modification_releases_the_internal_hal_lock() {
 }
 #[path = "support/waker.rs"]
 mod waker_support;
+
+testing_aids::init_tracing!();

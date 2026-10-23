@@ -329,3 +329,5 @@ fn nonreserved_extension_units_preserve_spelling_and_opaque_semantics() {
         assert_content_range_round_trip(&content);
     }
 }
+
+testing_aids::init_tracing!();

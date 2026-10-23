@@ -255,3 +255,5 @@ fn notifying_drivers_does_not_clone_custom_wakers_under_the_registry_lock() {
     registering.join().unwrap();
     assert!(first_driver.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some());
 }
+
+testing_aids::init_tracing!();

@@ -594,3 +594,5 @@ fn poll_timer(timer: &mut PeriodicTimer) -> Poll<Option<()>> {
     let mut context = Context::from_waker(Waker::noop());
     std::pin::pin!(timer).poll_next(&mut context)
 }
+
+testing_aids::init_tracing!();

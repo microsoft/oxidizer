@@ -131,3 +131,6 @@ pub(crate) const REPR_DIGEST_HEADER: &str = "repr-digest";
 
 pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
 pub use error::CompressibleTypeError;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

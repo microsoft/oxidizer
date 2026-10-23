@@ -115,3 +115,5 @@ fn response_methods_cover_success_and_failure_in_the_same_downstream_sink() {
     assert_eq!(sink.values.len(), 1);
     assert_eq!(sink.values[0], "a=1");
 }
+
+testing_aids::init_tracing!();

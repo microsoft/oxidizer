@@ -53,3 +53,5 @@ fn test_source_behavior() {
 
     assert_error_message!(error3, "Custom message");
 }
+
+testing_aids::init_tracing!();

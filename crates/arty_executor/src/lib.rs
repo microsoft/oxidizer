@@ -82,3 +82,6 @@ mod testing;
 mod wake_diagnostic;
 #[cfg(all(debug_assertions, test))]
 pub(crate) use wake_diagnostic::*;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

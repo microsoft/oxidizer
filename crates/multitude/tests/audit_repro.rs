@@ -179,3 +179,5 @@ fn zst_shared_handouts_advance_cursor() {
     assert!(!z.as_ptr().is_null());
     drop(arena);
 }
+
+testing_aids::init_tracing!();

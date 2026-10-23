@@ -78,3 +78,6 @@ mod windows;
 
 #[cfg(windows)]
 pub use fetch_winhttp_impl::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder, WinHttpTlsConfig, WinHttpTlsConfigBuilder};
+
+#[cfg(test)]
+testing_aids::init_tracing!();
