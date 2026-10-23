@@ -367,11 +367,10 @@ impl Sink {
         reason = "sink construction limits the processor count to the 64-bit dispatch mask"
     )]
     pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
-        let sinks = match &*self.inner {
-            SinkInner::Single(sink) => slice::from_ref(sink),
-            SinkInner::Composite { children } => children.as_slice(),
-            SinkInner::Noop => return,
-        };
+        if self.is_noop() {
+            return;
+        }
+        let sinks = self.sinks();
 
         let description = state.description();
         let bitmask = {
@@ -406,17 +405,23 @@ impl Sink {
         }
     }
 
-    fn sinks_with_shift(&self) -> impl Iterator<Item = (&SingleSinkState, usize)> {
-        let sinks = match &*self.inner {
+    fn sinks(&self) -> &[SingleSinkState] {
+        match &*self.inner {
             SinkInner::Single(state) => slice::from_ref(state),
-            SinkInner::Composite { children } => children.as_slice(),
+            SinkInner::Composite { children } => children,
             SinkInner::Noop => &[],
-        };
-        sinks.iter().filter(|sink| !sink.processors.is_empty()).scan(0, |next_shift, sink| {
-            let shift = *next_shift;
-            *next_shift += sink.processors.len();
-            Some((sink, shift))
-        })
+        }
+    }
+
+    fn sinks_with_shift(&self) -> impl Iterator<Item = (&SingleSinkState, usize)> {
+        self.sinks()
+            .iter()
+            .filter(|sink| !sink.processors.is_empty())
+            .scan(0, |next_shift, sink| {
+                let shift = *next_shift;
+                *next_shift += sink.processors.len();
+                Some((sink, shift))
+            })
     }
 
     /// Returns a `Vec` of all enrichment entries from outermost to innermost scope.
@@ -606,6 +611,55 @@ mod tests {
         fn description(&self) -> EventDescription {
             EventDescription::new("dummy", None, None, None, false, false)
         }
+    }
+
+    #[derive(Default)]
+    struct DescriptionCountingDyn {
+        description_calls: AtomicUsize,
+    }
+
+    impl crate::interop::DynEvent for DescriptionCountingDyn {
+        fn name(&self) -> &'static str {
+            "description-counting"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+        fn description(&self) -> EventDescription {
+            self.description_calls.fetch_add(1, Ordering::Relaxed);
+            EventDescription::new("description-counting", None, None, None, false, false)
+        }
+    }
+
+    #[test]
+    fn processor_free_sinks_do_not_read_dynamic_event_metadata() {
+        let event = DescriptionCountingDyn::default();
+        let sinks = [
+            Sink::noop(),
+            Sink::builder("single").clock(SimpleClock::new_frozen()).build(),
+            Sink::composite([
+                Sink::builder("first").clock(SimpleClock::new_frozen()).build(),
+                Sink::builder("second").clock(SimpleClock::new_frozen()).build(),
+            ]),
+        ];
+
+        for sink in &sinks {
+            crate::interop::emit_dyn_event(sink, &event);
+        }
+
+        assert_eq!(event.description_calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]
