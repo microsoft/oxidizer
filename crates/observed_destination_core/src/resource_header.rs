@@ -43,8 +43,8 @@ impl ResourceHeader {
     ///
     /// # Errors
     ///
-    /// Returns an [`OTelSdkError::InternalFailure`] with the reason for the underlying failure,
-    /// if writing to the provided writer fails.
+    /// Returns an [`opentelemetry_sdk::error::OTelSdkError::InternalFailure`]
+    /// with the reason for the underlying failure, if writing to the provided writer fails.
     pub fn print_once(&self, w: &mut (impl Write + ?Sized)) -> OTelSdkResult {
         if self
             .emitted

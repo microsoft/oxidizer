@@ -2,14 +2,15 @@
 // Licensed under the MIT License.
 
 //! Houses simple inversion of control for registering log and metric destinations
-//! with the otel logger and meter provider builders.
+//! with the OpenTelemetry logger and meter provider builders.
 
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 
 use crate::{DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination};
 
-/// Convenience extension trait to register log destinations with the otel logger provider builder.
+/// Convenience extension trait to register log destinations with the OpenTelemetry logger
+/// provider builder.
 ///
 /// # Examples
 ///
@@ -52,7 +53,8 @@ impl LoggerProviderBuilderExt for LoggerProviderBuilder {
     }
 }
 
-/// Convenience extension trait to register metric destinations with the otel meter provider builder.
+/// Convenience extension trait to register metric destinations with the OpenTelemetry meter
+/// provider builder.
 ///
 /// # Examples
 ///

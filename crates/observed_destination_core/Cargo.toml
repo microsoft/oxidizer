@@ -17,6 +17,20 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_core"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "log::LevelFilter",
+    "opentelemetry_sdk::error::OTelSdkResult",
+    "opentelemetry_sdk::logs::log_processor::LogProcessor",
+    "opentelemetry_sdk::logs::logger_provider::LoggerProviderBuilder",
+    "opentelemetry_sdk::logs::record::SdkLogRecord",
+    "opentelemetry_sdk::metrics::meter_provider::MeterProviderBuilder",
+    "opentelemetry_sdk::resource::Resource",
+    "opentelemetry::common::InstrumentationScope",
+    "opentelemetry::logs::record::Severity",
+    "opentelemetry::metrics::meter::MeterProvider",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 

@@ -39,8 +39,8 @@ expose an OpenTelemetry SDK’s error type.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHwtXGd867-ob3nWM5uSm9h8bnQ2dC0LWWk4br65QPJ4at05hZIGCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9jb3JlZTAuMS4w
- [__link0]: https://docs.rs/observed_destination_core/0.1.0/observed_destination_core/trait.LogDestination.html
- [__link1]: https://docs.rs/observed_destination_core/0.1.0/observed_destination_core/trait.MetricDestination.html
- [__link2]: https://docs.rs/observed_destination_core/0.1.0/observed_destination_core/?search=FlushableMetricsProvider
- [__link3]: https://docs.rs/observed_destination_core/0.1.0/observed_destination_core/type.DestinationResult.html
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHwtXGd867-ob3nWM5uSm9h8bnQ2dC0LWWk4br65QPJ4at05hZIGCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9jb3JlZjAuMjkuMA
+ [__link0]: https://docs.rs/observed_destination_core/0.29.0/observed_destination_core/trait.LogDestination.html
+ [__link1]: https://docs.rs/observed_destination_core/0.29.0/observed_destination_core/trait.MetricDestination.html
+ [__link2]: https://docs.rs/observed_destination_core/0.29.0/observed_destination_core/?search=FlushableMetricsProvider
+ [__link3]: https://docs.rs/observed_destination_core/0.29.0/observed_destination_core/type.DestinationResult.html
