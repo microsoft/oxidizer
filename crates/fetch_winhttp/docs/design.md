@@ -92,8 +92,8 @@ Schannel. WinHTTP does TLS itself and accepts only a small set of knobs, so
 `fetch_winhttp` therefore ignores `fetch`'s TLS configuration entirely and takes its
 own `WinHttpTlsConfig` instead (§4). Different transports inherently support different TLS
 configuration models, so trying to configure TLS uniformly at the transport-abstract
-`fetch` level is over-abstraction on `fetch`'s part; see the fetch API stabilization
-feedback (../../fetch/docs/stabilization.md).
+`fetch` level is over-abstraction on `fetch`'s part; see the [`fetch` API stabilization
+feedback](../../fetch/docs/stabilization.md).
 
 ### 1.3 Platform support
 
