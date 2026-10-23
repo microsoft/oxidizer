@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::task;
 
 use events_once::{LocalEventLake, PooledLocalReceiver};
@@ -18,9 +18,7 @@ use crate::{ShutdownCause, ShutdownError, TaskPanicPayload};
 /// because of an error. A panic payload need not implement [`Error`].
 pub enum JoinError {
     /// The task panicked.
-    // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
-    // thread-safe error while preserving the original payload for `into_panic`.
-    Panicked(Mutex<TaskPanicPayload>),
+    Panicked(TaskPanicPayload),
 
     /// Executor shutdown cancelled the task or rejected its submission.
     Shutdown(Option<ShutdownError>),
@@ -44,7 +42,7 @@ impl JoinError {
     }
 
     pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
-        Self::Panicked(Mutex::new(panic))
+        Self::Panicked(panic)
     }
 }
 
@@ -139,7 +137,8 @@ mod tests {
 
     #[test]
     fn shutdown_error_contract() {
-        assert_impl_all!(JoinError: Error, Send, Sync, UnwindSafe, RefUnwindSafe);
+        assert_impl_all!(JoinError: Error, Send);
+        assert_not_impl_any!(JoinError: Sync, UnwindSafe, RefUnwindSafe);
 
         let error = JoinError::shutdown(ShutdownCause::default());
 
@@ -158,7 +157,6 @@ mod tests {
         let JoinError::Panicked(payload) = error else {
             return;
         };
-        let payload = payload.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(*payload.downcast::<u64>().unwrap(), 42);
     }
 

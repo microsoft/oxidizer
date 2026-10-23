@@ -955,7 +955,7 @@ mod tests {
         let crate::JoinError::Panicked(panic) = error else {
             panic!("remote join must contain the captured panic");
         };
-        discard_task_panic_payload(panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        discard_task_panic_payload(panic);
 
         let events = processor.events();
         let panicked = events.iter().find(|event| event.name() == "arty.rt.task.panicked").unwrap();
@@ -1055,7 +1055,7 @@ mod tests {
         let crate::JoinError::Panicked(panic) = error else {
             panic!("remote join must contain the captured panic");
         };
-        discard_task_panic_payload(panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        discard_task_panic_payload(panic);
     }
 
     #[test]
