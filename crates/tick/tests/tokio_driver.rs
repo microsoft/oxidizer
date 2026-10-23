@@ -7,9 +7,8 @@
 
 use std::time::Duration;
 
-use futures::StreamExt as _;
 use thread_aware::Relocator;
-use tick::{Clock, Delay, PeriodicTimer};
+use tick::{Clock, Delay, Timer};
 
 #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
 #[tokio::test]
@@ -38,8 +37,9 @@ async fn fast_instant_clock_keeps_driver_timer_scheduling_precise() {
         .await
         .unwrap();
 
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
-    tokio::time::timeout(Duration::from_secs(1), timer.next()).await.unwrap();
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
+    let tick = tokio::time::timeout(Duration::from_secs(1), timer.next()).await.unwrap();
+    assert!(tick.observed_at() <= clock.instant());
 }
 
 #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.

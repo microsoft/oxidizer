@@ -1,94 +1,98 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Module that contains primitives for parsing, formatting, and serializing [`SystemTime`][`std::time::SystemTime`]
-//! into various formats.
+//! Parses, formats, and serializes [`SystemTime`][`std::time::SystemTime`].
 //!
-//! The following formats are available:
+//! The module provides these formats:
 //!
-//! - [`Iso8601`]: Parsing and formatting of system time in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format.
-//!   For example, `2024-08-06T21:30:00Z`.
-//!
-//! - [`EcmaScript`]: Parsing and formatting of system time in the
-//!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format), the profile produced by
-//!   the ECMAScript `Date.prototype.toISOString` method. For example, `2024-08-06T21:30:00.123Z`.
-//!
-//! - [`Rfc2822`]: Parsing and formatting of system time in [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3) format.
-//!   For example, `Tue, 6 Aug 2024 14:30:00 -0000`.
-//!
-//! - [`UnixSeconds`]: Parsing and formatting of system time that is represented as the number of whole seconds since Unix epoch.
-//!   For example, `0` represents `Thu, 1 Jan 1970 00:00:00 -0000`.
+//! - [`Iso8601`] uses [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601).
+//!   Example: `2024-08-06T21:30:00Z`.
+//! - [`EcmaScript`] uses the
+//!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format).
+//!   It matches `Date.prototype.toISOString`. Example:
+//!   `2024-08-06T21:30:00.123Z`.
+//! - [`Rfc2822`] uses [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3).
+//!   Example: `Tue, 6 Aug 2024 14:30:00 -0000`.
+//! - [`UnixSeconds`] uses whole seconds since the Unix epoch. For example, `0`
+//!   represents `Thu, 1 Jan 1970 00:00:00 -0000`.
 //!
 //! # Interoperability with `SystemTime`
 //!
-//! Types in this module use the [`TryFrom`] trait to convert from `SystemTime` to the respective format. The conversion is fallible
-//! because the `SystemTime` can be outside the maximum range of the respective format. The conversion back to `SystemTime` is
-//! always infallible.
+//! Each format implements [`TryFrom<SystemTime>`][TryFrom]. This conversion can
+//! fail because the format can have a smaller range than `SystemTime`.
+//! Conversion from a format back to `SystemTime` cannot fail.
 //!
-//! To retrieve the current system time in the respective format, use the [`Clock::system_time_as`][crate::Clock::system_time_as] function
-//! which retrieves current system time and does the automatic conversion to the output format. It panics when the target format cannot
-//! represent the clock's instant, which a controlled clock can produce; use [`Clock::system_time`][crate::Clock::system_time] with the
-//! target type's [`TryFrom`] where that has to be handled.
+//! Use [`Clock::system_time_as`][crate::Clock::system_time_as] to get the
+//! current time in one of these formats. This convenience method is
+//! intentionally infallible for normalized production data and supported
+//! `tick` formats.
+//!
+//! If conversion failure is expected, call
+//! [`Clock::system_time`][crate::Clock::system_time]. Then call the target
+//! type's [`TryFrom`] implementation.
 //!
 //! # Representable range
 //!
-//! Every value of these types is validated when it is created, whether by parsing or by
-//! converting from a [`SystemTime`]. A value that the platform's [`SystemTime`] cannot
-//! represent, or that the format itself cannot encode, is **rejected** rather than clamped
-//! or wrapped to a different value.
+//! Each value is validated when it is created. This applies to parsed values
+//! and values converted from [`SystemTime`]. Creation fails if the platform
+//! cannot represent the value or the format cannot encode it. The value is not
+//! clamped or wrapped.
 //!
 //! ```
 //! use std::time::SystemTime;
 //!
 //! use tick::fmt::{Iso8601, UnixSeconds};
 //!
-//! // Whatever parses can always be converted back, on every platform.
+//! // A parsed value can always convert back on the same platform.
 //! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! let system_time = SystemTime::from(iso);
 //! assert_eq!(Iso8601::try_from(system_time)?, iso);
 //!
-//! // `UnixSeconds` counts forward from the Unix epoch, so an earlier instant is rejected.
-//! UnixSeconds::try_from(SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(1)).unwrap_err();
+//! // `UnixSeconds` rejects times before the Unix epoch.
+//! let before_epoch = SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(1);
+//! assert!(UnixSeconds::try_from(before_epoch).is_err());
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! How far back [`EcmaScript`], [`Iso8601`], and [`Rfc2822`] reach is platform dependent:
-//! where [`SystemTime`] is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier
-//! instants are rejected. It also bounds resolution, counting in 100-nanosecond intervals
-//! there, so any conversion routed through it truncates a finer instant to that grid.
+//! The platform controls the earliest value for [`EcmaScript`], [`Iso8601`],
+//! and [`Rfc2822`]. On a FILETIME platform, [`SystemTime`] starts at
+//! `1601-01-01T00:00:00Z`. The types reject earlier times.
 //!
-//! Because the range is enforced up front, converting any of these types back into a
-//! [`SystemTime`] is infallible and cannot panic.
+//! FILETIME uses 100-nanosecond intervals. A conversion through FILETIME
+//! truncates a more precise value to that interval.
 //!
-//! Converting directly between the formats is deliberately not supported: each has a
-//! different representable range, so such a conversion would have to be fallible or lossy.
-//! Go through [`SystemTime`] instead, which makes the fallible step explicit.
+//! Range checks occur when a value is created. Conversion back to [`SystemTime`]
+//! therefore cannot fail or panic.
+//!
+//! The types do not convert directly between formats. Each format has a
+//! different range, so direct conversion can fail or lose data. Convert
+//! through [`SystemTime`] to make the fallible step visible.
 //!
 //! ```
 //! use std::time::SystemTime;
 //!
 //! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
 //!
-//! // ISO 8601 to RFC 2822, with the range check in plain sight.
+//! // Convert ISO 8601 to RFC 2822.
 //! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! let rfc = Rfc2822::try_from(SystemTime::from(iso))?;
 //! assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT");
 //!
-//! // And on to Unix seconds the same way.
+//! // Convert RFC 2822 to Unix seconds.
 //! let unix = UnixSeconds::try_from(SystemTime::from(rfc))?;
 //! assert_eq!(unix.to_string(), "1722979800");
 //!
-//! // The fallible step is explicit: `UnixSeconds` cannot express a pre-epoch instant.
+//! // `UnixSeconds` cannot represent a time before the Unix epoch.
 //! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
-//! UnixSeconds::try_from(SystemTime::from(before_epoch)).unwrap_err();
+//! assert!(UnixSeconds::try_from(SystemTime::from(before_epoch)).is_err());
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! # Examples
 //!
-//! ## Using format types
+//! ## Use format types
 //!
 //! ```
 //! use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
@@ -97,7 +101,7 @@
 //! let time: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! assert_eq!(time.to_string(), "2024-08-06T21:30:00Z");
 //!
-//! // ECMAScript (fixed-width, milliseconds)
+//! // ECMAScript with fixed-width milliseconds.
 //! let time: EcmaScript = "2024-08-06T21:30:00Z".parse()?;
 //! assert_eq!(time.to_string(), "2024-08-06T21:30:00.000Z");
 //!
@@ -112,7 +116,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! ## Using `SystemTimeExt`
+//! ## Use `SystemTimeExt`
 //!
 //! ```
 //! use std::time::{Duration, SystemTime};
@@ -145,11 +149,11 @@ pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
 
-/// Converts `timestamp` to `SystemTime` if the platform can represent it.
+/// Converts `timestamp` to `SystemTime` when the platform can represent it.
 ///
-/// Returns `None` otherwise. The representable range of [`SystemTime`] is platform defined:
-/// where it is FILETIME based, its epoch is `1601-01-01T00:00:00Z` and nothing earlier can be
-/// expressed, so the platform is asked directly rather than assumed.
+/// Returns `None` otherwise. The platform defines the range of [`SystemTime`].
+/// For example, FILETIME starts at `1601-01-01T00:00:00Z`. This function uses
+/// platform arithmetic instead of assuming a range.
 fn checked_system_time(timestamp: Timestamp) -> Option<SystemTime> {
     let offset = timestamp.as_duration();
     let magnitude = offset.unsigned_abs();
@@ -161,10 +165,10 @@ fn checked_system_time(timestamp: Timestamp) -> Option<SystemTime> {
     }
 }
 
-/// Rejects `timestamp` unless the platform's [`SystemTime`] can represent it.
+/// Returns `timestamp` if the platform can represent it as [`SystemTime`].
 ///
-/// Applied wherever one of these formats is created, so that converting the result back into
-/// a [`SystemTime`] is infallible.
+/// Each format calls this function during creation. Conversion back to
+/// [`SystemTime`] can then be infallible.
 ///
 /// # Errors
 ///
@@ -175,11 +179,10 @@ fn ensure_system_time_representable(timestamp: Timestamp) -> Result<Timestamp, E
         .ok_or_else(system_time_out_of_range)
 }
 
-/// The error reported for an instant this platform's [`SystemTime`] cannot express.
+/// Creates the error for a time outside the platform [`SystemTime`] range.
 ///
-/// Named separately so it stays reachable from tests. Whether [`checked_system_time`] can
-/// fail at all is a property of the platform, so where `SystemTime` spans the whole jiff
-/// range no input produces this error and the message would otherwise never be exercised.
+/// This separate function keeps the message testable. On platforms where
+/// `SystemTime` covers the full jiff range, [`checked_system_time`] cannot fail.
 fn system_time_out_of_range() -> Error {
     Error::out_of_range("the instant is outside the range that `SystemTime` can represent on this platform")
 }

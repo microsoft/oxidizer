@@ -6,24 +6,26 @@ use std::time::{Instant, SystemTime};
 use crate::state::ClockState;
 use crate::thread_aware_move;
 
-/// A simplified clock used purely for **time retrieval**.
+/// A clock that only reads time.
 ///
-/// Unlike [`Clock`][crate::Clock], a `SimpleClock` does not register or drive timers: it only
-/// exposes the current [`SystemTime`] and [`Instant`]. Because it has no timers, it requires
-/// **no runtime and no driver** — [`SimpleClock::new_system`] yields a ready-to-use clock backed
-/// by real OS time.
+/// Unlike [`Clock`][crate::Clock], `SimpleClock` does not register or drive
+/// timers. It provides the current [`SystemTime`] and [`Instant`]. It needs no
+/// runtime or driver because it has no timers.
 ///
-/// `SimpleClock` is the common denominator shared by both clock kinds:
+/// [`SimpleClock::new_system`] creates a ready-to-use clock that reads operating
+/// system time.
+///
+/// Both clock types use `SimpleClock` as their time-only interface:
 ///
 /// - [`Clock`][crate::Clock] implements [`AsRef<SimpleClock>`] and exposes
-///   [`Clock::simple_clock`][crate::Clock::simple_clock], so a timer-capable clock can be used
-///   anywhere a `SimpleClock` is expected.
+///   [`Clock::simple_clock`][crate::Clock::simple_clock]. You can pass a
+///   timer-capable clock where an API accepts `SimpleClock`.
 /// - With the `test-util` feature, [`ClockControl::to_simple_clock`][crate::ClockControl::to_simple_clock]
-///   creates a controlled `SimpleClock` whose time is driven by the same
-///   [`ClockControl`][crate::ClockControl].
+///   creates a controlled `SimpleClock`. The same
+///   [`ClockControl`][crate::ClockControl] drives its time.
 ///
-/// This makes APIs that only need to read time — such as [`Stopwatch`][crate::Stopwatch] —
-/// seamlessly accept either kind of clock.
+/// A time-only API, such as [`Stopwatch`][crate::Stopwatch], can accept either
+/// clock type.
 ///
 /// # Examples
 ///
@@ -55,28 +57,28 @@ enum TimeKind {
 thread_aware_move!(SimpleClock);
 
 impl SimpleClock {
-    /// Creates a `SimpleClock` backed by real operating-system time.
+    /// Creates a `SimpleClock` that reads operating system time.
     ///
-    /// The returned clock needs no runtime or driver; it reads time directly from the OS.
+    /// The clock needs no runtime or driver.
     #[must_use]
     pub fn new_system() -> Self {
         Self(TimeKind::System)
     }
 
-    /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
+    /// Selects lower-overhead [`Instant`] reads where supported.
     ///
-    /// On Linux and Windows, enabling this option uses a lower-precision source whose resolution is
-    /// platform-dependent; on Windows it is normally 10 to 16 milliseconds. On other platforms,
-    /// it delegates to [`Instant::now`].
+    /// On Linux and Windows, this option uses a lower-precision source. The
+    /// platform defines its resolution. On Windows, the resolution is normally
+    /// 10 to 16 milliseconds. Other platforms use [`Instant::now`].
     ///
-    /// The setting belongs to this clock instance. A differently configured clone can be used
-    /// independently, and stopwatches created from each clock retain that clock's setting.
-    /// Controlled clocks are unaffected.
+    /// The setting applies only to this clock value. A clone can use a different
+    /// setting. A stopwatch keeps the setting of its source clock. This option
+    /// does not affect controlled clocks.
     ///
     /// # Performance
     ///
-    /// Only enable fast instant retrieval when instrumentation shows that the default
-    /// [`SimpleClock::instant`] retrieval is a performance bottleneck. Otherwise, retain the
+    /// Enable fast instant reads only if measurements show that
+    /// [`SimpleClock::instant`] is a performance bottleneck. Otherwise, use the
     /// default precise source.
     ///
     /// # Examples
@@ -106,11 +108,11 @@ impl SimpleClock {
         matches!(self.0, TimeKind::SystemFast)
     }
 
-    /// Creates a new frozen `SimpleClock`.
+    /// Creates a frozen `SimpleClock`.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new().to_simple_clock()`.
+    /// This is equivalent to `ClockControl::new().to_simple_clock()`.
     ///
-    /// > **Note**: The returned clock will not advance time; all time is frozen.
+    /// The returned clock does not advance time.
     ///
     /// # Examples
     ///
@@ -137,11 +139,11 @@ impl SimpleClock {
         crate::ClockControl::new().to_simple_clock()
     }
 
-    /// Creates a new frozen `SimpleClock` at the specified timestamp.
+    /// Creates a frozen `SimpleClock` at `time`.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new_at(time).to_simple_clock()`.
+    /// This is equivalent to `ClockControl::new_at(time).to_simple_clock()`.
     ///
-    /// > **Note**: The returned clock will not advance time; all time is frozen at the specified timestamp.
+    /// The returned clock stays at the specified time.
     ///
     /// # Examples
     ///
@@ -161,7 +163,7 @@ impl SimpleClock {
         crate::ClockControl::new_at(time).to_simple_clock()
     }
 
-    /// Builds the read-only time view for a [`Clock`][crate::Clock]'s state.
+    /// Creates a time-only view of [`Clock`][crate::Clock] state.
     pub(crate) fn from_state(state: &ClockState) -> Self {
         match state {
             ClockState::System(_) => Self(TimeKind::System),
@@ -170,19 +172,19 @@ impl SimpleClock {
         }
     }
 
-    /// Builds a controlled `SimpleClock` from an owned [`ClockControl`][crate::ClockControl].
+    /// Creates a controlled `SimpleClock` from an owned [`ClockControl`][crate::ClockControl].
     ///
-    /// Taking ownership avoids an extra `Arc` clone compared to going through
+    /// Taking ownership avoids one `Arc` clone compared with
     /// [`from_state`][Self::from_state].
     #[cfg(any(feature = "test-util", test))]
     pub(crate) fn from_control(control: crate::ClockControl) -> Self {
         Self(TimeKind::Controlled(control))
     }
 
-    /// Retrieves the current system time as [`SystemTime`].
+    /// Returns the current system time.
     ///
-    /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
-    /// > For relative time measurements, use [`Stopwatch`][crate::Stopwatch].
+    /// [`SystemTime`] is not monotonic. A system clock change can move it
+    /// backward. Use [`Stopwatch`][crate::Stopwatch] to measure elapsed time.
     #[must_use]
     pub fn system_time(&self) -> SystemTime {
         match &self.0 {
@@ -194,35 +196,52 @@ impl SimpleClock {
         }
     }
 
-    /// Retrieves the current system time converted to a target type.
+    /// Returns the current system time as a target type.
     ///
-    /// See [`Clock::system_time_as`][crate::Clock::system_time_as] for details.
+    /// This method is intentionally infallible for normalized clock data. Each
+    /// format supported by `tick` must accept production clock values.
+    ///
+    /// If conversion failure is expected, call [`Self::system_time`]. Then call
+    /// the target type's [`TryFrom<SystemTime>`] implementation. Do not change
+    /// this method to return `Result`.
     ///
     /// # Panics
     ///
-    /// Panics if the current system time cannot be represented by the target type.
-    /// This can happen if the target type supports a narrower range than `SystemTime`, or in tests
-    /// when controlled time is moved outside the target type's supported range.
+    /// Panics if the target type cannot represent the current system time. The
+    /// target can have an unsupported range. A controlled test clock can also
+    /// be outside the documented target range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::SystemTime;
+    ///
+    /// use tick::SimpleClock;
+    ///
+    /// let clock = SimpleClock::new_system();
+    /// let time = clock.system_time_as::<SystemTime>();
+    /// assert!(time <= SystemTime::now());
+    /// ```
     #[expect(
         clippy::match_wild_err_arm,
         clippy::panic,
-        reason = "conversion failure indicates the chosen target type cannot represent the current SystemTime (or, in tests, controlled time was moved out of range); panicking keeps this API infallible"
+        reason = "conversion failure violates the documented normalized-format contract or a controlled test moved time outside the target range"
     )]
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         match T::try_from(self.system_time()) {
             Ok(time) => time,
-            Err(_err) => panic!(
+            Err(_error) => panic!(
                 "system_time_as::<{}> failed: target type cannot represent the current SystemTime (or controlled time is out of range)",
                 std::any::type_name::<T>()
             ),
         }
     }
 
-    /// Retrieves the current [`Instant`].
+    /// Returns the current [`Instant`].
     ///
-    /// An [`Instant`] is monotonically non-decreasing and unaffected by system clock changes.
-    /// Consecutive reads may be equal, but later reads do not go backward.
+    /// An [`Instant`] does not decrease and system clock changes do not affect
+    /// it. Consecutive reads can be equal.
     #[must_use]
     pub fn instant(&self) -> Instant {
         match &self.0 {
@@ -234,7 +253,7 @@ impl SimpleClock {
         }
     }
 
-    /// Creates a new [`Stopwatch`][crate::Stopwatch] that starts measuring elapsed time.
+    /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
         crate::Stopwatch::new(self)

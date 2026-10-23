@@ -15,46 +15,48 @@ use crate::fmt::ensure_system_time_representable;
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
 
-/// The earliest instant RFC 2822 can encode, as this crate writes it.
+/// The earliest time that this crate can write as RFC 2822.
 const MIN_ENCODABLE: &str = "Sat, 01 Jan 0000 00:00:00 GMT";
 
-/// [`MIN_ENCODABLE`] as a [`Timestamp`].
+/// The [`Timestamp`] value of [`MIN_ENCODABLE`].
 ///
-/// RFC 2822 writes the year as four digits, so nothing before year 0 can be formatted.
+/// RFC 2822 uses four year digits, so it cannot format a year before 0.
 static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
     RFC2822_PARSER
         .parse_timestamp(MIN_ENCODABLE)
         .expect("`MIN_ENCODABLE` is a literal in exactly the format `RFC2822_PARSER` accepts")
 });
 
-/// Parser and formatter for system time in RFC 2822 format, typically used in HTTP headers.
+/// Parser and formatter for RFC 2822 system time.
 ///
-/// Examples:
+/// HTTP headers commonly use this format. Examples include:
 ///
 /// - `Thu, 08 Aug 2024 11:45:00 GMT` (UTC)
 /// - `Tue, 06 Aug 2024 14:30:00 -0700` (UTC offset)
 /// - `Wed, 07 Aug 2024 09:15:00 +0100` (UTC offset)
 ///
-/// The RFC 2822 format is defined in [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3).
+/// [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3) defines this
+/// format.
 ///
 /// # UTC and time zones
 ///
-/// While RFC 2822 can include a UTC offset, the resulting [`Rfc2822`] is always represented in the
-/// UTC time zone with an offset of `GMT` (zero).
+/// Input can include a UTC offset. The stored value and output always use UTC
+/// with the `GMT` offset.
 ///
-/// Output follows the [IMF-fixdate](https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7)
-/// profile RFC 9110 defines for HTTP dates; parsing accepts the broader RFC 2822 grammar.
+/// Output follows the
+/// [IMF-fixdate](https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7)
+/// profile for HTTP dates. Parsing accepts the broader RFC 2822 grammar.
 ///
 /// # Serialization and deserialization
 ///
-/// `Rfc2822` implements the `Serialize` and `Deserialize` traits from the `serde` crate.
-/// The system time is serialized as a string using RFC 2822 format.
+/// `Rfc2822` implements `Serialize` and `Deserialize` from `serde_core`.
+/// Serialization writes an RFC 2822 string.
 ///
-/// The serialization support is available when `serde` feature is enabled.
+/// Enable the `serde` feature to use this support.
 ///
 /// # Leap seconds
 ///
-/// If an RFC 2822 string contains a leap second, parsing will succeed and the leap second will be trimmed.
+/// Parsing accepts a leap second and changes it to second 59.
 ///
 /// ```
 /// use tick::fmt::Rfc2822;
@@ -67,24 +69,23 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 ///
 /// # Representable range
 ///
-/// RFC 2822 encodes the year as four digits, so this type cannot express an instant before
-/// `Sat, 01 Jan 0000 00:00:00 GMT`, and its upper bound is [`Rfc2822::MAX`]
-/// (`Thu, 30 Dec 9999 22:00:00 GMT`). Instants outside that range, or outside what the
-/// platform's [`SystemTime`] can represent, are rejected when the value is created, so the
-/// type can never hold something it is unable to format.
+/// RFC 2822 uses four year digits. This type cannot represent a time before
+/// `Sat, 01 Jan 0000 00:00:00 GMT`. Its upper bound is [`Rfc2822::MAX`]:
+/// `Thu, 30 Dec 9999 22:00:00 GMT`.
+///
+/// Creation fails if the value is outside this range or the platform
+/// [`SystemTime`] range. Therefore, each stored value can be formatted.
 ///
 /// ```
 /// use tick::fmt::Rfc2822;
 ///
-/// // This string is ISO 8601, not RFC 2822, so the parser rejects it as malformed; RFC 2822
-/// // cannot write a year outside `0000` through `9999` at all. The year bound itself is
-/// // enforced on the `TryFrom<SystemTime>` path, where such an instant can arrive.
-/// "-0001-06-15T00:00:00Z".parse::<Rfc2822>().unwrap_err();
+/// // This is ISO 8601, not RFC 2822, so parsing fails.
+/// assert!("-0001-06-15T00:00:00Z".parse::<Rfc2822>().is_err());
 /// ```
 ///
 /// # Examples
 ///
-/// ## Formatting and parsing - UTC
+/// ## Parse and format UTC
 /// ```
 /// use std::time::SystemTime;
 ///
@@ -98,17 +99,17 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// ### Formatting and parsing - With UTC offset
+/// ### Parse a UTC offset
 ///
-/// This example demonstrates that the UTC offset is applied to the resulting [`Rfc2822`].
-/// Note that when formatting the absolute time, the UTC offset is not included in the formatted string.
+/// Parsing applies the UTC offset. Formatting then writes the absolute time as
+/// GMT without the input offset.
 /// ```
 /// use std::time::SystemTime;
 ///
 /// use tick::fmt::Rfc2822;
 ///
-/// let rfc  = "Tue, 06 Aug 2024 14:30:00 -0700".parse::<Rfc2822>()?;
-/// assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT"); // Note that the UTC offset is applied
+/// let rfc = "Tue, 06 Aug 2024 14:30:00 -0700".parse::<Rfc2822>()?;
+/// assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT");
 ///
 /// let system_time: SystemTime = rfc.into();
 ///
@@ -120,7 +121,7 @@ pub struct Rfc2822(Timestamp);
 crate::thread_aware_move!(Rfc2822);
 
 impl Rfc2822 {
-    /// The largest value that can be represented by `Rfc2822`.
+    /// The largest value that `Rfc2822` can represent.
     ///
     /// This represents a Unix system time of `Thu, 30 Dec 9999 22:00:00 GMT`.
     pub const MAX: Self = Self(Timestamp::MAX);
@@ -130,11 +131,10 @@ impl Rfc2822 {
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
-    /// Rejects `timestamp` unless it can be both formatted as RFC 2822 and represented as a
-    /// [`SystemTime`].
+    /// Creates an RFC 2822 value if both output types can represent it.
     ///
-    /// Every way to create an `Rfc2822` goes through here, so the type can never hold an
-    /// instant its [`Display`] implementation is unable to encode.
+    /// Each constructor calls this function. The type cannot store a time that
+    /// [`Display`] or [`SystemTime`] cannot represent.
     ///
     /// # Errors
     ///
@@ -191,7 +191,7 @@ impl TryFrom<SystemTime> for Rfc2822 {
     type Error = Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
+        let timestamp = Timestamp::try_from(value).map_err(|error| Error::out_of_range(error.to_string()))?;
         Self::new_checked(timestamp)
     }
 }

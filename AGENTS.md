@@ -64,6 +64,26 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [docs/feature-gated-doctests.md](docs/feature-gated-doctests.md).
 
+## Tick normalized time conversion
+
+`Clock::system_time_as` and `SimpleClock::system_time_as` are intentionally
+infallible convenience APIs. Do not replace them with `try_system_time_as` or a
+`Result` return type. Every `tick` format supported by these methods must accept
+normalized production clock data. See [docs/tick-api-decisions.md](docs/tick-api-decisions.md).
+
+**Open this when**: changing either `system_time_as` method; adding or changing a
+`tick::fmt` type; changing the normalized clock-data range or conversion behavior.
+
+## Tick periodic timer API
+
+`Timer` uses the inherent async `next` method and returns `TimerTick`.
+Do not implement `futures_core::Stream` for it or add `futures-core` to `tick`'s
+public dependencies. Applications that need stream combinators can use the
+downstream adapter documented on `Timer`.
+
+**Open this when**: changing `Timer`, `TimerTick`, or timer iteration;
+adding an async-stream dependency to `tick`.
+
 ## Optional Dependencies in Test Builds
 
 Feature-dependent code is gated behind `cfg(any(test, feature = "foo"))` so that a crate's test build compiles it without enumerating features. Features must therefore be additive. Because `cfg(test)` does not activate Cargo features, every optional dependency must also be declared as a non-optional dev-dependency, carrying whatever dependency features the feature activates. See [docs/optional-deps-in-test-builds.md](docs/optional-deps-in-test-builds.md).
