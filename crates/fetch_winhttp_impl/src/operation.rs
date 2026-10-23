@@ -298,7 +298,7 @@ impl RequestGuard {
             receiver: ManuallyDrop::new(receiver),
             receiver_live: true,
             request: Some(request),
-            context: AssertUnwindSafe(self.context),
+            context: AssertUnwindSafe(SendContextPtr { pointer: self.context }),
             request_slot: &mut self.request,
         }
     }
@@ -315,6 +315,17 @@ impl RequestGuard {
 unsafe impl Send for RequestGuard {}
 
 #[derive(Debug)]
+struct SendContextPtr {
+    pointer: NonNull<RequestContext>,
+}
+
+// SAFETY: This module uses the pointer only for shared access to
+// RequestContext, which is Sync. Moving the wrapper does not access or reclaim
+// the allocation. Dereferencing remains unsafe and requires a live context
+// without exclusive references.
+unsafe impl Send for SendContextPtr {}
+
+#[derive(Debug)]
 /// Owns one request handle while awaiting its callback completion.
 ///
 /// Moving the request handle into this future is the safe-code proof that one
@@ -328,17 +339,9 @@ pub(crate) struct OperationFuture<'guard> {
     receiver_live: bool,
     request: Option<RequestHandle>,
     // Shared observation reads only atomic cold-connect state, even after an unwind.
-    context: AssertUnwindSafe<NonNull<RequestContext>>,
+    context: AssertUnwindSafe<SendContextPtr>,
     request_slot: &'guard mut Option<RequestHandle>,
 }
-
-// SAFETY: The receiver, request handle and borrowed handle slot are Send. The
-// context is Sync and is only borrowed sharedly through this pointer. The
-// future's open request handle prevents HANDLE_CLOSING from reclaiming it
-// during access; cancellation destroys the receiver before closing that
-// handle. Moving the future transfers that close authority without allowing
-// another operation through the exclusively borrowed guard.
-unsafe impl Send for OperationFuture<'_> {}
 
 impl Future for OperationFuture<'_> {
     type Output = std::result::Result<CompletionResult, Disconnected>;
@@ -392,7 +395,7 @@ impl OperationFuture<'_> {
         // handle checked above is still open, so the reclaiming HANDLE_CLOSING
         // notification cannot have run. No exclusive reference to an
         // installed context exists, and the borrow ends with this statement.
-        unsafe { self.context.0.as_ref() }.cold_connect_state()
+        unsafe { self.context.0.pointer.as_ref() }.cold_connect_state()
     }
 }
 
@@ -438,7 +441,7 @@ mod tests {
         WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard};
+    use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard, SendContextPtr};
     use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
@@ -456,6 +459,8 @@ mod tests {
     assert_not_impl_any!(RawContextOwner: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: Sync);
+    assert_impl_all!(SendContextPtr: Send, std::fmt::Debug);
+    assert_not_impl_any!(SendContextPtr: Sync);
     assert_impl_all!(RawReceiver<CompletionResult>: Send);
     assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
     // The future mutably borrows the request-handle slot.

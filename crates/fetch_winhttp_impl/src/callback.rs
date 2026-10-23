@@ -61,10 +61,13 @@ pub(crate) unsafe extern "system" fn status_callback(
     };
 
     // SAFETY: dispatch_completion requires a null context or the exact
-    // plurality::Box::into_raw pointer of a live context, a payload readable
-    // for status_info_len bytes, a HANDLE_CLOSING notification that is final,
-    // exactly-once and non-overlapping, and the absence of exclusive references
-    // to an installed context. The payload and notification-ordering
+    // plurality::Box::into_raw pointer of a live context. The payload must be
+    // null or readable for status_info_len initialized bytes and remain
+    // unmodified until this call returns. A null context or
+    // WINHTTP_CALLBACK_STATUS_READ_COMPLETE removes the payload requirement
+    // because neither path dereferences it. HANDLE_CLOSING must be final,
+    // exactly-once and non-overlapping. No exclusive reference to an installed
+    // context can exist. The payload and notification-ordering
     // requirements are demanded of this function's caller unchanged. The
     // context requirement is met by the reconstruction above: this function's
     // caller supplies the address ContextInstallation::install published, and
