@@ -153,4 +153,16 @@ mod tests {
         assert_eq!(error.to_string(), "source failure");
         assert!(format!("{error:?}").contains("ShutdownError"));
     }
+
+    #[test]
+    fn consuming_error_cause_returns_the_shutdown_error() {
+        let error = ShutdownError::new(SourceError);
+        let expected = error.clone();
+
+        let consumed = ShutdownCause::from_error(error).into_error().unwrap();
+
+        let expected = expected.inner().downcast_ref::<SourceError>().unwrap();
+        let consumed = consumed.inner().downcast_ref::<SourceError>().unwrap();
+        assert!(std::ptr::eq(expected, consumed));
+    }
 }
