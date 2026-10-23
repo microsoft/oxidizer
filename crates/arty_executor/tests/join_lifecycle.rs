@@ -14,9 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{
-    CycleOutcome, Executor, JoinError, JoinHandle, ShutdownCause, ShutdownError, TaskOptions, TaskPlacement, TaskSet,
-};
+use arty_executor::{CycleOutcome, Executor, JoinError, JoinHandle, ShutdownCause, ShutdownError, TaskOptions, TaskPlacement, TaskSet};
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;

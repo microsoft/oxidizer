@@ -1296,11 +1296,7 @@ mod tests {
         );
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
-        worker
-            .executor
-            .as_mut()
-            .unwrap()
-            .begin_shutdown(ShutdownCause::default());
+        worker.executor.as_mut().unwrap().begin_shutdown(ShutdownCause::default());
 
         let outcome = worker.execute_step();
 
