@@ -21,7 +21,9 @@ You do not need to depend on this companion crate directly.
 Both attributes start a runtime, pass its worker capabilities to an
 async function, and shut down when that function returns. The optional
 `workers = N` argument starts exactly `N` async worker threads. Multiple
-workers share processors when `N` exceeds available processor capacity.
+workers share processors when `N` exceeds available processor capacity;
+`workers = all` selects all available processors. Both attributes use one
+worker by default.
 
 The application-facing references are
 [`arty::main`][__link1] and

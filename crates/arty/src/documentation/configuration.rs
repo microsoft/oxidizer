@@ -14,7 +14,7 @@
 //!
 //! | Policy | Meaning |
 //! | --- | --- |
-//! | `default()` | Let Arty choose. It currently uses all available processors, but that policy can change |
+//! | `default()` | Use one worker |
 //! | `all()` | Use all available processors explicitly |
 //! | `at_most(n)` | Use no more than `n`, clamping to available processors |
 //! | `exactly(n)` | Start `n` workers; share processors when `n` exceeds the available count |
@@ -65,13 +65,12 @@
 //! # Entry-point attributes
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
-//! the runtime for you. By default, `main` chooses workers automatically and
-//! `test` uses one worker.
+//! the runtime for you. Both use one worker by default.
 //!
-//! Use `workers = N` to set the exact worker count. Build the runtime explicitly
-//! for custom clocks, telemetry, blocking pools, stack sizes, or an
-//! [`at_most`](crate::runtime::WorkersPolicy::at_most) or
-//! [`all`](crate::runtime::WorkersPolicy::all) worker policy.
+//! Use `workers = N` to set the exact worker count, or `workers = all` to use
+//! all available processors. Build the runtime explicitly for custom clocks,
+//! telemetry, blocking pools, stack sizes, or an
+//! [`at_most`](crate::runtime::WorkersPolicy::at_most) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
 //! signature and worker option. Build the runtime yourself if you need to

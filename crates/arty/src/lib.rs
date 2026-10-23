@@ -13,10 +13,10 @@
 
 //! Single-threaded, thread-aware application runtime.
 //!
-//! An Arty runtime can have several workers, but each async task stays on one
-//! worker throughout its life. This lets it use thread-local and non-[`Send`]
-//! state across awaits. Thread-aware values can be explicitly relocated when
-//! starting new work on another worker.
+//! An Arty runtime defaults to one worker and can be configured with several,
+//! but each async task stays on one worker throughout its life. This lets it use
+//! thread-local and non-[`Send`] state across awaits. Thread-aware values can be
+//! explicitly relocated when starting new work on another worker.
 //!
 //! There is no process-global runtime: each instance owns its workers and
 //! services. Workers use thread-local bookkeeping rather than a global
@@ -162,15 +162,17 @@ use arty_io_core as _;
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
 ///   are available, multiple worker threads share each processor. Zero fails at
 ///   construction.
+/// - `workers = all` starts one async worker per available processor.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// The default is one worker, for both applications and tests.
 /// Each worker uses an operating-system thread and its configured stack.
 /// Large counts can exceed operating-system thread or memory limits.
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an at-most/all-workers policy must be configured.
+/// or an at-most worker policy must be configured.
 ///
 /// # Panics
 ///

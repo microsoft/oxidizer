@@ -70,6 +70,21 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Builtins) {
     assert_eq!(workers.len(), 3);
 }
 
+#[arty::main]
+#[::core::prelude::v1::test]
+async fn default_main_runtime_has_exactly_one_worker(cx: Builtins) {
+    let tasks: Vec<_> = cx
+        .control()
+        .workers()
+        .into_iter()
+        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .collect();
+    assert_eq!(tasks.len(), 1);
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), cx.thread().id());
+    }
+}
+
 #[test(workers = 0)]
 #[should_panic(expected = "failed to create the runtime for the entry point")]
 async fn zero_workers_fail_during_construction(_cx: Builtins) {
@@ -89,6 +104,20 @@ mod controlled_time {
     use arty::task::Builtins;
     use arty::time::ClockControl;
     use futures::FutureExt;
+
+    #[arty::test]
+    async fn controlled_test_defaults_to_one_worker(cx: Builtins, _control: ClockControl) {
+        let tasks: Vec<_> = cx
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+            .collect();
+        assert_eq!(tasks.len(), 1);
+        for task in tasks {
+            assert_eq!(task.await.unwrap(), cx.thread().id());
+        }
+    }
 
     trait TestTypes {
         type Context;
