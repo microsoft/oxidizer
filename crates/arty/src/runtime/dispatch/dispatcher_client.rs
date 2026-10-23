@@ -43,6 +43,7 @@ impl DispatcherClient {
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
         let (command_tx, _command_rx) = channel::unbounded();
+        let shutdown = Shutdown::default();
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
@@ -50,13 +51,14 @@ impl DispatcherClient {
             blocking_worker: BlockingWorker::new(
                 BlockingPool::new(None),
                 observed::Sink::noop(),
-                crate::runtime::Shutdown::default(),
+                shutdown.clone(),
             ),
         };
-        Self::new(Arc::new(DispatcherCore::new(
+        Self::new(Arc::new(DispatcherCore::new_with_shutdown(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             observed::Sink::noop(),
+            shutdown,
         )))
     }
 
