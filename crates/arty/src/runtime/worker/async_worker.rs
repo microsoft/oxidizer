@@ -115,7 +115,7 @@ impl AsyncWorker {
         signal: Arc<WorkerSignal>,
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
-        let shutdown = dispatcher.shutdown();
+        let shutdown = dispatcher.shutdown().clone();
         let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let time = clock.simple_clock().clone();
 

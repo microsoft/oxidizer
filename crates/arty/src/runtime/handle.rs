@@ -186,7 +186,7 @@ impl Runtime {
             return Err(Error::shutdown_wait_from_blocking_callback());
         }
         let wait_error = self.scheduler.dispatcher.wait().err();
-        if let Some(error) = self.scheduler.dispatcher.shutdown_error() {
+        if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
         wait_error.map_or(Ok(()), Err)
@@ -307,7 +307,7 @@ mod tests {
 
         scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
 
-        assert!(dispatcher.is_shutting_down());
+        assert!(dispatcher.shutdown().is_started());
         dispatcher.wait().unwrap();
         assert!(scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     }
@@ -325,7 +325,7 @@ mod tests {
             .join()
             .unwrap();
         scheduler.spawn(async move |_| drop(runtime)).join().unwrap();
-        assert!(dispatcher.is_shutting_down());
+        assert!(dispatcher.shutdown().is_started());
         dispatcher.wait().unwrap();
     }
 
@@ -362,7 +362,7 @@ mod tests {
             .join()
             .unwrap();
 
-        assert!(dispatcher.is_shutting_down());
+        assert!(dispatcher.shutdown().is_started());
         release.send(()).unwrap();
         assert_eq!(blocking.join().unwrap(), 42);
         dispatcher.wait().unwrap();

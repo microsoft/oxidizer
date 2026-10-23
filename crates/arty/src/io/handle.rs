@@ -149,9 +149,10 @@ impl ThreadAware for Io {
 }
 
 pub(super) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
-    dispatcher.is_shutting_down().then(|| {
+    dispatcher.shutdown().is_started().then(|| {
         dispatcher
-            .shutdown_error()
+            .shutdown()
+            .error()
             .map_or_else(Error::runtime_shutting_down, Error::shutdown_failure)
     })
 }

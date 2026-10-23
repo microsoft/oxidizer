@@ -192,8 +192,8 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown());
+        if self.dispatcher.shutdown().is_started() {
+            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown().clone());
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -219,7 +219,7 @@ impl Scheduler {
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = current.results.channel();
-            let shutdown = current.builtins.scheduler().dispatcher.shutdown();
+            let shutdown = current.builtins.scheduler().dispatcher.shutdown().clone();
             let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
@@ -345,11 +345,11 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown());
+        if self.dispatcher.shutdown().is_started() {
+            return JoinHandle::shutdown(self.dispatcher.remote_results(), self.dispatcher.shutdown().clone());
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::invalid_destination(self.dispatcher.remote_results(), self.dispatcher.shutdown());
+            return JoinHandle::invalid_destination(self.dispatcher.remote_results(), self.dispatcher.shutdown().clone());
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {

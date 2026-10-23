@@ -8,7 +8,7 @@ use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, ShutdownError};
+use arty_executor::ShutdownCause;
 #[cfg(test)]
 use nonempty::NonEmpty;
 use performables::arc::Arc;
@@ -80,11 +80,7 @@ impl DispatcherClient {
         self.core.owns(thread)
     }
 
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        self.core.is_shutting_down()
-    }
-
-    pub(crate) fn shutdown(&self) -> Shutdown {
+    pub(crate) fn shutdown(&self) -> &Shutdown {
         self.core.shutdown()
     }
 
@@ -127,10 +123,6 @@ impl DispatcherClient {
 
     pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
         self.core.stop_with_error(error)
-    }
-
-    pub(crate) fn shutdown_error(&self) -> Option<ShutdownError> {
-        self.core.shutdown_error()
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
@@ -185,12 +177,12 @@ mod tests {
         )));
         let clone = client.clone();
         assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
-        assert!(!client.is_shutting_down());
-        assert!(!clone.is_shutting_down());
+        assert!(!client.shutdown().is_started());
+        assert!(!clone.shutdown().is_started());
 
         client.stop();
-        assert!(client.is_shutting_down());
-        assert!(clone.is_shutting_down());
+        assert!(client.shutdown().is_started());
+        assert!(clone.shutdown().is_started());
     }
 
     #[test]

@@ -57,7 +57,8 @@ where
                 .expect("an uninitialized deferred task retains its factory")
                 .1
                 .dispatcher()
-                .is_shutting_down()
+                .shutdown()
+                .is_started()
             {
                 *this.cancelled = true;
                 return Poll::Pending;

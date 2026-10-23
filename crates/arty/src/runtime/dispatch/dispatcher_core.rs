@@ -156,10 +156,6 @@ impl DispatcherCore {
         cause
     }
 
-    pub(crate) fn shutdown_error(&self) -> Option<ShutdownError> {
-        self.shutdown.error()
-    }
-
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
     fn next_worker_index(&self) -> WorkerIndex {
         // This counter only chooses a worker; it does not publish any worker state.
@@ -188,7 +184,7 @@ impl DispatcherCore {
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
-        if self.is_shutting_down() {
+        if self.shutdown().is_started() {
             return Err(self.runtime_shutting_down_error());
         }
         let endpoint = self
@@ -203,16 +199,13 @@ impl DispatcherCore {
     }
 
     fn runtime_shutting_down_error(&self) -> Error {
-        self.shutdown_error()
+        self.shutdown()
+            .error()
             .map_or_else(Error::runtime_shutting_down, Error::shutdown_failure)
     }
 
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        self.shutdown.is_started()
-    }
-
-    pub(crate) fn shutdown(&self) -> Shutdown {
-        self.shutdown.clone()
+    pub(crate) const fn shutdown(&self) -> &Shutdown {
+        &self.shutdown
     }
 
     pub(crate) fn remote_results(&self) -> &RemotePool {
@@ -272,7 +265,7 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        if self.is_shutting_down() {
+        if self.shutdown().is_started() {
             drop(future_factory);
             return JoinHandle::shutdown(&self.remote_results, self.shutdown.clone());
         }
