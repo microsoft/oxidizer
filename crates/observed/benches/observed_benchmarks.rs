@@ -434,15 +434,19 @@ fn emit_redacted_strings<S: std::borrow::Borrow<EmitState>>(owned_input: S) -> (
 }
 
 #[metabench::benchmark(EMIT_COMPOSITE_TRAVERSAL, EMIT_COMPOSITE, "emit_composite_traversal")]
-#[bench::single(&traversal_sink(1))]
-#[bench::composite_3(&traversal_sink(3))]
-#[bench::composite_8(&traversal_sink(8))]
+#[bench::single(Box::new(traversal_sink(1)))]
+#[bench::composite_3(Box::new(traversal_sink(3)))]
+#[bench::composite_8(Box::new(traversal_sink(8)))]
 /// Measures sink traversal and one minimal processor call per leaf.
 ///
 /// The event payload stays fixed across cases so the 3- and 8-leaf cases
 /// expose composite interest, sampling, and dispatch overhead.
-fn emit_composite_traversal(sink: &Sink) {
-    observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
+fn emit_composite_traversal<S: std::borrow::Borrow<Sink>>(owned_input: S) -> ((), S) {
+    {
+        let sink = owned_input.borrow();
+        observed::emit!(sink, SimpleLogEvent { status: 200, retries: 0 });
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(EMIT_WITH_ENRICHMENTS, EMIT_ENRICHMENT, "emit_with_3_enrichments")]
@@ -681,12 +685,16 @@ fn poll_attached(mut state: AttachedPollState) -> AttachedPollState {
 }
 
 #[metabench::benchmark(CAPTURE_ENRICHMENT_CONTEXT, ENRICHMENT_TRANSFER, "capture_enrichment_context")]
-#[bench::single(&enriched_sink_state_with_slots(1, 1))]
-#[bench::composite_3(&enriched_sink_state_with_slots(3, 1))]
-#[bench::composite_8(&enriched_sink_state_with_slots(8, 1))]
+#[bench::single(Box::new(enriched_sink_state_with_slots(1, 1)))]
+#[bench::composite_3(Box::new(enriched_sink_state_with_slots(3, 1)))]
+#[bench::composite_8(Box::new(enriched_sink_state_with_slots(8, 1)))]
 /// Isolates current-slot lookup, captured-head cloning, and transfer assembly.
-fn capture_enrichment_context(state: &EnrichedSinkState) -> Transfer {
-    black_box(state.sink.transfer_context())
+fn capture_enrichment_context<S: std::borrow::Borrow<EnrichedSinkState>>(owned_input: S) -> (Transfer, S) {
+    let result = {
+        let state = owned_input.borrow();
+        black_box(state.sink.transfer_context())
+    };
+    (result, owned_input)
 }
 
 fn criterion_emit_pipeline(criterion: &mut Criterion) {
@@ -722,7 +730,7 @@ fn criterion_emit_composite(criterion: &mut Criterion) {
         ("composite_8", &traversal_8),
     ] {
         emit_composite.bench_function(BenchmarkId::new(EMIT_COMPOSITE_TRAVERSAL.benchmark_name(), case), |bencher| {
-            bencher.iter(|| emit_composite_traversal(black_box(sink)));
+            bencher.iter(|| emit_composite_traversal(black_box(sink)).0);
         });
     }
     emit_composite.finish();
@@ -831,7 +839,7 @@ fn criterion_enrichment_transfer(criterion: &mut Criterion) {
         ("composite_8", enriched_sink_state_with_slots(8, 1)),
     ] {
         transfer.bench_function(BenchmarkId::new(CAPTURE_ENRICHMENT_CONTEXT.benchmark_name(), case), |bencher| {
-            bencher.iter(|| capture_enrichment_context(black_box(&state)));
+            bencher.iter(|| capture_enrichment_context(black_box(&state)).0);
         });
     }
     transfer.finish();
