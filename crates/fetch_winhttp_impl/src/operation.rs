@@ -542,6 +542,40 @@ mod tests {
         );
     }
 
+    // Strict-provenance Miri cannot model the integer callback ABI.
+    #[cfg(not(miri_strict_provenance))]
+    #[test]
+    fn callback_uses_captured_installed_context_value() {
+        let (guard, context, contexts, session, closes) = installed();
+        let installed_value = closes.context.load(Ordering::SeqCst);
+        assert_eq!(installed_value, context.addr());
+        assert_eq!(guard.cold_connect_state(), ColdConnectState::Unobserved);
+
+        // SAFETY: The captured value is the address installation exposed and
+        // passed through WINHTTP_OPTION_CONTEXT_VALUE. The guard still owns the
+        // open request handle, so the context is live. This notification has no
+        // payload, runs alone on this thread, and overlaps no exclusive borrow.
+        // Only finish below delivers the final HANDLE_CLOSING notification.
+        unsafe {
+            crate::callback::status_callback(
+                std::ptr::null_mut(),
+                installed_value,
+                WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                std::ptr::null_mut(),
+                0,
+            );
+        }
+
+        assert_eq!(guard.cold_connect_state(), ColdConnectState::Connecting);
+
+        // SAFETY: The callback above returned without reclaiming the context.
+        // No notification or exclusive borrow is outstanding, and consuming the
+        // guard prevents access after this final reclamation.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
     #[test]
     fn pending_future_observes_context_and_cancels_on_another_thread() {
         let (mut guard, context, contexts, session, closes) = installed();
@@ -578,7 +612,7 @@ mod tests {
     fn inline_completion_before_submit_returns_is_observed() {
         let (mut guard, context, contexts, session, closes) = installed();
         let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
-            assert_eq!(context_value, context.expose_provenance());
+            assert_eq!(context_value, context.addr());
             assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
             // SAFETY: complete requires an installed, not-yet-reclaimed
             // context, a payload matching the notification, no overlapping

@@ -280,14 +280,15 @@ pub(crate) unsafe fn complete(context: *mut RequestContext, status: u32, info: *
     // SAFETY: Both callback entry points require a live installed context,
     // matching payload, no overlapping notification or exclusive borrow, and
     // exactly-once final reclamation. This function demands those unchanged;
-    // claim additionally checks installation and reclamation. The native ABI
-    // receives the exposed address of the exact context pointer; strict Miri
-    // uses that pointer directly because it cannot interpret the integer ABI.
+    // claim additionally checks installation and reclamation. Installation
+    // exposed the context pointer's provenance before passing its address to
+    // WinHTTP. The native ABI receives that address without exposing it again;
+    // strict Miri uses the retained pointer directly.
     unsafe {
         #[cfg(miri_strict_provenance)]
         callback::dispatch_completion(context, status, info, len);
         #[cfg(not(miri_strict_provenance))]
-        callback::status_callback(std::ptr::null_mut(), context.expose_provenance(), status, info, len);
+        callback::status_callback(std::ptr::null_mut(), context.addr(), status, info, len);
     }
 }
 
