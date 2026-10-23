@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::backtrace::{Backtrace, BacktraceStatus};
+use std::backtrace::Backtrace;
 use std::fmt;
 use std::time::SystemTimeError;
 
@@ -27,36 +27,10 @@ use std::time::SystemTimeError;
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    backtrace: MaybeBacktrace,
+    backtrace: Backtrace,
 }
 
 crate::thread_aware_move!(Error);
-
-#[derive(Debug)]
-enum MaybeBacktrace {
-    Captured(Box<Backtrace>),
-    Disabled,
-}
-
-impl MaybeBacktrace {
-    fn capture() -> Self {
-        Self::from_backtrace(Backtrace::capture())
-    }
-
-    fn from_backtrace(backtrace: Backtrace) -> Self {
-        match backtrace.status() {
-            BacktraceStatus::Captured => Self::Captured(Box::new(backtrace)),
-            _ => Self::Disabled,
-        }
-    }
-
-    const fn get(&self) -> Option<&Backtrace> {
-        match self {
-            Self::Captured(backtrace) => Some(backtrace),
-            Self::Disabled => None,
-        }
-    }
-}
 
 #[derive(Debug)]
 enum ErrorKind {
@@ -74,7 +48,7 @@ impl Error {
     fn from_kind(kind: ErrorKind) -> Self {
         Self {
             kind,
-            backtrace: MaybeBacktrace::capture(),
+            backtrace: Backtrace::capture(),
         }
     }
 
@@ -144,10 +118,13 @@ impl Error {
         }
     }
 
-    /// Returns the captured backtrace, when backtrace capture was enabled.
+    /// Returns the error backtrace.
+    ///
+    /// The status is [`BacktraceStatus::Disabled`](std::backtrace::BacktraceStatus::Disabled)
+    /// when backtrace capture is disabled.
     #[must_use]
-    pub const fn backtrace(&self) -> Option<&Backtrace> {
-        self.backtrace.get()
+    pub const fn backtrace(&self) -> &Backtrace {
+        &self.backtrace
     }
 
     #[cfg(test)]
@@ -195,6 +172,7 @@ impl From<SystemTimeError> for Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::backtrace::BacktraceStatus;
     use std::error::Error as StdError;
 
     use jiff::SignedDuration;
@@ -239,27 +217,27 @@ mod tests {
 
     #[test]
     fn captured_backtrace_is_available_from_the_error() {
-        let backtrace = MaybeBacktrace::from_backtrace(Backtrace::force_capture());
-        assert_eq!(backtrace.get().unwrap().status(), BacktraceStatus::Captured);
+        let backtrace = Backtrace::force_capture();
+        assert_eq!(backtrace.status(), BacktraceStatus::Captured);
 
         let error = Error {
             kind: ErrorKind::Timeout(std::io::Error::new(std::io::ErrorKind::TimedOut, "future timed out")),
             backtrace,
         };
 
-        assert_eq!(error.backtrace().unwrap().status(), BacktraceStatus::Captured);
+        assert_eq!(error.backtrace().status(), BacktraceStatus::Captured);
     }
 
     #[test]
-    fn disabled_backtrace_is_not_available_from_the_error() {
-        let backtrace = MaybeBacktrace::from_backtrace(Backtrace::disabled());
-        assert!(backtrace.get().is_none());
+    fn disabled_backtrace_is_available_from_the_error() {
+        let backtrace = Backtrace::disabled();
+        assert_eq!(backtrace.status(), BacktraceStatus::Disabled);
 
         let error = Error {
             kind: ErrorKind::Timeout(std::io::Error::new(std::io::ErrorKind::TimedOut, "future timed out")),
             backtrace,
         };
 
-        assert!(error.backtrace().is_none());
+        assert_eq!(error.backtrace().status(), BacktraceStatus::Disabled);
     }
 }
