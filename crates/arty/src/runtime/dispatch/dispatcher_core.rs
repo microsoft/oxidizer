@@ -201,10 +201,6 @@ impl DispatcherCore {
         &self.shutdown
     }
 
-    pub(crate) fn remote_results(&self) -> &RemotePool {
-        &self.remote_results
-    }
-
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     pub(crate) fn is_current_blocking_thread(&self) -> bool {
         self.worker_endpoints
@@ -260,10 +256,7 @@ impl DispatcherCore {
     {
         if self.shutdown().is_started() {
             drop(future_factory);
-            return JoinHandle::shutdown(
-                &self.remote_results,
-                self.shutdown().cause().unwrap_or_default(),
-            );
+            return JoinHandle::shutdown(self.shutdown().cause().unwrap_or_default());
         }
         let endpoint = self
             .worker_endpoints
@@ -463,7 +456,6 @@ mod tests {
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
 
-        assert!(std::ptr::eq(core.remote_results(), std::ptr::addr_of!(core.remote_results)));
         core.stop();
 
         assert!(shutdown.is_started());

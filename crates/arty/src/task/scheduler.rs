@@ -193,10 +193,7 @@ impl Scheduler {
         R: Send + 'static,
     {
         if self.dispatcher.shutdown().is_started() {
-            return JoinHandle::shutdown(
-                self.dispatcher.remote_results(),
-                self.dispatcher.shutdown().cause().unwrap_or_default(),
-            );
+            return JoinHandle::shutdown(self.dispatcher.shutdown().cause().unwrap_or_default());
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -348,13 +345,10 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         if self.dispatcher.shutdown().is_started() {
-            return JoinHandle::shutdown(
-                self.dispatcher.remote_results(),
-                self.dispatcher.shutdown().cause().unwrap_or_default(),
-            );
+            return JoinHandle::shutdown(self.dispatcher.shutdown().cause().unwrap_or_default());
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::invalid_destination(self.dispatcher.remote_results());
+            return JoinHandle::invalid_destination();
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {

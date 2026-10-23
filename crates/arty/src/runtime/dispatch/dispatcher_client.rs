@@ -7,7 +7,6 @@ use std::fmt::Debug;
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::remote::Pool as RemotePool;
 use arty_executor::ShutdownCause;
 #[cfg(test)]
 use nonempty::NonEmpty;
@@ -89,10 +88,6 @@ impl DispatcherClient {
 
     pub(crate) fn shutdown(&self) -> &Shutdown {
         self.core.shutdown()
-    }
-
-    pub(crate) fn remote_results(&self) -> &RemotePool {
-        self.core.remote_results()
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -184,7 +179,6 @@ mod tests {
             Shutdown::default(),
         )));
         let clone = client.clone();
-        assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
         assert!(!client.shutdown().is_started());
         assert!(!clone.shutdown().is_started());
 
