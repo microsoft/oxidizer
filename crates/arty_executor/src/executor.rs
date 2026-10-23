@@ -60,8 +60,8 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, ShutdownCause, TaskHa
 /// 3. Drop the executor when convenient.
 ///
 /// Dropping the executor without this sequence is also safe and synchronously cancels remaining
-/// tasks. Retained join handles and task wakers own independent pooled metadata, so they may
-/// outlive the executor and report shutdown or become inert respectively.
+/// tasks. Retained join handles keep pooled result slots alive and report shutdown. Retained task
+/// wakers keep emptied task allocations alive and become inert.
 ///
 /// # Process termination
 ///
