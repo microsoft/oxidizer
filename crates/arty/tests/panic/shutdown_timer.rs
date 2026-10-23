@@ -5,6 +5,8 @@
 
 #![cfg(not(miri))] // This contract exercises the native timer driver and process boundary.
 
+use std::error::Error as _;
+use std::future::pending;
 use std::pin::Pin;
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
@@ -22,6 +24,15 @@ struct PanicWake;
 impl Wake for PanicWake {
     fn wake(self: Arc<Self>) {
         panic!("final shutdown timer callback");
+    }
+}
+
+struct WorkerPanicWake(mpsc::Sender<()>);
+
+impl Wake for WorkerPanicWake {
+    fn wake(self: Arc<Self>) {
+        self.0.send(()).unwrap();
+        panic!("worker timer callback");
     }
 }
 
@@ -68,6 +79,37 @@ fn final_timer_panic_reports_worker_failure_after_joining_blocking_work() {
 #[test]
 fn final_timer_without_escaped_task_waker_reports_joined_worker_failure() {
     timer_case(false);
+}
+
+#[test]
+fn worker_panic_cause_reaches_other_task() {
+    testing_aids::execute_or_abandon(|| {
+        let runtime = runtime();
+        let (started, ready) = mpsc::channel();
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(started), |_, Unaware(started)| async move {
+                started.send(()).unwrap();
+                pending::<()>().await;
+            });
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        let (panicked, panic_observed) = mpsc::channel();
+        let timer = runtime.scheduler().spawn_anywhere(Unaware(panicked), |cx, Unaware(panicked)| async move {
+            let mut timer = cx.clock().delay(Duration::from_millis(2));
+            let waker = Waker::from(Arc::new(WorkerPanicWake(panicked)));
+            assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
+            std::mem::forget(timer);
+        });
+        timer.join().unwrap();
+        panic_observed.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        let error = task.join().unwrap_err();
+
+        assert!(error.is_shutdown());
+        assert_eq!(error.source().unwrap().to_string(), "a runtime worker panicked");
+        assert_eq!(runtime.stop().unwrap_err().to_string(), "a runtime worker panicked");
+    })
+    .unwrap();
 }
 
 fn timer_case(retain_waker: bool) {
