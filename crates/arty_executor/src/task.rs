@@ -952,8 +952,10 @@ mod tests {
         let task::Poll::Ready(Err(error)) = Pin::new(&mut result_rx).poll(&mut cx) else {
             panic!("captured panic must be published to the remote join handle");
         };
-        assert!(error.is_panic());
-        discard_task_panic_payload(error.into_panic().expect("the join error was checked as a panic"));
+        let crate::JoinError::Panicked(panic) = error else {
+            panic!("remote join must contain the captured panic");
+        };
+        discard_task_panic_payload(panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()));
 
         let events = processor.events();
         let panicked = events.iter().find(|event| event.name() == "arty.rt.task.panicked").unwrap();
@@ -1050,7 +1052,10 @@ mod tests {
         let task::Poll::Ready(Err(error)) = Pin::new(&mut result_rx).poll(&mut cx) else {
             panic!("captured poll panic must reach the remote join");
         };
-        discard_task_panic_payload(error.into_panic().unwrap());
+        let crate::JoinError::Panicked(panic) = error else {
+            panic!("remote join must contain the captured panic");
+        };
+        discard_task_panic_payload(panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()));
     }
 
     #[test]

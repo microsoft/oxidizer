@@ -239,7 +239,7 @@ fn shutdown_during_remote_conversion_rejects_the_task() {
     assert!(!executor.has_tasks());
     assert!(matches!(
         Pin::new(&mut result).poll(&mut Context::from_waker(Waker::noop())),
-        Poll::Ready(Err(error)) if error.is_shutdown()
+        Poll::Ready(Err(JoinError::Shutdown(_)))
     ));
 }
 
@@ -253,7 +253,7 @@ fn retained_handle_reports_shutdown_without_delaying_shutdown() {
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     assert!(!executor.has_tasks());
     drop(executor);
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn direct_executor_drop_cancels_tasks_safely() {
 
     drop(executor);
 
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]
@@ -345,7 +345,7 @@ fn task_set_shutdown_cancels_tasks_without_executor_drop() {
     assert!(!executor.has_tasks());
     drop(executor);
 
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn disconnected_task_set_returns_shutdown_error() {
 
     let mut handle = tasks.add(async { 42 }, TaskOptions::default());
 
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 struct IntoFutureProbe(Arc<AtomicBool>);
@@ -399,7 +399,7 @@ fn rejected_submission_does_not_convert_the_future() {
     let mut handle = tasks.add(IntoFutureProbe(Arc::clone(&converted)), TaskOptions::default());
 
     assert!(!converted.load(Ordering::Acquire));
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 struct PanickingRemoteJoinWake(AtomicBool);
@@ -427,7 +427,7 @@ fn disconnected_remote_submission_contains_panicking_join_notification() {
     assert!(wake.0.load(Ordering::Acquire));
     assert!(matches!(
         Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
-        Poll::Ready(Err(error)) if error.is_shutdown()
+        Poll::Ready(Err(JoinError::Shutdown(_)))
     ));
 }
 
@@ -439,7 +439,7 @@ fn submission_during_shutdown_returns_shutdown_error() {
 
     let mut handle = tasks.add(async { 42 }, TaskOptions::default());
 
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]
@@ -548,10 +548,10 @@ fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
     );
 
     assert!(owner.borrow().is_none());
-    assert!(matches!(poll_once(&mut existing), Poll::Ready(Err(error)) if error.is_shutdown()));
-    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut existing), Poll::Ready(Err(JoinError::Shutdown(_)))));
+    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(JoinError::Shutdown(_)))));
     let mut nested = nested.borrow_mut().take().unwrap();
-    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 #[test]
@@ -571,9 +571,9 @@ fn owner_drop_during_spawn_telemetry_cancels_task_and_rejects_nested_submission(
 
     let mut outer = tasks.add(pending::<()>(), TaskOptions::default());
 
-    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut outer), Poll::Ready(Err(JoinError::Shutdown(_)))));
     let mut nested = nested.borrow_mut().take().unwrap();
-    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut nested), Poll::Ready(Err(JoinError::Shutdown(_)))));
 }
 
 struct ShutdownDuringIntoFuture {
@@ -596,7 +596,7 @@ fn shutdown_during_into_future_conversion_rejects_the_outer_task() {
     let tasks = executor.tasks();
     let mut handle = tasks.add(ShutdownDuringIntoFuture { tasks: tasks.clone() }, TaskOptions::default());
 
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+    assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
 
@@ -640,7 +640,7 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
     let mut submitted_handle = submitted.borrow_mut().take().expect("future destructor submitted a task");
     assert!(matches!(
         poll_once(&mut submitted_handle),
-        Poll::Ready(Err(error)) if error.is_shutdown()
+        Poll::Ready(Err(JoinError::Shutdown(_)))
     ));
 }
 
@@ -673,6 +673,6 @@ fn shutdown_retires_a_batch_of_queued_tasks() {
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     for mut handle in handles {
-        assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(poll_once(&mut handle), Poll::Ready(Err(JoinError::Shutdown(_)))));
     }
 }

@@ -499,7 +499,7 @@ mod tests {
             let mut cx = Context::from_waker(Waker::noop());
             self.nested_rejected.set(matches!(
                 Pin::new(&mut nested).poll(&mut cx),
-                Poll::Ready(Err(error)) if error.is_shutdown()
+                Poll::Ready(Err(crate::JoinError::Shutdown(_)))
             ));
             ready(7)
         }
@@ -523,8 +523,14 @@ mod tests {
         assert!(owner.borrow().is_none());
         assert!(existing_dropped.get());
         let mut cx = Context::from_waker(Waker::noop());
-        assert!(matches!(Pin::new(&mut existing).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
-        assert!(matches!(Pin::new(&mut outer).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(
+            Pin::new(&mut existing).poll(&mut cx),
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
+        ));
+        assert!(matches!(
+            Pin::new(&mut outer).poll(&mut cx),
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
+        ));
         assert!(nested_rejected.get());
     }
 
@@ -843,7 +849,7 @@ mod tests {
         assert!(dropped.get());
         assert!(matches!(
             Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(error)) if error.is_shutdown()
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
         ));
     }
 
@@ -860,7 +866,7 @@ mod tests {
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         assert!(matches!(
             Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(error)) if error.is_shutdown()
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
         ));
     }
 
@@ -901,7 +907,7 @@ mod tests {
         let mut cx = Context::from_waker(Waker::noop());
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -914,7 +920,7 @@ mod tests {
         let mut handle = tasks.add_test(async { 42 });
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
 
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -925,7 +931,7 @@ mod tests {
         drop(executor);
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -964,7 +970,7 @@ mod tests {
         drop(executor);
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
