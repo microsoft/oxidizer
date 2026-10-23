@@ -1,26 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use arty_executor::{ShutdownCause, ShutdownError};
 
 /// Shared runtime shutdown state.
-///
-/// The atomic is only a state indicator. `OnceLock` owns cause publication and
-/// observation, so the indicator can use relaxed ordering without weakening
-/// visibility of the cause.
 #[derive(Clone, Default, derive_more::Debug)]
 pub(crate) struct Shutdown {
     #[debug(ignore)]
-    shared: Arc<Shared>,
-}
-
-#[derive(Default)]
-struct Shared {
-    started: AtomicBool,
-    cause: OnceLock<ShutdownCause>,
+    cause: Arc<OnceLock<ShutdownCause>>,
 }
 
 impl Shutdown {
@@ -29,18 +18,17 @@ impl Shutdown {
     /// The first published cause is authoritative. A later request cannot
     /// replace a cause, including a default cause without an error.
     pub(crate) fn begin(&self, cause: ShutdownCause) -> bool {
-        _ = self.shared.cause.set(cause);
-        !self.shared.started.swap(true, Ordering::Relaxed)
+        self.cause.set(cause).is_ok()
     }
 
     #[must_use]
     pub(crate) fn is_started(&self) -> bool {
-        self.shared.started.load(Ordering::Relaxed)
+        self.cause.get().is_some()
     }
 
     #[must_use]
     pub(crate) fn cause(&self) -> Option<ShutdownCause> {
-        self.is_started().then(|| self.shared.cause.wait().clone())
+        self.cause.get().cloned()
     }
 
     #[must_use]
