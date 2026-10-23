@@ -17,11 +17,15 @@ use crate::{ShutdownCause, ShutdownError, TaskPanicPayload};
 /// A shutdown error is available through [`Error::source`] when shutdown started
 /// because of an error. A panic payload need not implement [`Error`], so use
 /// [`into_panic`](Self::into_panic) to inspect it.
-pub struct JoinError {
+pub enum JoinError {
+    /// The task panicked.
+    ///
     // Panic payloads are `Send` but need not be `Sync`. The mutex lets `JoinError` remain a
     // thread-safe error while preserving the original payload for `into_panic`.
-    panic: Option<Mutex<TaskPanicPayload>>,
-    shutdown_error: Option<ShutdownError>,
+    Panicked(Mutex<TaskPanicPayload>),
+
+    /// Executor shutdown cancelled the task or rejected its submission.
+    Shutdown(Option<ShutdownError>),
 }
 
 impl PartialEq for JoinError {
@@ -35,51 +39,36 @@ impl Eq for JoinError {}
 impl JoinError {
     #[must_use]
     pub(crate) fn shutdown(cause: ShutdownCause) -> Self {
-        Self {
-            panic: None,
-            shutdown_error: cause.into_error(),
-        }
+        Self::Shutdown(cause.into_error())
     }
 
     pub(crate) fn panicked(panic: TaskPanicPayload) -> Self {
-        Self {
-            panic: Some(Mutex::new(panic)),
-            shutdown_error: None,
-        }
+        Self::Panicked(Mutex::new(panic))
     }
 
     /// Returns `true` if the task panicked.
     #[must_use]
     pub const fn is_panic(&self) -> bool {
-        self.panic.is_some()
+        matches!(self, Self::Panicked(_))
     }
 
     /// Returns `true` if executor shutdown cancelled the task or rejected its submission.
     #[must_use]
     pub const fn is_shutdown(&self) -> bool {
-        self.panic.is_none()
+        matches!(self, Self::Shutdown(_))
     }
 
     /// Returns the captured panic payload, or `None` if this error represents shutdown.
     #[must_use]
     pub fn into_panic(self) -> Option<TaskPanicPayload> {
-        self.panic.map(|panic| {
-            // Consuming the mutex gives us sole ownership. Poison records a previous unwind; it
-            // does not invalidate the payload, so returning that payload remains correct.
-            panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
-        })
-    }
-
-    /// Returns the error that caused shutdown, if one was recorded.
-    #[must_use]
-    pub const fn shutdown_error(&self) -> Option<&ShutdownError> {
-        self.shutdown_error.as_ref()
-    }
-
-    /// Returns the error that caused shutdown, if one was recorded.
-    #[must_use]
-    pub fn into_shutdown_error(self) -> Option<ShutdownError> {
-        self.shutdown_error
+        match self {
+            Self::Panicked(panic) => {
+                // Consuming the mutex gives us sole ownership. Poison records a previous unwind;
+                // it does not invalidate the payload, so returning that payload remains correct.
+                Some(panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
+            }
+            Self::Shutdown(_) => None,
+        }
     }
 }
 
@@ -98,14 +87,16 @@ impl Debug for JoinError {
         f.debug_struct(std::any::type_name::<Self>())
             .field("is_panic", &self.is_panic())
             .field("is_shutdown", &self.is_shutdown())
-            .field("has_shutdown_error", &self.shutdown_error.is_some())
             .finish_non_exhaustive()
     }
 }
 
 impl Error for JoinError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.shutdown_error.as_ref().map(|error| error as &(dyn Error + 'static))
+        match self {
+            Self::Shutdown(Some(error)) => Some(error),
+            Self::Panicked(_) | Self::Shutdown(None) => None,
+        }
     }
 }
 

@@ -141,10 +141,10 @@ impl JoinError {
 
 impl JoinError {
     pub(crate) fn from_executor(error: arty_executor::JoinError) -> Self {
-        if error.is_panic() {
-            return Self::panicked(error.into_panic().expect("the executor join error was checked as a panic"));
+        match error {
+            arty_executor::JoinError::Shutdown(error) => Self::shutdown(error),
+            error => Self::panicked(error.into_panic().expect("the executor join error was checked as a panic")),
         }
-        Self::shutdown(error.into_shutdown_error())
     }
 }
 
