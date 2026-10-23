@@ -62,6 +62,8 @@ static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["registry", "std"] }
 
 [[bench]]
 name = "observed_benchmarks"
