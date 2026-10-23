@@ -242,9 +242,9 @@ mod tests {
         let threads = test_threads(2);
 
         let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default());
-        let destination_worker =
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::Shutdown::default());
-        destination_worker.shutdown(ShutdownCause::default());
+        let destination_shutdown = Shutdown::default();
+        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), destination_shutdown.clone());
+        destination_shutdown.begin(ShutdownCause::default());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),

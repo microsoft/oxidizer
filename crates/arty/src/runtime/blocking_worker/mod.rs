@@ -12,7 +12,7 @@ use std::thread::ThreadId;
 use std::{fmt, thread};
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, discard_task_panic_payload};
+use arty_executor::discard_task_panic_payload;
 use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
@@ -233,11 +233,6 @@ impl BlockingWorker {
         }
 
         join_handle
-    }
-
-    /// Rejects new work and cancels queued work; already-running blocking calls finish.
-    pub(crate) fn shutdown(&self, cause: ShutdownCause) {
-        self.runtime_shutdown.begin(cause);
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -605,7 +600,7 @@ pub(super) mod blocking_worker_tests {
                 // hanging.
                 task_start_rx.recv().expect("the worker must run the blocking task");
 
-                worker.shutdown(ShutdownCause::default());
+                worker.runtime_shutdown.begin(ShutdownCause::default());
                 worker.join();
                 events.lock_result().unwrap().push("worker joined");
             }
@@ -646,7 +641,7 @@ pub(super) mod blocking_worker_tests {
 
         let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
 
         let work_item = WorkItem {
             dropped: Arc::clone(&dropped),
@@ -686,7 +681,7 @@ pub(super) mod blocking_worker_tests {
         running.join().unwrap();
         assert!(queued.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
@@ -704,7 +699,7 @@ pub(super) mod blocking_worker_tests {
 
         assert!(rejected.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
@@ -712,7 +707,7 @@ pub(super) mod blocking_worker_tests {
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
         let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop(), Shutdown::default());
         let _scope = BlockingTaskScope::enter(Arc::clone(&worker.pool.identity));
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
 
         let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
 
@@ -925,7 +920,7 @@ pub(super) mod blocking_worker_tests {
 
         // Release the blocker so the queued tasks drain, then wait for the pool to settle.
         release_tx.send(());
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
 
         (events, saturation_counts)
@@ -994,7 +989,7 @@ pub(super) mod blocking_worker_tests {
             );
         }
 
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
@@ -1042,7 +1037,7 @@ pub(super) mod blocking_worker_tests {
         );
 
         release_second_tx.send(());
-        worker.shutdown(ShutdownCause::default());
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
