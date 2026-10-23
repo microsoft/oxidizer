@@ -254,9 +254,9 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        if self.shutdown().is_started() {
+        if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
             drop(future_factory);
-            return JoinHandle::shutdown(self.shutdown().cause().unwrap_or_default());
+            return join_handle;
         }
         let endpoint = self
             .worker_endpoints

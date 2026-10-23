@@ -9,6 +9,7 @@ use arty_executor::remote::JoinHandle as RemoteJoinHandle;
 use performables::arc::Arc;
 
 use super::JoinError;
+use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
 
 /// A handle for receiving an async or blocking task's result.
@@ -75,6 +76,10 @@ where
             state: State::Error(Some(JoinError::shutdown(cause.into_error()))),
             blocking_pool: None,
         }
+    }
+
+    pub(crate) fn try_from_shutdown(shutdown: &Shutdown) -> Option<Self> {
+        shutdown.cause().map(Self::shutdown)
     }
 
     pub(crate) fn invalid_destination() -> Self {

@@ -192,8 +192,8 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.shutdown().is_started() {
-            return JoinHandle::shutdown(self.dispatcher.shutdown().cause().unwrap_or_default());
+        if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
+            return join_handle;
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -344,8 +344,8 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        if self.dispatcher.shutdown().is_started() {
-            return JoinHandle::shutdown(self.dispatcher.shutdown().cause().unwrap_or_default());
+        if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
+            return join_handle;
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
             return JoinHandle::invalid_destination();
