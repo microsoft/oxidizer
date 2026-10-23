@@ -367,14 +367,10 @@ impl Sink {
         reason = "sink construction limits the processor count to the 64-bit dispatch mask"
     )]
     pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
-        if self.is_noop() {
-            return;
-        }
-
         let sinks = match &*self.inner {
             SinkInner::Single(sink) => slice::from_ref(sink),
             SinkInner::Composite { children } => children.as_slice(),
-            SinkInner::Noop => &[],
+            SinkInner::Noop => return,
         };
 
         let description = state.description();
