@@ -12,25 +12,24 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{ResilienceContext, TelemetryString};
 
-/// Builder for configuring chaos injection middleware.
+/// Configures output injection middleware.
 ///
-/// This type is created by calling [`Injection::layer`](crate::chaos::injection::Injection::layer)
-/// and uses the type-state pattern to enforce that required properties are configured
-/// before the layer can be built:
+/// [`Injection::layer`](crate::chaos::injection::Injection::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
 /// - [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with]:
-///   Required probability of injection
+///   sets the injection rate.
 /// - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
 ///   [`output_error_with`][InjectionLayer::output_error_with], or
 ///   [`output_error`][InjectionLayer::output_error]:
-///   Required output factory
+///   creates injected output.
 ///
-/// For comprehensive examples, see the [injection module][crate::chaos::injection] documentation.
+/// See the [injection module][crate::chaos::injection] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with] has been set
-/// - `S2`: Tracks whether [`output_with`][InjectionLayer::output_with] has been set
+/// - `S1` records whether the injection rate is set.
+/// - `S2` records whether the output function is set.
 #[derive(Debug)]
 pub struct InjectionLayer<In, Out, S1 = Set, S2 = Set> {
     rate: Option<InjectionRate<In>>,
@@ -56,16 +55,15 @@ impl<In, Out> InjectionLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
-    /// Sets a callback that dynamically computes the injection rate for each
-    /// request.
+    /// Sets a callback that calculates the injection rate for each request.
     ///
-    /// The `rate_fn` receives a reference to the input and
-    /// [`InjectionRateArgs`], and returns a probability in `[0.0, 1.0]` where
-    /// `0.0` means never inject and `1.0` means always inject. The returned
-    /// value is clamped to this range.
+    /// The function receives the input and [`InjectionRateArgs`].
+    /// It returns a value in `[0.0, 1.0]`.
+    /// A value of `0.0` never injects output.
+    /// A value of `1.0` always injects output.
+    /// Values outside the range are clamped.
     ///
-    /// This allows the injection rate to vary per request based on request
-    /// properties or external state.
+    /// The rate can depend on the request or external state.
     #[must_use]
     pub fn rate_with(
         mut self,
@@ -75,34 +73,31 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
         self.into_state::<Set, S2>()
     }
 
-    /// Sets the probability of injecting the configured output instead of calling
-    /// the inner service.
+    /// Sets the rate for injected output.
     ///
-    /// The `rate` is clamped to the range `[0.0, 1.0]` where `0.0` means never
-    /// inject and `1.0` means always inject.
+    /// The value is clamped to `[0.0, 1.0]`.
     #[must_use]
     pub fn rate(self, rate: f64) -> InjectionLayer<In, Out, Set, S2> {
         let clamped = rate.clamp(0.0, 1.0);
         self.rate_with(move |_, _| clamped)
     }
 
-    /// Applies configuration from an [`InjectionConfig`] struct.
+    /// Applies an [`InjectionConfig`] to this layer.
     ///
     /// This sets the [`rate`][InjectionLayer::rate] and
     /// [`enable`][InjectionLayer::enable_always] / [`disable`][InjectionLayer::disable]
-    /// properties from the config.
+    /// properties from the configuration.
     #[must_use]
     pub fn config(self, config: &InjectionConfig) -> InjectionLayer<In, Out, Set, S2> {
         self.rate(config.rate).enable(config.enabled)
     }
 
-    /// Optionally enables the injection middleware based on a condition.
+    /// Enables injection middleware when a condition is true.
     ///
-    /// When disabled, the inner service output is returned as-is. The
-    /// `is_enabled` function receives a reference to the input and returns
-    /// `true` when injection should be active for this request.
+    /// If the condition is false, the middleware calls the inner service.
+    /// The `is_enabled` function receives the input.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -111,29 +106,26 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
 
     /// Enables or disables the injection middleware.
     ///
-    /// When disabled, requests pass through without injection.
-    /// This call replaces any previous condition.
+    /// If disabled, requests run without injection.
+    /// This call replaces the previous condition.
     #[must_use]
     fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);
         self
     }
 
-    /// Enables the injection middleware unconditionally.
+    /// Enables injection middleware for all requests.
     ///
-    /// All requests will be subject to injection at the configured rate.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This is the default behavior.
+    /// This call replaces the previous condition.
+    /// Injection middleware is enabled by default.
     #[must_use]
     pub fn enable_always(self) -> Self {
         self.enable(true)
     }
 
-    /// Disables the injection middleware completely.
+    /// Disables injection middleware for all requests.
     ///
-    /// All requests will pass through without injection.
-    /// This call replaces any previous condition.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn disable(self) -> Self {
         self.enable(false)
@@ -141,11 +133,11 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
 }
 
 impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1, S2> {
-    /// Sets a callback-based output factory for the injected output.
+    /// Sets a function that creates injected output.
     ///
-    /// The `output_fn` receives the consumed input and [`InjectionOutputArgs`],
-    /// and returns the output that replaces the inner service call when injection
-    /// is triggered. This call replaces any previous output factory.
+    /// The function receives consumed input and [`InjectionOutputArgs`].
+    /// It returns output without calling the inner service.
+    /// This call replaces the previous output function.
     #[must_use]
     pub fn output_with(
         mut self,
@@ -157,10 +149,10 @@ impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1
 
     /// Sets a fixed value that is cloned on every injection.
     ///
-    /// This is a convenience shorthand for [`output_with`][InjectionLayer::output_with]
-    /// when the injected output is always the same value. The input is discarded.
+    /// Use this method when injected output is always the same.
+    /// It discards the input and clones `value`.
     ///
-    /// This call replaces any previous output factory.
+    /// This call replaces the previous output function.
     #[must_use]
     pub fn output(self, value: Out) -> InjectionLayer<In, Out, S1, Set>
     where
@@ -176,16 +168,13 @@ where
     Ok: Send + 'static,
     Err: Send + 'static,
 {
-    /// Sets a callback-based error factory for the injected output.
+    /// Sets a function that creates an injected error.
     ///
-    /// The `error_fn` receives the consumed input and [`InjectionOutputArgs`],
-    /// and returns an error value that is wrapped in [`Err`] to produce the
-    /// output when injection is triggered. This call replaces any previous
-    /// output factory.
+    /// The function receives consumed input and [`InjectionOutputArgs`].
+    /// The middleware wraps its error in [`Err`].
+    /// This call replaces the previous output function.
     ///
-    /// This is a convenience shorthand for
-    /// [`output_with`][InjectionLayer::output_with] when the injected output is
-    /// always an error variant.
+    /// Use this method when injected output is always an error.
     #[must_use]
     pub fn output_error_with(
         self,
@@ -196,11 +185,10 @@ where
 
     /// Sets a fixed error value that is cloned on every injection.
     ///
-    /// This is a convenience shorthand for
-    /// [`output_error_with`][InjectionLayer::output_error_with] when the
-    /// injected error is always the same value. The input is discarded.
+    /// Use this method when the injected error is always the same.
+    /// It discards the input and clones `error`.
     ///
-    /// This call replaces any previous output factory.
+    /// This call replaces the previous output function.
     #[must_use]
     pub fn output_error(self, error: Err) -> InjectionLayer<In, Result<Ok, Err>, S1, Set>
     where

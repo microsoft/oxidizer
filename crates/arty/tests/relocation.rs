@@ -9,13 +9,100 @@ testing_aids::init_tracing!();
 
 mod support;
 
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::Waker;
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use arty::task::{Builtins, Scheduler};
+use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
 use support::JoinHandleExt as _;
 use thread_aware::{ThreadAware, ThreadBuilder};
+
+#[derive(Clone)]
+struct RelocationIoOptions(Arc<Mutex<Vec<ThreadId>>>);
+
+impl ThreadAware for RelocationIoOptions {
+    fn relocate(&mut self, _source: Option<&arty::core::Thread>, _destination: &arty::core::Thread) {}
+}
+
+#[derive(Clone)]
+struct RelocationIoContext(RelocationIoOptions);
+
+impl ThreadAware for RelocationIoContext {
+    fn relocate(&mut self, _source: Option<&arty::core::Thread>, _destination: &arty::core::Thread) {}
+}
+
+impl IoContext for RelocationIoContext {
+    type ContextOptions = RelocationIoOptions;
+    type Driver = RelocationIoDriver;
+
+    fn context(options: Self::ContextOptions) -> Self {
+        Self(options)
+    }
+
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        self.0.0.lock().unwrap_or_else(PoisonError::into_inner).push(options.thread().id());
+        _ = options.role();
+        Ok(RelocationIoDriver)
+    }
+}
+
+struct RelocationIoDriver;
+
+impl Driver for RelocationIoDriver {
+    fn waker(&self) -> Waker {
+        Waker::noop().clone()
+    }
+
+    fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    fn shutdown(self) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn relocating_builtins_leaves_shared_source_clones_on_the_source_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (source, original, scheduler) = runtime
+        .scheduler()
+        .spawn_anywhere(
+            (),
+            |cx, ()| async move { (cx.thread().clone(), cx.clone(), cx.scheduler().clone()) },
+        )
+        .join()
+        .unwrap();
+    let (destination, relocated_scheduler) = runtime
+        .scheduler()
+        .spawn_anywhere(original.clone(), |_, relocated| async move {
+            (relocated.thread().clone(), relocated.scheduler().clone())
+        })
+        .join()
+        .unwrap();
+    assert_ne!(source, destination);
+    let original_thread = scheduler
+        .spawn(move |_| async move {
+            let original_thread = original.thread().clone();
+            assert_eq!(original_thread.id(), thread::current().id());
+            assert_eq!(
+                original.scheduler().spawn(async |_| thread::current().id()).await.unwrap(),
+                original_thread.id()
+            );
+            original_thread
+        })
+        .join()
+        .unwrap();
+    assert_eq!(original_thread, source);
+    assert_eq!(
+        relocated_scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
+        destination.id()
+    );
+    runtime.stop().unwrap();
+}
 
 #[cfg(not(miri))]
 #[test]
@@ -208,6 +295,48 @@ fn relocating_builtins_uses_same_pool_when_shared() {
         "a shared single-threaded pool must keep dispatching blocking tasks to the same thread after relocating Builtins"
     );
     assert_async_follows_relocation(&observation);
+}
+
+#[test]
+fn relocated_builtins_initializes_io_on_the_destination_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let initialized = Arc::new(Mutex::new(Vec::new()));
+    let destination = runtime
+        .scheduler()
+        .block_on({
+            let initialized = Arc::clone(&initialized);
+            async move |cx| {
+                let here = cx.thread().clone();
+                let there = cx
+                    .control()
+                    .workers()
+                    .into_iter()
+                    .find(|worker| worker != &&here)
+                    .cloned()
+                    .expect("two-worker runtime exposes a relocation destination");
+                let mut relocated = cx.clone();
+                relocated.relocate(Some(&here), &there);
+                let destination = there.id();
+                let scheduler = relocated.scheduler().clone();
+                scheduler
+                    .spawn({
+                        let options = RelocationIoOptions(initialized);
+                        async move |_| {
+                            assert_eq!(thread::current().id(), destination);
+                            let _ = relocated.io().context::<RelocationIoContext>(&options);
+                        }
+                    })
+                    .await
+                    .unwrap();
+                destination
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+
+    let initialized = initialized.lock().unwrap();
+    assert_eq!(initialized.len(), 1);
+    assert!(initialized.contains(&destination));
 }
 
 #[test]

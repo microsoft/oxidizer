@@ -12,11 +12,15 @@ mod support;
 
 use std::cell::RefCell;
 use std::future::pending;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+use std::task::{Context, Poll, Waker};
 
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
 testing_aids::init_tracing!();
@@ -44,6 +48,52 @@ impl Drop for Probe {
         let block_on_rejected = self.block_on_runtime.scheduler().block_on(async |_| ()).is_err();
         self.outcome.send(block_on_rejected).unwrap();
     }
+}
+
+#[test]
+fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
+    struct RemoteWake {
+        ready: Arc<AtomicBool>,
+        waker: Option<mpsc::Sender<Waker>>,
+    }
+
+    impl Future for RemoteWake {
+        type Output = u64;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u64> {
+            // Observe the readiness publication independently of wake delivery.
+            if self.ready.load(Ordering::Acquire) {
+                return Poll::Ready(7);
+            }
+            if let Some(sender) = self.waker.take() {
+                sender.send(cx.waker().clone()).unwrap();
+            }
+            Poll::Pending
+        }
+    }
+
+    let runtime = runtime();
+    for _ in 0..if cfg!(miri) { 2 } else { 20 } {
+        let ready = Arc::new(AtomicBool::new(false));
+        let (sent, received) = mpsc::channel();
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(Unaware((Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| RemoteWake {
+                ready,
+                waker: Some(sender),
+            });
+        let waker = if is_mutation_testing() {
+            received.recv().unwrap()
+        } else {
+            received.recv_timeout(TEST_TIMEOUT).unwrap()
+        };
+        // Publish the predicate before waking; the test does not use waking as a memory barrier.
+        ready.store(true, Ordering::Release);
+        waker.wake_by_ref();
+        waker.wake_by_ref();
+        assert_eq!(task.join().unwrap(), 7);
+    }
+    runtime.stop().unwrap();
 }
 
 #[test]

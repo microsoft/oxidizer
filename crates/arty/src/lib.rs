@@ -22,9 +22,9 @@
 //! services. Workers use thread-local bookkeeping rather than a global
 //! runtime singleton.
 //!
-//! Arty provides task scheduling, clocks, telemetry, and pools for offloading
-//! blocking callbacks. It does not provide async I/O drivers or move running
-//! tasks between workers.
+//! Arty provides task scheduling, clocks, telemetry, external I/O driver
+//! hosting, and pools for offloading blocking callbacks. It does not provide
+//! an async I/O implementation or move running tasks between workers.
 //!
 //! # Quickstart
 //!
@@ -61,6 +61,9 @@
 //! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
+//! - [`Io`](crate::io::Io) registers external `arty_io_core` contexts and lazily
+//!   initializes a driver on each worker when that worker first requests the
+//!   context.
 //! - [`Scheduler`](crate::task::Scheduler) keeps child work on its worker.
 //! - [`Clock`](crate::time::Clock) provides timers and timeouts;
 //!   [`ClockControl`](crate::time::ClockControl) controls time in tests.
@@ -73,7 +76,7 @@
 //! This supports thread-local and non-`Send` state, keeps worker-local data
 //! nearby, and can reduce contention for that data. Shared data may still contend.
 //! Choose Tokio for automatic task distribution or its async I/O ecosystem;
-//! Arty does not provide Tokio's I/O or timer drivers.
+//! Arty does not provide Tokio's I/O implementations.
 //!
 //! # Blocking work
 //!
@@ -130,7 +133,7 @@
 //!
 //! The default feature set enables `rt` and `macros`.
 //!
-//! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
+//! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
@@ -155,16 +158,19 @@ use arty_io_core as _;
 /// Without options, the attribute uses
 /// [`Runtime::new`](crate::runtime::Runtime::new). The optional configuration is:
 ///
-/// - `workers = N` caps the number of async workers. Use an integer literal
+/// - `workers = N` starts exactly `N` async workers. Use an integer literal
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
-///   are available, Arty starts fewer workers; zero fails at construction.
+///   are available, multiple worker threads share each processor. Zero fails at
+///   construction.
 ///
-/// A worker limit does not limit blocking-pool threads. Without a limit, the
+/// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// Each worker uses an operating-system thread and its configured stack.
+/// Large counts can exceed operating-system thread or memory limits.
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an exact/all-workers policy must be configured.
+/// or an at-most/all-workers policy must be configured.
 ///
 /// # Panics
 ///
@@ -193,7 +199,7 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
-/// Cap the async worker count:
+/// Set the async worker count:
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
@@ -298,6 +304,8 @@ pub use arty_macros::test;
 ))]
 pub mod documentation;
 
+#[cfg(any(test, feature = "rt"))]
+pub mod io;
 #[cfg(any(test, feature = "rt"))]
 pub mod runtime;
 #[cfg(any(test, feature = "rt"))]

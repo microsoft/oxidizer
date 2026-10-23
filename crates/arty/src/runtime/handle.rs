@@ -9,8 +9,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// Owns an Arty runtime's workers and their shutdown.
 ///
 /// Use this type to run async work from synchronous code. Construction
-/// starts one async worker per selected processor. A task stays on its
-/// worker until it finishes or is cancelled.
+/// assigns each async worker to an available processor. Exact worker policies
+/// can assign multiple workers to one processor. A task stays on its worker
+/// until it finishes or is cancelled.
 ///
 /// Borrow its [`RuntimeScheduler`] through
 /// [`scheduler`](Self::scheduler) to submit work or block on
@@ -24,8 +25,9 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// callbacks already running are allowed to finish. A blocking callback that
 /// never returns can therefore prevent shutdown from completing.
 ///
-/// Implicit cleanup cannot return shutdown errors. Worker panic diagnostics are
-/// still emitted; use [`stop`](Self::stop) to receive the shutdown outcome.
+/// Implicit cleanup cannot return shutdown errors. Worker panic and I/O driver
+/// diagnostics are still emitted; use [`stop`](Self::stop) to receive the
+/// shutdown outcome.
 ///
 /// On any asynchronous Arty worker or one of this runtime's blocking worker
 /// threads, including callback teardown, dropping the owner only requests
@@ -136,8 +138,9 @@ impl Runtime {
     /// `Ok(())` means shutdown has completed. A calling-context error does not
     /// mean the workers have stopped.
     ///
-    /// Use [`RuntimeOperations::request_stop`](crate::runtime::RuntimeOperations::request_stop)
-    /// to request shutdown without consuming the owner or blocking the caller.
+    /// Use [`Builtins::control`](crate::task::Builtins::control) to obtain
+    /// runtime control and request shutdown without consuming the owner or
+    /// blocking the caller.
     ///
     /// # Errors
     ///
@@ -146,18 +149,20 @@ impl Runtime {
     /// those contexts cannot wait for shutdown. In those cases the owner is
     /// consumed without waiting.
     ///
-    /// Also returns an error if a worker panicked. All workers are joined before
-    /// reporting a worker failure; task failures must be observed through their
+    /// Also returns an error if a worker panicked or an I/O driver failed during
+    /// initialization or cycle execution. Driver shutdown errors are reported
+    /// through telemetry while shutdown continues. All workers are joined
+    /// before reporting a failure; task failures must be observed through their
     /// own join handles.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, RuntimeOperations};
+    /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     RuntimeOperations::from(&cx).request_stop();
+    ///     cx.control().request_stop();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await
@@ -180,7 +185,8 @@ impl Runtime {
         if self.scheduler.dispatcher.is_current_blocking_thread() {
             return Err(Error::shutdown_wait_from_blocking_callback());
         }
-        self.scheduler.dispatcher.wait()
+        self.scheduler.dispatcher.wait()?;
+        self.scheduler.dispatcher.take_shutdown_error().map_or(Ok(()), Err)
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {

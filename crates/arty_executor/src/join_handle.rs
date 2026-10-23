@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::task;
 
-use events_once::{LocalEventLake, PooledLocalReceiver, PooledLocalSender};
+use events_once::{LocalEventLake, PooledLocalReceiver};
 
 use crate::TaskPanicPayload;
 
@@ -86,34 +86,6 @@ impl Debug for JoinError {
 
 impl Error for JoinError {}
 
-/// Owns pooled result storage whose detached slots remain valid through their endpoints.
-#[derive(Clone, Debug)]
-pub(crate) struct JoinEventLake {
-    events: LocalEventLake,
-}
-
-impl JoinEventLake {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self {
-            events: LocalEventLake::new(),
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn rent<R: 'static>(&self) -> (PooledLocalSender<R>, JoinHandle<R>) {
-        let (tx, rx) = self.events.rent();
-        (tx, JoinHandle::new(rx))
-    }
-
-    #[must_use]
-    pub(crate) fn disconnected<R: 'static>(&self) -> JoinHandle<R> {
-        let (tx, handle) = self.rent();
-        drop(tx);
-        handle
-    }
-}
-
 /// A handle that can be used to await the completion of a task and to receive its result `R`.
 ///
 /// Completion produces `Ok(result)`. If executor shutdown cancels the task or rejects its
@@ -130,8 +102,14 @@ pub struct JoinHandle<R: 'static> {
 }
 
 impl<R: 'static> JoinHandle<R> {
-    fn new(rx: PooledLocalReceiver<R>) -> Self {
+    pub(crate) fn new(rx: PooledLocalReceiver<R>) -> Self {
         Self { rx }
+    }
+
+    pub(crate) fn disconnected(events: &LocalEventLake) -> Self {
+        let (tx, rx) = events.rent();
+        drop(tx);
+        Self::new(rx)
     }
 }
 

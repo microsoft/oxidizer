@@ -6,38 +6,49 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
 
-use crate::task::execution::BoxedRemoteFutureFactory;
+use crate::task::Builtins;
+use crate::task::execution::RemoteFutureFactory;
 
-/// Owns a complete submission closure until the destination worker registers it.
+pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
+
+/// Owns a queued closure until the destination worker consumes it.
 ///
-/// The closure includes every unregistered capture, such as the user's factory and its result
-/// sender. Dropping the wrapper contains a panic from disposing that complete closure; successful
-/// registration transfers the closure out. Captured endpoints retain their own disposal guards for
-/// paths that do not pass through this wrapper.
-pub(crate) struct QueuedTaskFactory {
-    inner: Option<BoxedRemoteFutureFactory>,
+/// Dropping the wrapper contains a panic from disposing the closure. Successful
+/// consumption transfers the closure out exactly once.
+pub(crate) struct QueuedClosure<T> {
+    inner: Option<T>,
 }
 
-impl QueuedTaskFactory {
-    pub(crate) fn new(inner: BoxedRemoteFutureFactory) -> Self {
+impl<T> QueuedClosure<T> {
+    pub(crate) fn new(inner: T) -> Self {
         Self { inner: Some(inner) }
     }
 
-    pub(crate) fn into_inner(mut self) -> BoxedRemoteFutureFactory {
-        self.inner.take().expect("a queued task factory is consumed exactly once")
+    pub(crate) fn into_inner(mut self) -> T {
+        self.inner.take().expect("a queued closure is consumed exactly once")
     }
 }
 
-impl Drop for QueuedTaskFactory {
+impl<T> Drop for QueuedClosure<T> {
     fn drop(&mut self) {
-        let Some(factory) = self.inner.take() else {
+        let Some(closure) = self.inner.take() else {
             return;
         };
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(factory))) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(closure))) {
             discard_task_panic_payload(panic);
         }
     }
 }
+
+/// Owns a complete submission closure until the destination worker registers it.
+///
+/// The closure includes every unregistered capture, such as the user's factory and its result
+/// sender. Captured endpoints retain their own disposal guards for paths that do not pass through
+/// this wrapper.
+pub(crate) type QueuedTaskFactory = QueuedClosure<RemoteFutureFactory>;
+
+/// Owns a synchronous I/O access closure until the destination worker invokes it.
+pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
 pub(crate) enum AsyncWorkerCommand {
     /// Schedules a new task for execution on this worker, providing the factory function that will
@@ -47,6 +58,9 @@ pub(crate) enum AsyncWorkerCommand {
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
     EnqueueTask { future_factory: QueuedTaskFactory },
+
+    /// Executes synchronous I/O context access on this worker.
+    AccessIo { access: QueuedIoAccess },
 
     /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
     /// any tasks that are enqueued after this command is received (e.g. because other threads do
@@ -62,6 +76,7 @@ impl fmt::Debug for AsyncWorkerCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
+            Self::AccessIo { .. } => write!(f, "AccessIo"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
@@ -109,11 +124,11 @@ mod tests {
         let executor = Executor::builder().build();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
-        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+        let factory = RemoteFutureFactory::new(move |_, _| {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        QueuedTaskFactory::new(factory).into_inner()(builtins, &executor.tasks());
+        let _registered = QueuedTaskFactory::new(factory).into_inner().register(builtins, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -123,13 +138,7 @@ mod tests {
     fn queued_factory_disposal_contains_join_notification_panic() {
         let sink = Sink::noop();
         let result_pool = arty_executor::remote::Pool::new();
-        let (factory, join) = prepare_remote(
-            &result_pool,
-            |_| async { 42 },
-            sink.transfer_context(),
-            TaskPlacement::Any,
-            performables::arc::Arc::new(AtomicBool::new(false)),
-        );
+        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, sink.transfer_context(), TaskPlacement::Any);
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));
@@ -148,12 +157,28 @@ mod tests {
     fn queued_factory_disposal_contains_captured_destructor_panic() {
         let drops = Arc::new(AtomicUsize::new(0));
         let capture = PanicOnDrop(Arc::clone(&drops));
-        let factory: BoxedRemoteFutureFactory = Box::new(move |_, _| {
+        let factory = RemoteFutureFactory::new(move |_, _| {
             let _ = &capture;
         });
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             drop(QueuedTaskFactory::new(factory));
+        }));
+
+        result.unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn queued_io_access_disposal_contains_captured_destructor_panic() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let capture = PanicOnDrop(Arc::clone(&drops));
+        let access: IoAccess = Box::new(move |_| {
+            let _ = &capture;
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(QueuedIoAccess::new(access));
         }));
 
         result.unwrap();

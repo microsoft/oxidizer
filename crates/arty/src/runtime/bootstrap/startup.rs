@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::task::Waker;
 use std::thread;
 
+use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
 use observed::{Sink, emit};
@@ -14,6 +15,7 @@ use performables::sync::channel::{OneshotReceiver, Sender};
 use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
+use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::RuntimeConfig;
@@ -35,9 +37,19 @@ pub(crate) fn build(
     sink: Sink,
     thread_builder: &ThreadBuilder,
 ) -> Result<Runtime, Error> {
-    let pool_mode = processor_config.blocking_pool_policy.mode_label();
     let available = available_processors();
-    let processors = processor_config.workers_policy.select(&available).inspect_err(|_| {
+    build_with_processors(processor_config, clock, sink, thread_builder, &available)
+}
+
+fn build_with_processors(
+    processor_config: RuntimeConfig,
+    clock: &InactiveClock,
+    sink: Sink,
+    thread_builder: &ThreadBuilder,
+    available: &ProcessorSet,
+) -> Result<Runtime, Error> {
+    let pool_mode = processor_config.blocking_pool_policy.mode_label();
+    let processors = processor_config.workers_policy.select(available).inspect_err(|_| {
         emit!(
             &sink,
             RuntimeStartFailed {
@@ -45,10 +57,7 @@ pub(crate) fn build(
             }
         );
     })?;
-    // Decomposition yields singleton processor sets, one per worker. Sort by their sole
-    // processor's ID so startup endpoints and service slots share a stable worker ordering.
-    let mut processors: Vec<_> = processors.decompose().into_iter().collect();
-    processors.sort_by_key(|processor| processor.processors().first().id());
+    let processors_used = processors.processors_used();
 
     let mut async_worker_command_txs = Vec::with_capacity(processors.len());
     let mut async_worker_start_txs = Vec::with_capacity(processors.len());
@@ -62,8 +71,8 @@ pub(crate) fn build(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
-    let worker_count = processors.len();
     let shutdown_started = Arc::new(AtomicBool::new(false));
+    let io_runtime = IoRuntime::new(sink.clone());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
             &sink,
@@ -94,6 +103,7 @@ pub(crate) fn build(
                 thread_builder: thread_builder.clone(),
                 blocking_pools: blocking_pools.clone(),
                 shutdown_started: Arc::clone(&shutdown_started),
+                io_runtime: io_runtime.clone(),
                 sink: sink.clone(),
             }
             .start(),
@@ -138,7 +148,7 @@ pub(crate) fn build(
         runtime_sink,
         RuntimeStarted {
             processors_available: available.len().into(),
-            processors_used: worker_count.into(),
+            processors_used: processors_used.into(),
             blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
             stack_size_bytes: stack_size.into(),
         }
@@ -162,6 +172,7 @@ struct AsyncWorkerStartInfo {
     thread_builder: ThreadBuilder,
     blocking_pools: BlockingPools,
     shutdown_started: Arc<AtomicBool>,
+    io_runtime: IoRuntime,
     sink: Sink,
 }
 
@@ -189,6 +200,7 @@ impl AsyncWorkerStartInfo {
             thread_builder,
             blocking_pools,
             shutdown_started,
+            io_runtime,
             sink,
         } = self;
 
@@ -219,12 +231,17 @@ impl AsyncWorkerStartInfo {
         // will share to send commands to each other.
         let start_signal = futures::executor::block_on(start_rx)
             .expect("RuntimeBuilder failed between initializing and starting a worker - impossible to continue worker execution");
+        let dispatcher = start_signal.dispatcher;
+        let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
+        let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
+        signal.set_driver_waker(driver_waker);
 
         let worker = AsyncWorker::new(
             command_rx,
-            start_signal.dispatcher,
+            dispatcher,
             current,
             sink,
+            io,
             Arc::clone(&blocking_worker),
             clock,
             signal,
@@ -282,5 +299,206 @@ fn available_processors() -> ProcessorSet {
     #[cfg(not(all(miri, any(test, feature = "test-util"))))]
     {
         SystemHardware::current().processors()
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::collections::HashSet;
+    use std::num::NonZero;
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread::ThreadId;
+
+    use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
+    use many_cpus::fake::HardwareBuilder;
+    use observed_testing::{TEST_ID, test_emitter};
+    use performables::arc::PerThread;
+
+    use super::*;
+    use crate::runtime::{BlockingPoolPolicy, WorkersPolicy};
+
+    thread_local! {
+        static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };
+    }
+
+    #[derive(Clone)]
+    struct DriverCounts {
+        initialized: StdArc<AtomicUsize>,
+        stopped: StdArc<AtomicUsize>,
+    }
+
+    impl ThreadAware for DriverCounts {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    #[derive(Clone)]
+    struct HardwareProbe(SystemHardware);
+
+    impl ThreadAware for HardwareProbe {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    #[derive(Clone)]
+    struct TestContext {
+        counts: DriverCounts,
+    }
+
+    impl ThreadAware for TestContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestContext {
+        type ContextOptions = DriverCounts;
+        type Driver = TestDriver;
+
+        fn context(options: Self::ContextOptions) -> Self {
+            Self { counts: options }
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            self.counts.initialized.fetch_add(1, Ordering::SeqCst);
+            Ok(TestDriver {
+                stopped: StdArc::clone(&self.counts.stopped),
+            })
+        }
+    }
+
+    struct TestDriver {
+        stopped: StdArc<AtomicUsize>,
+    }
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            self.stopped.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn exact_workers_oversubscribe_fake_processors_with_isolated_worker_state() {
+        const PROCESSORS: usize = 4;
+        const WORKERS: usize = 16;
+
+        let hardware = fake_hardware(PROCESSORS);
+        let (sink, processor) = test_emitter(TEST_ID);
+        let runtime = runtime_with_processors(WorkersPolicy::exactly(WORKERS), &hardware.processors(), sink);
+        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let scheduler = builtins.scheduler().clone();
+        let counts = DriverCounts {
+            initialized: StdArc::new(AtomicUsize::new(0)),
+            stopped: StdArc::new(AtomicUsize::new(0)),
+        };
+        let per_thread = Arc::<AtomicUsize, PerThread>::new_with(AtomicUsize::default);
+        let tasks: Vec<_> = builtins
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| {
+                scheduler.spawn_at(
+                    worker,
+                    (
+                        builtins.clone(),
+                        counts.clone(),
+                        per_thread.clone(),
+                        HardwareProbe(hardware.clone()),
+                    ),
+                    |(builtins, counts, value, hardware)| async move {
+                        let thread = thread::current().id();
+                        assert_eq!(builtins.thread().id(), thread);
+                        let _context = builtins.io().context::<TestContext>(&counts);
+                        let local_calls = WORKER_LOCAL_CALLS.with(|calls| calls.fetch_add(1, Ordering::SeqCst));
+                        let per_thread_calls = value.fetch_add(1, Ordering::SeqCst);
+                        (thread, hardware.0.current_processor_id(), local_calls, per_thread_calls)
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(tasks.len(), WORKERS);
+        let outcomes: Vec<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
+
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(thread, _, _, _)| *thread)
+                .collect::<HashSet<ThreadId>>()
+                .len(),
+            WORKERS
+        );
+        assert_eq!(
+            outcomes.iter().map(|(_, processor, _, _)| *processor).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+        );
+        assert!(
+            outcomes
+                .iter()
+                .all(|(_, _, local_calls, per_thread_calls)| (*local_calls, *per_thread_calls) == (0, 0))
+        );
+        assert_eq!(counts.initialized.load(Ordering::SeqCst), WORKERS);
+
+        runtime.stop().unwrap();
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), WORKERS);
+        let started = processor
+            .events()
+            .into_iter()
+            .find(|event| event.name() == "arty.rt.started")
+            .unwrap();
+        let dimensions = started.dimensions();
+        assert!(dimensions.contains(&("processors.available".into(), PROCESSORS.to_string().into())));
+        assert!(dimensions.contains(&("processors.used".into(), PROCESSORS.to_string().into())));
+    }
+
+    #[test]
+    fn maximum_workers_remain_bounded_by_fake_processor_capacity() {
+        const PROCESSORS: usize = 4;
+
+        let hardware = fake_hardware(PROCESSORS);
+        let runtime = runtime_with_processors(WorkersPolicy::at_most(16), &hardware.processors(), Sink::noop());
+        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let workers: HashSet<_> = builtins
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| {
+                builtins
+                    .scheduler()
+                    .spawn_at(worker, (), |()| async move { thread::current().id() })
+            })
+            .map(|task| task.join().unwrap())
+            .collect();
+
+        assert_eq!(workers.len(), PROCESSORS);
+        runtime.stop().unwrap();
+    }
+
+    fn fake_hardware(processors: usize) -> SystemHardware {
+        SystemHardware::fake(HardwareBuilder::from_counts(
+            NonZero::new(processors).unwrap(),
+            NonZero::new(1).unwrap(),
+        ))
+    }
+
+    fn runtime_with_processors(policy: WorkersPolicy, processors: &ProcessorSet, sink: Sink) -> Runtime {
+        build_with_processors(
+            RuntimeConfig {
+                workers_policy: policy,
+                stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
+                blocking_pool_policy: BlockingPoolPolicy::shared(),
+            },
+            &InactiveClock::default(),
+            sink,
+            &ThreadBuilder::default(),
+            processors,
+        )
+        .unwrap()
     }
 }

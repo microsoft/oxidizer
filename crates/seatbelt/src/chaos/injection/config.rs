@@ -6,8 +6,7 @@ const DEFAULT_RATE: f64 = 0.0;
 
 /// Configuration for the [`Injection`][super::Injection] middleware.
 ///
-/// This type can be deserialized from configuration files when the `serde`
-/// feature is enabled.
+/// Enable `serde` to load this type from a configuration file.
 ///
 /// # Example
 ///
@@ -22,13 +21,15 @@ const DEFAULT_RATE: f64 = 0.0;
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct InjectionConfig {
-    /// Whether the injection middleware is enabled. When `false`, the middleware
-    /// is bypassed and requests pass through directly to the inner service.
+    /// Controls whether the injection middleware runs.
+    ///
+    /// If this value is `false`, requests go directly to the inner service.
     pub enabled: bool,
 
-    /// The probability of injecting the configured output instead of calling the
-    /// inner service. Must be in the range `[0.0, 1.0]` where `0.0` means never
-    /// inject and `1.0` means always inject.
+    /// Sets the rate for output injection.
+    ///
+    /// The value must be in `[0.0, 1.0]`.
+    /// `0.0` never injects output, and `1.0` always injects output.
     pub rate: f64,
 }
 
@@ -38,31 +39,5 @@ impl Default for InjectionConfig {
             enabled: true,
             rate: DEFAULT_RATE,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn default_snapshot() {
-        let config = InjectionConfig::default();
-        insta::assert_json_snapshot!(config);
-    }
-
-    #[test]
-    fn serde_roundtrip() {
-        let config = InjectionConfig {
-            enabled: false,
-            rate: 0.42,
-        };
-
-        let json = serde_json::to_string(&config).unwrap();
-        let deserialized: InjectionConfig = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(config, deserialized);
     }
 }

@@ -6,27 +6,25 @@ use std::vec::IntoIter;
 
 use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
 
-/// The minimum throughput during probing stage is set to 1, so at least one request must come
-/// through in each probing stage to evaluate the health.
+/// Each probing stage requires at least one request before it evaluates health.
 const MIN_THROUGHPUT: u32 = 1;
 
 /// Options for a single probe type.
 #[derive(Debug, Clone)]
 pub(crate) enum ProbeOptions {
-    /// A single probe that allows one probe.
+    /// Allows one probe.
     ///
-    /// After the initial probe is allowed, it enters a cool-down period during which
-    /// no further probes are allowed.
+    /// After the first probe, it rejects probes during the cool-down period.
     SingleProbe {
         cooldown: Duration,
         abandoned_policy: AbandonedPolicy,
     },
 
-    /// A health-based probe that uses health metrics to determine the health of the system.
+    /// Uses health metrics to evaluate the service.
     HealthProbe(HealthProbeOptions),
 }
 
-/// Configuration options for the probing mechanism.
+/// Configures probing.
 #[derive(Debug, Clone)]
 pub(crate) struct ProbesOptions {
     probes: Vec<ProbeOptions>,

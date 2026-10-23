@@ -60,34 +60,3 @@ fn zero_shared_blocking_limit_can_be_replaced_before_building() {
 
     runtime.stop().unwrap();
 }
-
-#[test]
-fn unavailable_processors_return_a_typed_construction_error() {
-    let error: Error = Runtime::builder().workers(WorkersPolicy::exactly(usize::MAX)).build().unwrap_err();
-    assert!(error.to_string().contains(&usize::MAX.to_string()));
-    assert!(error.source().is_some());
-}
-
-#[test]
-fn processor_selection_failure_reports_failure_without_starting_threads() {
-    let (sink, processor) = test_emitter(TEST_ID);
-
-    Runtime::builder()
-        .workers(WorkersPolicy::exactly(usize::MAX))
-        .sink(sink)
-        .build()
-        .unwrap_err();
-
-    let events = processor.events();
-    let names: Vec<_> = events.iter().map(CapturedEvent::name).collect();
-    assert_eq!(names, vec!["arty.rt.start_failed"]);
-}
-
-#[test]
-fn runtime_can_be_constructed_after_a_rejected_processor_request() {
-    Runtime::builder().workers(WorkersPolicy::exactly(usize::MAX)).build().unwrap_err();
-
-    let runtime = Runtime::builder().workers(WorkersPolicy::at_most(1)).build().unwrap();
-
-    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-}

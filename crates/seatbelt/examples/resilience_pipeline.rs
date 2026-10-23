@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to combine multiple resilience middleware
-//! using the `seatbelt` crate to create a robust execution pipeline with basic
-//! resilience capabilities.
+//! This example combines retry and timeout middleware in one pipeline.
 
 use std::time::Duration;
 
@@ -24,15 +22,15 @@ async fn main() -> Result<(), AppError> {
 
     let clock = Clock::new_tokio();
 
-    // Shared options for resilience middleware
+    // Create shared configuration for the middleware.
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider).name("my_pipeline");
 
-    // Define stack with retry and timeout middleware
+    // Define a stack with retry and timeout middleware.
     let stack = (
         Retry::layer("my_retry", &context)
-            // automatically clones the input for retries
+            // Clone the input for each retry.
             .clone_input()
-            // classify the output
+            // Classify the output.
             .recovery_with(|output: &String, _args| match output.as_str() {
                 "error" | "timeout" => RecoveryInfo::retry(),
                 _ => RecoveryInfo::never(),
@@ -43,15 +41,15 @@ async fn main() -> Result<(), AppError> {
         Execute::new(execute_operation),
     );
 
-    // Build the service
+    // Build the service.
     let service = stack.into_service();
 
-    // Execute the service with an input
+    // Execute the service with an input.
     let output = service.execute("value".to_string()).await;
 
     println!("execution finished, output: {output}");
 
-    // Flush metrics to stdout before exiting
+    // Flush metrics to standard output before the program exits.
     meter_provider.force_flush()?;
 
     Ok(())
@@ -62,7 +60,7 @@ async fn execute_operation(input: String) -> String {
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()

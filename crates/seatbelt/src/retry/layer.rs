@@ -14,20 +14,20 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{Recovery, RecoveryInfo, ResilienceContext, TelemetryString};
 
-/// Builder for configuring retry resilience middleware.
+/// Configures retry middleware.
 ///
-/// This type is created by calling [`Retry::layer`](crate::retry::Retry::layer) and uses the
-/// type-state pattern to enforce that required properties are configured before the retry middleware can be built:
+/// [`Retry::layer`](crate::retry::Retry::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
-/// - [`clone_input`][RetryLayer::clone_input]: Required to specify how to clone inputs for retry attempts
-/// - [`recovery`][RetryLayer::recovery]: Required to determine if an output should trigger a retry
+/// - [`clone_input`][RetryLayer::clone_input] provides input for retry attempts.
+/// - [`recovery`][RetryLayer::recovery] decides whether output permits a retry.
 ///
-/// For comprehensive examples, see the [retry module][crate::retry] documentation.
+/// See the [retry module][crate::retry] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`clone_input`][RetryLayer::clone_input] has been set
-/// - `S2`: Tracks whether [`recovery`][RetryLayer::recovery] has been set
+/// - `S1` records whether [`clone_input`][RetryLayer::clone_input] is set.
+/// - `S2` records whether [`recovery`][RetryLayer::recovery] is set.
 #[derive(Debug)]
 pub struct RetryLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
@@ -65,24 +65,23 @@ impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
 impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// Sets the maximum number of retry attempts.
     ///
-    /// This specifies the maximum number of retry attempts in addition to the original call.
-    /// For example, if `max_retry_attempts` is 3, the operation will be attempted up to
-    /// 4 times total (1 original `+` 3 retries).
+    /// This value does not include the original call.
+    /// For example, a value of 3 permits four total calls.
     ///
-    /// **Default**: 3 retry attempts
+    /// Default: 3 retry attempts
     #[must_use]
     pub fn max_retry_attempts(mut self, max_attempts: u32) -> Self {
         self.max_attempts = max_attempts.saturating_add(1);
         self
     }
 
-    /// Sets the backoff strategy for delay calculation.
+    /// Sets the backoff strategy for retry delays.
     ///
-    /// - [`Backoff::Constant`]: Same delay between all retries
-    /// - [`Backoff::Linear`]: Linearly increasing delay (`base_delay` `×` attempt)
-    /// - [`Backoff::Exponential`]: Exponentially increasing delay (`base_delay × 2^attempt`)
+    /// - [`Backoff::Constant`]: Uses the same delay before each retry.
+    /// - [`Backoff::Linear`]: Increases the delay by `base_delay × attempt`.
+    /// - [`Backoff::Exponential`]: Increases the delay by `base_delay × 2^attempt`.
     ///
-    /// **Default**: [`Backoff::Exponential`]
+    /// Default: [`Backoff::Exponential`]
     #[must_use]
     pub fn backoff(mut self, backoff_type: Backoff) -> Self {
         self.backoff.backoff_type = backoff_type;
@@ -91,39 +90,38 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Sets the base delay used for backoff calculations.
     ///
-    /// The meaning depends on the backoff strategy:
-    /// - **Constant**: The actual delay between retries
-    /// - **Linear**: Initial delay; subsequent delays are `base_delay × attempt_number`
-    /// - **Exponential**: Initial delay; subsequent delays grow exponentially
+    /// The strategy uses this value as follows:
+    /// - Constant: The delay before each retry.
+    /// - Linear: The first delay. Later delays use `base_delay × attempt_number`.
+    /// - Exponential: The first delay. Later delays grow exponentially.
     ///
-    /// **Default**: 10 milliseconds (optimized for service-to-service communication)
+    /// Default: 10 milliseconds for service-to-service calls
     ///
-    /// For client-to-service scenarios, consider increasing to 1-2 seconds.
+    /// For client-to-service calls, use 1 to 2 seconds.
     #[must_use]
     pub fn base_delay(mut self, delay: Duration) -> Self {
         self.backoff.base_delay = delay;
         self
     }
 
-    /// Sets the maximum allowed delay between retries.
+    /// Sets the maximum delay between retries.
     ///
-    /// This caps the backoff calculation to prevent excessively long delays.
-    /// If not set, delays can grow indefinitely based on the backoff algorithm.
+    /// The middleware limits each calculated delay to this value.
+    /// If you do not set it, the backoff calculation does not have a limit.
     ///
-    /// **Default**: None (no limit)
+    /// Default: `None`
     #[must_use]
     pub fn max_delay(mut self, max_delay: Duration) -> Self {
         self.backoff.max_delay = Some(max_delay);
         self
     }
 
-    /// Enables or disables jitter to reduce correlation between retries.
+    /// Enables or disables jitter.
     ///
-    /// Jitter adds randomization to delay calculations to prevent thundering herd
-    /// problems when multiple clients retry simultaneously. This is especially
-    /// important in distributed systems to avoid synchronized retry storms.
+    /// Jitter adds random variation to retry delays.
+    /// It prevents many clients from retrying at the same time.
     ///
-    /// **Default**: true (jitter enabled)
+    /// Default: `true`
     #[must_use]
     pub fn use_jitter(mut self, use_jitter: bool) -> Self {
         self.backoff.use_jitter = use_jitter;
@@ -132,8 +130,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Applies all settings from a [`RetryConfig`] to this layer.
     ///
-    /// This is a convenience method for applying configuration loaded from external sources
-    /// (e.g., configuration files) without calling individual builder methods.
+    /// Use this method to apply configuration from an external source.
+    /// You do not need to call each builder method.
     #[must_use]
     pub fn config(self, config: &RetryConfig) -> Self {
         self.backoff(config.backoff_type)
@@ -151,11 +149,11 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Sets the input cloning function.
     ///
-    /// Called before each retry attempt to produce a fresh input value, since
-    /// the inner service consumes the input on each attempt. The `clone_fn` receives
-    /// a mutable reference to the input and [`CloneArgs`] containing context about
-    /// the retry attempt. Return `Some(cloned_input)` to proceed with retry, or `None`
-    /// to abort and return the last failed result.
+    /// The middleware calls this function before each retry.
+    /// The inner service consumes its input, so each retry needs new input.
+    /// The function receives the input and [`CloneArgs`].
+    /// Return `Some(cloned_input)` to retry.
+    /// Return `None` to stop and return the last output.
     #[must_use]
     pub fn clone_input_with(
         mut self,
@@ -165,18 +163,14 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
         self.into_state::<Set, S2>()
     }
 
-    /// Automatically sets the input cloning function for types that implement [`Clone`].
+    /// Uses [`Clone`] to create input for retries.
     ///
-    /// This is a convenience method that uses the standard [`Clone`] trait to clone
-    /// inputs for retry attempts. For types that implement [`Clone`], this provides
-    /// a simple way to enable retries without manually implementing a cloning function.
-    ///
-    /// This is equivalent to calling [`clone_input_with`][RetryLayer::clone_input_with] with
+    /// This method is equivalent to [`clone_input_with`][RetryLayer::clone_input_with] with
     /// `|input, _args| Some(input.clone())`.
     ///
-    /// # Type Requirements
+    /// # Type requirements
     ///
-    /// This method is only available when the input type `In` implements [`Clone`].
+    /// The input type `In` must implement [`Clone`].
     #[must_use]
     pub fn clone_input(self) -> RetryLayer<In, Out, Set, S2>
     where
@@ -187,10 +181,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Sets the recovery classification function.
     ///
-    /// This function determines whether a specific output should trigger a retry
-    /// by examining the output and returning a [`RecoveryInfo`] classification.
-    /// The `recover_fn` receives a reference to the output and [`RecoveryArgs`]
-    /// with context about the current attempt, and returns a [`RecoveryInfo`] decision.
+    /// The function receives the output and [`RecoveryArgs`].
+    /// It returns the [`RecoveryInfo`] classification for the output.
     #[must_use]
     pub fn recovery_with(
         mut self,
@@ -200,19 +192,14 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
         self.into_state::<S1, Set>()
     }
 
-    /// Automatically sets the recovery classification function for types that implement [`Recovery`].
+    /// Uses [`Recovery`] to classify output.
     ///
-    /// This is a convenience method that uses the [`Recovery`] trait to determine
-    /// whether an output should trigger a retry. For types that implement [`Recovery`],
-    /// this provides a simple way to enable intelligent retry behavior without manually
-    /// implementing a recovery classification function.
-    ///
-    /// This is equivalent to calling [`recovery`][RetryLayer::recovery] with
+    /// This method is equivalent to [`recovery`][RetryLayer::recovery] with
     /// `|output, _args| output.recovery()`.
     ///
-    /// # Type Requirements
+    /// # Type requirements
     ///
-    /// This method is only available when the output type `Out` implements [`Recovery`].
+    /// The output type `Out` must implement [`Recovery`].
     #[must_use]
     pub fn recovery(self) -> RetryLayer<In, Out, S1, Set>
     where
@@ -221,29 +208,27 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
         self.recovery_with(|out, _args| out.recovery())
     }
 
-    /// Configures a callback invoked before each retry attempt.
+    /// Sets a callback that runs before each retry.
     ///
-    /// This callback is useful for logging, metrics, or other observability
-    /// purposes. The `retry_fn` receives the output that triggered the retry
-    /// and [`OnRetryArgs`] with detailed retry information.
+    /// Use this callback for logs, metrics, or other observations.
+    /// It receives the output that caused the retry and [`OnRetryArgs`].
     ///
-    /// The callback does not affect retry behavior - it's purely for observation.
+    /// The callback does not change retry behavior.
     ///
-    /// **Default**: None (no observability by default)
+    /// Default: `None`
     #[must_use]
     pub fn on_retry(mut self, retry_fn: impl Fn(&Out, OnRetryArgs) + Send + Sync + 'static) -> Self {
         self.on_retry = Some(OnRetry::new(retry_fn));
         self
     }
 
-    /// Optionally enables the retry middleware based on a condition.
+    /// Enables retry middleware when a condition is true.
     ///
-    /// When disabled, requests pass through without retry protection.
-    /// This call replaces any previous condition. The `is_enabled` function
-    /// receives a reference to the input and returns `true` if retry protection
-    /// should be enabled for this request.
+    /// If the condition is false, the request runs without retries.
+    /// The `is_enabled` function receives the input.
+    /// This call replaces the previous condition.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -252,51 +237,43 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Enables or disables the retry middleware.
     ///
-    /// When disabled, requests pass through without retry protection.
-    /// This call replaces any previous condition.
+    /// If disabled, requests run without retries.
+    /// This call replaces the previous condition.
     #[must_use]
     fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);
         self
     }
 
-    /// Enables the retry middleware unconditionally.
+    /// Enables retry middleware for all requests.
     ///
-    /// All requests will have retry protection applied.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This is the default behavior - retry is enabled by default.
+    /// This call replaces the previous condition.
+    /// Retry middleware is enabled by default.
     #[must_use]
     pub fn enable_always(self) -> Self {
         self.enable(true)
     }
 
-    /// Disables the retry middleware completely.
+    /// Disables retry middleware for all requests.
     ///
-    /// All requests will pass through without retry protection.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This overrides the default enabled behavior.
+    /// Requests run without retries.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn disable(self) -> Self {
         self.enable(false)
     }
 
-    /// Configures whether the retry middleware should attempt to recover from unavailable services.
+    /// Controls retries for unavailable services.
     ///
-    /// When enabled, the retry middleware will treat [`RecoveryInfo::unavailable`] classifications
-    /// as recoverable conditions and attempt retries. When disabled (default), unavailable services
-    /// are treated as non-recoverable and cause immediate failure without retry attempts.
+    /// If enabled, [`RecoveryInfo::unavailable`] permits a retry.
+    /// If disabled, the middleware returns unavailable output without a retry.
     ///
-    /// This is particularly useful when you have access to multiple resources
-    /// or service endpoints. When one resource is unavailable, the retry
-    /// mechanism can attempt the operation against a different resource in subsequent
-    /// attempts, potentially allowing the operation to succeed despite the unavailability.
+    /// Use this option when retries can select another resource or endpoint.
     ///
-    /// Set `enable` to `true` to enable unavailable recovery, or `false` to treat
-    /// unavailable responses as permanent failures.
+    /// Set `enable` to `true` to retry unavailable output.
+    /// Set it to `false` to return unavailable output.
     ///
-    /// **Default**: false (unavailable responses are not retried)
+    /// Default: `false`
     ///
     /// # Example
     ///
@@ -307,11 +284,11 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// # use tick::Clock;
     /// # fn example() {
     /// # let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen());
-    /// // Service with multiple endpoints that can route around unavailable services
+    /// // Use multiple endpoints to route around an unavailable service.
     /// let layer = Retry::layer("multi_endpoint_retry", &context)
     ///     .clone_input_with(|input: &mut String, args| {
     ///         let mut input = input.clone();
-    ///         update_endpoint(&mut input, args.attempt()); // Modify input to use a different endpoint
+    ///         update_endpoint(&mut input, args.attempt()); // Select another endpoint.
     ///         Some(input)
     ///     })
     ///     .recovery_with(|result, _args| match result {
@@ -319,7 +296,7 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///         Err(msg) if msg.contains("service unavailable") => RecoveryInfo::unavailable(),
     ///         Err(_) => RecoveryInfo::retry(),
     ///     })
-    ///     .handle_unavailable(true); // Try different endpoints on unavailable
+    ///     .handle_unavailable(true); // Try another endpoint when one is unavailable.
     /// # }
     /// # fn update_endpoint(_input : &mut String, _attempt: Attempt)  {}
     /// ```
@@ -331,23 +308,18 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Sets the input restoration function.
     ///
-    /// This function is called when the original input could not be cloned for a retry
-    /// attempt (i.e., when [`clone_input_with`][RetryLayer::clone_input_with] returns `None`).
-    /// The `restore_fn` receives a mutable reference to the output from the failed attempt
-    /// and [`RestoreInputArgs`] containing context about the retry attempt. It can attempt
-    /// to extract and reconstruct the input for the next retry.
+    /// The middleware calls this function when input cloning returns `None`.
+    /// The function receives the output from the failed attempt and [`RestoreInputArgs`].
+    /// It can extract or rebuild input for the next retry.
     ///
-    /// This is particularly useful when a service is unavailable and the input was not actually
-    /// consumed by the operation. A common pattern is that error responses contain or reference
-    /// the original input that can be extracted for retry. For example, an HTTP request that
-    /// is rejected even before sending, because the remote service is known to be down.
+    /// Use this function when a failed operation returns the original input.
+    /// For example, an HTTP client can reject a request before it sends the request.
     ///
-    /// The restore function should return:
-    /// - `Some(Input)` to proceed with retry using the restored input
-    /// - `None` to abort retry and return the provided output
+    /// The restore function returns:
+    /// - `Some(Input)` to retry with the restored input.
+    /// - `None` to stop and return the output.
     ///
-    /// This enables retry scenarios where input cloning is expensive or impossible, but
-    /// the input can be extracted from error responses or failure contexts.
+    /// This supports input that is expensive or impossible to clone.
     ///
     /// # Example
     ///
@@ -372,10 +344,10 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// }
     ///
     /// let layer = Retry::layer("http_retry", &context)
-    ///     .clone_input_with(|_request, _args| None) // Don't clone expensive request bodies
+    ///     .clone_input_with(|_request, _args| None) // Do not clone expensive request bodies.
     ///     .restore_input(|result: &mut HttpResult, _args| {
     ///         match result {
-    ///             // Extract the original request from the error for retry
+    ///             // Extract the original request from the error.
     ///             HttpResult::ConnectionError { original_request } => {
     ///                 let request = original_request.clone();
     ///                 *result = HttpResult::ServerError(0);
@@ -423,23 +395,22 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
 }
 
 impl<In, Res, Error, S1, S2> RetryLayer<In, Result<Res, Error>, S1, S2> {
-    /// Sets a specialized input restoration callback that operates only on error cases.
+    /// Sets an input restoration callback for `Err` values.
     ///
-    /// This is a convenience method for working with `Result<Res, Error>` outputs, where you
-    /// only want to restore input when an error occurs. The callback receives a mutable reference
-    /// to the error and can extract the original input from it, while potentially modifying the
-    /// error for the next attempt.
+    /// Use this method with `Result<Res, Error>` output.
+    /// The callback receives the error and can extract the original input.
+    /// It can also change the error before the next attempt.
     ///
-    /// This method is particularly useful when:
-    /// - Your service returns `Result<T, E>` where the error type contains recoverable request data
-    /// - You want to extract and restore input only from error cases, not successful responses
-    /// - You need to modify the error (e.g., to remove sensitive data) before the next retry
+    /// Use this method when:
+    /// - The error contains request data that can be recovered.
+    /// - Only errors can restore input.
+    /// - The callback must change the error before the next retry.
     ///
     /// # Parameters
     ///
-    /// * `restore_fn` - A function that takes a mutable reference to the error and restoration
-    ///   arguments, returning `Some(input)` if the input can be restored from the error, or
-    ///   `None` if restoration is not possible or desired.
+    /// * `restore_fn` receives the error and restoration data.
+    ///   It returns `Some(input)` when it restores input.
+    ///   It returns `None` when it cannot or must not restore input.
     ///
     /// # Example
     ///
@@ -471,7 +442,7 @@ impl<In, Res, Error, S1, S2> RetryLayer<In, Result<Res, Error>, S1, S2> {
     ///
     /// let layer = Retry::layer("http_retry", &context).restore_input_from_error(
     ///     |error: &mut HttpError, _args| {
-    ///         // Only restore input from connection errors that contain the original request
+    ///         // Restore input only when a connection error contains the request.
     ///         error.try_restore_request()
     ///     },
     /// );

@@ -15,11 +15,9 @@ pub(crate) enum HealthStatus {
     Unhealthy,
 }
 
-/// Raw tally of execution results over a sampling period.
+/// Counts execution results during a sampling period.
 ///
-/// Groups the three outcome counters that are tracked and aggregated together throughout the
-/// circuit breaker health machinery, so they can be passed around as a single value instead of
-/// three loose `u32` arguments.
+/// It stores success, failure, and abandoned counts in one value.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub(crate) struct ExecutionInfo {
     pub(crate) succeeded: u32,
@@ -57,12 +55,9 @@ impl ExecutionInfo {
     }
 }
 
-/// Aggregated health information that can be used to determine the failure rate and throughput
-/// of a service over a recent sampling period.
+/// Contains service health for a recent sampling period.
 ///
-/// This is a plain verdict produced by [`HealthEvaluator`]; all of the evaluation logic (how
-/// abandoned executions are folded in, and how the failure rate and minimum throughput are turned
-/// into a [`HealthStatus`]) lives there.
+/// [`HealthEvaluator`] produces this result.
 #[must_use]
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct HealthInfo {
@@ -74,7 +69,7 @@ pub(crate) struct HealthInfo {
     pub(crate) status: HealthStatus,
 }
 
-/// Pre-configured builder that creates `HealthMetrics` instances with consistent settings.
+/// Creates `HealthMetrics` with shared configuration.
 #[derive(Debug, Clone)]
 pub(crate) struct HealthMetricsBuilder {
     pub(crate) sampling_duration: Duration,
@@ -101,15 +96,15 @@ impl HealthMetricsBuilder {
     }
 }
 
-/// Tracks execution results over a sliding time window to provide health metrics.
+/// Tracks execution results in a sliding time window.
 #[derive(Debug)]
 pub(crate) struct HealthMetrics {
     sampling_duration: Duration,
     window_duration: Duration,
     windows: VecDeque<Window>,
-    /// Running aggregate of [`Self::windows`] counts, kept in sync as windows are added to and
-    /// evicted from the sliding window, so [`Self::health_info`] does not re-sum every window on
-    /// each invocation.
+    /// Stores the total for all current windows.
+    ///
+    /// This avoids adding every window again in [`Self::health_info`].
     counts: ExecutionInfo,
     evaluator: HealthEvaluator,
 }
@@ -130,8 +125,9 @@ impl HealthMetrics {
         self.counts.record(result);
     }
 
-    /// Returns a mutable reference to the current window, evicting expired windows and creating a
-    /// new window when the most recent one is older than the per-window duration.
+    /// Returns the current window.
+    ///
+    /// It removes expired windows and creates a new window when needed.
     fn current_window(&mut self, now: Instant) -> &mut Window {
         // Remove old windows, keeping the running aggregate in sync.
         while let Some(expired) = self

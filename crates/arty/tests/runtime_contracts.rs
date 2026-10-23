@@ -18,7 +18,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Builtins;
 use arty::task::JoinError;
@@ -120,6 +120,35 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
     assert_eq!(results.len(), 4 * tasks_per_producer);
     assert_eq!(results.iter().filter(|id| **id == first).count(), 2 * tasks_per_producer);
     assert_eq!(results.into_iter().collect::<std::collections::HashSet<_>>().len(), 2);
+}
+
+#[test]
+fn worker_local_result_channels_remain_sendable_after_worker_shutdown() {
+    let runtime = runtime(2);
+    let (completed, completions) = mpsc::channel();
+    let children = (0..2)
+        .map(|_| {
+            runtime
+                .scheduler()
+                .spawn_anywhere(Unaware(completed.clone()), |cx, Unaware(completed)| async move {
+                    let child = cx.scheduler().spawn(async |_| 42);
+                    let value = child.await.unwrap();
+                    let child = cx.scheduler().spawn(move |_| {
+                        completed.send(()).unwrap();
+                        std::future::ready(value)
+                    });
+                    (child,)
+                })
+        })
+        .map(|parent| parent.join().unwrap().0)
+        .collect::<Vec<_>>();
+    for _ in &children {
+        completions.recv_timeout(TEST_TIMEOUT).unwrap();
+    }
+    runtime.stop().unwrap();
+    for child in children {
+        assert_eq!(thread::spawn(move || child.join().unwrap()).join().unwrap(), 42);
+    }
 }
 
 #[test]
@@ -360,9 +389,9 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
 fn repeated_stop_requests_report_one_completed_shutdown() {
     let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
-    let operations = RuntimeOperations::from(&runtime);
-    operations.request_stop();
-    operations.request_stop();
+    let control = support::runtime_control(&runtime);
+    control.request_stop();
+    control.request_stop();
     runtime.stop().unwrap();
     assert_eq!(
         processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),

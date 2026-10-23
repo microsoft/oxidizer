@@ -3,6 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
+use arty_executor::remote::Pool as RemotePool;
 use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
@@ -28,6 +29,8 @@ struct CurrentWorker {
     thread: Thread,
     builtins: Builtins,
     tasks: TaskSet,
+    // Child submissions must not contend with every other worker's result-channel rentals.
+    results: RemotePool,
 }
 
 /// A worker-bound handle for submitting async and blocking tasks.
@@ -88,6 +91,7 @@ impl Scheduler {
                 thread: builtins.thread().clone(),
                 builtins,
                 tasks,
+                results: RemotePool::new(),
             });
         });
     }
@@ -211,12 +215,11 @@ impl Scheduler {
             if current.thread != self.binding.thread {
                 return Err(future_factory);
             }
-            let sink = current.builtins.sink().clone();
+            let sink = current.builtins.sink();
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
-            let (result_tx, result_rx) = self.dispatcher.remote_results().channel();
-            let shutdown_signal = current.builtins.scheduler.dispatcher.shutdown_signal();
-            let inner = DeferredTask::new(future_factory, builtins, shutdown_signal);
+            let (result_tx, result_rx) = current.results.channel();
+            let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
@@ -277,28 +280,37 @@ impl Scheduler {
         })
     }
 
-    /// Submits one task to every worker and relocates a clone of its payload.
+    /// Submits a task to `destination` and relocates its payload there.
     ///
-    /// Clones `data` for each worker and relocates each clone from this
-    /// scheduler's worker before calling `f`. Other submissions do not affect
-    /// which workers receive a task.
+    /// The destination must be a worker coordinate returned by this runtime's
+    /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
+    /// Before calling `f`, Arty relocates `data` from this scheduler's worker to
+    /// the destination.
     ///
-    /// Returns joins in the runtime's worker order. Futures need not be [`Send`];
-    /// their results must implement [`ThreadAware`] (which includes `Send`).
-    /// Shutdown rejects submissions without invoking `f`.
+    /// Futures need not be [`Send`]. Results must implement [`ThreadAware`]
+    /// and are not relocated. Shutdown or an unsupported destination rejects
+    /// the submission without relocating `data` or invoking `f`.
     ///
     /// # Examples
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-    /// let tasks = cx
+    /// # async fn main(
+    /// #     cx: arty::task::Builtins,
+    /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// let destination = cx
+    ///     .control()
+    ///     .workers()
+    ///     .into_iter()
+    ///     .next()
+    ///     .ok_or_else(|| std::io::Error::other("runtime has no workers"))?;
+    /// let task = cx
     ///     .scheduler()
-    ///     .spawn_everywhere(cx.clone(), |worker| async move { worker.thread().id() });
-    /// for task in tasks {
-    ///     let _worker = task.await?;
-    /// }
+    ///     .spawn_at(destination, cx.clone(), |worker| async move {
+    ///         worker.thread().id()
+    ///     });
+    /// assert_eq!(task.await?, destination.id());
     /// # Ok(())
     /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
@@ -310,27 +322,42 @@ impl Scheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly;
-    /// let runtime = Runtime::new().unwrap();
-    /// let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    /// scheduler.spawn_everywhere((), |()| async { SendOnly });
+    ///
+    /// fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ///     let runtime = Runtime::new()?;
+    ///     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone())?;
+    ///     let destination = runtime.scheduler().block_on(async |cx| {
+    ///         cx.control()
+    ///             .workers()
+    ///             .into_iter()
+    ///             .next()
+    ///             .cloned()
+    ///             .ok_or_else(|| std::io::Error::other("runtime has no workers"))
+    ///     })??;
+    ///     scheduler.spawn_at(&destination, (), |()| async { SendOnly });
+    ///     Ok(())
+    /// }
     /// ```
-    pub fn spawn_everywhere<D, F, R>(&self, data: D, f: fn(D) -> F) -> Vec<JoinHandle<R>>
+    pub fn spawn_at<D, F, R>(&self, destination: &Thread, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where
-        D: ThreadAware + Clone + 'static,
+        D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        let source = &self.binding.thread;
-        let tasks = self.dispatcher.spawn_everywhere(|| {
-            let source = source.clone();
-            let mut data = data.clone();
-            async move |cx| {
+        if self.dispatcher.is_shutting_down() {
+            return JoinHandle::shutdown(self.dispatcher.remote_results());
+        }
+        let Some(worker_index) = self.resolve_worker_index(destination) else {
+            return JoinHandle::invalid_destination(self.dispatcher.remote_results());
+        };
+        let source = self.binding.thread.clone();
+        self.dispatcher.spawn_at_worker(worker_index, move |cx| {
+            let mut data = data;
+            async move {
                 data.relocate(Some(&source), cx.thread());
                 f(data).await
             }
-        });
-        drop(data);
-        tasks
+        })
     }
 
     /// Submits a synchronous callback to a blocking-task pool.

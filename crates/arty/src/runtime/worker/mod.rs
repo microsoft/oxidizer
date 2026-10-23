@@ -5,6 +5,6 @@
 
 mod async_worker;
 pub(super) mod protocol;
-pub(super) mod signal;
+pub(crate) mod signal;
 
 pub(super) use async_worker::AsyncWorker;

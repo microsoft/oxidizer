@@ -31,8 +31,8 @@ doc-hidden, versioned `__private::v1` constructors.
 The crate has no normal dependencies; its only manifest dependency is test-only.
 The `std` feature is enabled by default and adds
 implementations for standard-library types such as `HashMap`, `Path` and
-`PathBuf`. Turn it off for `no_std`, where the crate needs only `alloc` and
-pointer-width atomics; a
+`PathBuf`, `SocketAddr`, `SocketAddrV4` and `SocketAddrV6`. Turn it off for
+`no_std`, where the crate needs only `alloc` and pointer-width atomics; a
 `Thread` then loses its thread id component and cannot be constructed, leaving `Owner` and
 `NumaNode` readable so that a `no_std` library can still implement
 `ThreadAware`. Implementations for types from external crates are intentionally

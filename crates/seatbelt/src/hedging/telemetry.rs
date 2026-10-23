@@ -9,11 +9,11 @@ use crate::{Attempt, RecoveryKind};
 #[cfg(any(feature = "metrics", test))]
 pub(super) const HEDGING_EVENT: &str = "hedging";
 
-/// A guard that emits hedging telemetry when dropped.
+/// Emits hedging telemetry when it is dropped.
 ///
-/// - Abandoned futures (dropped before completing): reports with recovery kind `"abandoned"`
-/// - Recoverable results: reports with the actual [`RecoveryKind`]
-/// - Non-recoverable (accepted) results: disarmed, no telemetry emitted
+/// - A dropped future reports the recovery kind `"abandoned"`.
+/// - Recoverable output reports its [`RecoveryKind`].
+/// - Accepted output disarms the guard and does not report telemetry.
 #[cfg_attr(
     not(any(feature = "logs", feature = "metrics", test)),
     expect(dead_code, reason = "fields are used for telemetry when feature flags are enabled")
@@ -21,7 +21,7 @@ pub(super) const HEDGING_EVENT: &str = "hedging";
 pub(super) struct TelemetryGuard {
     pub(super) attempt: Attempt,
     pub(super) hedging_delay: Duration,
-    /// `None` means abandoned (future was dropped before completing).
+    /// `None` means that the future was abandoned.
     recovery_kind: Option<RecoveryKind>,
     pub(super) armed: bool,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -29,7 +29,7 @@ pub(super) struct TelemetryGuard {
 }
 
 impl TelemetryGuard {
-    /// Creates a new armed guard that defaults to "abandoned" if dropped without
+    /// Creates an armed guard that defaults to `"abandoned"` if dropped without
     /// calling [`set_recovery_kind`][Self::set_recovery_kind].
     pub(super) fn new(
         attempt: Attempt,
@@ -51,9 +51,9 @@ impl TelemetryGuard {
         self.recovery_kind = Some(kind);
     }
 
-    /// Disarms the guard so no telemetry is emitted on drop.
+    /// Disarms the guard so that drop does not emit telemetry.
     ///
-    /// Used for non-recoverable (accepted) results.
+    /// Use this method for accepted output.
     pub(super) fn disarm(&mut self) {
         self.armed = false;
     }

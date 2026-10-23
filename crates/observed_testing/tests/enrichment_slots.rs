@@ -17,9 +17,13 @@
 //! - Composite broadcast to every leaf
 //! - Cross-thread context transfer (`Sink::transfer_context`)
 
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::task::{Context, Poll, Waker};
+
 use data_privacy::{DataClass, Sensitive};
 use observed::context::{Transfer, Transferred};
-use observed::enrichment::EnrichFnExt;
+use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Sink, SinkId};
 use tick::SimpleClock;
 
@@ -52,6 +56,16 @@ struct ServiceCtx {
 struct RequestCtx {
     #[dimension(log = "request.id")]
     request_id: Sensitive<&'static str>,
+}
+
+#[derive(Enrichment)]
+struct ParentA {
+    parent_a: Sensitive<&'static str>,
+}
+
+#[derive(Enrichment)]
+struct ParentB {
+    parent_b: Sensitive<&'static str>,
 }
 
 #[derive(Enrichment)]
@@ -177,6 +191,77 @@ fn applied_guard_can_outlive_the_transfer() {
 
     drop(guard);
     assert!(sink.current_enrichments().is_empty());
+}
+
+#[test]
+fn enriched_future_rebinds_parent_without_mutating_captured_snapshot() {
+    let sink = processor_free_sink();
+    let observations = Rc::new(RefCell::new(Vec::new()));
+    let captured = Rc::new(RefCell::new(None));
+    let mut future = Box::pin(
+        std::future::poll_fn({
+            let sink = sink.clone();
+            let observations = Rc::clone(&observations);
+            let captured = Rc::clone(&captured);
+            move |_| {
+                observations.borrow_mut().push(
+                    sink.current_enrichments()
+                        .iter()
+                        .map(|entry| entry.key().as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                );
+                let mut captured = captured.borrow_mut();
+                if captured.is_none() {
+                    *captured = Some(sink.transfer_context());
+                }
+                Poll::<()>::Pending
+            }
+        })
+        .enrich(
+            &sink,
+            ServiceCtx {
+                service: Sensitive::new("api", TEST_DC),
+            },
+        ),
+    );
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+
+    (|| {
+        assert!(future.as_mut().poll(&mut context).is_pending());
+    })
+    .enrich(
+        &sink,
+        ParentA {
+            parent_a: Sensitive::new("a", TEST_DC),
+        },
+    )();
+    (|| {
+        assert!(future.as_mut().poll(&mut context).is_pending());
+    })
+    .enrich(
+        &sink,
+        ParentB {
+            parent_b: Sensitive::new("b", TEST_DC),
+        },
+    )();
+
+    assert_eq!(
+        *observations.borrow(),
+        [
+            vec!["parent_a".to_owned(), "service".to_owned()],
+            vec!["parent_b".to_owned(), "service".to_owned()]
+        ]
+    );
+
+    let transfer = captured.borrow_mut().take().unwrap();
+    let _guard = transfer.apply_current_thread();
+    let replayed = sink
+        .current_enrichments()
+        .iter()
+        .map(|entry| entry.key().as_str().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(replayed, ["parent_a", "service"]);
 }
 
 #[test]

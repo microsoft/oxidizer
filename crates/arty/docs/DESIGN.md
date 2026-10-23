@@ -1,8 +1,8 @@
 # Design
 
 Arty runs async tasks on dedicated workers, with separate pools for blocking
-work. Tasks receive `Builtins` with their worker's scheduler, clock, and
-telemetry sink.
+work. Tasks receive `Builtins` with their worker's scheduler, clock, I/O handle,
+and telemetry sink.
 
 This document describes the application-facing design. Maintainers should also
 read the [runtime implementation map](INTERNALS.md) for bootstrap, ownership,
@@ -13,6 +13,10 @@ readiness, shutdown, and scoped-borrowing invariants.
 Each runtime owns its workers and shutdown. There is no process-global runtime.
 Stopping one does not request shutdown of another, but application data can
 still be shared. This is scheduling isolation, not a security boundary.
+
+Each worker owns a separate OS thread. An exact worker count can exceed the
+available processor count. In that case, multiple worker threads share each
+processor, and the operating system schedules their execution.
 
 An async task stays on the worker that creates its future, including across
 awaits. Arty does not move running tasks to balance load. This lets futures
@@ -32,9 +36,10 @@ Ordinary task factories and results must be `Send`, but their futures need not
 be. Create worker-local, non-`Send` state inside the task future after it reaches
 the destination worker.
 
-`spawn_anywhere` lets the runtime choose a worker;
-`Scheduler::spawn_everywhere` starts one task per worker. Submission order
-does not guarantee completion order. See the
+`spawn_anywhere` lets the runtime choose a worker.
+`Scheduler::spawn_at` targets a worker coordinate obtained from
+`Builtins::control().workers()`. Submission order does not guarantee
+completion order. See the
 [scheduling guide](../src/documentation/scheduling.rs) for examples.
 
 ## Thread-aware values
@@ -43,11 +48,11 @@ does not guarantee completion order. See the
 It includes `Send`, so moving the value must be safe even without relocation.
 Moving or cloning alone does not change its worker association.
 
-`spawn_anywhere` and `spawn_everywhere` relocate their explicit input to the
-destination worker before starting the task. On a worker's `Scheduler`,
-their results must also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts
-any `Send` result. Joining does not relocate results; ordinary `spawn` and
-`block_on` do not relocate captures or results either.
+`spawn_anywhere` and `spawn_at` relocate their explicit input to the destination
+worker before starting the task. On a worker's `Scheduler`, their results must
+also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts any `Send` result.
+Joining does not relocate results; ordinary `spawn` and `block_on` do not
+relocate captures or results either.
 
 Relocation does not transfer Arty's worker-bound handles to another runtime.
 See the
@@ -60,15 +65,18 @@ and results must be `Send`. Workers share one blocking pool by default; the
 per-worker policy separates their blocking workloads into one pool per worker,
 potentially using more threads.
 
-Arty provides timers, but not async network or file I/O drivers. An async I/O
-library still needs its own runtime support. See [I/O](IO.md).
+Arty provides timers and hosts drivers supplied by I/O libraries built on
+`arty_io_core`, but it does not include a built-in network or file I/O
+implementation. Access compatible contexts through `Builtins::io()`; see
+[I/O](IO.md). Use `spawn_blocking` for synchronous I/O.
 
 ## Runtime lifetime and shutdown
 
 Schedulers, joins, and `Builtins` do not keep the runtime running. Dropping a
 join handle neither cancels its task nor waits for it.
 
-`RuntimeOperations::request_stop` requests shutdown without waiting.
+`Builtins::control()` is the only source of `RuntimeControl`.
+`RuntimeControl::request_stop` requests shutdown without waiting.
 `Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
 Dropping the owner also requests shutdown and normally waits, but cannot return
 errors. Neither waits when called from an async Arty worker or the runtime's own
@@ -101,6 +109,7 @@ the runtime's shutdown contract.
 Application errors remain task results. A caught panic becomes `JoinError`;
 that alone does not stop the runtime or repair shared state. Worker isolation
 does not make every panic recoverable: some failures must stop the process.
+Failure to initialize or execute an I/O driver stops the runtime.
 
 Runtime telemetry uses a no-op sink by default. Configured telemetry processors
 must not panic. See [panic handling](PANICS.md) for how task, shutdown, and

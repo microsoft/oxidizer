@@ -21,16 +21,15 @@ use crate::Attempt;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Applies hedging logic to service execution for tail-latency reduction.
+/// Starts concurrent service calls to reduce tail latency.
 ///
-/// `Hedging` wraps an inner [`Service`] and launches additional concurrent requests
-/// to reduce the impact of slow responses. The first acceptable result is returned
-/// and remaining in-flight requests are cancelled.
+/// `Hedging` wraps an inner [`Service`] and starts more requests when needed.
+/// It returns the first acceptable output and cancels the other requests.
 ///
-/// Hedging is configured by calling [`Hedging::layer`] and using the
-/// builder methods on the returned [`HedgingLayer`][crate::hedging::HedgingLayer] instance.
+/// Call [`Hedging::layer`] to create a [`HedgingLayer`][crate::hedging::HedgingLayer].
+/// Use its builder methods to configure hedging.
 ///
-/// For comprehensive examples, see the [hedging module][crate::hedging] documentation.
+/// See the [hedging module][crate::hedging] for examples.
 #[derive(Debug)]
 pub struct Hedging<In, Out, S> {
     pub(super) shared: Arc<HedgingShared<In, Out>>,
@@ -39,7 +38,7 @@ pub struct Hedging<In, Out, S> {
 
 /// Shared configuration for [`Hedging`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct HedgingShared<In, Out> {
     pub(crate) clock: Clock,
@@ -64,10 +63,10 @@ impl<In, Out, S: Clone> Clone for Hedging<In, Out, S> {
 }
 
 impl<In, Out> Hedging<In, Out, ()> {
-    /// Creates a new hedging layer with the specified name and options.
+    /// Creates a hedging layer with the specified name and context.
     ///
-    /// Returns a [`HedgingLayer`][crate::hedging::HedgingLayer] that must be configured with
-    /// required parameters before it can be used to build a hedging service.
+    /// Set the required properties on the returned [`HedgingLayer`][crate::hedging::HedgingLayer]
+    /// before you build a service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::ResilienceContext<In, Out>,
@@ -76,11 +75,11 @@ impl<In, Out> Hedging<In, Out, ()> {
     }
 }
 
-/// Internal result from the select race between stream next and delay.
+/// Stores the result of a race between stream output and a delay.
 enum SelectOutcome<Out> {
-    /// A result was produced by one of the in-flight futures.
+    /// An in-flight future produced output.
     Result(Option<Out>),
-    /// The delay expired without any result completing.
+    /// The delay ended before a future produced output.
     DelayExpired,
 }
 
@@ -106,23 +105,19 @@ where
 
 use super::telemetry::TelemetryGuard;
 
-/// Wraps an inner future with a [`TelemetryGuard`] so that abandoned (dropped)
-/// futures still emit telemetry.
+/// Wraps a future with a [`TelemetryGuard`].
 ///
-/// When the future completes the guard is returned alongside the output so the
-/// caller can classify the result. When the future is dropped before completing
-/// the guard's [`Drop`] impl reports the attempt as `"abandoned"`.
+/// A completed future returns the guard with its output.
+/// If the future is dropped, the guard reports the attempt as `"abandoned"`.
 async fn guarded<F: Future>(inner: F, guard: TelemetryGuard) -> (F::Output, TelemetryGuard) {
     let out = inner.await;
     (out, guard)
 }
 
 impl<In, Out> HedgingShared<In, Out> {
-    /// Core hedging orchestration shared by both layered and tower service impls.
+    /// Runs hedging for the layered and Tower service implementations.
     ///
-    /// Takes ownership of `input` and always returns an `Out`. When hedging is
-    /// bypassed (no hedging attempts configured or input clone failed), the `launch` closure
-    /// is called directly with the original input.
+    /// If hedging is bypassed, `launch` receives the original input.
     async fn run_hedging<F>(&self, mut input: In, mut launch: impl FnMut(In) -> F) -> Out
     where
         F: Future<Output = Out>,
@@ -147,14 +142,12 @@ impl<In, Out> HedgingShared<In, Out> {
         .await
     }
 
-    /// Classifies a result as recoverable or non-recoverable.
+    /// Classifies output as recoverable or accepted.
     ///
-    /// Returns `Some(kind)` for recoverable results (the hedging loop continues),
-    /// or `None` for non-recoverable results (accept and return immediately).
+    /// Returns `Some(kind)` to continue.
+    /// Returns `None` to accept the output.
     ///
-    /// [`RecoveryKind::Unknown`] is treated as non-recoverable: if the recovery
-    /// callback cannot classify a result, hedging accepts it rather than risking
-    /// waiting for attempts that may also fail classification.
+    /// [`RecoveryKind::Unknown`] accepts the output.
     fn recovery_kind(&self, out: &Out, attempt: Attempt) -> Option<RecoveryKind> {
         let recovery = self.should_recover.call(
             out,
@@ -208,7 +201,7 @@ impl<In, Out> HedgingShared<In, Out> {
                         guard.set_recovery_kind(recovery_kind);
                         drop(guard);
                         last_result = Some(out);
-                        // Result was recoverable — launch a hedging attempt immediately
+                        // The result was recoverable. Start a hedged attempt now.
                         // instead of waiting for the delay timer again.
                         self.launch_hedging_attempt(futs, input, next_attempt, Duration::ZERO, &mut guarded_launch);
                         attempt = next_attempt;
@@ -222,7 +215,7 @@ impl<In, Out> HedgingShared<In, Out> {
                     }
                 }
             } else {
-                // All hedging attempts launched — drain remaining futures, preserving
+                // All hedging attempts started. Drain the remaining futures and preserve
                 // any recoverable result collected during the delay loop.
                 while let Some((out, mut guard)) = futs.next().await {
                     let Some(recovery_kind) = self.recovery_kind(&out, guard.attempt) else {

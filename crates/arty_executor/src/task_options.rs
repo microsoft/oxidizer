@@ -18,6 +18,9 @@ pub enum TaskPlacement {
 
     /// The submitter targeted its current worker.
     SameThread,
+
+    /// The submitter targeted a specific worker.
+    SpecificThread,
 }
 
 /// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
@@ -74,20 +77,24 @@ impl TaskOptions {
         f()
     }
 
-    pub(crate) fn created_reporter(&self, sink: Sink) -> TaskCreatedReporter {
-        TaskCreatedReporter {
+    pub(crate) fn created_reporter(&self, sink: Sink) -> Option<TaskCreatedReporter> {
+        (!sink.is_noop()).then(|| TaskCreatedReporter {
             context: self.context.clone(),
             placement: self.placement,
             sink,
-        }
+        })
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_succeeded(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_succeeded(sink, polls));
+        }
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_panicked(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_panicked(sink, polls));
+        }
     }
 }
 
@@ -115,9 +122,9 @@ mod tests {
 
     #[test]
     fn new_options_keep_placement_without_context() {
-        let options = TaskOptions::new(TaskPlacement::SameThread);
+        let options = TaskOptions::new(TaskPlacement::SpecificThread);
 
         assert!(options.context.is_none());
-        assert_eq!(options.placement, TaskPlacement::SameThread);
+        assert_eq!(options.placement, TaskPlacement::SpecificThread);
     }
 }

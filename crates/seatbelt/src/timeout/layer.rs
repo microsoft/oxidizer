@@ -12,20 +12,20 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{ResilienceContext, TelemetryString};
 
-/// Builder for configuring timeout resilience middleware.
+/// Configures timeout middleware.
 ///
-/// This type is created by calling [`Timeout::layer`](crate::timeout::Timeout::layer) and uses the
-/// type-state pattern to enforce that required properties are configured before the timeout middleware can be built:
+/// [`Timeout::layer`](crate::timeout::Timeout::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
-/// - [`timeout_output`][TimeoutLayer::timeout_output]: Required to specify how to represent output values when a timeout occurs
-/// - [`timeout`][TimeoutLayer::timeout]: Required to set the timeout duration for operations
+/// - [`timeout_output`][TimeoutLayer::timeout_output] creates output after a timeout.
+/// - [`timeout`][TimeoutLayer::timeout] sets the timeout duration.
 ///
-/// For comprehensive examples, see the [timeout module][crate::timeout] documentation.
+/// See the [timeout module][crate::timeout] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`timeout`][TimeoutLayer::timeout] has been set
-/// - `S2`: Tracks whether [`timeout_output`][TimeoutLayer::timeout_output] has been set
+/// - `S1` records whether [`timeout`][TimeoutLayer::timeout] is set.
+/// - `S2` records whether [`timeout_output`][TimeoutLayer::timeout_output] is set.
 #[derive(Debug)]
 pub struct TimeoutLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
@@ -55,12 +55,10 @@ impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, E, S1, S2> TimeoutLayer<In, Result<Out, E>, S1, S2> {
-    /// Configures the error value to return when a timeout occurs for Result types.
+    /// Sets the error to return after a timeout for `Result` output.
     ///
-    /// This is a convenience method for Result types that creates an error value
-    /// when a timeout occurs instead of requiring you to specify the full Result.
-    /// The `timeout_error` function receives [`TimeoutOutputArgs`] containing timeout
-    /// context and returns the error value to use when a timeout occurs.
+    /// The `timeout_error` function receives [`TimeoutOutputArgs`].
+    /// It returns the error value to use after a timeout.
     pub fn timeout_error(
         self,
         timeout_error: impl Fn(TimeoutOutputArgs) -> E + Send + Sync + 'static,
@@ -74,8 +72,8 @@ impl<In, Out, E, S1, S2> TimeoutLayer<In, Result<Out, E>, S1, S2> {
 impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// Sets the timeout duration.
     ///
-    /// The `timeout` parameter specifies the maximum duration to wait before
-    /// timing out an operation. This call replaces any previous timeout value.
+    /// The `timeout` parameter sets the longest time to wait for an operation.
+    /// This call replaces the previous timeout value.
     #[must_use]
     pub fn timeout(mut self, timeout: Duration) -> TimeoutLayer<In, Out, Set, S2> {
         self.timeout = Some(timeout);
@@ -84,36 +82,33 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
 
     /// Applies all settings from a [`TimeoutConfig`] to this layer.
     ///
-    /// This is a convenience method for applying configuration loaded from external sources
-    /// (e.g., configuration files) without calling individual builder methods.
+    /// Use this method to apply configuration from an external source.
+    /// You do not need to call each builder method.
     #[must_use]
     pub fn config(self, config: &TimeoutConfig) -> TimeoutLayer<In, Out, Set, S2> {
         self.timeout(config.timeout).enable(config.enabled)
     }
 
-    /// Sets the timeout result factory function.
+    /// Sets the function that creates output after a timeout.
     ///
-    /// This function is called when a timeout occurs to create the output value
-    /// that will be returned instead of the original operation's result. The `output`
-    /// function receives [`TimeoutOutputArgs`] containing timeout context and returns
-    /// the output value to use when a timeout occurs. This call replaces any previous
-    /// timeout output handler.
+    /// The `output` function receives [`TimeoutOutputArgs`].
+    /// It returns the value that replaces the unfinished operation output.
+    /// This call replaces the previous output function.
     #[must_use]
     pub fn timeout_output(mut self, output: impl Fn(TimeoutOutputArgs) -> Out + Send + Sync + 'static) -> TimeoutLayer<In, Out, S1, Set> {
         self.timeout_output = Some(TimeoutOutput::new(output));
         self.into_state::<S1, Set>()
     }
 
-    /// Configures a callback invoked when a timeout occurs.
+    /// Sets a callback that runs after a timeout.
     ///
-    /// This callback is useful for logging, metrics, or other observability
-    /// purposes. The `on_timeout` callback receives a reference to the timeout
-    /// output and [`OnTimeoutArgs`] with detailed timeout information.
+    /// Use this callback for logs, metrics, or other observations.
+    /// It receives the timeout output and [`OnTimeoutArgs`].
     ///
-    /// The callback does not affect timeout behavior - it's purely for observation.
-    /// This call replaces any previous callback.
+    /// The callback does not change timeout behavior.
+    /// This call replaces the previous callback.
     ///
-    /// **Default**: None (no observability by default)
+    /// Default: `None`
     #[must_use]
     pub fn on_timeout(mut self, on_timeout: impl Fn(&Out, OnTimeoutArgs) + Send + Sync + 'static) -> Self {
         self.on_timeout = Some(OnTimeout::new(on_timeout));
@@ -122,15 +117,14 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
 
     /// Overrides the default timeout on a per-request basis.
     ///
-    /// Use this to compute a timeout dynamically from the input. The `timeout_override`
-    /// function receives a reference to the input and [`TimeoutOverrideArgs`], which
-    /// exposes the default via [`TimeoutOverrideArgs::default_timeout`]. Return
-    /// `Some(Duration)` to apply an override, or `None` to fall back to the default
-    /// timeout configured via [`timeout`][TimeoutLayer::timeout].
+    /// Use this method to calculate a timeout from the input.
+    /// The function receives the input and [`TimeoutOverrideArgs`].
+    /// Return `Some(Duration)` to override the timeout.
+    /// Return `None` to use the timeout from [`timeout`][TimeoutLayer::timeout].
     ///
-    /// This call replaces any previous timeout override.
+    /// This call replaces the previous timeout override.
     ///
-    /// **Default**: None (uses default timeout for all requests)
+    /// Default: `None`. All requests use the default timeout.
     #[must_use]
     pub fn timeout_override(
         mut self,
@@ -140,14 +134,13 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
         self
     }
 
-    /// Optionally enables the timeout middleware based on a condition.
+    /// Enables timeout middleware when a condition is true.
     ///
-    /// When disabled, requests pass through without timeout protection.
-    /// This call replaces any previous condition. The `is_enabled` function
-    /// receives a reference to the input and returns `true` if timeout
-    /// protection should be enabled for this request.
+    /// If the condition is false, the request runs without a timeout.
+    /// The `is_enabled` function receives the input.
+    /// This call replaces the previous condition.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -156,31 +149,27 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
 
     /// Enables or disables the timeout middleware.
     ///
-    /// When disabled, requests pass through without timeout protection.
-    /// This call replaces any previous condition.
+    /// If disabled, requests run without a timeout.
+    /// This call replaces the previous condition.
     #[must_use]
     fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);
         self
     }
 
-    /// Enables the timeout middleware unconditionally.
+    /// Enables timeout middleware for all requests.
     ///
-    /// All requests will have timeout protection applied.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This is the default behavior - timeout is enabled by default.
+    /// This call replaces the previous condition.
+    /// Timeout middleware is enabled by default.
     #[must_use]
     pub fn enable_always(self) -> Self {
         self.enable(true)
     }
 
-    /// Disables the timeout middleware completely.
+    /// Disables timeout middleware for all requests.
     ///
-    /// All requests will pass through without timeout protection.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This overrides the default enabled behavior.
+    /// Requests run without a timeout.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn disable(self) -> Self {
         self.enable(false)
