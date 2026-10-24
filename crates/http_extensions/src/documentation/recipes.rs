@@ -163,7 +163,6 @@
 //! Use [`templated`] URI types instead of raw `format!` strings.
 //! [`EscapedString::escape`] percent-encodes characters that are unsafe in a template value.
 //! Templated URIs follow RFC 6570.
-//! They allocate less memory than construction with `format!`.
 //! Each request stores the template string.
 //! Logging and metrics handlers can then group traffic by route instead of by unique URL.
 //!
@@ -175,7 +174,6 @@
 //! Do not use raw string formatting.
 //! The builder still validates the formatted URI when it converts the string.
 //! Raw formatting does not escape dynamic values or preserve template metadata.
-//! It also creates an intermediate `String` allocation.
 //!
 //! ```
 //! # fn main() {
@@ -194,7 +192,7 @@
 //! ```
 //!
 //! Use a templated URI struct.
-//! It uses URI-safe field values, fewer allocations, and template metadata for telemetry.
+//! It escapes field values and provides template metadata for telemetry.
 //!
 //! ```
 //! # fn main() {

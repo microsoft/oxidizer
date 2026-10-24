@@ -3,8 +3,9 @@
 
 //! Callgrind benchmarks for `Router::resolve_request_uri`, the per-request routing step.
 //!
-//! The router selects the `BaseUri` and creates the request `http::Uri` for each attempt.
-//! This benchmark isolates that operation for root and prefixed base paths.
+//! `Router::resolve_request_uri` selects the `BaseUri` and creates the request
+//! `http::Uri` when a caller invokes it.
+//! This benchmark measures initial fixed-route resolution for root and prefixed base paths.
 //! `HttpRequestBuilder` creates the request and caches its rendered path.
 //!
 //! `router_resolve.rs` measures the same operation with Criterion wall-clock timing.

@@ -189,7 +189,9 @@
 //!
 //! # Memory Management
 //!
-//! Bodies created through [`HttpBodyBuilder`] use its configured [`bytesbuf`] memory provider.
+//! Methods that allocate body data use the [`bytesbuf`] memory provider configured on
+//! [`HttpBodyBuilder`].
+//! Methods that wrap existing body data keep the storage supplied by the caller.
 //! A pooled provider can reuse memory after the body data is consumed.
 
 use http::{Request, Response};

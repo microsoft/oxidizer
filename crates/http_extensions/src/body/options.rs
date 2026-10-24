@@ -49,11 +49,10 @@ impl HttpBodyOptions {
         self
     }
 
-    /// Sets the body buffer limit.
+    /// Sets the maximum buffered payload size.
     ///
-    /// This value limits the memory used when
-    /// [`HttpBody::into_buffered`][super::HttpBody::into_buffered] buffers the body.
-    /// The operation returns an error if the body exceeds this limit.
+    /// [`HttpBody::into_buffered`][super::HttpBody::into_buffered] returns an error
+    /// if the body contains more bytes than this limit.
     #[must_use]
     pub const fn buffer_limit(mut self, limit: usize) -> Self {
         self.buffer_limit = Some(limit);

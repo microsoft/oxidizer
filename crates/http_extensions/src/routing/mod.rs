@@ -16,7 +16,8 @@
 //!
 //! # Construction
 //!
-//! - [`Router::default`] creates a router without a [`BaseUri`]. It keeps the target [`Uri`] unchanged.
+//! - [`Router::default`] creates a router without a [`BaseUri`].
+//!   It keeps an existing target base URI unchanged and returns an error if the target has no base URI.
 //! - [`Router::fixed`] creates a router that always selects the same [`BaseUri`].
 //! - [`Router::fallback`] creates a router with a primary and fallback [`BaseUri`].
 //!   It uses recovery information and the current attempt position.

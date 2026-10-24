@@ -159,7 +159,9 @@ Use it to test code that depends on HTTP clients.
 
 ## Memory Management
 
-Bodies created through [`HttpBodyBuilder`][__link33] use its configured [`bytesbuf`][__link34] memory provider.
+Methods that allocate body data use the [`bytesbuf`][__link33] memory provider configured on
+[`HttpBodyBuilder`][__link34].
+Methods that wrap existing body data keep the storage supplied by the caller.
 A pooled provider can reuse memory after the body data is consumed.
 
 
@@ -168,7 +170,7 @@ A pooled provider can reuse memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbF_Ys-IWPd3Mb95DN669vGMMbQkuWKbGRVSAbEWiMqJ1wpiRhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt
@@ -196,8 +198,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link30]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
  [__link31]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=FakeHandler
  [__link32]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=Json
- [__link33]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
- [__link34]: https://crates.io/crates/bytesbuf/0.12.0
+ [__link33]: https://crates.io/crates/bytesbuf/0.12.0
+ [__link34]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
  [__link4]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBody

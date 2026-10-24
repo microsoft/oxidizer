@@ -87,9 +87,10 @@ pub(crate) mod timeout_body;
 /// - Clone a streaming body before it is consumed
 /// - Keep data after the network connection closes
 ///
-/// Buffering uses a memory limit to prevent an out-of-memory failure.
+/// Buffering uses a payload size limit.
 /// The default limit is 2 GB.
 /// If a response exceeds the limit, the operation returns an error.
+/// The limit does not cap the total memory used by the operation.
 /// Set a different limit with [`HttpBodyOptions::buffer_limit`].
 ///
 /// # Streaming
@@ -270,7 +271,7 @@ impl HttpBody {
     /// - Clone a body that was not cloneable before buffering
     /// - Preload data to avoid connection issues later
     ///
-    /// Set the memory limit with [`HttpBodyOptions::buffer_limit`] on the builder.
+    /// Set the payload size limit with [`HttpBodyOptions::buffer_limit`] on the builder.
     /// The default limit is 2 GB.
     ///
     /// # Caveats
@@ -282,6 +283,7 @@ impl HttpBody {
     ///
     /// - A network problem stops data collection.
     /// - Another operation already consumed the body.
+    /// - The body exceeds the configured payload size limit.
     ///
     /// # Examples
     ///

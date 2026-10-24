@@ -3,9 +3,10 @@
 
 //! Wall-clock benchmarks for [`Router::resolve_request_uri`], the per-request routing step.
 //!
-//! An HTTP client resolves the target URI against its endpoint for each request attempt.
-//! It selects the [`BaseUri`] and creates the request `http::Uri`.
-//! This benchmark uses a request from [`HttpRequestBuilder`] and a fixed endpoint.
+//! [`Router::resolve_request_uri`] selects the [`BaseUri`] and creates the request
+//! `http::Uri` when a caller invokes it.
+//! This benchmark measures the initial resolution of a fixed endpoint.
+//! It uses a request from [`HttpRequestBuilder`].
 //! The builder caches the rendered path.
 //!
 //! `router_resolve_cg.rs` measures the same operation with Callgrind.
