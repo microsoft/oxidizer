@@ -189,7 +189,10 @@ impl Worker {
             .as_mut()
             .expect("executor removal publishes shutdown, which is handled above");
 
-        let cycle_outcome = executor.execute_cycle();
+        let cycle_outcome = {
+            let _cycle = Scheduler::enter_current_executor_cycle();
+            executor.execute_cycle()
+        };
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -915,6 +918,35 @@ mod tests {
         assert!(task_done.load(Ordering::Relaxed));
         assert!(timer_done.load(Ordering::Relaxed));
         assert!((COMMANDS_PER_CYCLE..=2 * COMMANDS_PER_CYCLE + 1).contains(&processed.load(Ordering::Relaxed)));
+    }
+
+    #[test]
+    fn same_worker_child_progresses_without_a_redundant_worker_notification() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+        let mut worker = test_worker(
+            command_tx,
+            command_rx,
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            InactiveClock::default(),
+            Arc::clone(&signal),
+        );
+        let child_ran = Arc::new(AtomicBool::new(false));
+        let child_observer = Arc::clone(&child_ran);
+        let scheduler = worker.builtins.as_ref().unwrap().scheduler().clone();
+        drop(worker.tasks.add_test(async move {
+            drop(scheduler.spawn(move |_| async move {
+                child_observer.store(true, Ordering::Relaxed);
+            }));
+        }));
+
+        assert!(worker.execute_step().is_continue());
+        assert!(!signal.is_notified());
+        assert!(!child_ran.load(Ordering::Relaxed));
+
+        WorkerSignal::waker(&signal).wake_by_ref();
+        assert!(worker.execute_step().is_continue());
+        assert!(child_ran.load(Ordering::Relaxed));
     }
 
     #[test]
