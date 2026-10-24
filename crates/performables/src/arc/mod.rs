@@ -432,8 +432,7 @@ fn relocate_affinity<T: ?Sized, S: private::AffinityStrategy>(
 
     let destination_key = S::key(destination);
     let source_key = source.map(S::key);
-    let current = StdArc::clone(&state.current);
-    let factory = {
+    let (current, factory) = {
         let mut inner = state.shared.inner.write().expect("Arc affinity state lock was poisoned");
         if !inner.storage.bind_owner(destination.owner()) {
             return;
@@ -444,11 +443,14 @@ fn relocate_affinity<T: ?Sized, S: private::AffinityStrategy>(
         }
 
         if let Some(value) = inner.storage.get_clone(&destination_key) {
+            // Replacing the last unregistered handle can run T's destructor.
+            drop(inner);
             state.current = value;
             state.current_owner = Some(destination.owner().clone());
             return;
         }
 
+        let current = StdArc::clone(&state.current);
         if source_key.as_ref() == Some(&destination_key) {
             _ = inner.storage.insert(destination_key, current);
             state.current_owner = Some(destination.owner().clone());
@@ -458,7 +460,7 @@ fn relocate_affinity<T: ?Sized, S: private::AffinityStrategy>(
         if let Some(source_key) = source_key.as_ref() {
             _ = inner.storage.insert(source_key.clone(), StdArc::clone(&current));
         }
-        inner.factory.clone()
+        (current, inner.factory.clone())
     };
 
     let next = factory.as_ref().map_or_else(
@@ -1152,6 +1154,8 @@ mod tests {
     use thread_aware::Relocator;
 
     use super::*;
+
+    mod warm_relocation;
 
     #[test]
     fn per_process_has_standard_arc_size() {
