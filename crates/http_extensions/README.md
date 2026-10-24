@@ -15,43 +15,43 @@
 
 Shared HTTP types and extension traits for clients and servers.
 
-This crate provides common HTTP functionality built on the popular [`http`][__link0] crate,
-including flexible body handling, unified error types, and ergonomic extension traits
-for working with HTTP requests and responses.
+This crate provides common HTTP features that build on the [`http`][__link0] crate.
+It includes body handling, error types, and extension traits for HTTP requests
+and responses.
 
 ## Core Types
 
-* [`HttpRequest`][__link1] and [`HttpResponse`][__link2] - Type aliases for requests and responses with [`HttpBody`][__link3]
-* [`HttpRequestBuilder`][__link4] - Builder for constructing HTTP requests with a fluent API
-* [`HttpResponseBuilder`][__link5] - Builder for constructing HTTP responses with a fluent API
-* [`HttpBody`][__link6] - Flexible body type supporting text, binary, JSON, and streaming content
-* [`HttpBodyBuilder`][__link7] - Builder for creating HTTP bodies with memory pool optimization
-* [`HttpError`][__link8] - Unified error type with automatic backtraces and recovery classification
-* [`RequestHandler`][__link9] - Trait for HTTP middleware and request processing pipelines
+* [`HttpRequest`][__link1] and [`HttpResponse`][__link2] are aliases for requests and responses with [`HttpBody`][__link3].
+* [`HttpRequestBuilder`][__link4] constructs HTTP requests with chained method calls.
+* [`HttpResponseBuilder`][__link5] constructs HTTP responses with chained method calls.
+* [`HttpBody`][__link6] supports text, binary, JSON, and streaming content.
+* [`HttpBodyBuilder`][__link7] creates HTTP bodies with a configurable memory provider.
+* [`HttpError`][__link8] provides backtraces and recovery information.
+* [`RequestHandler`][__link9] defines HTTP middleware and request pipelines.
 
 ## Extension Traits
 
-The crate provides extension traits that add convenience methods to standard HTTP types:
+The crate provides extension traits for standard HTTP types:
 
-* [`StatusExt`][__link10] - Status code validation and recovery classification
-* [`RequestExt`][__link11] - Extensions for HTTP requests
-* [`ResponseExt`][__link12] - Response recovery classification with `Retry-After` support
-* [`HttpRequestExt`][__link13] - Request cloning with body support
-* [`HeaderMapExt`][__link14] - Header value extraction and parsing
-* [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`Bytes`][__link17]
-* [`ExtensionsExt`][__link18] - Extensions for [`Extensions`][__link19] to extract URI template labels
+* [`StatusExt`][__link10] classifies status codes and their recovery behavior.
+* [`RequestExt`][__link11] extends HTTP requests.
+* [`ResponseExt`][__link12] classifies response recovery behavior and supports `Retry-After`.
+* [`HttpRequestExt`][__link13] clones requests and their bodies.
+* [`HeaderMapExt`][__link14] extracts and parses header values.
+* [`HeaderValueExt`][__link15] constructs [`HeaderValue`][__link16] from [`Bytes`][__link17].
+* [`ExtensionsExt`][__link18] extracts URI template labels from [`Extensions`][__link19].
 
 ## Quick Start
 
-Here’s a complete example showing how to create an HTTP client, build a request,
-and validate the response:
+The following example creates an HTTP client, builds a request, and requires
+a successful response:
 
 ```rust
-// Create a body builder for constructing request/response bodies
+// Create a builder for request and response bodies.
 let body_builder = HttpBodyBuilder::new_fake();
 
-// Create a fake handler that returns a successful response
-// (This uses the `test-util` feature for testing; similar workflow applies to real clients)
+// Create a fake handler that returns a successful response.
+// The `test-util` feature provides this test handler.
 let handler = FakeHandler::from(
     HttpResponseBuilder::new(&body_builder)
         .status(200)
@@ -60,7 +60,7 @@ let handler = FakeHandler::from(
         .build()?,
 );
 
-// Build and send an HTTP request using the handler
+// Build and send an HTTP request through the handler.
 let response = handler
     .request_builder()
     .get("https://api.example.com/data")
@@ -68,40 +68,39 @@ let response = handler
     .fetch()
     .await?;
 
-// Validate that the response succeeded (returns error for `4xx/5xx` status codes)
+// Return an error if the response does not have a `2xx` status code.
 let validated_response = response.ensure_success()?;
 
 println!("response status: {}", validated_response.status());
 ```
 
-**Note**: This example uses the `test-util` feature to create a `FakeHandler` for testing.
-In production code, you would use a real HTTP client that implements the
-[`RequestHandler`][__link20] trait, but the workflow remains the same: build requests with
-[`HttpRequestBuilder`][__link21], send them through a handler, and validate responses with
-[`StatusExt::ensure_success`][__link22].
+This example uses the `test-util` feature to create a [`FakeHandler`][__link20].
+Production code uses an HTTP client that implements [`RequestHandler`][__link21].
+In both cases, [`HttpRequestBuilder`][__link22] builds the request and the handler sends it.
+[`StatusExt::ensure_success`][__link23] then requires a successful response.
 
 ## Integration with the HTTP Ecosystem
 
-This crate builds on the popular [`http`][__link23] crate rather than inventing new types:
+This crate builds on the [`http`][__link24] crate:
 
-* Uses [`http::Request`][__link24] and [`http::Response`][__link25] as base types
-* Reuses [`http::Method`][__link26], [`http::StatusCode`][__link27], and [`http::HeaderMap`][__link28]
-* Implements standard traits like [`http_body::Body`][__link29] for ecosystem compatibility
-* Works seamlessly with other Rust HTTP libraries
+* It uses [`http::Request`][__link25] and [`http::Response`][__link26] as base types.
+* It reuses [`http::Method`][__link27], [`http::StatusCode`][__link28], and [`http::HeaderMap`][__link29].
+* It implements standard traits such as [`http_body::Body`][__link30].
+* It works with other Rust HTTP libraries.
 
 ## Examples
 
-### Validating Response Status
+### Requiring a Successful Response
 
 ```rust
-// Check if the response succeeded and return an error if not
+// Return an error if the response was not successful.
 let validated_response = response.ensure_success()?;
 ```
 
 ### Creating Request Bodies
 
 ```rust
-// Create different body types
+// Create different body types.
 let text_body = builder.text("Hello, world!");
 let binary_body = builder.slice(&[1, 2, 3, 4]);
 let empty_body = builder.empty();
@@ -149,20 +148,21 @@ impl<S: RequestHandler> Service<HttpRequest> for LoggingMiddleware<S> {
 
 ### Testing with `FakeHandler`
 
-The `FakeHandler` type (available with the `test-util` feature) lets you mock HTTP responses
-for testing without making actual network requests. This is useful for unit testing code
-that depends on HTTP clients.
+The `test-util` feature provides [`FakeHandler`][__link31].
+It returns test responses without network requests.
+Use it to test code that depends on HTTP clients.
 
 ## Features
 
-* `json` - Enables JSON serialization/deserialization support via `Json` type
-* `test-util` - Enables fake implementations for testing
+* `json` enables JSON serialization and deserialization through [`Json`][__link32].
+* `test-util` enables test implementations.
 
 ## Memory Management
 
-Bodies created through [`HttpBodyBuilder`][__link30] use memory pools from [`bytesbuf`][__link31] to
-reduce allocation overhead. When body data is consumed, memory is automatically recycled
-for future requests. This makes the crate particularly efficient for high-throughput scenarios.
+Methods that allocate body data use the [`bytesbuf`][__link33] memory provider configured on
+[`HttpBodyBuilder`][__link34].
+Methods that wrap existing body data keep the storage supplied by the caller.
+A pooled provider can reuse memory after the body data is consumed.
 
 
 <hr/>
@@ -170,7 +170,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8ws5BCyJXrMbtKOqwMaB35YbTeUgtnVoxOMbl-5qQusDAothZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt
@@ -184,19 +184,22 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link18]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=ExtensionsExt
  [__link19]: https://docs.rs/http/1.5.0/http/?search=Extensions
  [__link2]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpResponse.html
- [__link20]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
- [__link21]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
- [__link22]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt::ensure_success
- [__link23]: https://crates.io/crates/http/1.5.0
- [__link24]: https://docs.rs/http/1.5.0/http/?search=Request
- [__link25]: https://docs.rs/http/1.5.0/http/?search=Response
- [__link26]: https://docs.rs/http/1.5.0/http/?search=Method
- [__link27]: https://docs.rs/http/1.5.0/http/?search=StatusCode
- [__link28]: https://docs.rs/http/1.5.0/http/?search=HeaderMap
- [__link29]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
+ [__link20]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=FakeHandler
+ [__link21]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
+ [__link22]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
+ [__link23]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt::ensure_success
+ [__link24]: https://crates.io/crates/http/1.5.0
+ [__link25]: https://docs.rs/http/1.5.0/http/?search=Request
+ [__link26]: https://docs.rs/http/1.5.0/http/?search=Response
+ [__link27]: https://docs.rs/http/1.5.0/http/?search=Method
+ [__link28]: https://docs.rs/http/1.5.0/http/?search=StatusCode
+ [__link29]: https://docs.rs/http/1.5.0/http/?search=HeaderMap
  [__link3]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBody
- [__link30]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
- [__link31]: https://crates.io/crates/bytesbuf/0.12.0
+ [__link30]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
+ [__link31]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=FakeHandler
+ [__link32]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=Json
+ [__link33]: https://crates.io/crates/bytesbuf/0.12.0
+ [__link34]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
  [__link4]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBody
