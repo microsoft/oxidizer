@@ -13,14 +13,15 @@ use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord};
 ///
 /// Records with severity below the configured threshold are dropped.
 pub struct SeverityFilter<T: LogProcessor> {
-    severity: Severity,
+    severity: Option<Severity>,
     inner: T,
     is_shutdown: atomic::AtomicBool,
 }
 
 impl<T: LogProcessor> SeverityFilter<T> {
     /// Creates a new [`SeverityFilter`] that wraps the given inner processor.
-    pub fn new(severity: Severity, inner: T) -> Self {
+    /// For `severity`, `None` disables all logging, while `Some(severity)` drops records below that severity.
+    pub fn new(severity: Option<Severity>, inner: T) -> Self {
         Self {
             severity,
             inner,
@@ -31,21 +32,34 @@ impl<T: LogProcessor> SeverityFilter<T> {
 
 impl<T: LogProcessor> std::fmt::Debug for SeverityFilter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SeverityFilter({}, {:?})", self.severity.name(), self.inner)
+        write!(
+            f,
+            "SeverityFilter({}, {:?})",
+            self.severity.map_or("None", |s| s.name()),
+            self.inner
+        )
     }
 }
 
 impl<T: LogProcessor> LogProcessor for SeverityFilter<T> {
     fn event_enabled(&self, level: Severity, target: &str, name: Option<&str>) -> bool {
-        !self.is_shutdown.load(atomic::Ordering::SeqCst) && level >= self.severity && self.inner.event_enabled(level, target, name)
+        self.severity.is_some_and(|s| {
+            !self.is_shutdown.load(atomic::Ordering::SeqCst) && level >= s && self.inner.event_enabled(level, target, name)
+        })
     }
 
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &opentelemetry::InstrumentationScope) {
+        let Some(severity) = self.severity else {
+            return;
+        };
+
         if self.is_shutdown.load(atomic::Ordering::SeqCst) {
             return;
         }
-        let severity = data.severity_number().unwrap_or(Severity::Fatal);
-        if severity >= self.severity {
+
+        let record_severity = data.severity_number().unwrap_or(Severity::Fatal);
+
+        if record_severity >= severity {
             self.inner.emit(data, instrumentation);
         }
     }
@@ -70,15 +84,16 @@ impl<T: LogProcessor> LogProcessor for SeverityFilter<T> {
 }
 
 /// Converts a [`log::LevelFilter`] to an `OTel` [`Severity`].
+/// Returns `None` for `log::LevelFilter::Off` which disables all logging.
 #[must_use]
-pub const fn severity_of_level(level: log::LevelFilter) -> Severity {
+pub const fn severity_of_level(level: log::LevelFilter) -> Option<Severity> {
     match level {
-        log::LevelFilter::Trace => Severity::Trace,
-        log::LevelFilter::Debug => Severity::Debug,
-        log::LevelFilter::Info => Severity::Info,
-        log::LevelFilter::Warn => Severity::Warn,
-        log::LevelFilter::Error => Severity::Error,
-        log::LevelFilter::Off => Severity::Fatal,
+        log::LevelFilter::Trace => Some(Severity::Trace),
+        log::LevelFilter::Debug => Some(Severity::Debug),
+        log::LevelFilter::Info => Some(Severity::Info),
+        log::LevelFilter::Warn => Some(Severity::Warn),
+        log::LevelFilter::Error => Some(Severity::Error),
+        log::LevelFilter::Off => None,
     }
 }
 
@@ -126,7 +141,7 @@ mod tests {
     fn shutdown_with_timeout_propagates_to_inner() {
         let inner = RecordingProcessor::default();
         let calls = Arc::clone(&inner.0);
-        let filter = SeverityFilter::new(Severity::Warn, inner);
+        let filter = SeverityFilter::new(Some(Severity::Warn), inner);
 
         filter.shutdown_with_timeout(Duration::from_secs(5)).unwrap();
 
@@ -141,7 +156,7 @@ mod tests {
     fn severity_threshold_preserves_lifecycle_and_accepts_unspecified_severity() {
         let inner = RecordingProcessor::default();
         let calls = Arc::clone(&inner.0);
-        let mut filter = SeverityFilter::new(Severity::Warn, inner);
+        let mut filter = SeverityFilter::new(Some(Severity::Warn), inner);
         assert!(format!("{filter:?}").contains("WARN"));
 
         filter.set_resource(&Resource::builder_empty().with_service_name("example").build());
@@ -154,12 +169,12 @@ mod tests {
         filter.emit(&mut record, &scope);
 
         for (level, severity) in [
-            (LevelFilter::Trace, Severity::Trace),
-            (LevelFilter::Debug, Severity::Debug),
-            (LevelFilter::Info, Severity::Info),
-            (LevelFilter::Warn, Severity::Warn),
-            (LevelFilter::Error, Severity::Error),
-            (LevelFilter::Off, Severity::Fatal),
+            (LevelFilter::Trace, Some(Severity::Trace)),
+            (LevelFilter::Debug, Some(Severity::Debug)),
+            (LevelFilter::Info, Some(Severity::Info)),
+            (LevelFilter::Warn, Some(Severity::Warn)),
+            (LevelFilter::Error, Some(Severity::Error)),
+            (LevelFilter::Off, None),
         ] {
             assert_eq!(severity_of_level(level), severity);
         }
@@ -217,7 +232,7 @@ mod tests {
                 Severity::Error,
                 Severity::Fatal,
             ] {
-                let expected = severity >= severity_of_level(level);
+                let expected = severity_of_level(level).map_or_else(|| false, |s| severity >= s);
                 assert_eq!(
                     filter.event_enabled(severity, "target", Some("event")),
                     expected,
@@ -258,7 +273,7 @@ mod tests {
     #[test]
     fn severity_interest_preserves_the_inner_filter() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let filter = SeverityFilter::new(Severity::Warn, InterestProbe(Arc::clone(&calls)));
+        let filter = SeverityFilter::new(Some(Severity::Warn), InterestProbe(Arc::clone(&calls)));
 
         assert!(!filter.event_enabled(Severity::Info, "included", Some("included")));
         assert_eq!(calls.load(Ordering::Relaxed), 0);
