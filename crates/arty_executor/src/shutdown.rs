@@ -142,9 +142,11 @@ mod tests {
     }
 
     #[test]
-    fn default_cause_has_no_error_after_clone() {
-        let clone = ShutdownCause::default().clone();
+    fn default_cause_and_clone_have_no_error() {
+        let cause = ShutdownCause::default();
+        let clone = cause.clone();
 
+        assert!(cause.as_error().is_none());
         assert!(clone.as_error().is_none());
     }
 
