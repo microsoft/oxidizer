@@ -411,26 +411,30 @@ impl TokioLocalCase {
     fn run_with_instrumentation(&mut self, iterations: u64, instrument: bool) -> Duration {
         let count = self.count;
         self.local.block_on(&self.runtime, async move {
-            if instrument {
-                toggle_callgrind_collection();
-            }
-            let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
-            let start = Instant::now();
-            for _ in 0..iterations {
-                for handle in handles.iter_mut().take(count) {
-                    *handle = Some(tokio::task::spawn_local(async { black_box(()) }));
+            tokio::task::spawn_local(async move {
+                if instrument {
+                    toggle_callgrind_collection();
                 }
-                for handle in handles.iter_mut().take(count) {
-                    black_box(handle.take().expect("all benchmark task slots are filled"))
-                        .await
-                        .expect("benchmark tasks do not panic");
+                let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
+                let start = Instant::now();
+                for _ in 0..iterations {
+                    for handle in handles.iter_mut().take(count) {
+                        *handle = Some(tokio::task::spawn_local(async { black_box(()) }));
+                    }
+                    for handle in handles.iter_mut().take(count) {
+                        black_box(handle.take().expect("all benchmark task slots are filled"))
+                            .await
+                            .expect("benchmark tasks do not panic");
+                    }
                 }
-            }
-            let elapsed = start.elapsed();
-            if instrument {
-                toggle_callgrind_collection();
-            }
-            elapsed
+                let elapsed = start.elapsed();
+                if instrument {
+                    toggle_callgrind_collection();
+                }
+                elapsed
+            })
+            .await
+            .expect("benchmark controller task does not panic")
         })
     }
 }
