@@ -29,13 +29,13 @@ const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 1;
 #[cfg(not(debug_assertions))]
 const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
-fn spawn_complete_once(executor: &Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
+fn spawn_complete_once(executor: &mut Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
     let mut handle = pin!(tasks.add(async {}, TaskOptions::default()));
     let _ = executor.execute_cycle();
     handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
 }
 
-fn spawn_remote_complete_once(executor: &Executor, tasks: &TaskSet, result_pool: &RemotePool) -> Poll<Result<(), JoinError>> {
+fn spawn_remote_complete_once(executor: &mut Executor, tasks: &TaskSet, result_pool: &RemotePool) -> Poll<Result<(), JoinError>> {
     let (result_tx, mut handle) = result_pool.channel();
     tasks.add_with_remote_result(async {}, TaskOptions::default(), result_tx);
     let _ = executor.execute_cycle();
@@ -54,11 +54,11 @@ fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
 
 #[test]
 fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
 
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
+        assert_eq!(spawn_complete_once(&mut executor, &tasks), Poll::Ready(Ok(())));
     }
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -67,7 +67,7 @@ fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_complete_once(&executor, &tasks), Poll::Ready(Ok(())));
+            assert_eq!(spawn_complete_once(&mut executor, &tasks), Poll::Ready(Ok(())));
         }
     }
 
@@ -92,12 +92,12 @@ fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
 
 #[test]
 fn remote_spawn_reuses_cross_thread_result_channel_storage() {
-    let executor = Executor::builder().build();
+    let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let result_pool = RemotePool::new();
 
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_remote_complete_once(&executor, &tasks, &result_pool), Poll::Ready(Ok(())));
+        assert_eq!(spawn_remote_complete_once(&mut executor, &tasks, &result_pool), Poll::Ready(Ok(())));
     }
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
@@ -106,7 +106,7 @@ fn remote_spawn_reuses_cross_thread_result_channel_storage() {
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_remote_complete_once(&executor, &tasks, &result_pool), Poll::Ready(Ok(())));
+            assert_eq!(spawn_remote_complete_once(&mut executor, &tasks, &result_pool), Poll::Ready(Ok(())));
         }
     }
 

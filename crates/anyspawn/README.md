@@ -27,6 +27,19 @@ different async runtimes without generic infection.
 
 ## Quick Start
 
+### Using Arty
+
+```rust
+use anyspawn::Spawner;
+use arty::runtime::Runtime;
+
+let runtime = Runtime::new()?;
+let spawner = Spawner::new_arty(cx.scheduler().clone());
+let result = spawner.spawn(async { 1 + 1 }).await;
+assert_eq!(result, 2);
+runtime.stop()?;
+```
+
 ### Using Tokio
 
 ```rust
@@ -45,8 +58,9 @@ integrations to adapt task dispatch after relocation.
 
 ## Features
 
-* `tokio`: Enables the [`Spawner::new_tokio`][__link5] and
-  [`Spawner::new_tokio_with_handle`][__link6] constructors
+* `arty`: Enables the [`Spawner::new_arty`][__link5] constructor
+* `tokio`: Enables the [`Spawner::new_tokio`][__link6] and
+  [`Spawner::new_tokio_with_handle`][__link7] constructors
 
 
 <hr/>
@@ -54,11 +68,12 @@ integrations to adapt task dispatch after relocation.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbdP7zL-Rj49Ybglp2cxGMPI4b-K3GVaoD2YQbQVf8GeDtMClhZIKCaGFueXNwYXduZTAuOS4ygmx0aHJlYWRfYXdhcmVmMC4xMi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw6WnZACa5M0bDba-jT02mz0bvAMR8fjk4OsbKTx8-83BMw1hZIKCaGFueXNwYXduZTAuOS4ygmx0aHJlYWRfYXdhcmVmMC4xMi4x
  [__link0]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=SpawnCustom
  [__link2]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=CustomSpawnerBuilder
  [__link3]: https://docs.rs/thread_aware/0.12.1/thread_aware/?search=ThreadAware
  [__link4]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio
- [__link6]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__link5]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_arty
+ [__link6]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio
+ [__link7]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio_with_handle

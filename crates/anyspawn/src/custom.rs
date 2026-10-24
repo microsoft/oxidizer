@@ -81,6 +81,16 @@ where
     }
 }
 
+fn spawn_anywhere_channel<T, D, F>(data: D, f: fn(D) -> F) -> (Box<dyn ThreadAwareAsyncFnOnce<()>>, OneshotReceiver<T>)
+where
+    T: Send + 'static,
+    D: ThreadAware + 'static,
+    F: Future<Output = T> + Send + 'static,
+{
+    let (tx, rx) = oneshot();
+    (Box::new(SpawnAnywhereTask { data, f, tx }), rx)
+}
+
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
@@ -108,8 +118,7 @@ impl CustomSpawner {
         D: ThreadAware + 'static,
         F: Future<Output = T> + Send + 'static,
     {
-        let (tx, rx) = oneshot();
-        let task = Box::new(SpawnAnywhereTask { data, f, tx });
+        let (task, rx) = spawn_anywhere_channel(data, f);
         self.spawn.spawn_anywhere(task);
         rx
     }
