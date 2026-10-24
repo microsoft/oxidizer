@@ -112,16 +112,7 @@ impl ExecutorShared {
     }
 
     pub(crate) fn begin_shutdown(&self, cause: ShutdownCause) -> ShutdownCause {
-        if let Err(cause) = self.inner.shutdown_cause.set(cause)
-            && let Some(error) = cause.into_error()
-        {
-            let authoritative = self
-                .inner
-                .shutdown_cause
-                .get()
-                .expect("a failed shutdown cause insertion means a cause is already present");
-            _ = authoritative.record_error(error);
-        }
+        _ = self.inner.shutdown_cause.set(cause);
         self.shutdown_cause()
     }
 

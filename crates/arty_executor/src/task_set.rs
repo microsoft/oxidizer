@@ -52,8 +52,7 @@ impl TaskSet {
 
     /// Begins executor shutdown with a cause without borrowing executor-owned polling state.
     ///
-    /// The first shutdown error remains authoritative. A clean shutdown can
-    /// record a later error.
+    /// The first shutdown cause remains authoritative.
     pub fn begin_shutdown(&self, cause: ShutdownCause) {
         self.shared.request_shutdown(cause);
     }

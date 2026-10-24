@@ -3,7 +3,6 @@
 
 use std::error::Error;
 use std::fmt::{self, Debug};
-use std::sync::{Arc, OnceLock};
 
 use ohno::OhnoCore;
 
@@ -73,41 +72,29 @@ impl Error for ShutdownError {
 
 /// Describes why executor shutdown started.
 ///
-/// The default value represents shutdown without an error. All clones observe
-/// the first error that is recorded after shutdown starts.
+/// The default value represents shutdown without an error.
 #[derive(Clone, Default)]
 pub struct ShutdownCause {
-    error: Arc<OnceLock<ShutdownError>>,
+    error: Option<ShutdownError>,
 }
 
 impl ShutdownCause {
     /// Creates a shutdown cause from an error.
     #[must_use]
     pub fn from_error(error: ShutdownError) -> Self {
-        let cause = Self::default();
-        let recorded = cause.record_error(error);
-        debug_assert!(recorded, "a new shutdown cause cannot already contain an error");
-        cause
-    }
-
-    /// Records the error if this cause does not contain one.
-    ///
-    /// All existing and future clones observe the recorded error.
-    #[must_use]
-    pub fn record_error(&self, error: ShutdownError) -> bool {
-        self.error.set(error).is_ok()
+        Self { error: Some(error) }
     }
 
     /// Returns the shutdown error, if shutdown started because of an error.
     #[must_use]
-    pub fn as_error(&self) -> Option<&ShutdownError> {
-        self.error.get()
+    pub const fn as_error(&self) -> Option<&ShutdownError> {
+        self.error.as_ref()
     }
 
     /// Returns the shutdown error, if shutdown started because of an error.
     #[must_use]
     pub fn into_error(self) -> Option<ShutdownError> {
-        self.error.get().cloned()
+        self.error
     }
 }
 
@@ -155,15 +142,10 @@ mod tests {
     }
 
     #[test]
-    fn default_cause_records_the_first_error_for_all_clones() {
-        let cause = ShutdownCause::default();
-        let clone = cause.clone();
+    fn default_cause_has_no_error_after_clone() {
+        let clone = ShutdownCause::default().clone();
 
-        assert!(cause.record_error(ShutdownError::new(std::io::Error::other("first"))));
-        assert!(!clone.record_error(ShutdownError::new(std::io::Error::other("later"))));
-
-        assert_eq!(cause.as_error().unwrap().inner().to_string(), "first");
-        assert_eq!(clone.as_error().unwrap().inner().to_string(), "first");
+        assert!(clone.as_error().is_none());
     }
 
     #[test]

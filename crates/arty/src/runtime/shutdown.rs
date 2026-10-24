@@ -21,22 +21,10 @@ pub(crate) enum ShutdownState {
 impl Shutdown {
     /// Starts shutdown and returns whether this call started it.
     ///
-    /// The first error is authoritative. A clean shutdown can record a later
-    /// error so concurrent failures are not lost.
+    /// The first published cause is authoritative. Later requests do not
+    /// replace it, including a default cause without an error.
     pub(crate) fn begin(&self, cause: ShutdownCause) -> bool {
-        match self.cause.set(cause) {
-            Ok(()) => true,
-            Err(cause) => {
-                if let Some(error) = cause.into_error() {
-                    let authoritative = self
-                        .cause
-                        .get()
-                        .expect("a failed shutdown cause insertion means a cause is already present");
-                    _ = authoritative.record_error(error);
-                }
-                false
-            }
-        }
+        self.cause.set(cause).is_ok()
     }
 
     #[must_use]
@@ -87,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn default_cause_records_the_first_error() {
+    fn default_cause_remains_authoritative() {
         assert_impl_all!(Shutdown: Clone, Debug, Default, Send, Sync);
 
         let shutdown = Shutdown::default();
@@ -96,7 +84,7 @@ mod tests {
         assert!(!shutdown.begin(cause("later")));
 
         assert_eq!(shutdown.state(), ShutdownState::Started);
-        assert_eq!(shutdown.error().unwrap().inner().to_string(), "later");
+        assert!(shutdown.error().is_none());
     }
 
     #[test]

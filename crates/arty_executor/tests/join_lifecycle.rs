@@ -315,18 +315,16 @@ fn remote_task_cancellation_carries_the_shutdown_cause() {
 }
 
 #[test]
-fn clean_shutdown_records_a_later_error_for_rejected_tasks() {
+fn clean_shutdown_remains_authoritative_for_rejected_tasks() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    let (cause, expected) = shutdown_cause("later failure");
+    let cause = shutdown_cause("later failure").0;
 
     executor.begin_shutdown(ShutdownCause::default());
     let mut rejected = tasks.add(async {}, TaskOptions::default());
     executor.begin_shutdown(cause);
 
-    let error = poll_error(&mut rejected);
-    let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
-    assert_same_shutdown_source(source, &expected);
+    assert!(poll_error(&mut rejected).source().is_none());
 }
 
 #[test]
