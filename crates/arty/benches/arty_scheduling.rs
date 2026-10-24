@@ -7,6 +7,9 @@
 //! not measure isolated instruction costs. Each case creates its runtime,
 //! reusable vectors, and external waking thread before measurement. It reuses
 //! this input for every measured iteration.
+//! Both runtimes use the same external join driver. Worker-anywhere samples
+//! submit from a task on a multi-thread runtime. Worker-local samples use an
+//! Arty worker and a Tokio current-thread runtime with a `LocalSet`.
 //!
 //! Both runtimes use the same code outside the runtime to wait for task results.
 //! For from-task workloads, timing starts inside the initial async task.
@@ -35,10 +38,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use thread_aware::Unaware;
-use tokio::task::JoinHandle as TokioJoinHandle;
+use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
 
 const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 20];
+const MAX_COUNT: usize = 20;
 const WORKERS: [usize; 2] = [1, 4];
 
 // Neither deadline expires during a benchmark. The background timer remains
@@ -53,7 +57,8 @@ enum Workload {
     RemoteWake,
     Timer,
     Timeout,
-    FromTask,
+    WorkerAnywhere,
+    WorkerLocal,
     Blocking,
 }
 
@@ -64,7 +69,7 @@ impl Workload {
         Self::RemoteWake,
         Self::Timer,
         Self::Timeout,
-        Self::FromTask,
+        Self::WorkerAnywhere,
         Self::Blocking,
     ];
 
@@ -75,7 +80,8 @@ impl Workload {
             Self::RemoteWake => "wake",
             Self::Timer => "timer",
             Self::Timeout => "timeout",
-            Self::FromTask => "nested",
+            Self::WorkerAnywhere => "worker_anywhere",
+            Self::WorkerLocal => "worker_local",
             Self::Blocking => "blocking",
         }
     }
@@ -171,16 +177,38 @@ impl ArtyCase {
                 }
                 start.elapsed()
             }
-            Workload::FromTask => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
+            Workload::WorkerAnywhere => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
                 (iterations, count),
                 |cx, (iterations, count)| async move {
-                    let mut handles = Vec::with_capacity(count);
+                    let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
                     let start = Instant::now();
                     for _ in 0..iterations {
-                        handles.clear();
-                        handles.extend((0..count).map(|_| cx.scheduler().spawn(async |_| black_box(()))));
-                        for handle in &mut handles {
-                            black_box(handle).await.expect("benchmark tasks finish before shutdown");
+                        for handle in handles.iter_mut().take(count) {
+                            *handle = Some(cx.scheduler().spawn_anywhere((), |()| async { black_box(()) }));
+                        }
+                        for handle in handles.iter_mut().take(count) {
+                            black_box(handle.take().expect("all benchmark task slots are filled"))
+                                .await
+                                .expect("benchmark tasks finish before shutdown");
+                        }
+                    }
+                    start.elapsed()
+                },
+            ))
+            .expect("benchmark parent finishes before shutdown"),
+            Workload::WorkerLocal => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
+                (iterations, count),
+                |cx, (iterations, count)| async move {
+                    let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        for handle in handles.iter_mut().take(count) {
+                            *handle = Some(cx.scheduler().spawn(async |_| black_box(())));
+                        }
+                        for handle in handles.iter_mut().take(count) {
+                            black_box(handle.take().expect("all benchmark task slots are filled"))
+                                .await
+                                .expect("benchmark tasks finish before shutdown");
                         }
                     }
                     start.elapsed()
@@ -277,19 +305,23 @@ impl TokioCase {
                 let sender = self.peer.sender();
                 self.remote(iterations, async move || RemoteWake::new(sender.clone()).await)
             }
-            Workload::FromTask => futures::executor::block_on(self.runtime.spawn(async move {
-                let mut handles = Vec::with_capacity(count);
+            Workload::WorkerAnywhere => futures::executor::block_on(self.runtime.spawn(async move {
+                let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
                 let start = Instant::now();
                 for _ in 0..iterations {
-                    handles.clear();
-                    handles.extend((0..count).map(|_| tokio::spawn(async { black_box(()) })));
-                    for handle in &mut handles {
-                        black_box(handle).await.expect("benchmark tasks do not panic");
+                    for handle in handles.iter_mut().take(count) {
+                        *handle = Some(tokio::spawn(async { black_box(()) }));
+                    }
+                    for handle in handles.iter_mut().take(count) {
+                        black_box(handle.take().expect("all benchmark task slots are filled"))
+                            .await
+                            .expect("benchmark tasks do not panic");
                     }
                 }
                 start.elapsed()
             }))
             .expect("benchmark parent task does not panic"),
+            Workload::WorkerLocal => unreachable!("worker-local Tokio uses TokioLocalCase"),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
@@ -306,10 +338,48 @@ impl TokioCase {
     }
 }
 
-/// Arms and cancels `operations` request timeouts on the current worker.
-///
-/// A background timer stays armed. Each request timeout is polled once to
-/// register it, then dropped to unregister it.
+struct TokioLocalCase {
+    runtime: tokio::runtime::Runtime,
+    local: LocalSet,
+    count: usize,
+}
+
+impl TokioLocalCase {
+    fn new(count: usize) -> Self {
+        let mut case = Self {
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("benchmark runtime initialization must succeed"),
+            local: LocalSet::new(),
+            count,
+        };
+        black_box(case.run(1));
+        case
+    }
+
+    fn run(&mut self, iterations: u64) -> Duration {
+        let count = self.count;
+        self.local.block_on(&self.runtime, async move {
+            let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
+            let start = Instant::now();
+            for _ in 0..iterations {
+                for handle in handles.iter_mut().take(count) {
+                    *handle = Some(tokio::task::spawn_local(async { black_box(()) }));
+                }
+                for handle in handles.iter_mut().take(count) {
+                    black_box(handle.take().expect("all benchmark task slots are filled"))
+                        .await
+                        .expect("benchmark tasks do not panic");
+                }
+            }
+            start.elapsed()
+        })
+    }
+}
+
+/// Arms and cancels `operations` request timeouts on the current worker while a background
+/// timer stays armed. Each timeout is polled once, which registers it, then dropped, which
+/// unregisters it.
 async fn timeout_churn<T, F>(operations: u64, mut timer: F)
 where
     T: Future<Output = ()>,
@@ -461,6 +531,21 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         }
     }
     group.finish();
+
+    let mut group = criterion.benchmark_group(ARTY_LOCAL.group_name());
+    for count in COUNTS {
+        let name = format!("spawn_w1_n{count}");
+        group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
+        group.bench_function(BenchmarkId::new(ARTY_LOCAL.benchmark_name(), &name), |bencher| {
+            let mut state = ArtyCase::new(1, count, Workload::WorkerLocal);
+            bencher.iter_custom(|iterations| arty_local_workload(&mut state, iterations).0);
+        });
+        group.bench_function(BenchmarkId::new(TOKIO_LOCAL.benchmark_name(), &name), |bencher| {
+            let mut state = TokioLocalCase::new(count);
+            bencher.iter_custom(|iterations| tokio_local_workload(&mut state, iterations).0);
+        });
+    }
+    group.finish();
 }
 
 #[benchmark(ARTY, "arty_scheduling/tasks", "Arty")]
@@ -484,10 +569,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::timeout_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Timeout)), 1)]
-#[bench::nested_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::FromTask)), 1)]
-#[bench::nested_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::FromTask)), 1)]
-#[bench::nested_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::FromTask)), 1)]
-#[bench::nested_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::FromTask)), 1)]
+#[bench::worker_anywhere_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::WorkerAnywhere)), 1)]
 #[bench::blocking_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Blocking)), 1)]
 #[bench::blocking_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Blocking)), 1)]
 #[bench::blocking_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Blocking)), 1)]
@@ -521,15 +606,37 @@ fn arty_workload<S: std::borrow::BorrowMut<ArtyCase>>(mut owned_input: S, iterat
 #[bench::timeout_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Timeout)), 1)]
-#[bench::nested_w1_n1(Box::new(TokioCase::new(1, 1, Workload::FromTask)), 1)]
-#[bench::nested_w1_n20(Box::new(TokioCase::new(1, 20, Workload::FromTask)), 1)]
-#[bench::nested_w4_n1(Box::new(TokioCase::new(4, 1, Workload::FromTask)), 1)]
-#[bench::nested_w4_n20(Box::new(TokioCase::new(4, 20, Workload::FromTask)), 1)]
+#[bench::worker_anywhere_w1_n1(Box::new(TokioCase::new(1, 1, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w1_n20(Box::new(TokioCase::new(1, 20, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w4_n1(Box::new(TokioCase::new(4, 1, Workload::WorkerAnywhere)), 1)]
+#[bench::worker_anywhere_w4_n20(Box::new(TokioCase::new(4, 20, Workload::WorkerAnywhere)), 1)]
 #[bench::blocking_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Blocking)), 1)]
 #[bench::blocking_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Blocking)), 1)]
 #[bench::blocking_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Blocking)), 1)]
 #[bench::blocking_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Blocking)), 1)]
 fn tokio_workload<S: std::borrow::BorrowMut<TokioCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
+    let result = {
+        let state = owned_input.borrow_mut();
+        state.run(iterations)
+    };
+    (result, owned_input)
+}
+
+#[benchmark(ARTY_LOCAL, "arty_scheduling/worker_local_spawn", "Arty")]
+#[bench::spawn_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::WorkerLocal)), 1)]
+#[bench::spawn_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::WorkerLocal)), 1)]
+fn arty_local_workload<S: std::borrow::BorrowMut<ArtyCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
+    let result = {
+        let state = owned_input.borrow_mut();
+        state.run(iterations)
+    };
+    (result, owned_input)
+}
+
+#[benchmark(TOKIO_LOCAL, "arty_scheduling/worker_local_spawn", "Tokio")]
+#[bench::spawn_w1_n1(Box::new(TokioLocalCase::new(1)), 1)]
+#[bench::spawn_w1_n20(Box::new(TokioLocalCase::new(20)), 1)]
+fn tokio_local_workload<S: std::borrow::BorrowMut<TokioLocalCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
     let result = {
         let state = owned_input.borrow_mut();
         state.run(iterations)
@@ -551,7 +658,7 @@ metabench::main!(
                 .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
         );
     },
-    benchmarks = [ARTY, TOKIO],
+    benchmarks = [ARTY, TOKIO, ARTY_LOCAL, TOKIO_LOCAL],
 );
 
 #[cfg(not(target_os = "linux"))]
@@ -561,5 +668,5 @@ metabench::main!(
         benchmarks = criterion_benchmarks,
         unit = "ns",
     },
-    benchmarks = [ARTY, TOKIO],
+    benchmarks = [ARTY, TOKIO, ARTY_LOCAL, TOKIO_LOCAL],
 );
