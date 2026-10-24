@@ -5,8 +5,8 @@
 //!
 //! [`Router::resolve_request_uri`] selects the [`BaseUri`] and creates the request
 //! `http::Uri` when a caller invokes it.
-//! This benchmark measures the initial resolution of a fixed endpoint.
-//! It uses a request from [`HttpRequestBuilder`].
+//! This benchmark repeatedly resolves a fixed endpoint on the same request.
+//! [`HttpRequestBuilder`] creates the request before measurement starts.
 //! The builder caches the rendered path.
 //!
 //! `router_resolve_cg.rs` measures the same operation with Callgrind.
