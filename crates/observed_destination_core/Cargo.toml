@@ -44,7 +44,7 @@ opentelemetry_sdk = { workspace = true, features = ["logs", "metrics"] }
 [dev-dependencies]
 insta = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-performables = { workspace = true }
+performables = { path = "../performables", default-features = false }
 
 # >>> anvil-managed: anvil-lints
 [lints]
