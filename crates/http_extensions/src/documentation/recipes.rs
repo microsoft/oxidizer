@@ -8,7 +8,9 @@
 //! # Use dedicated types
 //!
 //! Use the dedicated URI, header, and body types instead of plain `String`.
-//! These types reject invalid values when you construct them.
+//! Types that enforce format rules, such as [`Uri`], [`HeaderName`], and
+//! [`HeaderValue`], reject invalid values when you construct them.
+//! Body types can store arbitrary bytes.
 //! They also support operations that do not allocate memory.
 //!
 //! This guidance applies the [`M-STRONG-TYPES`](https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html?highlight=strong#M-STRONG-TYPES)
@@ -159,7 +161,7 @@
 //! # Use Templated URIs
 //!
 //! Use [`templated`] URI types instead of raw `format!` strings.
-//! [`EscapedString`] rejects reserved characters.
+//! [`EscapedString::escape`] percent-encodes characters that are unsafe in a template value.
 //! Templated URIs follow RFC 6570.
 //! They allocate less memory than construction with `format!`.
 //! Each request stores the template string.
@@ -171,7 +173,9 @@
 //! This includes `#[templated]` structs.
 //!
 //! Do not use raw string formatting.
-//! It loses the template and does not reject invalid URI values during construction.
+//! The builder still validates the formatted URI when it converts the string.
+//! Raw formatting does not escape dynamic values or preserve template metadata.
+//! It also creates an intermediate `String` allocation.
 //!
 //! ```
 //! # fn main() {
@@ -190,7 +194,7 @@
 //! ```
 //!
 //! Use a templated URI struct.
-//! It rejects invalid values, uses few allocations, and provides the template for telemetry.
+//! It uses URI-safe field values, fewer allocations, and template metadata for telemetry.
 //!
 //! ```
 //! # fn main() {

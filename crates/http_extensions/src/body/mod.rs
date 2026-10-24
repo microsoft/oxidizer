@@ -79,8 +79,8 @@ pub(crate) mod timeout_body;
 ///
 /// # Buffering
 ///
-/// [`HttpBody::into_buffered`] loads the complete body into memory.
-/// It also releases the underlying network connection.
+/// [`HttpBody::into_buffered`] consumes the body and loads its complete data into memory.
+/// If buffering succeeds, the transport can reclaim or reuse its resources.
 /// Use buffering to:
 ///
 /// - Process the same data multiple times

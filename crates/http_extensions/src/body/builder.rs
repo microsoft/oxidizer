@@ -20,7 +20,7 @@ use crate::{HttpError, Result};
 ///
 /// The builder provides:
 ///
-/// - Pooled memory.
+/// - Configurable memory, including pooled memory from [`GlobalPool`].
 /// - Optimizations for each runtime.
 /// - Test support through the `test-util` feature.
 ///
@@ -92,7 +92,8 @@ impl HttpBodyBuilder {
     /// This method type-erases the memory provider.
     /// It uses the provider instead of the global per-thread memory from [`HttpBodyBuilder::new`].
     /// The provider remains thread-aware.
-    /// If the runtime moves the builder to another thread, it also moves the provider state.
+    /// If a thread-aware runtime moves the builder and calls [`ThreadAware::relocate`], the provider
+    /// state moves to the new thread.
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
