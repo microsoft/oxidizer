@@ -3,6 +3,7 @@
 
 use std::error::Error;
 use std::fmt::{self, Debug};
+use std::sync::{Arc, OnceLock};
 
 use ohno::OhnoCore;
 
@@ -72,30 +73,41 @@ impl Error for ShutdownError {
 
 /// Describes why executor shutdown started.
 ///
-/// The default value represents shutdown without an error. An error cause is
-/// cheap to clone because [`ShutdownError`] shares its immutable source.
+/// The default value represents shutdown without an error. All clones observe
+/// the first error that is recorded after shutdown starts.
 #[derive(Clone, Default)]
 pub struct ShutdownCause {
-    error: Option<ShutdownError>,
+    error: Arc<OnceLock<ShutdownError>>,
 }
 
 impl ShutdownCause {
     /// Creates a shutdown cause from an error.
     #[must_use]
     pub fn from_error(error: ShutdownError) -> Self {
-        Self { error: Some(error) }
+        let cause = Self::default();
+        let recorded = cause.record_error(error);
+        debug_assert!(recorded, "a new shutdown cause cannot already contain an error");
+        cause
+    }
+
+    /// Records the error if this cause does not contain one.
+    ///
+    /// All existing and future clones observe the recorded error.
+    #[must_use]
+    pub fn record_error(&self, error: ShutdownError) -> bool {
+        self.error.set(error).is_ok()
     }
 
     /// Returns the shutdown error, if shutdown started because of an error.
     #[must_use]
-    pub const fn as_error(&self) -> Option<&ShutdownError> {
-        self.error.as_ref()
+    pub fn as_error(&self) -> Option<&ShutdownError> {
+        self.error.get()
     }
 
     /// Returns the shutdown error, if shutdown started because of an error.
     #[must_use]
     pub fn into_error(self) -> Option<ShutdownError> {
-        self.error
+        self.error.get().cloned()
     }
 }
 
@@ -107,7 +119,9 @@ impl From<ShutdownError> for ShutdownCause {
 
 impl Debug for ShutdownCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShutdownCause").field("has_error", &self.error.is_some()).finish()
+        f.debug_struct("ShutdownCause")
+            .field("has_error", &self.as_error().is_some())
+            .finish()
     }
 }
 
@@ -138,6 +152,18 @@ mod tests {
         assert_impl_all!(ShutdownCause: Clone, Debug, Default, Send, Sync, UnwindSafe, RefUnwindSafe);
 
         assert!(ShutdownCause::default().as_error().is_none());
+    }
+
+    #[test]
+    fn default_cause_records_the_first_error_for_all_clones() {
+        let cause = ShutdownCause::default();
+        let clone = cause.clone();
+
+        assert!(cause.record_error(ShutdownError::new(std::io::Error::other("first"))));
+        assert!(!clone.record_error(ShutdownError::new(std::io::Error::other("later"))));
+
+        assert_eq!(cause.as_error().unwrap().inner().to_string(), "first");
+        assert_eq!(clone.as_error().unwrap().inner().to_string(), "first");
     }
 
     #[test]
