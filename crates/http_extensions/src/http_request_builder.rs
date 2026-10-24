@@ -621,7 +621,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// This method sends the request and deserializes the response.
     /// It consumes the [`HttpRequestBuilder`].
-    /// The returned owned value can outlive the response and move between threads.
+    /// The returned owned value can outlive the response.
     ///
     /// Use [`fetch_json_ref`](Self::fetch_json_ref) to borrow strings and bytes
     /// from the response buffer.

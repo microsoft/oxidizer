@@ -71,11 +71,11 @@ pub(crate) mod timeout_body;
 ///    You do not have to wait for the complete response.
 /// 2. Each chunk is a [`bytesbuf::BytesView`].
 ///    Its backing memory follows the provider that created it.
-///    A pooled provider can reuse memory after the chunk is consumed.
+///    A pooled provider can reuse memory when its layout and reference count permit release.
 /// 3. [`bytesbuf::BytesView`] avoids data copies when possible.
 ///
 /// [`HttpBody::poll_frame`] returns a [`Poll`] value when data is available.
-/// After you consume data from a [`BytesView`], its memory returns to its provider.
+/// After you release a [`BytesView`], its provider can reclaim memory that has no retained references.
 ///
 /// # Buffering
 ///
@@ -365,7 +365,8 @@ impl HttpBody {
 
     /// Consumes the body and creates a JSON parser that can borrow data.
     ///
-    /// The parser reads directly from the body buffer.
+    /// The parser borrows from an internal contiguous buffer.
+    /// A body with multiple non-contiguous spans can require one copy to create this buffer.
     /// Unlike [`into_json`][HttpBody::into_json], it supports borrowed data
     /// and types that use `Cow<str>`.
     ///
