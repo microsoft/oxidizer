@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::AtomicBool;
 use std::task::Waker;
 use std::thread;
 
+use arty_executor::discard_task_panic_payload;
 use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
@@ -22,6 +22,7 @@ use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::telemetry::events::{
     AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted,
 };
@@ -71,7 +72,7 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
 
-    let shutdown_started = Arc::new(AtomicBool::new(false));
+    let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(sink.clone());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
         emit!(
@@ -102,7 +103,7 @@ fn build_with_processors(
                 worker_endpoint_tx,
                 thread_builder: thread_builder.clone(),
                 blocking_pools: blocking_pools.clone(),
-                shutdown_started: Arc::clone(&shutdown_started),
+                shutdown: shutdown.clone(),
                 io_runtime: io_runtime.clone(),
                 sink: sink.clone(),
             }
@@ -122,12 +123,12 @@ fn build_with_processors(
     }
 
     let runtime_sink = sink.clone();
-    let dispatcher = Arc::new(DispatcherCore::new_with_shutdown(
+    let dispatcher = Arc::new(DispatcherCore::new(
         ThreadWaiter::new(async_worker_join_handles),
         NonEmpty::from_vec(async_worker_command_txs)
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
-        shutdown_started,
+        shutdown,
     ));
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
@@ -171,7 +172,7 @@ struct AsyncWorkerStartInfo {
     worker_endpoint_tx: Sender<(Waker, Thread, Arc<BlockingWorker>)>,
     thread_builder: ThreadBuilder,
     blocking_pools: BlockingPools,
-    shutdown_started: Arc<AtomicBool>,
+    shutdown: Shutdown,
     io_runtime: IoRuntime,
     sink: Sink,
 }
@@ -199,7 +200,7 @@ impl AsyncWorkerStartInfo {
             worker_endpoint_tx,
             thread_builder,
             blocking_pools,
-            shutdown_started,
+            shutdown,
             io_runtime,
             sink,
         } = self;
@@ -215,8 +216,7 @@ impl AsyncWorkerStartInfo {
         clock.relocate(None, &current);
 
         // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker =
-            BlockingWorker::new_with_shutdown(blocking_pools.build_worker(), worker_sink.clone(), Arc::clone(&shutdown_started));
+        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone(), shutdown);
 
         let signal = Arc::new(WorkerSignal::default());
         let worker_waker = WorkerSignal::waker(&signal);
@@ -236,16 +236,7 @@ impl AsyncWorkerStartInfo {
         let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        let worker = AsyncWorker::new(
-            command_rx,
-            dispatcher,
-            current,
-            sink,
-            io,
-            Arc::clone(&blocking_worker),
-            clock,
-            signal,
-        );
+        let mut worker = AsyncWorker::new(command_rx, dispatcher.clone(), current, sink, io, &blocking_worker, clock, signal);
 
         emit!(
             worker_sink,
@@ -258,7 +249,11 @@ impl AsyncWorkerStartInfo {
 
         // Incomplete executor teardown fails closed. A panic after safe retirement still
         // needs to join the blocking pool before the worker's failure is reported.
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
+        let run_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
+        report_worker_failure(&run_outcome, &dispatcher);
+        let drop_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(worker)));
+        report_worker_failure(&drop_outcome, &dispatcher);
+        let outcome = combine_worker_outcomes(run_outcome, drop_outcome);
         if outcome.is_ok() {
             emit!(
                 worker_sink,
@@ -273,6 +268,24 @@ impl AsyncWorkerStartInfo {
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
         }
+    }
+}
+
+fn report_worker_failure(outcome: &std::thread::Result<()>, dispatcher: &DispatcherClient) {
+    if outcome.is_err() {
+        _ = dispatcher.stop_with_error(Error::worker_panicked());
+    }
+}
+
+fn combine_worker_outcomes(run: std::thread::Result<()>, teardown: std::thread::Result<()>) -> std::thread::Result<()> {
+    match (run, teardown) {
+        (Err(primary), Err(secondary)) => {
+            discard_task_panic_payload(secondary);
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), Err(panic)) => Err(panic),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 
@@ -317,10 +330,85 @@ mod tests {
     use performables::arc::PerThread;
 
     use super::*;
+    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::{BlockingPoolPolicy, WorkersPolicy};
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };
+    }
+
+    #[test]
+    fn worker_run_panic_precedes_teardown_panic() {
+        let outcome = combine_worker_outcomes(Err(Box::new("run panic")), Err(Box::new("teardown panic")));
+
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "run panic");
+    }
+
+    #[test]
+    fn worker_teardown_panic_is_reported_after_successful_run() {
+        let outcome = combine_worker_outcomes(Ok(()), Err(Box::new("teardown panic")));
+
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "teardown panic");
+    }
+
+    #[test]
+    fn successful_worker_run_and_teardown_succeed() {
+        combine_worker_outcomes(Ok(()), Ok(())).unwrap();
+    }
+
+    #[test]
+    fn worker_run_panic_is_reported_without_teardown_panic() {
+        let outcome = combine_worker_outcomes(Err(Box::new("run panic")), Ok(()));
+
+        assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "run panic");
+    }
+
+    #[test]
+    fn worker_failure_publishes_shutdown_cause() {
+        let (command_tx, _command_rx) = channel::unbounded();
+        let shutdown = Shutdown::default();
+        let current = ThreadBuilder::default().build(thread::current().id());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone());
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: current,
+            blocking_worker,
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            Sink::noop(),
+            shutdown.clone(),
+        )));
+
+        report_worker_failure(&Err(Box::new("worker panic")), &dispatcher);
+
+        assert_eq!(shutdown.error().unwrap().to_string(), "a runtime worker panicked");
+    }
+
+    #[test]
+    fn successful_worker_does_not_publish_shutdown_cause() {
+        let (command_tx, _command_rx) = channel::unbounded();
+        let shutdown = Shutdown::default();
+        let current = ThreadBuilder::default().build(thread::current().id());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone());
+        let endpoint = WorkerEndpoint {
+            command_tx,
+            waker: Waker::noop().clone(),
+            thread: current,
+            blocking_worker,
+        };
+        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint),
+            Sink::noop(),
+            shutdown.clone(),
+        )));
+
+        report_worker_failure(&Ok(()), &dispatcher);
+
+        assert!(shutdown.cause().is_none());
     }
 
     #[derive(Clone)]

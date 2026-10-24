@@ -119,6 +119,26 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
 }
 
 #[test]
+fn shutdown_rejects_blocking_work_before_worker_teardown() {
+    let runtime = runtime();
+
+    let result = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.control().request_stop();
+            cx.scheduler().spawn_blocking(|| 42).await
+        })
+        .unwrap();
+
+    if result.is_ok() {
+        std::mem::forget(runtime);
+        panic!("blocking work must be rejected after shutdown starts");
+    }
+    runtime.stop().unwrap();
+    assert!(result.unwrap_err().is_shutdown());
+}
+
+#[test]
 fn shutdown_between_same_worker_tasks_skips_later_factory() {
     let runtime = runtime();
     let invoked = Arc::new(AtomicBool::new(false));

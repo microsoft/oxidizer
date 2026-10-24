@@ -317,7 +317,7 @@ mod tests {
                 }
                 barrier.wait();
                 // SAFETY: The original owner retires the non-Send payload on its creating thread.
-                unsafe { original.as_task() }.abort();
+                unsafe { original.as_task() }.abort(crate::ShutdownCause::default());
                 drop(original);
             });
 
