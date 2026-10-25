@@ -55,8 +55,9 @@ impl Default for LogFormatConfig {
 }
 
 impl LogFormatConfig {
-    /// Creates a minimal format configuration (only timestamp, severity, and
-    /// message body with placeholders expanded).
+    /// Creates a minimal format configuration.
+    ///
+    /// Only timestamp, severity, and message body with placeholders expanded.
     #[must_use]
     pub fn minimal() -> Self {
         Self {
