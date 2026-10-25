@@ -74,8 +74,10 @@ pub trait MetricDestination: std::fmt::Debug {
     ) -> DestinationResult<opentelemetry_sdk::metrics::MeterProviderBuilder>;
 }
 
-/// Anything that yields a [`LogDestination`] — a destination itself, or a
-/// `bon` builder for one, which is finished on the caller's behalf.
+/// Anything that yields a [`LogDestination`].
+///
+/// It can be a destination itself, or a `bon` builder for one, which is finished on the
+/// caller's behalf.
 ///
 /// Implementing this trait allows skipping the explicit `.build()` call on
 /// a `bon` builder when passing it to a function that expects a `LogDestination`.
@@ -95,8 +97,10 @@ impl<D: LogDestination + 'static> IntoLogDestination for D {
     }
 }
 
-/// Anything that yields a [`MetricDestination`] — a destination itself, or a
-/// `bon` builder for one, which is finished on the caller's behalf.
+/// Anything that yields a [`MetricDestination`].
+///
+/// It can be a destination itself, or a `bon` builder for one, which is finished on the
+/// caller's behalf.
 ///
 /// Implementing this trait allows skipping the explicit `.build()` call on
 /// a `bon` builder when passing it to a function that expects a `MetricDestination`.
