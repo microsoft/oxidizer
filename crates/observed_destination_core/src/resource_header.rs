@@ -22,7 +22,9 @@ pub struct ResourceHeader {
 }
 
 impl ResourceHeader {
-    /// Creates a header for the empty default resource.
+    /// Creates a header with the OpenTelemetry SDK default resource.
+    ///
+    /// Includes attributes from the SDK's default resource detectors.
     #[must_use]
     pub fn new() -> Self {
         Self {
