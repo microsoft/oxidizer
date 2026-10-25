@@ -11,6 +11,7 @@ use jiff::Timestamp;
 use opentelemetry::logs::AnyValue;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::logs::SdkLogRecord;
 
 /// Configuration for log formatting.
 ///
@@ -178,12 +179,7 @@ pub fn print_log_record(
         if let Some(body) = record.body() {
             if config.format_body {
                 if let AnyValue::String(template) = body {
-                    let mut result = template.to_string();
-
-                    for (key, value) in record.attributes_iter() {
-                        let placeholder = format!("{{{key}}}");
-                        result = result.replace(&placeholder, &DisplayAnyValue(value).to_string());
-                    }
+                    let result = interpolate(template.as_str(), record);
 
                     write!(w, "{result}")?;
                 } else {
@@ -216,6 +212,41 @@ pub fn print_log_record(
     .map_err(io_err)
 }
 
+fn interpolate(template: &str, record: &SdkLogRecord) -> String {
+    use std::fmt::Write as _;
+
+    let mut result = String::with_capacity(template.len());
+    let mut remaining = template;
+
+    while let Some(offset) = remaining.find('{') {
+        result.push_str(&remaining[..offset]);
+        remaining = &remaining[offset..];
+
+        if remaining.starts_with("{{") {
+            result.push_str(&remaining[..2]);
+            remaining = &remaining[2..];
+            continue;
+        }
+
+        let Some((placeholder, remainder)) = remaining[1..].split_once('}') else {
+            break;
+        };
+
+        if let Some((_, value)) = record
+            .attributes_iter()
+            .find(|(key, _)| !placeholder.is_empty() && key.as_str() == placeholder)
+        {
+            write!(result, "{}", DisplayAnyValue(value)).expect("DisplayAnyValue writing to a String cannot fail");
+        } else {
+            result.push_str(&remaining[..placeholder.len() + 2]);
+        }
+        remaining = remainder;
+    }
+
+    result.push_str(remaining);
+    result
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -227,9 +258,7 @@ mod tests {
 
     use super::*;
 
-    fn create_record_and_scope(
-        configure: impl FnOnce(&mut opentelemetry_sdk::logs::SdkLogRecord),
-    ) -> (opentelemetry_sdk::logs::SdkLogRecord, InstrumentationScope) {
+    fn create_record_and_scope(configure: impl FnOnce(&mut SdkLogRecord)) -> (SdkLogRecord, InstrumentationScope) {
         let scope = InstrumentationScope::builder("test-lib").build();
         let provider = SdkLoggerProvider::builder().build();
         let logger = provider.logger("test-lib");
@@ -238,7 +267,7 @@ mod tests {
         (rec, scope)
     }
 
-    fn format(record: &opentelemetry_sdk::logs::SdkLogRecord, scope: &InstrumentationScope, config: LogFormatConfig) -> String {
+    fn format(record: &SdkLogRecord, scope: &InstrumentationScope, config: LogFormatConfig) -> String {
         let mut buf = Vec::new();
 
         print_log_record(&mut buf, record, scope, config).unwrap();
@@ -259,6 +288,145 @@ mod tests {
         let output = format(&record, &scope, LogFormatConfig::minimal());
 
         insta::assert_snapshot!(output, @"hello world, world! {missing}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_does_not_replace_twice() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{path} {id}".into()));
+            r.add_attribute("path", "/tmp/{id}");
+            r.add_attribute("id", 42);
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"/tmp/{id} 42");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_respects_escaped_braces() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{{name}} / {name}".into()));
+            r.add_attribute("name", "Ada");
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"{{name}} / Ada");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_preserves_text_after_unicode_prefix() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("é{id}X".into()));
+            r.add_attribute("id", 42);
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"é42X");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_preserves_text_after_unicode_key() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{café}X".into()));
+            r.add_attribute("café", 42);
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"42X");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_respects_escaped_braces_after_unicode() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("é{{name}} / {name}".into()));
+            r.add_attribute("name", "Ada");
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"é{{name}} / Ada");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_uses_first_duplicate_key() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{id}".into()));
+            r.add_attribute("id", 1);
+            r.add_attribute("id", 2);
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"1");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_keeps_empty_placeholder_literal() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{}".into()));
+            r.add_attribute("", "value");
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"{}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_keeps_unmatched_braces_literal() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{id} {unfinished {".into()));
+            r.add_attribute("id", 42);
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"42 {unfinished {");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
+    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
+    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
+    fn interpolation_ends_placeholder_at_first_closing_brace() {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(AnyValue::String("{a} {b}".into()));
+            r.add_attribute("a} {b", "wrong");
+            r.add_attribute("a", "A");
+            r.add_attribute("b", "B");
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        insta::assert_snapshot!(output, @"A B");
     }
 
     #[test]
