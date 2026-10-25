@@ -38,6 +38,7 @@ all-features = true
 # 3rd-party
 jiff = { workspace = true, default-features = false, features = ["std"] }
 log = { workspace = true }
+observed_utils = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics"] }
 

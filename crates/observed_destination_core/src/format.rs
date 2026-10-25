@@ -8,6 +8,7 @@ use std::io::Write;
 use std::time::SystemTime;
 
 use jiff::Timestamp;
+use observed_utils::format_any_value;
 use opentelemetry::logs::AnyValue;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
@@ -65,47 +66,6 @@ impl LogFormatConfig {
             include_library: false,
             include_event_name: false,
             format_body: true,
-        }
-    }
-}
-
-/// Display wrapper for [`AnyValue`] that avoids Rust debug formatting
-/// (e.g. `String(Static("…"))`) and instead renders human-readable values.
-struct DisplayAnyValue<'a>(&'a AnyValue);
-
-impl fmt::Display for DisplayAnyValue<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            AnyValue::String(s) => write!(f, "{s}"),
-            AnyValue::Boolean(b) => write!(f, "{b}"),
-            AnyValue::Int(i) => write!(f, "{i}"),
-            AnyValue::Double(d) => write!(f, "{d}"),
-            AnyValue::Bytes(bytes) => {
-                write!(f, "0x")?;
-                for byte in bytes.iter() {
-                    write!(f, "{byte:02x}")?;
-                }
-                Ok(())
-            }
-            AnyValue::ListAny(l) => {
-                write!(f, "[")?;
-                for v in l.iter() {
-                    write!(f, "{}, ", DisplayAnyValue(v))?;
-                }
-                write!(f, "]")
-            }
-            AnyValue::Map(m) => {
-                write!(f, "{{")?;
-                for (k, v) in m.iter() {
-                    write!(f, "{k}: {}, ", DisplayAnyValue(v))?;
-                }
-                write!(f, "}}")
-            }
-            // Closure to skip coverage for a non-exhaustive match arm.
-            _ => ({
-                #[cfg_attr(coverage_nightly, coverage(off))]
-                || write!(f, "{:?}", self.0)
-            })(),
         }
     }
 }
@@ -184,17 +144,17 @@ pub fn print_log_record(
 
                     write!(w, "{result}")?;
                 } else {
-                    write!(w, "{}", DisplayAnyValue(body))?;
+                    write!(w, "{}", format_any_value(body))?;
                 }
                 formatted_body_printed = true;
             } else {
-                write!(w, "{}", DisplayAnyValue(body))?;
+                write!(w, "{}", format_any_value(body))?;
             }
         }
 
         if !formatted_body_printed {
             for (k, v) in record.attributes_iter() {
-                write!(w, " {k}={}", DisplayAnyValue(v))?;
+                write!(w, " {k}={}", format_any_value(v))?;
             }
         }
 
@@ -237,7 +197,7 @@ fn interpolate(template: &str, record: &SdkLogRecord) -> String {
             .attributes_iter()
             .find(|(key, _)| !placeholder.is_empty() && key.as_str() == placeholder)
         {
-            write!(result, "{}", DisplayAnyValue(value)).expect("DisplayAnyValue writing to a String cannot fail");
+            write!(result, "{}", format_any_value(value)).expect("format_any_value writing to a String cannot fail");
         } else {
             result.push_str(&remaining[..placeholder.len() + 2]);
         }
@@ -439,14 +399,14 @@ mod tests {
             (AnyValue::Int(42), "42"),
             (AnyValue::Boolean(true), "true"),
             (AnyValue::Double(1.5), "1.5"),
-            (AnyValue::Bytes(Box::new(vec![0, 15, 255])), "0x000fff"),
+            (AnyValue::Bytes(Box::new(vec![0, 15, 255])), "000fff"),
             (
                 AnyValue::ListAny(Box::new(vec![AnyValue::Int(42), AnyValue::Boolean(false)])),
-                "[42, false, ]",
+                "[42, false]",
             ),
             (
                 AnyValue::Map(Box::new([("answer".into(), AnyValue::Int(42))].into())),
-                "{answer: 42, }",
+                "{answer: 42}",
             ),
         ] {
             let (record, scope) = create_record_and_scope(|r| {
