@@ -82,7 +82,13 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 /// default `Display` for [`Timestamp`] omits trailing zero fractional digits,
 /// which produces inconsistent, occasionally shorter timestamps.
 #[derive(Debug)]
-pub struct Rfc3339Nanos(pub SystemTime);
+pub struct Rfc3339Nanos(SystemTime);
+
+impl From<SystemTime> for Rfc3339Nanos {
+    fn from(ts: SystemTime) -> Self {
+        Self(ts)
+    }
+}
 
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
