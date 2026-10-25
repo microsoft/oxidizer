@@ -37,6 +37,7 @@ impl FlushableMetricsProvider for SdkMeterProvider {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use opentelemetry_sdk::error::OTelSdkError;
 
