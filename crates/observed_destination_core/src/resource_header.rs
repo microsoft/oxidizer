@@ -51,8 +51,14 @@ impl ResourceHeader {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            print_resource(w, &self.resource)?;
-            writeln!(w).map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()))?;
+            let result = (|| {
+                print_resource(w, &self.resource)?;
+                writeln!(w).map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()))
+            })();
+            if result.is_err() {
+                self.emitted.store(false, Ordering::SeqCst);
+            }
+            result?;
         }
         Ok(())
     }
