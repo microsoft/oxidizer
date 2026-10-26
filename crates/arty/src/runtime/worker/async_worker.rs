@@ -954,8 +954,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         WorkerSignal::waker(&signal).wake_by_ref();
@@ -985,8 +985,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1025,8 +1025,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -1115,8 +1115,8 @@ mod tests {
                 let mut worker = test_worker(
                     worker_command_tx,
                     command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+                    test_blocking_worker(),
+                    InactiveClock::new_isolated(),
                     worker_signal,
                 );
                 drop(worker.tasks.add_test(async move { initial_completed_tx.send(()) }));
@@ -1203,8 +1203,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1228,8 +1228,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx,
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1251,8 +1251,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let invoked = Arc::new(AtomicBool::new(false));
@@ -1284,8 +1284,8 @@ mod tests {
         let mut worker = test_worker(
             command_tx.clone(),
             command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let shutdown = worker.shutdown.clone();
