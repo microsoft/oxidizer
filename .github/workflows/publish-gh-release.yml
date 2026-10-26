@@ -9,7 +9,7 @@
 name: Publish GitHub Release
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -24,6 +24,8 @@ on:
 jobs:
   create-release:
     runs-on: ubuntu-slim
+    permissions:
+      contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,4 +41,6 @@ jobs:
     - name: Create GitHub Release
       env:
         GH_TOKEN: ${{ github.token }}
-      run: just publish-gh-release --repository "${{ github.repository }}" --tag "${{ inputs.tag || github.ref_name }}"
+        RELEASE_REPO: ${{ github.repository }}
+        RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      run: just publish-gh-release --repository "$RELEASE_REPO" --tag "$RELEASE_TAG"
