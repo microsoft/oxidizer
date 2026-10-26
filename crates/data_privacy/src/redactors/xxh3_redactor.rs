@@ -1,23 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A redactor based on `xxh3`.
+//! A keyed cryptographic redactor with a legacy `xxh3` API.
 
-use core::fmt::Write;
+use core::fmt::{self, Write};
 
-use xxhash_rust::xxh3::xxh3_64_with_secret;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 use crate::{DataClass, Redactor};
 
 /// The length of the redacted output in hex digits.
-pub const REDACTED_LEN: usize = 16;
+pub const REDACTED_LEN: usize = 64;
 
-/// A redactor that replaces the original string with the xxH3 hash of the string.
+/// A redactor that replaces the original string with its HMAC-SHA-256 value.
+///
+/// The type and feature names remain unchanged for source compatibility.
+/// This redactor no longer uses xxHash, which is not a cryptographic hash.
+/// Outputs now contain 64 lowercase hex digits instead of 16.
+/// Previously stored xxHash outputs cannot be correlated with the new outputs.
+///
+/// # Security
+///
+/// Generate the secret with a cryptographically secure random number generator.
+/// Keep it private. Anyone with the secret can test guesses against redacted values.
+/// Use the same secret only where correlation between values is intended.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"
 )]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct xxH3Redactor {
     secret: Box<[u8]>,
 }
@@ -53,11 +65,22 @@ impl Redactor for xxH3Redactor {
     }
 
     fn redact(&self, _: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
-        let hash = xxh3_64_with_secret(value.as_bytes(), &self.secret);
-        let buffer = crate::redactors::u64_to_hex_array::<REDACTED_LEN>(hash);
+        let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(&self.secret) else {
+            unreachable!("HMAC accepts keys of any length");
+        };
+        mac.update(value.as_bytes());
 
-        // SAFETY: The buffer is guaranteed to be valid UTF-8 because it only contains hex digits.
-        write!(output, "{}", unsafe { core::str::from_utf8_unchecked(&buffer) })
+        for byte in mac.finalize().into_bytes() {
+            write!(output, "{byte:02x}")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Debug for xxH3Redactor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("xxH3Redactor").finish_non_exhaustive()
     }
 }
 

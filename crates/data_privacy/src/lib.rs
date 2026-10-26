@@ -30,9 +30,9 @@
 //!   policies.
 //!
 //! * **Redaction**: The process of removing or obscuring sensitive information from data.
-//!   Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
-//!   value that is not reversible. This allows the data to be used for analysis or processing
-//!   without exposing the sensitive information.
+//!   A keyed cryptographic hash can preserve correlation while the key remains secret.
+//!   Non-cryptographic hashes do not protect sensitive data from recovery.
+//!   Replace or erase values when correlation is not needed.
 //!
 //! It's important to note that redaction is different from deletion. Redaction typically replaces sensitive data
 //! with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece

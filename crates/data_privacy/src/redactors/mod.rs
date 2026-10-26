@@ -9,7 +9,7 @@ pub mod xxh3_redactor;
 #[cfg(feature = "rapidhash")]
 pub mod rapidhash_redactor;
 
-#[cfg(any(feature = "xxh3", feature = "rapidhash"))]
+#[cfg(feature = "rapidhash")]
 #[inline]
 pub(crate) fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
     const HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
@@ -32,7 +32,7 @@ mod tests {
 
     use crate::Redactor;
 
-    #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
+    #[cfg(feature = "rapidhash")]
     #[test]
     fn test_u64_to_hex_array() {
         use super::u64_to_hex_array;

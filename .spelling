@@ -1,4 +1,6 @@
 +
+cryptographic
+xxHash
 doctests
 executables
 subprocesses

@@ -17,6 +17,52 @@ fn get_test_redactor() -> xxH3Redactor {
 }
 
 #[test]
+fn test_redact_uses_full_hmac_sha256() {
+    let redactor = get_test_redactor();
+    let data_class = DataClass::new("test_taxonomy", "test_class");
+    let mut output = String::new();
+
+    redactor.redact(&data_class, "sensitive_data", &mut output).unwrap();
+
+    assert_eq!(output, "db9ed334ee500115514ab525f4a4e554076017061f1566e89da723cd7951ae23");
+}
+
+#[test]
+fn test_empty_input_uses_full_hmac_sha256() {
+    let redactor = get_test_redactor();
+    let data_class = DataClass::new("test_taxonomy", "test_class");
+    let mut output = String::new();
+
+    redactor.redact(&data_class, "", &mut output).unwrap();
+
+    assert_eq!(output, "7947bad2555c92453e779d76d03f36c64202bd4c9590b63353665c0414cd9ab1");
+}
+
+#[test]
+fn test_debug_does_not_expose_secret() {
+    assert_eq!(format!("{:?}", get_test_redactor()), "xxH3Redactor { .. }");
+}
+
+#[test]
+fn test_output_errors_are_propagated() {
+    struct FailingWriter;
+
+    impl core::fmt::Write for FailingWriter {
+        fn write_str(&mut self, _: &str) -> core::fmt::Result {
+            Err(core::fmt::Error)
+        }
+    }
+
+    let redactor = get_test_redactor();
+    let data_class = DataClass::new("test_taxonomy", "test_class");
+
+    assert_eq!(
+        redactor.redact(&data_class, "sensitive_data", &mut FailingWriter),
+        Err(core::fmt::Error)
+    );
+}
+
+#[test]
 fn test_redact_produces_consistent_output() {
     let redactor = get_test_redactor();
     let data_class = DataClass::new("test_taxonomy", "test_class");

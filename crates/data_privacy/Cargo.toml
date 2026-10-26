@@ -36,24 +36,26 @@ allowed_external_types = [
 default = ["serde"]
 rapidhash = ["dep:rapidhash"]
 serde = ["data_privacy_core/serde"]
-xxh3 = ["dep:xxhash-rust"]
+xxh3 = ["dep:hmac", "dep:sha2"]
 
 [dependencies]
 data_privacy_core.workspace = true
 data_privacy_macros.workspace = true
+hmac = { workspace = true, optional = true }
 rapidhash = { workspace = true, optional = true }
 rustc-hash = { workspace = true, features = ["std"] }
-xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 derive_more = { workspace = true, features = ["constructor", "from"] }
+hmac.workspace = true
 insta.workspace = true
 mutants.workspace = true
 once_cell = { workspace = true, features = ["std"] }
 rapidhash = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
-xxhash-rust = { workspace = true, features = ["xxh3"] }
+sha2.workspace = true
 
 [[example]]
 name = "employees"

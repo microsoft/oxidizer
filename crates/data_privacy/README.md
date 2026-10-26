@@ -39,9 +39,9 @@ Before continuing, it’s important to understand a few concepts:
   policies.
 
 * **Redaction**: The process of removing or obscuring sensitive information from data.
-  Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
-  value that is not reversible. This allows the data to be used for analysis or processing
-  without exposing the sensitive information.
+  A keyed cryptographic hash can preserve correlation while the key remains secret.
+  Non-cryptographic hashes do not protect sensitive data from recovery.
+  Replace or erase values when correlation is not needed.
 
 It’s important to note that redaction is different from deletion. Redaction typically replaces sensitive data
 with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece
@@ -192,7 +192,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAWFzjclwJjIbiHFP50AIleIbqUJnOIJFvacbIY1u-XBFz3FhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
  [__link0]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified
