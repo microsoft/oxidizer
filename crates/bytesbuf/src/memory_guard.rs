@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(any(test, feature = "bytes-compat"))]
+use bytes::Bytes;
 use smallvec::SmallVec;
 
 use crate::MAX_INLINE_SPANS;
@@ -23,14 +25,32 @@ use crate::mem::BlockRef;
 #[derive(Debug)]
 #[must_use]
 pub struct MemoryGuard {
-    _block_refs: SmallVec<[BlockRef; MAX_INLINE_SPANS]>,
+    _storage: MemoryGuardStorage,
+}
+
+#[derive(Debug)]
+enum MemoryGuardStorage {
+    BlockRefs {
+        _block_refs: SmallVec<[BlockRef; MAX_INLINE_SPANS]>,
+    },
+    #[cfg(any(test, feature = "bytes-compat"))]
+    Bytes { _bytes: SmallVec<[Bytes; MAX_INLINE_SPANS]> },
 }
 
 impl MemoryGuard {
     /// Creates a new memory guard for the provided memory blocks.
     pub(crate) fn new(block_refs: impl IntoIterator<Item = BlockRef>) -> Self {
         Self {
-            _block_refs: block_refs.into_iter().collect(),
+            _storage: MemoryGuardStorage::BlockRefs {
+                _block_refs: block_refs.into_iter().collect(),
+            },
+        }
+    }
+
+    #[cfg(any(test, feature = "bytes-compat"))]
+    pub(crate) fn from_bytes(bytes: SmallVec<[Bytes; MAX_INLINE_SPANS]>) -> Self {
+        Self {
+            _storage: MemoryGuardStorage::Bytes { _bytes: bytes },
         }
     }
 }
@@ -53,6 +73,9 @@ mod tests {
     #[test]
     fn default_creates_empty_guard() {
         let guard = MemoryGuard::default();
-        assert!(guard._block_refs.is_empty());
+        assert!(matches!(
+            guard._storage,
+            MemoryGuardStorage::BlockRefs { ref _block_refs } if _block_refs.is_empty()
+        ));
     }
 }

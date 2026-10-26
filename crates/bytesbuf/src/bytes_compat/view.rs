@@ -26,10 +26,10 @@ impl Buf for BytesView {
             return 0;
         }
 
-        let slice_count = self.spans_reversed.len().min(dst.len());
+        let slice_count = self.storage.slice_count().min(dst.len());
 
-        for (i, span) in self.spans_reversed.iter().rev().take(slice_count).enumerate() {
-            *dst.get_mut(i).expect("guarded by min()") = IoSlice::new(span);
+        for (i, (slice, _)) in self.slices().take(slice_count).enumerate() {
+            *dst.get_mut(i).expect("guarded by min()") = IoSlice::new(slice);
         }
 
         slice_count

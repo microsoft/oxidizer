@@ -7,6 +7,7 @@ use core::mem::MaybeUninit;
 use core::ptr;
 
 use crate::BytesView;
+use crate::view::BytesViewStorage;
 
 /// Generates the little-, big-, and native-endian read accessors for a primitive numeric type.
 ///
@@ -87,23 +88,36 @@ impl BytesView {
     #[inline]
     #[must_use]
     pub fn get_byte(&mut self) -> u8 {
-        // The first span (last in reverse order) backs the next byte. Stored spans are never
-        // empty (type invariant), so reading its first byte and advancing over it in one pass
-        // avoids the general `advance` loop and a second span lookup.
-        let front = self.spans_reversed.last_mut().expect("view must cover at least one byte");
+        let byte = match &mut self.storage {
+            BytesViewStorage::Spans(spans) => {
+                let front = spans.last_mut().expect("view must cover at least one byte");
+                let byte = front[0];
 
-        let byte = front[0];
+                if front.len() == 1 {
+                    spans.pop();
+                } else {
+                    // SAFETY: The span has at least two bytes, so advancing by one stays in bounds.
+                    unsafe {
+                        front.advance(1);
+                    }
+                }
 
-        if front.len() == 1 {
-            self.spans_reversed.pop();
-        } else {
-            // SAFETY: the span has at least two bytes, so advancing by one stays in bounds.
-            unsafe {
-                front.advance(1);
+                byte
             }
-        }
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => {
+                let front = bytes.last_mut().expect("view must cover at least one byte");
+                let byte = front[0];
 
-        // The view covered at least one byte, which we just removed from the front span.
+                if front.len() == 1 {
+                    bytes.pop();
+                } else {
+                    *front = front.slice(1..);
+                }
+
+                byte
+            }
+        };
         self.shrink_len(1);
 
         byte
@@ -241,31 +255,50 @@ impl BytesView {
     // `get_array` / `get_array_buffered` wrappers remain mutation-tested.
     #[cfg_attr(test, mutants::skip)]
     fn get_array_from_first_span<const N: usize>(&mut self) -> Option<[u8; N]> {
-        let front = self.spans_reversed.last_mut()?;
-        let front_len = front.len() as usize;
+        let array = match &mut self.storage {
+            BytesViewStorage::Spans(spans) => {
+                let front = spans.last_mut()?;
+                let front_len = front.len() as usize;
 
-        if N > front_len {
-            return None;
-        }
+                if N > front_len {
+                    return None;
+                }
 
-        // A byte-wise copy tolerates the span's lack of alignment, and reading into a `[u8; N]`
-        // can never construct an invalid value regardless of the source bytes. The zero-init is
-        // optimized away: `copy_from_slice` fully overwrites the array, so the compiler elides it
-        // (verified via Callgrind - identical to a `MaybeUninit` variant, which we avoid to keep
-        // this path free of `unsafe`).
-        let mut array = [0_u8; N];
-        array.copy_from_slice(&front[..N]);
+                let mut array = [0_u8; N];
+                array.copy_from_slice(&front[..N]);
 
-        if front_len == N {
-            self.spans_reversed.pop();
-        } else {
-            // SAFETY: `N < front_len`, so advancing the span by `N` stays in bounds.
-            unsafe {
-                front.advance(N);
+                if front_len == N {
+                    spans.pop();
+                } else {
+                    // SAFETY: `N < front_len`, so advancing the span by `N` stays in bounds.
+                    unsafe {
+                        front.advance(N);
+                    }
+                }
+
+                array
             }
-        }
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => {
+                let front = bytes.last_mut()?;
+                let front_len = front.len();
 
-        // The caller verified the view covers at least `N` bytes, which we just removed.
+                if N > front_len {
+                    return None;
+                }
+
+                let mut array = [0_u8; N];
+                array.copy_from_slice(&front[..N]);
+
+                if front_len == N {
+                    bytes.pop();
+                } else {
+                    *front = front.slice(N..);
+                }
+
+                array
+            }
+        };
         self.shrink_len(N);
 
         Some(array)

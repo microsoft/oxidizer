@@ -3,10 +3,12 @@
 
 use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
-use core::iter;
 use core::num::NonZero;
 use core::ops::{Bound, RangeBounds};
+use core::{iter, mem};
 
+#[cfg(any(test, feature = "bytes-compat"))]
+use bytes::Bytes;
 #[cfg(feature = "std")]
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
@@ -66,19 +68,56 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 pub struct BytesView {
     identity: BufferIdentity,
 
-    /// The spans of the byte sequence, stored in reverse order for efficient consumption
-    /// by popping items off the end of the collection.
-    pub(crate) spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
+    pub(crate) storage: BytesViewStorage,
 
     /// We cache the length so we do not have to recalculate it every time it is queried.
     len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum BytesViewStorage {
+    /// The spans are stored in reverse order for efficient front consumption.
+    Spans(SmallVec<[Span; MAX_INLINE_SPANS]>),
+    /// Owned `Bytes` segments are stored inline to avoid a second ownership allocation.
+    #[cfg(any(test, feature = "bytes-compat"))]
+    Bytes(SmallVec<[Bytes; MAX_INLINE_SPANS]>),
+}
+
+impl BytesViewStorage {
+    const fn empty() -> Self {
+        Self::Spans(SmallVec::new_const())
+    }
+
+    pub(crate) fn slice_count(&self) -> usize {
+        match self {
+            Self::Spans(spans) => spans.len(),
+            #[cfg(any(test, feature = "bytes-compat"))]
+            Self::Bytes(bytes) => bytes.len(),
+        }
+    }
+
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Spans(spans) => spans.iter().map(|span| span.len() as usize).sum(),
+            #[cfg(any(test, feature = "bytes-compat"))]
+            Self::Bytes(bytes) => bytes.iter().map(Bytes::len).sum(),
+        }
+    }
+
+    fn into_spans_reversed(self) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
+        match self {
+            Self::Spans(spans) => spans,
+            #[cfg(any(test, feature = "bytes-compat"))]
+            Self::Bytes(bytes) => crate::bytes_compat::bytes_storage_to_spans_reversed(bytes),
+        }
+    }
 }
 
 impl Clone for BytesView {
     fn clone(&self) -> Self {
         Self {
             identity: BufferIdentity::new(),
-            spans_reversed: self.spans_reversed.clone(),
+            storage: self.storage.clone(),
             len: self.len,
         }
     }
@@ -95,7 +134,7 @@ impl BytesView {
     pub const fn new() -> Self {
         Self {
             identity: BufferIdentity::new(),
-            spans_reversed: SmallVec::new_const(),
+            storage: BytesViewStorage::empty(),
             len: 0,
         }
     }
@@ -123,7 +162,34 @@ impl BytesView {
 
         Self {
             identity: BufferIdentity::new(),
-            spans_reversed,
+            storage: BytesViewStorage::Spans(spans_reversed),
+            len,
+        }
+    }
+
+    #[cfg(any(test, feature = "bytes-compat"))]
+    pub(crate) fn from_bytes(bytes: Bytes) -> Self {
+        if bytes.is_empty() {
+            return Self::new();
+        }
+
+        let len = bytes.len();
+        let mut bytes_reversed = SmallVec::new();
+        if len <= BlockSize::MAX as usize {
+            bytes_reversed.push(bytes);
+        } else {
+            let mut remaining = bytes;
+            while !remaining.is_empty() {
+                let take = remaining.len().min(BlockSize::MAX as usize);
+                bytes_reversed.push(remaining.slice(..take));
+                remaining = remaining.slice(take..);
+            }
+            bytes_reversed.reverse();
+        }
+
+        Self {
+            identity: BufferIdentity::new(),
+            storage: BytesViewStorage::Bytes(bytes_reversed),
             len,
         }
     }
@@ -172,24 +238,16 @@ impl BytesView {
         I: IntoIterator<Item = Self>,
         <I as IntoIterator>::IntoIter: iter::DoubleEndedIterator,
     {
-        // The two-level flat_map exposes no usable size hint, so the SmallVec grows on the fly.
-        // Counting the spans in a first pass to pre-size the SmallVec is deliberately avoided: it
-        // trims SmallVec reallocations and lowers the simulated instruction count, but the extra
-        // counting traversal measured as a net wall-clock regression, costing more than the
-        // reallocations it saves. The spans are moved out of the input views rather than cloned, so
-        // this path performs no BlockRef refcount traffic or block allocation.
+        let mut views = views.into_iter();
+        let Some(mut combined) = views.next() else {
+            return Self::new();
+        };
 
-        // For a given input ABC123.
-        let spans_reversed: SmallVec<_> = views
-            .into_iter()
-            // We first reverse the views: 123ABC.
-            .rev()
-            // And from inside each view we take the reversed spans: 321CBA.
-            .flat_map(|view| view.spans_reversed)
-            // Which become our final SmallVec of spans. Great success!
-            .collect();
+        for view in views {
+            combined.append(view);
+        }
 
-        Self::from_spans_reversed(spans_reversed)
+        combined
     }
 
     /// Creates a `BytesView` by copying the contents of a `&[u8]`.
@@ -235,7 +293,7 @@ impl BytesView {
     }
 
     pub(crate) fn into_spans_reversed(self) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
-        self.spans_reversed
+        self.storage.into_spans_reversed()
     }
 
     /// The number of bytes exposed through the view.
@@ -265,7 +323,7 @@ impl BytesView {
     #[must_use]
     pub fn len(&self) -> usize {
         // Sanity check.
-        debug_assert_eq!(self.len, self.spans_reversed.iter().map(|x| x.len() as usize).sum::<usize>());
+        debug_assert_eq!(self.len, self.storage.byte_len());
 
         self.len
     }
@@ -283,7 +341,11 @@ impl BytesView {
     /// is possible to reach a condition where the `BytesView` itself no longer exists, even though
     /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
-        MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
+        match &self.storage {
+            BytesViewStorage::Spans(spans) => MemoryGuard::new(spans.iter().map(Span::block_ref).map(Clone::clone)),
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => MemoryGuard::from_bytes(bytes.clone()),
+        }
     }
 
     /// Returns a range of the byte sequence.
@@ -358,11 +420,48 @@ impl BytesView {
             return Some(Self::new());
         }
 
+        #[cfg(any(test, feature = "bytes-compat"))]
+        if let BytesViewStorage::Bytes(bytes_reversed) = &self.storage {
+            let mut bytes_until_range = bytes_until_range;
+            let mut bytes_remaining = bytes_in_range;
+            let mut slice_bytes = SmallVec::new();
+
+            for bytes in bytes_reversed.iter().rev() {
+                if bytes_until_range >= bytes.len() {
+                    bytes_until_range -= bytes.len();
+                    continue;
+                }
+
+                let start = bytes_until_range;
+                let take = bytes_remaining.min(bytes.len() - start);
+                slice_bytes.push(bytes.slice(start..start + take));
+                bytes_remaining -= take;
+                bytes_until_range = 0;
+
+                if bytes_remaining == 0 {
+                    break;
+                }
+            }
+
+            debug_assert_eq!(bytes_remaining, 0);
+            slice_bytes.reverse();
+
+            return Some(Self {
+                identity: BufferIdentity::new(),
+                storage: BytesViewStorage::Bytes(slice_bytes),
+                len: bytes_in_range,
+            });
+        }
+
+        let BytesViewStorage::Spans(spans_reversed) = &self.storage else {
+            unreachable!("Bytes storage returns from the branch above");
+        };
+
         // Fast path: when the entire requested range lies within the first span - always true for
         // a single-span view (the common case for a sequence backed by one memory block), and also
         // common when peeking a header at the front of a multi-span view - the result is just a
         // sub-slice of that one span, needing no cross-span accounting.
-        if let Some(first) = self.spans_reversed.last()
+        if let Some(first) = spans_reversed.last()
             && required_len <= first.len() as usize
         {
             #[expect(
@@ -376,7 +475,7 @@ impl BytesView {
 
             return Some(Self {
                 identity: BufferIdentity::new(),
-                spans_reversed,
+                storage: BytesViewStorage::Spans(spans_reversed),
                 len: bytes_in_range,
             });
         }
@@ -401,7 +500,7 @@ impl BytesView {
             let mut pass1_bytes_until_range = bytes_until_range;
             let mut pass1_bytes_in_range = bytes_in_range;
 
-            for span in self.spans_reversed.iter().rev() {
+            for span in spans_reversed.iter().rev() {
                 let bytes_in_span = span.len();
                 let bytes_in_span_usize = bytes_in_span as usize;
 
@@ -467,7 +566,7 @@ impl BytesView {
             }
         }
 
-        let relevant_spans = self.spans_reversed.iter().rev().skip(spans_until_range).take(spans_in_range);
+        let relevant_spans = spans_reversed.iter().rev().skip(spans_until_range).take(spans_in_range);
 
         let mut bytes_remaining_in_range = bytes_in_range;
 
@@ -534,7 +633,7 @@ impl BytesView {
 
         Some(Self {
             identity: BufferIdentity::new(),
-            spans_reversed: slice_spans,
+            storage: BytesViewStorage::Spans(slice_spans),
             len: bytes_in_range,
         })
     }
@@ -613,7 +712,11 @@ impl BytesView {
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn first_slice(&self) -> &[u8] {
-        self.spans_reversed.last().map_or::<&[u8], _>(&[], |span| span)
+        match &self.storage {
+            BytesViewStorage::Spans(spans) => spans.last().map_or::<&[u8], _>(&[], |span| span),
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => bytes.last().map_or::<&[u8], _>(&[], AsRef::as_ref),
+        }
     }
 
     /// Iterates over all the slices that make up this view, together with their metadata.
@@ -714,7 +817,11 @@ impl BytesView {
     /// [`first_slice()`]: Self::first_slice
     #[must_use]
     pub fn first_slice_meta(&self) -> Option<&dyn BlockMeta> {
-        self.spans_reversed.last().and_then(|span| span.block_ref().meta())
+        match &self.storage {
+            BytesViewStorage::Spans(spans) => spans.last().and_then(|span| span.block_ref().meta()),
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(_) => None,
+        }
     }
 
     /// Removes the first `count` bytes from the front of the view.
@@ -758,35 +865,50 @@ impl BytesView {
     pub fn advance(&mut self, mut count: usize) {
         self.len = self.len.checked_sub(count).expect("attempted to advance past end of the view");
 
-        while count > 0 {
-            let front = self
-                .spans_reversed
-                .last_mut()
-                .expect("logic error - ran out of spans before advancing over their contents");
-            let span_len = front.len() as usize;
+        match &mut self.storage {
+            BytesViewStorage::Spans(spans) => {
+                while count > 0 {
+                    let front = spans
+                        .last_mut()
+                        .expect("logic error - ran out of spans before advancing over their contents");
+                    let span_len = front.len() as usize;
 
-            if count < span_len {
-                // SAFETY: We must guarantee we advance in-bounds. The if statement guarantees that.
-                unsafe {
-                    front.advance(count);
+                    if count < span_len {
+                        // SAFETY: We must guarantee we advance in-bounds. The if statement guarantees that.
+                        unsafe {
+                            front.advance(count);
+                        }
+                        break;
+                    }
+
+                    spans.pop();
+                    // Will never overflow because we already handled the count < span_len case.
+                    count = count.wrapping_sub(span_len);
                 }
-                break;
             }
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => {
+                while count > 0 {
+                    let front = bytes
+                        .last_mut()
+                        .expect("logic error - ran out of Bytes segments before advancing over their contents");
+                    let bytes_len = front.len();
 
-            self.spans_reversed.pop();
-            // Will never overflow because we already handled the count < span_len case.
-            count = count.wrapping_sub(span_len);
+                    if count < bytes_len {
+                        *front = front.slice(count..);
+                        break;
+                    }
+
+                    bytes.pop();
+                    count = count.wrapping_sub(bytes_len);
+                }
+            }
         }
     }
 
-    /// Reduces the cached length after the caller has removed `amount` bytes from the front spans.
-    ///
-    /// This keeps the cached length consistent with `spans_reversed` for the fused consumption
-    /// fast paths, which pop or advance the front span directly and then record the removal here.
-    /// The caller must have already removed exactly `amount` bytes from the front of the view.
+    /// Reduces the cached length after the caller removes bytes from the front storage item.
     #[inline]
     pub(crate) fn shrink_len(&mut self, amount: usize) {
-        // Cannot underflow: the caller removed `amount` bytes that the view was already covering.
         self.len = self.len.wrapping_sub(amount);
     }
 
@@ -825,12 +947,30 @@ impl BytesView {
         }
         if self.is_empty() {
             self.identity.replace(other.take_identity());
-        } else {
-            self.identity.clear();
+            self.storage = other.storage;
+            self.len = new_len;
+            return;
         }
+        self.identity.clear();
         self.len = new_len;
 
-        self.spans_reversed.insert_many(0, other.spans_reversed);
+        let self_storage = mem::replace(&mut self.storage, BytesViewStorage::empty());
+        self.storage = match (self_storage, other.storage) {
+            (BytesViewStorage::Spans(mut self_spans), BytesViewStorage::Spans(other_spans)) => {
+                self_spans.insert_many(0, other_spans);
+                BytesViewStorage::Spans(self_spans)
+            }
+            #[cfg(any(test, feature = "bytes-compat"))]
+            (BytesViewStorage::Bytes(mut self_bytes), BytesViewStorage::Bytes(other_bytes)) => {
+                self_bytes.insert_many(0, other_bytes);
+                BytesViewStorage::Bytes(self_bytes)
+            }
+            (self_storage, other_storage) => {
+                let mut self_spans = self_storage.into_spans_reversed();
+                self_spans.insert_many(0, other_storage.into_spans_reversed());
+                BytesViewStorage::Spans(self_spans)
+            }
+        };
     }
 
     /// Returns a new view that concatenates this view with another.
@@ -872,7 +1012,7 @@ impl BytesView {
 #[cfg(feature = "seismograph")]
 impl seismograph_io::Buffer for BytesView {
     fn recording_state(&self) -> seismograph_io::BufferState {
-        seismograph_io::BufferState::new(Some(self.identity.get_or_allocate()), self.len(), self.spans_reversed.len())
+        seismograph_io::BufferState::new(Some(self.identity.get_or_allocate()), self.len(), self.storage.slice_count())
     }
 }
 
@@ -889,54 +1029,51 @@ impl PartialEq for BytesView {
             return false;
         }
 
-        // The two views may have differently sized spans, so we only compare in steps
-        // of the smallest span size offered by either view.
-
-        // We iterate over spans_reversed using indices to avoid cloning the views,
-        // which would increment atomic reference counts for every span.
-        let mut self_span_idx = self.spans_reversed.len();
+        let mut self_slices = self.slices();
+        let mut other_slices = other.slices();
+        let mut self_slice = self_slices.next().map_or(&[][..], |(slice, _)| slice);
+        let mut other_slice = other_slices.next().map_or(&[][..], |(slice, _)| slice);
         let mut self_offset: usize = 0;
-        let mut other_span_idx = other.spans_reversed.len();
         let mut other_offset: usize = 0;
         let mut remaining_bytes = self.len();
 
         while remaining_bytes > 0 {
-            let self_span: &[u8] = &self.spans_reversed[self_span_idx - 1];
-            let other_span: &[u8] = &other.spans_reversed[other_span_idx - 1];
-
-            let self_slice = self_span
+            let self_remaining = self_slice
                 .get(self_offset..)
-                .expect("offset only advances within span length, reset to 0 on span boundary");
-            let other_slice = other_span
+                .expect("offset only advances within slice length, reset to 0 on slice boundary");
+            let other_remaining = other_slice
                 .get(other_offset..)
-                .expect("offset only advances within span length, reset to 0 on span boundary");
+                .expect("offset only advances within slice length, reset to 0 on slice boundary");
 
-            let comparison_len = NonZero::new(self_slice.len().min(other_slice.len()))
+            let comparison_len = NonZero::new(self_remaining.len().min(other_remaining.len()))
                 .expect("both views said there are remaining bytes but we got an empty slice from at least one of them");
 
-            let self_slice = self_slice.get(..comparison_len.get()).expect("guarded by min() above");
-            let other_slice = other_slice.get(..comparison_len.get()).expect("guarded by min() above");
+            let self_part = self_remaining.get(..comparison_len.get()).expect("guarded by min() above");
+            let other_part = other_remaining.get(..comparison_len.get()).expect("guarded by min() above");
 
-            if self_slice != other_slice {
+            if self_part != other_part {
                 // Something is different. That is enough for a determination.
                 return false;
             }
 
-            // Advance within or past the current spans.
+            // Advance within or past the current slices.
             self_offset += comparison_len.get();
-            debug_assert!(self_offset <= self_span.len(), "guarded by min() above to never exceed span length");
-            if self_offset == self_span.len() {
-                self_span_idx -= 1;
+            debug_assert!(
+                self_offset <= self_slice.len(),
+                "guarded by min() above to never exceed slice length"
+            );
+            if self_offset == self_slice.len() {
+                self_slice = self_slices.next().map_or(&[][..], |(slice, _)| slice);
                 self_offset = 0;
             }
 
             other_offset += comparison_len.get();
             debug_assert!(
-                other_offset <= other_span.len(),
-                "guarded by min() above to never exceed span length"
+                other_offset <= other_slice.len(),
+                "guarded by min() above to never exceed slice length"
             );
-            if other_offset == other_span.len() {
-                other_span_idx -= 1;
+            if other_offset == other_slice.len() {
+                other_slice = other_slices.next().map_or(&[][..], |(slice, _)| slice);
                 other_offset = 0;
             }
 
@@ -961,47 +1098,20 @@ impl PartialEq<&[u8]> for BytesView {
             return false;
         }
 
-        // We iterate over spans_reversed using an index to avoid cloning the view,
-        // which would increment atomic reference counts for every span.
-        let mut span_idx = self.spans_reversed.len();
-        let mut span_offset: usize = 0;
-        let mut remaining_bytes = self.len();
-
-        while remaining_bytes > 0 {
-            let span: &[u8] = &self.spans_reversed[span_idx - 1];
-            let self_slice = span
-                .get(span_offset..)
-                .expect("offset only advances within span length, reset to 0 on span boundary");
-
+        for (self_slice, _) in self.slices() {
             let slice_size = NonZero::new(self_slice.len())
                 .expect("both sides of the comparison said there are remaining bytes but we got an empty slice from at least one of them");
 
-            let self_slice = self_slice.get(..slice_size.get()).expect("already checked that remaining > 0");
             let other_slice = other.get(..slice_size.get()).expect("already checked that remaining > 0");
 
             if self_slice != other_slice {
                 return false;
             }
 
-            // Advance within or past the current span.
-            span_offset += slice_size.get();
-            debug_assert!(
-                span_offset <= span.len(),
-                "guarded by (..slice_size) logic above to never exceed span length"
-            );
-            if span_offset == span.len() {
-                span_idx -= 1;
-                span_offset = 0;
-            }
-
             other = other.get(slice_size.get()..).expect("guarded by length check above");
-
-            remaining_bytes = remaining_bytes
-                .checked_sub(slice_size.get())
-                .expect("impossible to consume more bytes from the sequences than are remaining");
         }
 
-        debug_assert_eq!(remaining_bytes, 0);
+        debug_assert!(other.is_empty());
 
         true
     }
@@ -1056,10 +1166,8 @@ impl Hash for BytesView {
         let mut block = [0_u8; HASH_BLOCK_BYTES];
         let mut filled = 0_usize;
 
-        // We iterate over spans_reversed in reverse (logical order) using references, which does
-        // not clone the spans and therefore does not touch their atomic reference counts.
-        for span in self.spans_reversed.iter().rev() {
-            let mut remaining: &[u8] = span;
+        for (slice, _) in self.slices() {
+            let mut remaining = slice;
             while !remaining.is_empty() {
                 // Fast path: when the buffer is empty we are aligned to a block boundary, so if the
                 // span holds at least a full block we can hash it directly from the span without
@@ -1102,16 +1210,15 @@ pub struct BytesViewSlices<'s> {
 
     // Index of the most recent that we have already returned.
     //
-    // Index into spans_reversed, counting from the end (the logical first span).
-    // Starts at spans_reversed.len() (one past the end) and counts down toward 0.
-    previous_span_index: usize,
+    // Index into the reverse-ordered storage. It starts one past the end and counts down.
+    previous_slice_index: usize,
 }
 
 impl<'s> BytesViewSlices<'s> {
     pub(crate) fn new(view: &'s BytesView) -> Self {
         Self {
             view,
-            previous_span_index: view.spans_reversed.len(),
+            previous_slice_index: view.storage.slice_count(),
         }
     }
 }
@@ -1121,16 +1228,19 @@ impl<'s> Iterator for BytesViewSlices<'s> {
 
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     fn next(&mut self) -> Option<Self::Item> {
-        if self.previous_span_index == 0 {
+        if self.previous_slice_index == 0 {
             return None;
         }
 
-        self.previous_span_index -= 1;
-        let span = &self.view.spans_reversed[self.previous_span_index];
-        let slice: &'s [u8] = span;
-        let meta: Option<&'s dyn BlockMeta> = span.block_ref().meta();
-
-        Some((slice, meta))
+        self.previous_slice_index -= 1;
+        match &self.view.storage {
+            BytesViewStorage::Spans(spans) => {
+                let span = &spans[self.previous_slice_index];
+                Some((span, span.block_ref().meta()))
+            }
+            #[cfg(any(test, feature = "bytes-compat"))]
+            BytesViewStorage::Bytes(bytes) => Some((&bytes[self.previous_slice_index], None)),
+        }
     }
 }
 
@@ -1993,7 +2103,7 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<BytesView>(), 272 + size_of::<BufferIdentity>());
+        assert_eq!(size_of::<BytesView>(), 280 + size_of::<BufferIdentity>());
     }
 
     #[test]

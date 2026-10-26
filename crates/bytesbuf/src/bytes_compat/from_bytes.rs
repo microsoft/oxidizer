@@ -17,49 +17,57 @@ use crate::{BytesView, MAX_INLINE_SPANS, Span};
 impl From<Bytes> for BytesView {
     /// Converts a [`Bytes`] instance into a `BytesView`.
     ///
-    /// This operation is always zero-copy, though does cost a small dynamic allocation.
+    /// This operation is zero-copy and does not allocate for the common case.
     fn from(value: Bytes) -> Self {
-        // A Bytes instance may contain any number of bytes, same as a BytesView. However, each
-        // block of memory inside BytesView is limited to BlockSize::MAX, which is a smaller size.
-        // Therefore, we may need to chop up the Bytes into smaller slices, so each slice fits in
-        // a BlockSize. This iterator does the job.
-        let bytes_blocks = BytesBlockIterator::new(value);
-
-        let blocks = bytes_blocks.map(|bytes| {
-            // SAFETY: We must treat the provided memory capacity as immutable. We do, only using
-            // it to create a `BytesView` over the immutable data that already exists within.
-            // Note that this requirement also extends down the stack - no code that runs in this
-            // function is allowed to create an exclusive reference over the data of the `Bytes`,
-            // even if that exclusive reference is not used for writes (Miri will tell you if you
-            // did it wrong).
-            unsafe { non_empty_bytes_to_immutable_block(bytes) }
-        });
-
-        let spans = blocks.map(|block| {
-            let mut span_builder = block.into_span_builder();
-
-            #[expect(clippy::cast_possible_truncation, reason = "a span can never be larger than BlockSize")]
-            let len = NonZero::new(span_builder.remaining_capacity() as BlockSize).expect("splitting Bytes cannot yield zero-sized chunks");
-
-            // SAFETY: We know that the data is already initialized; we simply declare this to the
-            // SpanBuilder and get it to emit a completed Span from all its contents.
-            unsafe {
-                span_builder.advance(len.get() as usize);
-            }
-
-            span_builder.consume(len)
-        });
-
-        // NB! We cannot use `BytesBuf::from_blocks` because it is not guaranteed to use the
-        // blocks in the same order as they are provided. Instead, we directly construct the inner
-        // span array in the BytesView, which lets us avoid any temporary allocations and resizing.
-        let mut spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = spans.collect();
-
-        // Not ideal but 99.999% of the case this is a 1-element array, so it does not matter.
-        spans_reversed.reverse();
-
-        Self::from_spans_reversed(spans_reversed)
+        Self::from_bytes(value)
     }
+}
+
+pub(crate) fn bytes_storage_to_spans_reversed(bytes_reversed: SmallVec<[Bytes; MAX_INLINE_SPANS]>) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
+    bytes_reversed.into_iter().flat_map(bytes_to_spans_reversed).collect()
+}
+
+fn bytes_to_spans_reversed(value: Bytes) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
+    // A Bytes instance may contain any number of bytes, same as a BytesView. However, each
+    // block of memory inside BytesView is limited to BlockSize::MAX, which is a smaller size.
+    // Therefore, we may need to chop up the Bytes into smaller slices, so each slice fits in
+    // a BlockSize. This iterator does the job.
+    let bytes_blocks = BytesBlockIterator::new(value);
+
+    let blocks = bytes_blocks.map(|bytes| {
+        // SAFETY: We must treat the provided memory capacity as immutable. We do, only using
+        // it to create a `BytesView` over the immutable data that already exists within.
+        // Note that this requirement also extends down the stack - no code that runs in this
+        // function is allowed to create an exclusive reference over the data of the `Bytes`,
+        // even if that exclusive reference is not used for writes (Miri will tell you if you
+        // did it wrong).
+        unsafe { non_empty_bytes_to_immutable_block(bytes) }
+    });
+
+    let spans = blocks.map(|block| {
+        let mut span_builder = block.into_span_builder();
+
+        #[expect(clippy::cast_possible_truncation, reason = "a span can never be larger than BlockSize")]
+        let len = NonZero::new(span_builder.remaining_capacity() as BlockSize).expect("splitting Bytes cannot yield zero-sized chunks");
+
+        // SAFETY: We know that the data is already initialized; we simply declare this to the
+        // SpanBuilder and get it to emit a completed Span from all its contents.
+        unsafe {
+            span_builder.advance(len.get() as usize);
+        }
+
+        span_builder.consume(len)
+    });
+
+    // NB! We cannot use `BytesBuf::from_blocks` because it is not guaranteed to use the
+    // blocks in the same order as they are provided. Instead, we directly construct the inner
+    // span array in the BytesView, which lets us avoid any temporary allocations and resizing.
+    let mut spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = spans.collect();
+
+    // Not ideal but 99.999% of the case this is a 1-element array, so it does not matter.
+    spans_reversed.reverse();
+
+    spans_reversed
 }
 
 /// An implementation of `BlockRef` that reuses immutable memory of an owned `Bytes` instance.
@@ -195,6 +203,9 @@ impl Iterator for BytesBlockIterator {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
     use bytes::{BufMut, BytesMut};
 
     use super::*;
@@ -212,6 +223,58 @@ mod tests {
 
         // We expect this to be zero-copy - Bytes to BytesView always is.
         assert_eq!(view.first_slice().as_ptr(), bytes_data_ptr);
+    }
+
+    #[test]
+    fn owned_bytes_preserve_order_across_clone_slice_and_append() {
+        let first = BytesView::from(Bytes::from_static(b"abc"));
+        let second = BytesView::from(Bytes::from_static(b"def"));
+        let third = BytesView::from(Bytes::from_static(b"ghi"));
+
+        let mut combined = first.clone();
+        combined.append(second);
+        combined.append(third);
+
+        assert_eq!(combined, b"abcdefghi");
+        assert_eq!(combined.range(2..8), b"cdefgh");
+        assert_eq!(first, b"abc");
+    }
+
+    #[test]
+    fn owned_bytes_drop_after_last_view_and_guard() {
+        #[derive(Debug)]
+        struct Owner {
+            bytes: &'static [u8],
+            drops: Arc<AtomicUsize>,
+        }
+
+        impl AsRef<[u8]> for Owner {
+            fn as_ref(&self) -> &[u8] {
+                self.bytes
+            }
+        }
+
+        impl Drop for Owner {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let bytes = Bytes::from_owner(Owner {
+            bytes: b"owned bytes",
+            drops: Arc::clone(&drops),
+        });
+        let view = BytesView::from(bytes);
+        let clone = view.clone();
+        let guard = view.extend_lifetime();
+
+        drop(view);
+        drop(clone);
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+
+        drop(guard);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     #[test]

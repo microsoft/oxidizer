@@ -6,6 +6,7 @@ use bytes::{Bytes, BytesMut};
 use nm::Event;
 
 use crate::BytesView;
+use crate::view::BytesViewStorage;
 
 impl BytesView {
     /// Returns a `bytes::Bytes` that contains the same byte sequence.
@@ -53,33 +54,47 @@ impl BytesView {
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn to_bytes(&self) -> Bytes {
-        if self.spans_reversed.is_empty() {
-            #[cfg(feature = "std")]
-            TO_BYTES_SHARED.with(|x| x.observe(0));
+        match &self.storage {
+            BytesViewStorage::Spans(spans) => {
+                if spans.is_empty() {
+                    #[cfg(feature = "std")]
+                    TO_BYTES_SHARED.with(|x| x.observe(0));
 
-            Bytes::new()
-        } else if self.spans_reversed.len() == 1 {
-            // We are a single-span view, which can always be zero-copy represented.
-            #[cfg(feature = "std")]
-            TO_BYTES_SHARED.with(|x| x.observe(self.len()));
+                    Bytes::new()
+                } else if spans.len() == 1 {
+                    // We are a single-span view, which can always be zero-copy represented.
+                    #[cfg(feature = "std")]
+                    TO_BYTES_SHARED.with(|x| x.observe(self.len()));
 
-            Bytes::from_owner(self.spans_reversed.first().expect("we verified there is one span").clone())
-        } else {
-            // We must copy, as Bytes can only represent consecutive spans of data.
-            let mut bytes = BytesMut::with_capacity(self.len());
-
-            for span in self.spans_reversed.iter().rev() {
-                bytes.extend_from_slice(span);
+                    Bytes::from_owner(spans.first().expect("we verified there is one span").clone())
+                } else {
+                    copy_slices_to_bytes(self)
+                }
             }
+            BytesViewStorage::Bytes(bytes) if bytes.len() == 1 => {
+                #[cfg(feature = "std")]
+                TO_BYTES_SHARED.with(|x| x.observe(self.len()));
 
-            debug_assert_eq!(self.len(), bytes.len());
-
-            #[cfg(feature = "std")]
-            TO_BYTES_COPIED.with(|x| x.observe(self.len()));
-
-            bytes.freeze()
+                bytes.first().expect("we verified there is one Bytes segment").clone()
+            }
+            BytesViewStorage::Bytes(_) => copy_slices_to_bytes(self),
         }
     }
+}
+
+fn copy_slices_to_bytes(view: &BytesView) -> Bytes {
+    let mut bytes = BytesMut::with_capacity(view.len());
+
+    for (slice, _) in view.slices() {
+        bytes.extend_from_slice(slice);
+    }
+
+    debug_assert_eq!(view.len(), bytes.len());
+
+    #[cfg(feature = "std")]
+    TO_BYTES_COPIED.with(|x| x.observe(view.len()));
+
+    bytes.freeze()
 }
 
 impl From<BytesView> for Bytes {
