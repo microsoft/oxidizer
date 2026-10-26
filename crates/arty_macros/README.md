@@ -22,6 +22,9 @@ Both attributes start a runtime, pass its worker capabilities to an
 async function, and shut down when that function returns. The optional
 `workers = N` argument starts exactly `N` async worker threads. Multiple
 workers share processors when `N` exceeds available processor capacity.
+The `monitor = enabled` and `monitor = disabled` arguments select the
+monitoring policy. `#[arty::main]` defaults to enabled. `#[arty::test]`
+defaults to disabled to reduce monitor overhead and resource use.
 
 The application-facing references are
 [`arty::main`][__link1] and

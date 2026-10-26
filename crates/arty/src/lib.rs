@@ -165,6 +165,8 @@ use arty_io_core as _;
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
 ///   are available, multiple worker threads share each processor. Zero fails at
 ///   construction.
+/// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
+///   policy. The default is `enabled`.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
@@ -173,9 +175,7 @@ use arty_io_core as _;
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// monitoring, or an at-most/all-workers policy must be configured. Macro-created
-/// runtimes use the default [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled)
-/// policy.
+/// or an at-most/all-workers policy must be configured.
 ///
 /// # Panics
 ///
@@ -202,6 +202,15 @@ use arty_io_core as _;
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
 /// # }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
+/// Disable monitoring for the runtime:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(monitor = disabled)]
+/// async fn main(_cx: arty::task::Builtins) {}
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -233,7 +242,9 @@ pub use arty_macros::main;
 /// the test harness runs it.
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// option also applies. By default, a test uses one worker.
+/// and `monitor` options also apply. By default, a test uses one worker and
+/// disables monitoring to reduce monitor overhead and resource use. A test that
+/// exercises monitoring must opt in with `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -252,11 +263,6 @@ pub use arty_macros::main;
 /// with controlled time, create the control in a synchronous test and call
 /// `builder.clock(control.clone()).build()`. Enabling `test-util` alone does
 /// not change a one-argument test's clock.
-///
-/// Macro-created test runtimes use the default
-/// [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled) policy.
-/// Use a regular synchronous test with explicit runtime construction when the
-/// test needs [`MonitorPolicy::disabled`](crate::runtime::MonitorPolicy::disabled).
 ///
 /// # Panics
 ///
@@ -284,6 +290,14 @@ pub use arty_macros::main;
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
 /// }
+/// ```
+///
+/// Enable monitoring for a test that exercises monitoring behavior:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(monitor = enabled)]
+/// async fn monitored(_cx: arty::task::Builtins) {}
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

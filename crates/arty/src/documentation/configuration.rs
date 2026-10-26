@@ -73,17 +73,18 @@
 //! # Entry-point attributes
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
-//! the runtime for you. Both attributes use the default enabled monitoring
-//! policy. By default, `main` chooses workers automatically and `test` uses one
-//! worker.
+//! the runtime for you. By default, `main` uses the enabled monitoring policy.
+//! Tests use one worker and disable monitoring to reduce monitor overhead and
+//! resource use. A test that exercises monitoring must use `monitor = enabled`.
 //!
-//! Use `workers = N` to set the exact worker count. Build the runtime explicitly
-//! for custom clocks, telemetry, blocking pools, stack sizes, or an
+//! Use `workers = N` to set the exact worker count. Use `monitor = enabled` or
+//! `monitor = disabled` to select the monitoring policy. Build the runtime
+//! explicitly for custom clocks, telemetry, blocking pools, stack sizes, or an
 //! [`at_most`](crate::runtime::WorkersPolicy::at_most) or
 //! [`all`](crate::runtime::WorkersPolicy::all) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
-//! signature and worker option. Build the runtime yourself if you need to
+//! signature and configuration. Build the runtime yourself if you need to
 //! handle construction errors or own its shutdown.
 //!
 //! # Clocks and telemetry
