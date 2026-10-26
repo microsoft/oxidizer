@@ -78,6 +78,10 @@ name = "performables_arc_clone"
 harness = false
 
 [[bench]]
+name = "performables_arc_relocate"
+harness = false
+
+[[bench]]
 name = "performables_ready"
 harness = false
 
