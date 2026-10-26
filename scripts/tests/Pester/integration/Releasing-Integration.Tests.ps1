@@ -939,6 +939,58 @@ publish = true
     }
 }
 
+Describe 'Write-Changelog: source-level release boundary' {
+    BeforeAll {
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+    }
+
+    It 'excludes earlier release changes when publication tags are <TagState>' -TestCases @(
+        @{ TagState = 'missing'; TagVersion = '' }
+        @{ TagState = 'outdated'; TagVersion = '0.2.0' }
+        @{ TagState = 'current'; TagVersion = '0.2.1' }
+    ) {
+        param($TagState, $TagVersion)
+
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive "changelog-$TagState")
+        if ($TagVersion -eq '0.2.0') {
+            Invoke-Git -Arguments @('tag', 'dependency-v0.2.0') -RepoRoot $ws.Path
+        }
+        $ws.ModifySource('dependency', '// earlier fix')
+        $ws.AddCommit('fix(dependency): already released fix')
+        $ws.SetVersion('dependency', '0.2.1')
+
+        $packageFolder = Join-Path $ws.Path 'crates\dependency'
+        $changelog = Join-Path $packageFolder 'CHANGELOG.md'
+        $earlierContent = "## [0.2.1] - 2026-06-15`n`n- already released fix`n"
+        Set-Content -LiteralPath $changelog -Value "# Changelog`n`n$earlierContent" -NoNewline -Encoding utf8
+        $ws.AddCommit('chore(dependency): release dependency 0.2.1')
+        if ($TagVersion -eq '0.2.1') {
+            Invoke-Git -Arguments @('tag', 'dependency-v0.2.1') -RepoRoot $ws.Path
+        }
+
+        $ws.ModifySource('dependency', '// new optimization')
+        $ws.AddCommit('perf(dependency): new optimization')
+        $ws.SetVersion('dependency', '0.2.2')
+
+        Push-Location $ws.Path
+        try {
+            Write-Changelog -packageName 'dependency' -newVersion '0.2.2' `
+                -packageFolder $packageFolder -changelogFile $changelog -prBaseUrl 'http://x'
+        } finally {
+            Pop-Location
+        }
+
+        $content = Get-Content -LiteralPath $changelog -Raw
+        $newSection = $content.Substring(0, $content.IndexOf('## [0.2.1]'))
+        $newSection | Should -Match '## \[0\.2\.2\]'
+        $newSection | Should -Match 'new optimization'
+        $newSection | Should -Not -Match 'already released fix'
+        $newSection | Should -Not -Match 'release dependency 0\.2\.1'
+        $content.EndsWith($earlierContent) | Should -BeTrue
+    }
+}
+
 # --------------------------------------------------------------------------
 # Invoke-ResolvedRelease — atomic multi-package on-disk product.
 #

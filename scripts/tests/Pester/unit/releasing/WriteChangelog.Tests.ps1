@@ -22,14 +22,15 @@ BeforeAll {
 
 Describe 'Write-Changelog cascade emission' {
     BeforeEach {
-        # Hermetic: no tags, no commits. The function falls straight through
+        # Hermetic: no committed version, no commits. The function falls straight through
         # to the cascade-emission branch because $formattedCommits.Count -eq 0
         # but $hasCascade -eq $true.
+        Mock -CommandName Get-PreviousVersionBumpCommit -MockWith { $null }
         Mock -CommandName Invoke-Git -MockWith { @() }
 
         # Stable date for diffability across runs.
         Mock -CommandName Get-Date -MockWith {
-            [datetime]'2026-06-15T00:00:00Z'
+            [datetime]::new(2026, 6, 15)
         }
 
         $script:ChangelogPath = Join-Path $TestDrive ("write-changelog-" + [guid]::NewGuid().Guid.Substring(0,8) + ".md")
@@ -158,7 +159,7 @@ Describe 'Write-Changelog cascade emission' {
 
     Context 'no-cascade paths' {
         It 'emits no cascade section when reasons is null and no commits exist' {
-            # No tags, no commits, no cascade reasons → warns and returns
+            # No committed version, no commits, no cascade reasons → warns and returns
             # WITHOUT touching the file.
             $before = Get-Content -LiteralPath $script:ChangelogPath -Raw
 

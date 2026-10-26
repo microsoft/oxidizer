@@ -1294,25 +1294,18 @@ function Write-Changelog {
 
     $hasUnreleased = $unreleasedLines.Count -gt 0
 
-    $tags = Invoke-Git -Arguments @('tag', '--list', "$packageName-v*")
-    $latestTag = $null
-    if ($null -eq $tags -or $tags.Count -eq 0) {
-        Write-Warning "No tags found for package '$packageName'. Generating changelog from all history."
-    } else {
-        $filteredTags = @($tags | Where-Object { $_ -match "^${packageName}-v\d+\.\d+\.\d+$" })
-        if ($filteredTags.Count -gt 0) {
-            $sortedTags = @($filteredTags | Sort-Object { [version]($_ -replace "${packageName}-v", '') })
-            $latestTag = $sortedTags[-1]
-        } else {
-            Write-Warning "No valid semantic version tags found for package '$packageName'. Generating changelog from all history."
-        }
+    # Match the SemVer source baseline: publication tags can lag declared versions.
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $packageFolder)
+    $folder = Split-Path -Leaf $packageFolder
+    $baseline = Get-PreviousVersionBumpCommit -RepoRoot $repoRoot -BaseRef 'HEAD' -PackageFolder $folder
+    if ($null -eq $baseline) {
+        Write-Warning "No committed version found for package '$packageName'. Generating changelog from all history."
     }
 
     $currentDate = (Get-Date).ToString('yyyy-MM-dd')
 
-    # Get commits since the latest tag (unreleased commits)
-    $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
-    $rawCommits = Invoke-Git -Arguments @('log', $range, '--pretty=format:%s', '--', $packageFolder)
+    $range = if ($null -ne $baseline) { "$($baseline.Sha)..HEAD" } else { "HEAD" }
+    $rawCommits = Invoke-Git -Arguments @('log', $range, '--pretty=format:%s', '--', $packageFolder) -RepoRoot $repoRoot
     if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
         $rawCommits = @()
     } else {
