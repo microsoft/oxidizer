@@ -332,6 +332,10 @@ impl EnrichmentTransfer {
 
     /// Restores captured heads with an owned guard that can outlive this transfer.
     pub(crate) fn apply_owned(&self) -> Guard {
+        if self.slots.is_empty() {
+            return Guard::empty();
+        }
+
         let mut slots = SmallVec::with_capacity(self.slots.len());
         for (slot, head) in &self.slots {
             let prev = slot.replace(head.clone());
@@ -604,6 +608,41 @@ mod coverage_tests {
 
         drop(guard);
         assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn empty_apply_owned_leaves_existing_enrichment_untouched() {
+        let slot = Slot::new();
+        let existing_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("existing", 1_i64)]));
+        let existing = slot.current().unwrap();
+        let transfer = EnrichmentTransfer::default();
+
+        let guard = transfer.apply_owned();
+
+        assert!(Arc::ptr_eq(slot.current().as_ref().unwrap(), &existing));
+        drop(guard);
+        assert!(Arc::ptr_eq(slot.current().as_ref().unwrap(), &existing));
+        drop(existing_guard);
+    }
+
+    #[test]
+    fn apply_owned_restores_previous_heads() {
+        let slot = Slot::new();
+        let captured_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("captured", 1_i64)]));
+        let captured = slot.current().unwrap();
+        let mut transfer = EnrichmentTransfer::default();
+        transfer.add_slot(&slot);
+        drop(captured_guard);
+
+        let previous_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("previous", 2_i64)]));
+        let previous = slot.current().unwrap();
+
+        let guard = transfer.apply_owned();
+        assert!(Arc::ptr_eq(slot.current().as_ref().unwrap(), &captured));
+
+        drop(guard);
+        assert!(Arc::ptr_eq(slot.current().as_ref().unwrap(), &previous));
+        drop(previous_guard);
     }
 
     #[test]
