@@ -8,8 +8,6 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-testing_aids::init_tracing!();
-
 #[cfg(test)]
 mod tests {
     use std::io::{self, Write as _};

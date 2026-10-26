@@ -243,3 +243,5 @@ impl Service<HttpRequest> for OkHandler {
         std::future::ready(HttpResponseBuilder::new(&self.body_builder).status(StatusCode::OK).build())
     }
 }
+
+testing_aids::init_tracing!();

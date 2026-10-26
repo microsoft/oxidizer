@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
-testing_aids::init_tracing!();
-
 #[path = "../support/mod.rs"]
 mod support;
 

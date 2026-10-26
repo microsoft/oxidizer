@@ -259,7 +259,6 @@ dependencies = [
  "arty_macros",
  "bolero",
  "criterion",
- "ctor",
  "data_privacy",
  "derive_more",
  "events_once",
@@ -2079,7 +2078,6 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
- "ctor",
  "fetch",
  "fetch_winhttp_impl",
  "futures",
@@ -2089,7 +2087,6 @@ dependencies = [
  "http_extensions",
  "observed",
  "ohno",
- "testing_aids",
  "tick",
  "tokio",
 ]
@@ -2680,7 +2677,6 @@ version = "0.3.0"
 dependencies = [
  "bytesbuf",
  "compressors",
- "ctor",
  "futures",
  "http",
  "http-body",
@@ -2691,7 +2687,6 @@ dependencies = [
  "ohno",
  "seatbelt",
  "smallvec",
- "testing_aids",
  "tokio",
 ]
 
@@ -4219,7 +4214,6 @@ version = "0.3.0"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "ctor",
  "libc",
  "loom",
  "many_cpus",

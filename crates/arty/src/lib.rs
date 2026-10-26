@@ -357,6 +357,3 @@ pub mod time {
     #[doc(inline)]
     pub use tick::ClockControl;
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

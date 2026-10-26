@@ -27,8 +27,6 @@ use testing_aids::YieldFuture;
 #[cfg(feature = "macros")]
 use thread_aware::Unaware;
 
-testing_aids::init_tracing!();
-
 #[test]
 fn assert_send_sync() {
     static_assertions::assert_impl_all!(Scheduler: Send, Sync);
