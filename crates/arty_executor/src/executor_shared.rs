@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::task::Waker;
 use std::thread::ThreadId;
 
@@ -15,7 +16,10 @@ use plurality::MultiPool;
 
 use crate::remote::Sender as RemoteSender;
 use crate::wake::RemoteWake;
-use crate::{JoinHandle, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_remote_task, allocate_task};
+use crate::{
+    JoinHandle, ShutdownCause, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_remote_task, allocate_task,
+    discard_task_panic_payload,
+};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -29,7 +33,7 @@ struct ExecutorSharedInner {
     task_storage: MultiPool,
     task_count: Cell<usize>,
     join_events: LocalEventLake,
-    shutting_down: Cell<bool>,
+    shutdown_cause: Rc<OnceLock<ShutdownCause>>,
     wake: WakeShared,
     // Owner-only reception breaks the wake queue -> task -> shared wake state ownership cycle.
     remote_wakes: channel::Receiver<RemoteWake>,
@@ -45,7 +49,7 @@ impl ExecutorShared {
                 task_storage: MultiPool::new(),
                 task_count: Cell::new(0),
                 join_events: LocalEventLake::new(),
-                shutting_down: Cell::new(false),
+                shutdown_cause: Rc::new(OnceLock::new()),
                 wake,
                 remote_wakes,
                 sink,
@@ -66,7 +70,11 @@ impl ExecutorShared {
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
-        self.inner.shutting_down.get()
+        self.inner.shutdown_cause.get().is_some()
+    }
+
+    pub(crate) fn shutdown_cause(&self) -> ShutdownCause {
+        self.inner.shutdown_cause.get().cloned().unwrap_or_default()
     }
 
     pub(crate) fn accept_new_tasks(&self, active: &mut VecDeque<TaskHandle>) -> usize {
@@ -100,18 +108,16 @@ impl ExecutorShared {
 
     pub(crate) fn shutdown_complete(&self) -> bool {
         debug_assert!(self.inner.new_tasks.borrow().is_empty());
-        self.inner.shutting_down.get() && self.inner.task_count.get() == 0
+        self.is_shutting_down() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn begin_shutdown(&self) {
-        assert!(
-            !self.inner.shutting_down.replace(true),
-            "Cannot start shutdown process when it has already been started"
-        );
+    pub(crate) fn begin_shutdown(&self, cause: ShutdownCause) -> ShutdownCause {
+        _ = self.inner.shutdown_cause.set(cause);
+        self.shutdown_cause()
     }
 
-    pub(crate) fn request_shutdown(&self) {
-        self.inner.shutting_down.set(true);
+    pub(crate) fn request_shutdown(&self, cause: ShutdownCause) -> ShutdownCause {
+        self.begin_shutdown(cause)
     }
 
     pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
@@ -134,7 +140,7 @@ impl ExecutorShared {
             options,
             self.inner.sink.clone(),
         ));
-        JoinHandle::new(result_rx)
+        JoinHandle::new(result_rx, Rc::clone(&self.inner.shutdown_cause))
     }
 
     pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>)
@@ -143,10 +149,16 @@ impl ExecutorShared {
         R: Send + 'static,
     {
         if self.is_shutting_down() {
+            if let Err(panic) = remote_result_tx.shutdown(self.shutdown_cause()) {
+                discard_task_panic_payload(panic);
+            }
             return;
         }
         let future = future.into_future();
         if self.is_shutting_down() {
+            if let Err(panic) = remote_result_tx.shutdown(self.shutdown_cause()) {
+                discard_task_panic_payload(panic);
+            }
             return;
         }
         self.register_task(allocate_remote_task(
@@ -159,7 +171,8 @@ impl ExecutorShared {
     }
 
     fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
-        self.is_shutting_down().then(|| JoinHandle::disconnected(&self.inner.join_events))
+        self.is_shutting_down()
+            .then(|| JoinHandle::disconnected(&self.inner.join_events, Rc::clone(&self.inner.shutdown_cause)))
     }
 
     fn register_task(&self, task_handle: TaskHandle) {
@@ -198,7 +211,7 @@ mod tests {
         let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), std::thread::current().id());
 
         assert!(!shared.shutdown_complete());
-        shared.request_shutdown();
+        shared.request_shutdown(ShutdownCause::default());
         assert!(shared.shutdown_complete());
     }
 }

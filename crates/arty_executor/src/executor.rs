@@ -11,7 +11,7 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
 use tick::SimpleClock;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskHandle, TaskList, TaskSet, executor_context};
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context};
 
 /// The async task executor for a single thread.
 ///
@@ -60,8 +60,8 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, TaskHandle, TaskList,
 /// 3. Drop the executor when convenient.
 ///
 /// Dropping the executor without this sequence is also safe and synchronously cancels remaining
-/// tasks. Retained join handles and task wakers own independent pooled metadata, so they may
-/// outlive the executor and report shutdown or become inert respectively.
+/// tasks. Retained join handles keep pooled result slots alive and report shutdown. Retained task
+/// wakers keep emptied task allocations alive and become inert.
 ///
 /// # Process termination
 ///
@@ -158,10 +158,10 @@ impl Executor {
     ///
     /// [1]: Self::execute_cycle
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
-    pub fn begin_shutdown(&mut self) {
-        self.shared.begin_shutdown();
+    pub fn begin_shutdown(&mut self, cause: ShutdownCause) {
+        let cause = self.shared.begin_shutdown(cause);
         let aborted_count = self.prepare_task_abort();
-        self.abort_prepared_tasks(aborted_count, true);
+        self.abort_prepared_tasks(aborted_count, true, &cause);
     }
 
     fn start_cycle(&self) -> Instant {
@@ -192,8 +192,9 @@ impl Executor {
 
     fn cancel_if_shutting_down(&mut self) {
         if self.shared.is_shutting_down() {
+            let cause = self.shared.shutdown_cause();
             let aborted_count = self.prepare_task_abort();
-            self.abort_prepared_tasks(aborted_count, true);
+            self.abort_prepared_tasks(aborted_count, true, &cause);
         }
     }
 
@@ -235,7 +236,7 @@ impl Executor {
             let linked = task.links().linked.get();
 
             if self.shared.is_shutting_down() {
-                task.abort();
+                task.abort(self.shared.shutdown_cause());
                 self.shared.decrement_task_count(1);
                 // SAFETY: The active owner keeps `pointer` live; a linked active task belongs to
                 // this executor's pending list, and this code runs on the task owner thread.
@@ -303,10 +304,10 @@ impl Executor {
         aborted_count
     }
 
-    fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool) {
+    fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool, cause: &ShutdownCause) {
         while let Some(task_handle) = self.active.pop_front() {
             // SAFETY: The cancellation batch owns each pinned task on its owner thread.
-            unsafe { task_handle.as_task() }.abort();
+            unsafe { task_handle.as_task() }.abort(cause.clone());
         }
         if record_drop_metric && let Some(aborted_count) = NonZeroUsize::new(aborted_count) {
             TASKS_DROPPED.with(|event| event.observe(aborted_count.get()));
@@ -335,17 +336,18 @@ impl Drop for Executor {
             fn drop(&mut self) {
                 if std::thread::panicking() {
                     // Retire remaining payloads on their owner if cancellation unwinds.
+                    let cause = self.0.shared.shutdown_cause();
                     let aborted_count = self.0.prepare_task_abort();
-                    self.0.abort_prepared_tasks(aborted_count, false);
+                    self.0.abort_prepared_tasks(aborted_count, false, &cause);
                 }
                 executor_context::unregister(self.0.shared.wake().thread_id());
             }
         }
 
-        self.shared.request_shutdown();
+        let cause = self.shared.request_shutdown(ShutdownCause::default());
         let guard = FinishDrop(self);
         let aborted_count = guard.0.prepare_task_abort();
-        guard.0.abort_prepared_tasks(aborted_count, false);
+        guard.0.abort_prepared_tasks(aborted_count, false, &cause);
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
             // Executor cleanup must remain safe after metrics TLS has been destroyed.
         }
@@ -497,7 +499,7 @@ mod tests {
             let mut cx = Context::from_waker(Waker::noop());
             self.nested_rejected.set(matches!(
                 Pin::new(&mut nested).poll(&mut cx),
-                Poll::Ready(Err(error)) if error.is_shutdown()
+                Poll::Ready(Err(crate::JoinError::Shutdown(_)))
             ));
             ready(7)
         }
@@ -521,8 +523,14 @@ mod tests {
         assert!(owner.borrow().is_none());
         assert!(existing_dropped.get());
         let mut cx = Context::from_waker(Waker::noop());
-        assert!(matches!(Pin::new(&mut existing).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
-        assert!(matches!(Pin::new(&mut outer).poll(&mut cx), Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(
+            Pin::new(&mut existing).poll(&mut cx),
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
+        ));
+        assert!(matches!(
+            Pin::new(&mut outer).poll(&mut cx),
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
+        ));
         assert!(nested_rejected.get());
     }
 
@@ -812,7 +820,7 @@ mod tests {
 
         assert!(!drop_signal.get());
 
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
 
         assert!(drop_signal.get());
 
@@ -823,7 +831,7 @@ mod tests {
     fn shutdown_without_tasks_is_immediate() {
         let mut executor = Executor::builder().build();
 
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     }
@@ -835,13 +843,13 @@ mod tests {
         let dropped = Rc::new(Cell::new(false));
         let mut handle = tasks.add_test(DropSignalFuture(Rc::clone(&dropped)));
 
-        tasks.begin_shutdown();
+        tasks.begin_shutdown(ShutdownCause::default());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         assert!(dropped.get());
         assert!(matches!(
             Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(error)) if error.is_shutdown()
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
         ));
     }
 
@@ -851,14 +859,14 @@ mod tests {
         let tasks = executor.tasks();
         let shutdown = tasks.clone();
         let mut handle = tasks.add_test(poll_fn(move |_| {
-            shutdown.begin_shutdown();
+            shutdown.begin_shutdown(ShutdownCause::default());
             Poll::Pending::<()>
         }));
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         assert!(matches!(
             Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(error)) if error.is_shutdown()
+            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
         ));
     }
 
@@ -881,7 +889,7 @@ mod tests {
         // This task has nothing holding on to its resources, so it can be cleaned up at any time.
         tasks.add_test(TestSubjectFuture::new());
 
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
     }
@@ -893,13 +901,13 @@ mod tests {
 
         let mut join_handle = tasks.add_test(TestSubjectFuture::new());
 
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         let mut cx = Context::from_waker(Waker::noop());
         let result = Pin::new(&mut join_handle).poll(&mut cx);
 
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -907,12 +915,12 @@ mod tests {
         let mut executor = Executor::builder().build();
         let tasks = executor.tasks();
 
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
 
         let mut handle = tasks.add_test(async { 42 });
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
 
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -923,7 +931,7 @@ mod tests {
         drop(executor);
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -962,7 +970,7 @@ mod tests {
         drop(executor);
 
         let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(error)) if error.is_shutdown()));
+        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
     }
 
     #[test]
@@ -1129,7 +1137,7 @@ mod tests {
         }));
 
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         drop(executor);
 
@@ -1209,7 +1217,7 @@ mod tests {
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
         let retained_waiter = retained_waiter.borrow_mut().take().unwrap();
         drop(task);
-        executor.begin_shutdown();
+        executor.begin_shutdown(ShutdownCause::default());
         assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
         drop(executor);
 

@@ -3,25 +3,14 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-#[cfg(test)]
-use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::remote::Pool as RemotePool;
-#[cfg(test)]
-use nonempty::NonEmpty;
+use arty_executor::ShutdownCause;
 use performables::arc::Arc;
-#[cfg(test)]
-use performables::sync::channel;
 
-#[cfg(test)]
-use crate::runtime::blocking_worker::BlockingPool;
 use crate::runtime::blocking_worker::BlockingWorker;
-#[cfg(test)]
-use crate::runtime::dispatch::WorkerEndpoint;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-#[cfg(test)]
-use crate::runtime::thread::waiter::ThreadWaiter;
+use crate::runtime::shutdown::Shutdown;
 use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -41,17 +30,23 @@ impl DispatcherClient {
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
-        let (command_tx, _command_rx) = channel::unbounded();
-        let endpoint = WorkerEndpoint {
+        let (command_tx, _command_rx) = performables::sync::channel::unbounded();
+        let shutdown = Shutdown::default();
+        let endpoint = crate::runtime::dispatch::WorkerEndpoint {
             command_tx,
-            waker: Waker::noop().clone(),
+            waker: std::task::Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop()),
+            blocking_worker: BlockingWorker::new(
+                crate::runtime::blocking_worker::BlockingPool::new(None),
+                observed::Sink::noop(),
+                shutdown.clone(),
+            ),
         };
         Self::new(Arc::new(DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
-            NonEmpty::new(endpoint),
+            crate::runtime::thread::waiter::ThreadWaiter::new(Vec::new()),
+            nonempty::NonEmpty::new(endpoint),
             observed::Sink::noop(),
+            shutdown,
         )))
     }
 
@@ -79,16 +74,8 @@ impl DispatcherClient {
         self.core.owns(thread)
     }
 
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        self.core.is_shutting_down()
-    }
-
-    pub(crate) fn shutdown_signal(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        self.core.shutdown_signal()
-    }
-
-    pub(crate) fn remote_results(&self) -> &RemotePool {
-        self.core.remote_results()
+    pub(crate) fn shutdown(&self) -> &Shutdown {
+        self.core.shutdown()
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -124,12 +111,8 @@ impl DispatcherClient {
         self.core.spawn(future_factory)
     }
 
-    pub(crate) fn stop_with_error(&self, error: Error) {
-        self.core.stop_with_error(error);
-    }
-
-    pub(crate) fn take_shutdown_error(&self) -> Option<Error> {
-        self.core.take_shutdown_error()
+    pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
+        self.core.stop_with_error(error)
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
@@ -137,8 +120,8 @@ impl DispatcherClient {
     }
 
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
-    pub(crate) fn stop(&self) {
-        self.core.stop();
+    pub(crate) fn stop(&self) -> ShutdownCause {
+        self.core.stop()
     }
 
     // Impractical to test real waiting at this API layer. We test the real waiter implementation
@@ -160,12 +143,17 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::task::Waker;
+
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
+    use performables::sync::channel;
     use thread_aware::{Thread, ThreadAware};
 
     use super::*;
-    use crate::runtime::dispatch::test_threads;
+    use crate::runtime::blocking_worker::BlockingPool;
+    use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
+    use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::scheduler::Scheduler;
 
     #[test]
@@ -175,21 +163,21 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
         let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
+            Shutdown::default(),
         )));
         let clone = client.clone();
-        assert!(std::ptr::eq(client.remote_results(), client.core.remote_results()));
-        assert!(!client.is_shutting_down());
-        assert!(!clone.is_shutting_down());
+        assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
+        assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
 
         client.stop();
-        assert!(client.is_shutting_down());
-        assert!(clone.is_shutting_down());
+        assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Started);
+        assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Started);
     }
 
     #[test]
@@ -199,7 +187,7 @@ mod tests {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             wfs,
@@ -219,6 +207,7 @@ mod tests {
             ])
             .unwrap(),
             Sink::noop(),
+            Shutdown::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -242,9 +231,10 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
-        destination_worker.shutdown();
+        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
+        let destination_shutdown = Shutdown::default();
+        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), destination_shutdown.clone());
+        destination_shutdown.begin(ShutdownCause::default());
 
         let dispatcher = Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
@@ -264,6 +254,7 @@ mod tests {
             ])
             .unwrap(),
             Sink::noop(),
+            Shutdown::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -327,12 +318,13 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop()),
+            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
         let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
+            Shutdown::default(),
         )));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)

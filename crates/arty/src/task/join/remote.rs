@@ -4,11 +4,12 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
-use arty_executor::remote::{JoinHandle as RemoteJoinHandle, Pool as RemotePool};
+use arty_executor::ShutdownCause;
+use arty_executor::remote::JoinHandle as RemoteJoinHandle;
 use performables::arc::Arc;
-use pin_project::pin_project;
 
 use super::JoinError;
+use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
 
 /// A handle for receiving an async or blocking task's result.
@@ -41,17 +42,36 @@ use crate::runtime::blocking_worker::is_current_blocking_pool;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(derive_more::Debug)]
-#[pin_project]
 pub struct JoinHandle<R>
 where
     R: Send + 'static,
 {
     #[debug(ignore)]
-    #[pin]
-    inner: RemoteJoinHandle<R>,
-    invalid_destination: bool,
+    state: State<R>,
     blocking_pool: Option<Arc<()>>,
-    completed: bool,
+}
+
+enum State<R>
+where
+    R: Send + 'static,
+{
+    Pending(RemoteJoinHandle<R>),
+    Error(Option<ImmediateError>),
+    Completed,
+}
+
+enum ImmediateError {
+    Shutdown(ShutdownCause),
+    InvalidDestination,
+}
+
+impl ImmediateError {
+    fn into_join_error(self) -> JoinError {
+        match self {
+            Self::Shutdown(cause) => JoinError::shutdown(cause.into_error()),
+            Self::InvalidDestination => JoinError::invalid_destination(),
+        }
+    }
 }
 
 impl<R> JoinHandle<R>
@@ -60,23 +80,26 @@ where
 {
     pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
         Self {
-            inner,
-            invalid_destination: false,
+            state: State::Pending(inner),
             blocking_pool: None,
-            completed: false,
         }
     }
 
-    pub(crate) fn shutdown(pool: &RemotePool) -> Self {
-        let (sender, inner) = pool.channel();
-        drop(sender);
-        Self::new(inner)
+    pub(crate) fn shutdown(cause: ShutdownCause) -> Self {
+        Self {
+            state: State::Error(Some(ImmediateError::Shutdown(cause))),
+            blocking_pool: None,
+        }
     }
 
-    pub(crate) fn invalid_destination(pool: &RemotePool) -> Self {
+    pub(crate) fn try_from_shutdown(shutdown: &Shutdown) -> Option<Self> {
+        shutdown.cause().map(Self::shutdown)
+    }
+
+    pub(crate) fn invalid_destination() -> Self {
         Self {
-            invalid_destination: true,
-            ..Self::shutdown(pool)
+            state: State::Error(Some(ImmediateError::InvalidDestination)),
+            blocking_pool: None,
         }
     }
 
@@ -106,19 +129,22 @@ where
     type Output = Result<R, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        assert!(!*this.completed, "JoinHandle polled after completion");
+        let this = self.get_mut();
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
-        if std::mem::take(this.invalid_destination) {
-            *this.completed = true;
-            return Poll::Ready(Err(JoinError::invalid_destination()));
+        let result = match &mut this.state {
+            State::Pending(inner) => match Pin::new(inner).poll(cx) {
+                Poll::Ready(result) => Poll::Ready(result.map_err(JoinError::from_executor)),
+                Poll::Pending => Poll::Pending,
+            },
+            State::Error(error) => Poll::Ready(Err(error
+                .take()
+                .expect("an immediate join error is returned exactly once")
+                .into_join_error())),
+            State::Completed => unreachable!("JoinHandle polled after completion"),
+        };
+        if result.is_ready() {
+            this.state = State::Completed;
         }
-        match this.inner.poll(cx) {
-            Poll::Ready(result) => {
-                *this.completed = true;
-                Poll::Ready(result.map_err(JoinError::from_executor))
-            }
-            Poll::Pending => Poll::Pending,
-        }
+        result
     }
 }
