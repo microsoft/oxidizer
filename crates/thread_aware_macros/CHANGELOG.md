@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.2] - 2026-10-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.12.2` of `thread_aware_macros_impl`
+
 ## [0.12.1] - 2026-10-20
 
 - Refresh published macro documentation and classify the macro crate as private API.

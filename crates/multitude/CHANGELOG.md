@@ -5,6 +5,7 @@
 - ⚠️ Breaking
 
   - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.13.0` of `multitude_macros`
 
 ## [0.12.0] - 2026-10-20
 

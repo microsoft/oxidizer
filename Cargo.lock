@@ -3684,7 +3684,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -5973,7 +5973,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "mutants",
  "syn 3.0.5",
@@ -5982,7 +5982,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "insta",
  "proc-macro2",

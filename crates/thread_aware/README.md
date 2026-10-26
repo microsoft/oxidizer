@@ -136,7 +136,7 @@ struct Point {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQburAvdYZeQXwbsxAmczn2sx8bfyf9Ch8-naMbc1jLWJX0UERhZIOCbHRocmVhZF9hd2FyZWYwLjEyLjKCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4zgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQburAvdYZeQXwbsxAmczn2sx8bfyf9Ch8-naMbc1jLWJX0UERhZIOCbHRocmVhZF9hd2FyZWYwLjEyLjKCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4zgnN0aHJlYWRfYXdhcmVfbWFjcm9zZjAuMTIuMg
  [__link0]: https://docs.rs/thread_aware_core
  [__link1]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
  [__link10]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
@@ -151,8 +151,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link19]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
  [__link2]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link20]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=Unaware
- [__link21]: https://docs.rs/thread_aware_macros/0.12.1/thread_aware_macros/?search=ThreadAware
- [__link22]: https://docs.rs/thread_aware_macros/0.12.1/thread_aware_macros/?search=ThreadAware
+ [__link21]: https://docs.rs/thread_aware_macros/0.12.2/thread_aware_macros/?search=ThreadAware
+ [__link22]: https://docs.rs/thread_aware_macros/0.12.2/thread_aware_macros/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
  [__link4]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
  [__link5]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware

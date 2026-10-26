@@ -5,6 +5,7 @@
 - 🔧 Maintenance
 
   - Now requires `0.1.3` of `thread_aware_core`
+  - Now requires `0.12.2` of `thread_aware_macros`
 
 ## [0.12.1] - 2026-10-20
 
