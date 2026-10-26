@@ -12,7 +12,6 @@ use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 #[test]
-#[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
 fn sdk_flush_errors_are_preserved_in_destination_results() {
     let sdk = SdkMeterProvider::builder().build();
     let provider: &dyn FlushableMetricsProvider = &sdk;

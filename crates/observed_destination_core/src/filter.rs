@@ -150,9 +150,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "OTel SDK logger construction calls current_exe, unsupported in Miri isolation")]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn severity_threshold_preserves_lifecycle_and_accepts_unspecified_severity() {
         let inner = RecordingProcessor::default();
         let calls = Arc::clone(&inner.0);
@@ -200,12 +197,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn severity_interest_matches_emission_for_each_log_level() {
         use opentelemetry_sdk::logs::{InMemoryLogExporter, SimpleLogProcessor};
 

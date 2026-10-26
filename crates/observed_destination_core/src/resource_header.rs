@@ -85,9 +85,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg_attr(miri, ignore = "Default resource detection calls current_exe, unsupported in Miri isolation")]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn header_is_printed_once() {
         let header = ResourceHeader::default();
         let mut output = Vec::new();
