@@ -50,8 +50,8 @@ mod tests {
 
     #[test]
     fn worker_options_preserve_the_runtime_policy() {
-        let options = MonitorOptions::from(MonitorPolicy::enabled());
+        let options = MonitorOptions::from(MonitorPolicy::disabled());
 
-        assert!(options.for_worker().policy().is_enabled());
+        assert!(!options.for_worker().policy().is_enabled());
     }
 }
