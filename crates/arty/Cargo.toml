@@ -37,11 +37,7 @@ all-features = true
 [features]
 default = ["rt", "macros", "monitor"]
 macros = ["rt", "dep:arty_macros"]
-monitor = [
-    "dep:seismograph",
-    "seismograph/monitor",
-    "performables?/seismograph",
-]
+monitor = ["dep:seismograph", "seismograph/monitor", "performables?/seismograph"]
 rt = [
     "time",
     "dep:arty_executor",
