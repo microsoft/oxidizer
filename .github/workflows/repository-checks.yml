@@ -155,6 +155,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/target/metabench-contract-scratch"
           export TMPDIR="$GITHUB_WORKSPACE/target/metabench-contract-scratch"
+          cargo +1.95 test --package metabench --test gungraun_perf --locked
           cargo +1.95 test --package metabench --test spawned_benchmark --locked -- --exact --nocapture \
             gungraun_listing_is_forwarded \
             gungraun_measurements_write_report \

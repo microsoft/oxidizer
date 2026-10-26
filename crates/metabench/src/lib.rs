@@ -193,6 +193,16 @@
 //! See [owned native inputs](https://github.com/microsoft/oxidizer/blob/main/docs/benchmarks.md#owned-native-inputs)
 //! for the migration recipe.
 //!
+//! Metabench serializes the perf-control calls in its generated Gungraun adapters within each process.
+//! The lock covers the whole native perf callback.
+//! Nested sections panic instead of waiting for their own lock.
+//! If a callback panics, later perf callbacks fail instead of reusing its shared state.
+//! A workload can still use multiple threads.
+//! Do not call Gungraun's `perf_enable!` or `perf_disable!` macros directly from workloads or hooks.
+//! Direct calls bypass this lock and can race with generated controls.
+//! This restriction applies until [Gungraun fixes its shared control state](https://github.com/gungraun/gungraun/issues/778).
+//! Callgrind, Cachegrind, DHAT, and the separate Metabench `--perf` engine do not use these controls.
+//!
 //! Benchmark-level `gungraun_config`, `gungraun_setup`, and
 //! `gungraun_teardown` options work with native `#[bench::...]` and
 //! `#[benches::...]` cases:
@@ -387,6 +397,7 @@ mod arguments;
 mod artifact;
 mod entrypoint;
 mod error;
+mod gungraun_perf;
 mod identity;
 mod metric_display;
 mod mode;

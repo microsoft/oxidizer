@@ -5,6 +5,10 @@ Valgrind and the `gungraun-runner` version selected by `just setup-callgrind`,
 matching the workspace's Gungraun version (currently 0.20.0).
 It runs the native listing, default-engine smoke, and report-generation
 contracts and is required by the stable **Required repository checks** fan-in.
+It also runs `tests/gungraun_perf.rs` with real control pipes and generated native callbacks.
+This test checks that perf callbacks in one process run one at a time.
+It also checks nested-call rejection and rejection of later perf callbacks after a callback panics.
+The test does not need hardware counters or the `perf` executable.
 The report contract runs Callgrind and checks that schema-v7 summaries produce
 JSON and Markdown reports with instruction counts. It selects `--gungraun`
 without Cargo's `--bench` argument so explicit measurement intent is covered
@@ -28,6 +32,7 @@ just setup-callgrind
 # Install Valgrind using your Linux distribution's package manager.
 gungraun-runner --version
 valgrind --version
+cargo test --package metabench --test gungraun_perf --locked
 cargo test --package metabench --test spawned_benchmark --locked -- --exact --nocapture \
   gungraun_listing_is_forwarded \
   gungraun_measurements_write_report \
