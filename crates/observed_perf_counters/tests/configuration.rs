@@ -160,10 +160,9 @@ fn binding_failure_retains_a_typed_source() {
 fn any_unsupported_instrument_rejects_the_entire_event_at_startup() {
     let error = builder().bind_event::<Mixed>().build().unwrap_err();
     assert!(error.is_invalid_configuration());
-    assert!(
-        error
-            .to_string()
-            .contains("requires an unsigned counter or gauge, or a signed up/down counter")
+    assert_eq!(
+        error.message().lines().next().unwrap(),
+        "invalid performance-counter configuration: metric `Queue Depth` requires an unsigned counter or gauge, or a signed up/down counter (received Histogram/U64)"
     );
 }
 
