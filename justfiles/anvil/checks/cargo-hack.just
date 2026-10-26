@@ -11,6 +11,7 @@
 # is the right scope.
 
 # Check feature combinations for required workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-cargo-hack: anvil-cargo-hack-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -22,9 +23,9 @@ anvil-cargo-hack: anvil-cargo-hack-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-cargo-hack` recipe.
-[group("anvil-setup")]
+[private]
 anvil-cargo-hack-setup installer="install": (anvil-tool-cargo-hack-install installer)
 
 # Validate prerequisites for the `anvil-cargo-hack` recipe.
-[group("anvil-setup")]
+[private]
 anvil-cargo-hack-validate-prereqs: anvil-tool-cargo-hack-validate-prereqs

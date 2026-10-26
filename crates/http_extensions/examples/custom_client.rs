@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! An example of a custom HTTP client using `http_extensions`.
+//! This example defines a custom HTTP client with `http_extensions`.
 //!
-//! This example demonstrates how to create a simple HTTP client that just echoes back the
-//! data it receives.
+//! The client returns the data that it receives.
 
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilderExt, HttpResponse, HttpResponseBuilder, StatusExt};
@@ -13,10 +12,10 @@ use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // Create a custom client that implements the Service trait
+    // Create a custom client that implements the Service trait.
     let client = CustomClient::default();
 
-    // Use the client to send a request
+    // Send a request through the client.
     let response = client
         .request_builder()
         .get("http://localhost:8080")
@@ -35,8 +34,7 @@ struct CustomClient {
     builder: HttpBodyBuilder,
 }
 
-/// The implementation of `AsRef<HttpBodyBuilder>` allows us to use the
-/// `RequestBuilder` extension methods provided by `http_extensions`.
+/// This implementation enables the request builder extension methods from `http_extensions`.
 impl AsRef<HttpBodyBuilder> for CustomClient {
     fn as_ref(&self) -> &HttpBodyBuilder {
         &self.builder
@@ -57,7 +55,7 @@ impl Service<HttpRequest> for CustomClient {
     async fn execute(&self, input: HttpRequest) -> Self::Out {
         let data = input.into_body().into_bytes().await?;
 
-        // echo back the data we received
+        // Return the received data.
         HttpResponseBuilder::new(&self.builder).status(200).bytes(data).build()
     }
 }

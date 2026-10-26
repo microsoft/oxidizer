@@ -5,8 +5,6 @@
 
 #![cfg(feature = "rt")]
 
-testing_aids::init_tracing!();
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

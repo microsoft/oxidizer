@@ -65,19 +65,19 @@ _anvil-full: anvil-full-validate-prereqs \
 # Local users who want "install everything" run `just anvil-setup`.
 
 # Install prerequisites for the `anvil-pr` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-setup installer="install": \
     (anvil-pr-fast-setup installer) \
     (anvil-pr-slow-setup installer)
 
 # Validate prerequisites for the `anvil-pr` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-validate-prereqs: \
     anvil-pr-fast-validate-prereqs \
     anvil-pr-slow-validate-prereqs
 
 # Install prerequisites for the `anvil-scheduled` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-setup installer="install": \
     (anvil-scheduled-test-setup installer) \
     (anvil-scheduled-advisories-setup installer) \
@@ -85,7 +85,7 @@ anvil-scheduled-setup installer="install": \
     (anvil-scheduled-exhaustive-setup installer)
 
 # Validate prerequisites for the `anvil-scheduled` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-validate-prereqs: \
     anvil-scheduled-test-validate-prereqs \
     anvil-scheduled-advisories-validate-prereqs \
@@ -93,13 +93,13 @@ anvil-scheduled-validate-prereqs: \
     anvil-scheduled-exhaustive-validate-prereqs
 
 # Install prerequisites for the `anvil-full` recipe.
-[group("anvil-setup")]
+[private]
 anvil-full-setup installer="install": \
     (anvil-pr-setup installer) \
     (anvil-scheduled-setup installer)
 
 # Validate prerequisites for the `anvil-full` recipe.
-[group("anvil-setup")]
+[private]
 anvil-full-validate-prereqs: \
     anvil-pr-validate-prereqs \
     anvil-scheduled-validate-prereqs

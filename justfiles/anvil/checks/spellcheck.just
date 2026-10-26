@@ -25,6 +25,7 @@
 # leaving the path dangling.
 
 # Check spelling in source comments and documentation.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-spellcheck: anvil-spellcheck-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -53,9 +54,9 @@ anvil-spellcheck: anvil-spellcheck-validate-prereqs
 # successful prebuilt installation does not require libclang.
 
 # Install prerequisites for the `anvil-spellcheck` recipe.
-[group("anvil-setup")]
+[private]
 anvil-spellcheck-setup installer="install": (anvil-tool-cargo-spellcheck-install installer)
 
 # Validate prerequisites for the `anvil-spellcheck` recipe.
-[group("anvil-setup")]
+[private]
 anvil-spellcheck-validate-prereqs: anvil-tool-cargo-spellcheck-validate-prereqs

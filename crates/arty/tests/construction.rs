@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 // Under Miri, test-util supplies a processor model for the same selection logic.
 
-testing_aids::init_tracing!();
-
 use std::error::Error as StdError;
 
 use arty::runtime::{BlockingPoolPolicy, Error, Runtime, WorkersPolicy};

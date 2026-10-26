@@ -30,8 +30,6 @@ use tick::ClockControl;
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use tick::FutureExt;
 
-testing_aids::init_tracing!();
-
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()

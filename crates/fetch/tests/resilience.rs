@@ -177,3 +177,5 @@ fn create_breaker_client(status: StatusCode) -> HttpClient {
         })
         .build()
 }
+
+testing_aids::init_tracing!();

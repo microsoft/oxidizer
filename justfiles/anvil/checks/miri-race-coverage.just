@@ -14,12 +14,13 @@
 # per-seed crashes, so coverage matters more than depth-per-seed.
 
 # Run Miri tests with race coverage tracking.
+[group("anvil")]
 anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs (_anvil-miri-test "race-coverage")
 
 # Install prerequisites for the `anvil-miri-race-coverage` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-race-coverage-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 # Validate prerequisites for the `anvil-miri-race-coverage` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-race-coverage-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs

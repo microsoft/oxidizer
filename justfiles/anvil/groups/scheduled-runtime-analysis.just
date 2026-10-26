@@ -29,7 +29,7 @@ _anvil-scheduled-runtime-analysis: anvil-scheduled-runtime-analysis-validate-pre
     anvil-miri-race-coverage
 
 # Install prerequisites for the `anvil-scheduled-runtime-analysis` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-runtime-analysis-setup installer="install": \
     (anvil-miri-setup installer) \
     (anvil-miri-tree-borrows-setup installer) \
@@ -37,7 +37,7 @@ anvil-scheduled-runtime-analysis-setup installer="install": \
     (anvil-miri-race-coverage-setup installer)
 
 # Validate prerequisites for the `anvil-scheduled-runtime-analysis` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-runtime-analysis-validate-prereqs: \
     anvil-miri-validate-prereqs \
     anvil-miri-tree-borrows-validate-prereqs \
