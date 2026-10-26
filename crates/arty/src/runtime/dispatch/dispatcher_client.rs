@@ -158,7 +158,7 @@ mod tests {
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
     use performables::sync::channel;
-    use thread_aware::{Thread, ThreadAware};
+    use thread_aware::Thread;
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
