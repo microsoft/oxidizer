@@ -609,14 +609,13 @@ fn collect_with_limit(
 ) -> impl Future<Output = Result<BytesView>> + Send {
     let limit = limit.unwrap_or(DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES);
 
-    data.try_fold((0_usize, Vec::new()), move |(total_size, mut fragments), bytes| {
-        let result = check_size_limit(total_size, bytes.len(), limit).map(|total_size| {
-            fragments.push(bytes);
-            (total_size, fragments)
+    data.try_fold(BytesView::new(), move |mut combined, bytes| {
+        let result = check_size_limit(combined.len(), bytes.len(), limit).map(|_| {
+            combined.append(bytes);
+            combined
         });
         ready(result)
     })
-    .map_ok(|(_, fragments)| BytesView::from_views(fragments))
 }
 
 fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Result<usize> {
@@ -787,6 +786,20 @@ mod tests {
 
         let result = block_on(collect_with_limit(stream, Some(100))).unwrap();
         assert_eq!(result, b"test data");
+    }
+
+    #[test]
+    fn collect_with_limit_preserves_chunk_order() {
+        let memory = GlobalPool::new();
+        let stream = futures::stream::iter([
+            Ok(BytesView::copied_from_slice(b"first", &memory)),
+            Ok(BytesView::copied_from_slice(b"second", &memory)),
+            Ok(BytesView::copied_from_slice(b"third", &memory)),
+        ]);
+
+        let result = block_on(collect_with_limit(stream, Some(100))).unwrap();
+
+        assert_eq!(result, b"firstsecondthird");
     }
 
     #[test]

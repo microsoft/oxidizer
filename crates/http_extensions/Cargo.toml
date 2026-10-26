@@ -119,6 +119,11 @@ required-features = ["test-util", "json"]
 
 [[bench]]
 harness = false
+name = "body_path"
+required-features = ["test-util"]
+
+[[bench]]
+harness = false
 name = "router_resolve"
 required-features = ["test-util"]
 
