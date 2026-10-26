@@ -9,6 +9,7 @@
 # Affected tier.
 
 # Build all workspace benchmarks.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-bench: anvil-bench-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -23,9 +24,9 @@ anvil-bench: anvil-bench-validate-prereqs anvil-impact
 # is needed beyond the Rust toolchain.
 
 # Install prerequisites for the `anvil-bench` recipe.
-[group("anvil-setup")]
+[private]
 anvil-bench-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-bench` recipe.
-[group("anvil-setup")]
+[private]
 anvil-bench-validate-prereqs: anvil-tool-rustc-validate-prereqs

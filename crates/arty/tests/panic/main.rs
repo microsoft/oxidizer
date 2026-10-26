@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(test)]
 
-testing_aids::init_tracing!();
-
 #[path = "../panic_support/mod.rs"]
 mod runtime_support;
 #[path = "../support/mod.rs"]

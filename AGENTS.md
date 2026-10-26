@@ -138,15 +138,19 @@ In example code, prefer `.expect()` unless it gets too verbose - `.unwrap()` is 
 
 # [Testing tracing events](docs/tracing-tests.md)
 
-How to test `tracing` output without cross-test pollution. Key rule: every test
-binary that emits or inspects `tracing` must invoke `testing_aids::init_tracing!()`
-at module scope, or trace-event lines may be reported as uncovered even though
-they run.
+How to test `tracing` output without cross-test pollution. In packages that declare
+a direct normal or dev-dependency on `tracing`, every Cargo unit-test and
+integration-test executable must invoke `testing_aids::init_tracing!()` before tests run.
+Also initialize specific targets that explicitly test or capture tracing through a
+dependency. Build-only and procedural-macro host dependencies do not qualify a consumer.
+Apply the rule across declared features and platforms. Transitive presence alone
+does not qualify. Each integration target needs its own initializer.
+The guide defines isolated exceptions for disabled tracing and custom subscribers.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;
-adding a log/event emission that needs coverage; adding a crate whose tests emit
-`tracing` events (it needs the ctor initialization); tempted to install a global
-subscriber in a unit test.
+adding a log/event emission that needs coverage; adding a test target or changing
+dependencies that can introduce tracing; tempted to install a global subscriber
+in a unit test.
 
 # [Benchmarks](docs/benchmarks.md)
 

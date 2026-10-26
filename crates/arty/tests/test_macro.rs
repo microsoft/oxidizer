@@ -6,8 +6,6 @@
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]
 
-testing_aids::init_tracing!();
-
 use arty::task::Builtins;
 use arty::test;
 

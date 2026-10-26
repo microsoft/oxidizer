@@ -217,7 +217,7 @@ opentelemetry-semantic-conventions = { version = "0.33.0", default-features = fa
 opentelemetry-stdout = { version = "0.33.0", default-features = false }
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
-parking_lot = { version = "0.12.5", default-features = false }
+parking_lot = { version = "0.13.0", default-features = false }
 paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }
 pbjson = { version = "0.9.0", default-features = false }
@@ -250,7 +250,7 @@ route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.3.0" }
 routerama_build = { path = "crates/routerama_build", default-features = false, version = "=0.3.0" }
 routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "=0.3.0" }
-rstest = { version = "0.27.0", default-features = false }
+rstest = { version = "0.28.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.46", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }

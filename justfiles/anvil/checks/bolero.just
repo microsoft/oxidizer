@@ -29,6 +29,7 @@
 # repo-specific to standardize).
 
 # Run Bolero tests for affected workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -114,9 +115,9 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
 # (libfuzzer engine requires nightly rustc features).
 
 # Install prerequisites for the `anvil-bolero` recipe.
-[group("anvil-setup")]
+[private]
 anvil-bolero-setup installer="install": anvil-toolchain-nightly-install (anvil-tool-cargo-bolero-install installer)
 
 # Validate prerequisites for the `anvil-bolero` recipe.
-[group("anvil-setup")]
+[private]
 anvil-bolero-validate-prereqs: anvil-toolchain-nightly-validate-prereqs anvil-tool-cargo-bolero-validate-prereqs

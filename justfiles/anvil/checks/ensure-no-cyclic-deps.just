@@ -9,6 +9,7 @@
 # Modified tier.
 
 # Check that workspace dependencies contain no cycles.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-ensure-no-cyclic-deps: anvil-ensure-no-cyclic-deps-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -20,9 +21,9 @@ anvil-ensure-no-cyclic-deps: anvil-ensure-no-cyclic-deps-validate-prereqs anvil-
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-ensure-no-cyclic-deps` recipe.
-[group("anvil-setup")]
+[private]
 anvil-ensure-no-cyclic-deps-setup installer="install": (anvil-tool-cargo-ensure-no-cyclic-deps-install installer)
 
 # Validate prerequisites for the `anvil-ensure-no-cyclic-deps` recipe.
-[group("anvil-setup")]
+[private]
 anvil-ensure-no-cyclic-deps-validate-prereqs: anvil-tool-cargo-ensure-no-cyclic-deps-validate-prereqs

@@ -434,3 +434,5 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     // Each service ran through retry cycle: 3 attempts each = 6 total
     assert_eq!(call_count.load(Ordering::SeqCst), 6);
 }
+
+testing_aids::init_tracing!();

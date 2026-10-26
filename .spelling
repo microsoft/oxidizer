@@ -10,6 +10,9 @@ PerfMon
 PDH
 PERFLIBREQUEST
 metacharacters
+doctests
+executables
+subprocesses
 ACL
 IPC
 UID

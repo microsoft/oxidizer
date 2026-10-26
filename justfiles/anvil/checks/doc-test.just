@@ -19,6 +19,7 @@
 # explicit crate types such as rlib/cdylib and proc macros remain eligible.
 
 # Run documentation tests for affected workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -63,9 +64,9 @@ anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-doc-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-test-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-doc-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-test-validate-prereqs: anvil-tool-rustc-validate-prereqs

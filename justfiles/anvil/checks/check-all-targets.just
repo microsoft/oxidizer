@@ -12,6 +12,7 @@
 # defaults disabled, without linking or executing their test binaries.
 
 # Check all targets of affected packages independently.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -32,9 +33,9 @@ anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     }
 
 # Install prerequisites for the `anvil-check-all-targets` recipe.
-[group("anvil-setup")]
+[private]
 anvil-check-all-targets-setup installer="install": anvil-toolchain-stable-install (anvil-tool-cargo-each-install installer)
 
 # Validate prerequisites for the `anvil-check-all-targets` recipe.
-[group("anvil-setup")]
+[private]
 anvil-check-all-targets-validate-prereqs: anvil-tool-rustc-validate-prereqs anvil-tool-cargo-each-validate-prereqs

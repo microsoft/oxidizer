@@ -9,6 +9,7 @@
 # Modified tier.
 
 # Check that workspace packages compile without default features.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-ensure-no-default-features: anvil-ensure-no-default-features-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -20,9 +21,9 @@ anvil-ensure-no-default-features: anvil-ensure-no-default-features-validate-prer
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-ensure-no-default-features` recipe.
-[group("anvil-setup")]
+[private]
 anvil-ensure-no-default-features-setup installer="install": (anvil-tool-cargo-ensure-no-default-features-install installer)
 
 # Validate prerequisites for the `anvil-ensure-no-default-features` recipe.
-[group("anvil-setup")]
+[private]
 anvil-ensure-no-default-features-validate-prereqs: anvil-tool-cargo-ensure-no-default-features-validate-prereqs
