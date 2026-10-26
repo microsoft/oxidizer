@@ -135,9 +135,9 @@
 //!
 //! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
-//! - **`monitor`** - Enables Seismograph monitor and runtime dependencies. It
-//!   forwards `performables` telemetry support when `performables` is enabled. It
-//!   does not start monitoring or emit new telemetry.
+//! - **`monitor`** - Enables the Seismograph monitor dependency. It forwards
+//!   `performables` telemetry support when `performables` is enabled. It does
+//!   not start monitoring or emit new telemetry.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.

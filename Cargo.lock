@@ -277,7 +277,6 @@ dependencies = [
  "plurality",
  "scopeguard",
  "seismograph",
- "seismograph_runtime",
  "static_assertions",
  "testing_aids",
  "thread_aware",
