@@ -114,14 +114,17 @@ fn run_with_isolated_control_fds() {
             "--nocapture",
         ])
         .env("METABENCH_TEST_GUNGRAUN_PERF_CHILD", "1");
-    // SAFETY: Only async-signal-safe dup2 calls run after fork. The source owners
-    // stay alive through output(), and exec discards any previous target owners.
+    let install = move || {
+        // SAFETY: The sources stay alive through output(), and exec discards
+        // previous target owners. Both sources are above the reserved targets.
+        // Occupy both reserved slots with the wrong endpoints before remapping them.
+        unsafe { install_control_fds(acknowledgement_fd, control_fd) }?;
+        // SAFETY: The same source and target ownership conditions still hold.
+        unsafe { install_control_fds(control_fd, acknowledgement_fd) }
+    };
+    // SAFETY: Only async-signal-safe dup2 calls run in the closure after fork.
     unsafe {
-        command.pre_exec(move || {
-            // Occupy both reserved slots with the wrong endpoints before remapping them.
-            install_control_fds(acknowledgement_fd, control_fd)?;
-            install_control_fds(control_fd, acknowledgement_fd)
-        });
+        command.pre_exec(install);
     }
     let output = command.output().unwrap();
     drop((control, acknowledgement, reservations));
@@ -149,10 +152,9 @@ fn generated_callbacks_serialize_and_reject_reuse_after_unwinding() {
         let pipes = control_pipes();
         // SAFETY: This isolated Miri process has no Rust owners for the reserved
         // targets. Gungraun takes ownership when the first callback starts.
-        unsafe {
-            install_control_fds(pipes.2.as_raw_fd(), pipes.1.as_raw_fd()).unwrap();
-            install_control_fds(pipes.1.as_raw_fd(), pipes.2.as_raw_fd()).unwrap();
-        }
+        unsafe { install_control_fds(pipes.2.as_raw_fd(), pipes.1.as_raw_fd()) }.unwrap();
+        // SAFETY: The same source and target ownership conditions still hold.
+        unsafe { install_control_fds(pipes.1.as_raw_fd(), pipes.2.as_raw_fd()) }.unwrap();
         pipes
     };
 
