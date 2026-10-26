@@ -23,7 +23,7 @@ transferred between different components of a large complex system. This crate p
 mechanisms to reduce the risk of unintentionally exposing sensitive data.
 
 This crate’s approach uses wrapping to isolate sensitive data and avoid accidental exposure.
-Mechanisms are provided to automatically process sensitive data to make it safe to use in telemetry.
+Redactors control how sensitive values appear in telemetry.
 
 ## Concepts
 
@@ -39,15 +39,14 @@ Before continuing, it’s important to understand a few concepts:
   policies.
 
 * **Redaction**: The process of removing or obscuring sensitive information from data.
-  Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
-  value that is not reversible. This allows the data to be used for analysis or processing
-  without exposing the sensitive information.
+  A redactor can replace sensitive data with fixed text or a hash. Hash-based redactors
+  can support correlation, but do not by themselves guarantee that the original value
+  cannot be recovered.
 
-It’s important to note that redaction is different from deletion. Redaction typically replaces sensitive data
-with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece
-of sensitive data will always produce the same redacted value. This makes it possible to look at many different
-log records and correlate them to a specific user or entity without exposing the sensitive data itself. It’s possible
-to tell over time that an operation is attributed to the same piece of state without knowing what the state is.
+Redaction differs from deletion: it can replace sensitive data instead of removing it entirely.
+Some redactors produce the same output for the same input. This lets applications correlate log records
+without writing the original value directly.
+Non-cryptographic hashes, such as `xxH3`, do not provide cryptographic protection, even when used with a secret.
 
 ## Traits
 
@@ -192,7 +191,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKniesAWKGNYbTz04QVz4wBgbZ1sH_GETVwUbyzNGqnifBlBhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
  [__link0]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified
