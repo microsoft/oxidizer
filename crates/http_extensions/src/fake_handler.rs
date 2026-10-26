@@ -15,10 +15,10 @@ use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Res
 
 type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 
-/// Simulates HTTP responses for testing without making actual network requests.
+/// Returns test responses without network requests.
 ///
-/// The [`FakeHandler`] lets you easily mock HTTP client behavior by providing predefined
-/// responses or custom response logic. Available with the `test-util` feature enabled.
+/// [`FakeHandler`] returns predefined responses or uses custom response logic.
+/// The `test-util` feature provides this type.
 ///
 /// # Examples
 ///
@@ -30,7 +30,7 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 /// use http::StatusCode;
 /// use http_extensions::FakeHandler;
 ///
-/// // All requests to this client will return 404 Not Found
+/// // All requests return 404 Not Found.
 /// let handler = FakeHandler::from(StatusCode::NOT_FOUND);
 /// # }
 /// # }
@@ -50,10 +50,10 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 ///     StatusCode::INTERNAL_SERVER_ERROR,
 /// ]);
 ///
-/// // First request → 200 OK
-/// // Second request → 400 Bad Request
-/// // Third request → 500 Internal Server Error
-/// // Fourth request → Error (all responses consumed)
+/// // The first request returns 200 OK.
+/// // The second request returns 400 Bad Request.
+/// // The third request returns 500 Internal Server Error.
+/// // The fourth request returns an error because no response remains.
 /// # }
 /// # }
 /// ```
@@ -85,9 +85,9 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 ///
 /// # Working with [`HttpResponseBuilder`][crate::HttpResponseBuilder]
 ///
-/// Use [`HttpResponseBuilder::new_fake`][crate::HttpResponseBuilder::new_fake] to generate tailored test responses
-/// with a fluent API. This is especially useful with [`FakeHandler::from_fn`]
-/// to create responses that react to request data:
+/// Use [`HttpResponseBuilder::new_fake`][crate::HttpResponseBuilder::new_fake]
+/// to create a test response.
+/// Use it with [`FakeHandler::from_fn`] when the response depends on request data:
 #[derive(Clone, Debug)]
 pub struct FakeHandler {
     inner: Arc<Inner>,
@@ -96,8 +96,7 @@ pub struct FakeHandler {
 
 impl ThreadAware for FakeHandler {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-        // No thread awareness needed for fake handler, we want the same behavior
-        // even after relocation.
+        // FakeHandler has the same behavior after relocation.
     }
 }
 
@@ -117,8 +116,8 @@ impl FakeHandler {
 
     /// Creates a handler from a synchronous request handler function.
     ///
-    /// Takes a function that processes requests synchronously and wraps it into
-    /// an async handler internally.
+    /// The input function processes requests synchronously.
+    /// This method wraps it in an asynchronous handler.
     ///
     /// # Examples
     ///
@@ -148,7 +147,7 @@ impl FakeHandler {
         })
     }
 
-    /// Creates a handler that always returns HTTP error.
+    /// Creates a handler that always returns an HTTP error.
     ///
     /// # Examples
     ///
@@ -169,8 +168,7 @@ impl FakeHandler {
 
     /// Creates a handler from an asynchronous function.
     ///
-    /// Useful for complex async scenarios like simulating network delays or
-    /// other asynchronous behavior in your tests.
+    /// Use this method to simulate asynchronous behavior, such as a network delay.
     ///
     /// # Examples
     ///
@@ -181,7 +179,7 @@ impl FakeHandler {
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
     /// let handler = FakeHandler::from_async_fn(|request| async move {
-    ///     // Simulate network delay
+    ///     // Simulate a network delay.
     ///     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     ///
     ///     HttpResponseBuilder::new_fake()
@@ -203,7 +201,7 @@ impl FakeHandler {
     /// Creates a handler that returns a sequence of status codes.
     ///
     /// Returns empty-body responses with the given status codes in order.
-    /// When the sequence is exhausted, further requests will error.
+    /// When the sequence is exhausted, further requests return an error.
     ///
     /// # Examples
     ///
@@ -511,7 +509,7 @@ mod tests {
         let handler = FakeHandler::from(response);
 
         for _ in 0..3 {
-            // Single response handlers should work indefinitely
+            // A single-response handler works for every call.
             assert_eq!(get_response_text(&handler)?, "Single response");
         }
 
@@ -539,7 +537,7 @@ mod tests {
         let handler =
             FakeHandler::from_async_fn(|_request| async { Err(HttpError::validation("this is a test error from async handler")) });
 
-        // Next call should produce a specific error message
+        // The next call returns a specific error message.
         let error = get_response(&handler).unwrap_err();
         assert_eq!(error.message(), "this is a test error from async handler");
     }
@@ -562,7 +560,7 @@ mod tests {
         let handler = FakeHandler::from(response);
 
         assert_eq!(get_response_text(&handler).unwrap(), "Test body");
-        // Subsequent calls should also succeed
+        // Later calls also succeed.
         assert_eq!(get_response_text(&handler).unwrap(), "Test body");
     }
 

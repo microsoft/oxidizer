@@ -5,17 +5,16 @@ use bytes::Bytes;
 use http::HeaderValue;
 use http::header::InvalidHeaderValue;
 
-/// Construction of [`HeaderValue`] from shared byte buffers.
+/// Creates [`HeaderValue`] values from shared byte buffers.
 ///
-/// This extension enables zero-copy (when possible) creation of header values
-/// from types convertible to [`bytes::Bytes`] by delegating to
-/// [`HeaderValue::from_maybe_shared`].
+/// This extension accepts types that convert to [`bytes::Bytes`].
+/// It delegates construction to [`HeaderValue::from_maybe_shared`].
+/// The operation does not copy data when the input permits sharing.
 pub trait HeaderValueExt: sealed::Sealed {
     /// Creates a [`HeaderValue`] from a source convertible to [`Bytes`].
     ///
-    /// The provided bytes are validated through
-    /// [`HeaderValue::from_maybe_shared`]. This is zero-copy when the
-    /// source is backed by a single contiguous slice of memory capacity.
+    /// [`HeaderValue::from_maybe_shared`] rejects invalid header bytes.
+    /// It does not copy a source that uses one contiguous memory slice.
     ///
     /// # Errors
     ///

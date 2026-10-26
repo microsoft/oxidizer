@@ -15,15 +15,18 @@ use crate::{HttpError, Result};
 /// Wraps a streaming body to enforce an idle timeout on data reception.
 #[pin_project]
 pub(crate) struct TimeoutBody<B> {
-    /// The inner body, or `None` once the idle timeout has fired. After a
-    /// timeout the inner body is dropped and every subsequent poll returns
-    /// `None`, consistent with [`is_end_stream`] returning `true`.
+    /// The inner body, or `None` after the idle timeout fires.
+    ///
+    /// A timeout drops the inner body.
+    /// Each later poll returns `None`, which matches [`Body::is_end_stream`].
     #[pin]
     inner: Option<B>,
     timeout: Duration,
     clock: Clock,
-    /// Cached delay; created on the first pending poll and reused until
-    /// the inner body makes progress or the delay fires.
+    /// The cached delay.
+    ///
+    /// The first pending poll creates it.
+    /// The next progress event or timeout clears it.
     current_delay: Option<Delay>,
 }
 
@@ -48,9 +51,8 @@ where
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
         let mut this = self.project();
 
-        // Once the timeout has fired the inner body is `None`. Return
-        // `None` to signal end-of-stream, consistent with `is_end_stream`
-        // returning `true` when `inner` is `None`.
+        // After the timeout fires, the inner body is None.
+        // Return None to signal the end of the stream.
         let Some(inner) = this.inner.as_mut().as_pin_mut() else {
             return Poll::Ready(None);
         };
@@ -62,7 +64,7 @@ where
             return Poll::Ready(result);
         }
 
-        // Inner body is pending — enforce the timeout via a delay.
+        // The inner body is pending. Apply the timeout through a delay.
         // Reuse the existing delay if we are re-polled without the inner body
         // making progress, or create a new one for the full timeout duration.
         // `Delay` implements `Unpin` (a deliberate guarantee from the `tick` crate),
@@ -109,7 +111,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
-        // Stream yields data immediately — well within the generous timeout,
+        // The stream yields data before the long timeout.
         // exercising the TimeoutBody happy path via stream with timeout options.
         let chunks: Vec<Result<BytesView>> = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
@@ -162,7 +164,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
-        // Full body has an exact size hint; verify it passes through TimeoutBody.
+        // A full body has an exact size hint. TimeoutBody keeps this hint.
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.body(
             http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
@@ -239,8 +241,8 @@ mod tests {
         // Advance the clock past the timeout before polling.
         control.advance(Duration::from_mins(1));
 
-        // The inner body has data ready, so it should be returned regardless of
-        // elapsed time — the idle timeout only fires when the inner body is pending.
+        // Return data from the inner body regardless of elapsed time.
+        // The idle timeout fires only when the inner body is pending.
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"ready data");
     }
@@ -251,10 +253,9 @@ mod tests {
         let clock = control.to_clock();
         let timeout = Duration::from_millis(100);
 
-        // Body that returns Pending on the first poll (so the delay is created
-        // and registered), then advances the clock past the timeout on the
-        // second poll before returning Pending again. This makes the cached
-        // delay fire on re-poll, exercising the delay-fires path.
+        // The first poll returns Pending and registers the delay.
+        // The second poll advances the clock past the timeout and returns Pending.
+        // The next poll fires the cached delay.
         let body = ClockAdvancingBody {
             control,
             advance_by: Duration::from_mins(1),
@@ -283,7 +284,7 @@ mod tests {
         // First poll: inner returns Pending, delay is created and auto-advanced.
         assert!(Pin::new(&mut timeout_body).poll_frame(&mut cx).is_pending());
 
-        // Second poll: delay has fired → timeout error, inner is dropped.
+        // The second poll fires the delay, returns an error, and drops the inner body.
         let result = Pin::new(&mut timeout_body).poll_frame(&mut cx);
         assert!(matches!(result, Poll::Ready(Some(Err(_)))));
 
@@ -305,8 +306,9 @@ mod tests {
         }
     }
 
-    /// Body that returns [`Poll::Pending`] but advances the clock on the second poll,
-    /// allowing the cached delay to fire before the next poll completes.
+    /// A body that advances the clock on its second pending poll.
+    ///
+    /// The cached delay fires before the next poll completes.
     struct ClockAdvancingBody {
         control: ClockControl,
         advance_by: Duration,

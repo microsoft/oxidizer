@@ -10,7 +10,7 @@ use crate::UriTemplateLabel;
 pub trait ExtensionsExt: sealed::Sealed {
     /// Returns the URI template label from extensions, if available.
     ///
-    /// This method checks for a template label in the following order:
+    /// This method finds a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension
     /// 2. From a [`PathAndQuery`] label (if set via `#[templated(label = "...")]`)
     /// 3. From a [`PathAndQuery`] template string
