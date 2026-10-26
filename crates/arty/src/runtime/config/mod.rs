@@ -4,8 +4,12 @@
 //! Resource limits and worker-pool policy, independent of live runtime state.
 
 mod blocking_pool_policy;
+mod monitor_options;
+mod monitor_policy;
 mod workers_policy;
 
 pub use blocking_pool_policy::BlockingPoolPolicy;
+pub(crate) use monitor_options::MonitorOptions;
+pub use monitor_policy::MonitorPolicy;
 pub(crate) use workers_policy::RuntimeConfig;
 pub use workers_policy::WorkersPolicy;

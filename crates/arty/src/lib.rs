@@ -131,10 +131,13 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `monitor`.
 //!
 //! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
+//! - **`monitor`** - Enables Seismograph monitor and runtime dependencies. It
+//!   forwards `performables` telemetry support when `performables` is enabled. It
+//!   does not start monitoring or emit new telemetry.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -170,7 +173,9 @@ use arty_io_core as _;
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an at-most/all-workers policy must be configured.
+/// monitoring, or an at-most/all-workers policy must be configured. Macro-created
+/// runtimes use the default [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled)
+/// policy.
 ///
 /// # Panics
 ///
@@ -247,6 +252,11 @@ pub use arty_macros::main;
 /// with controlled time, create the control in a synchronous test and call
 /// `builder.clock(control.clone()).build()`. Enabling `test-util` alone does
 /// not change a one-argument test's clock.
+///
+/// Macro-created test runtimes use the default
+/// [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled) policy.
+/// Use a regular synchronous test with explicit runtime construction when the
+/// test needs [`MonitorPolicy::disabled`](crate::runtime::MonitorPolicy::disabled).
 ///
 /// # Panics
 ///

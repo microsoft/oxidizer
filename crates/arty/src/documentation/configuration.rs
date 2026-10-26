@@ -6,6 +6,14 @@
 //! Use [`Runtime::builder`](crate::runtime::Runtime::builder) when the defaults
 //! do not fit your application. Set your options before calling
 //! [`build`](crate::runtime::RuntimeBuilder::build), which starts the workers.
+//! The monitoring policy is enabled by default. Use
+//! [`RuntimeBuilder::monitor`](crate::runtime::RuntimeBuilder::monitor) with
+//! [`MonitorPolicy::disabled`](crate::runtime::MonitorPolicy::disabled) to
+//! disable it for one runtime.
+//!
+//! The `monitor` Cargo feature enables the Seismograph dependencies for
+//! `performables` and runtime monitoring. This stage only provides configuration
+//! plumbing. It does not start a monitor, instrument tasks, or emit new telemetry.
 //!
 //! # Async workers
 //!
@@ -65,8 +73,9 @@
 //! # Entry-point attributes
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
-//! the runtime for you. By default, `main` chooses workers automatically and
-//! `test` uses one worker.
+//! the runtime for you. Both attributes use the default enabled monitoring
+//! policy. By default, `main` chooses workers automatically and `test` uses one
+//! worker.
 //!
 //! Use `workers = N` to set the exact worker count. Build the runtime explicitly
 //! for custom clocks, telemetry, blocking pools, stack sizes, or an
