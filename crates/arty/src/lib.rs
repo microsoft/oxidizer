@@ -243,8 +243,9 @@ pub use arty_macros::main;
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
 /// and `monitor` options also apply. By default, a test uses one worker and
-/// disables monitoring to reduce monitor overhead and resource use. A test that
-/// exercises monitoring must opt in with `monitor = enabled`.
+/// selects the disabled monitoring policy. This keeps future monitor activation
+/// out of ordinary tests. A test that exercises monitoring must opt in with
+/// `monitor = enabled`.
 ///
 /// # Simulated time
 ///

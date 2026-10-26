@@ -14,7 +14,7 @@
 //! workers share processors when `N` exceeds available processor capacity.
 //! The `monitor = enabled` and `monitor = disabled` arguments select the
 //! monitoring policy. `#[arty::main]` defaults to enabled. `#[arty::test]`
-//! defaults to disabled to reduce monitor overhead and resource use.
+//! defaults to disabled so future monitor activation stays out of ordinary tests.
 //!
 //! The application-facing references are
 //! [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) and

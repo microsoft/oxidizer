@@ -74,8 +74,9 @@
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
 //! the runtime for you. By default, `main` uses the enabled monitoring policy.
-//! Tests use one worker and disable monitoring to reduce monitor overhead and
-//! resource use. A test that exercises monitoring must use `monitor = enabled`.
+//! Tests use one worker and select the disabled monitoring policy. This keeps
+//! future monitor activation out of ordinary tests. A test that exercises
+//! monitoring must use `monitor = enabled`.
 //!
 //! Use `workers = N` to set the exact worker count. Use `monitor = enabled` or
 //! `monitor = disabled` to select the monitoring policy. Build the runtime
