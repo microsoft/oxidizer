@@ -121,15 +121,23 @@ mod tests {
     }
 
     #[test]
-    fn header_write_failure_is_reported_as_sdk_error() {
+    fn header_write_failures_are_reported_at_every_output_position() {
         let header = ResourceHeader {
-            resource: Resource::builder_empty().build(),
+            resource: Resource::builder_empty()
+                .with_schema_url([KeyValue::new("service.name", "example")], "https://example.test/schema")
+                .build(),
             emitted: AtomicBool::new(false),
         };
+        let mut buffer = [0u8; b"<Resource: https://example.test/schema service.name=example>".len()];
 
-        let err = header.print_once(&mut [].as_mut_slice() as &mut (dyn Write + Send)).unwrap_err();
+        // Each failed attempt must leave the header available for retry.
+        for capacity in 0..buffer.len() {
+            let err = header
+                .print_once(&mut &mut buffer[..capacity] as &mut (dyn Write + Send))
+                .unwrap_err();
 
-        assert!(matches!(err, OTelSdkError::InternalFailure(_)));
+            assert!(matches!(err, OTelSdkError::InternalFailure(_)));
+        }
     }
 
     #[test]

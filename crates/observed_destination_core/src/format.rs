@@ -273,9 +273,7 @@ pub fn print_log_record(
         if let Some(body) = record.body() {
             if config.format_body {
                 if let AnyValue::String(template) = body {
-                    let result = interpolate(template.as_str(), record);
-
-                    write!(w, "{result}")?;
+                    write_interpolated(w, template.as_str(), record)?;
                 } else {
                     write!(w, "{}", format_any_value(body))?;
                 }
@@ -306,18 +304,15 @@ pub fn print_log_record(
     .map_err(io_err)
 }
 
-fn interpolate(template: &str, record: &SdkLogRecord) -> String {
-    use std::fmt::Write as _;
-
-    let mut result = String::with_capacity(template.len());
+fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &SdkLogRecord) -> std::io::Result<()> {
     let mut remaining = template;
 
     while let Some(offset) = remaining.find('{') {
-        result.push_str(&remaining[..offset]);
+        w.write_all(&remaining.as_bytes()[..offset])?;
         remaining = &remaining[offset..];
 
         if remaining.starts_with("{{") {
-            result.push_str(&remaining[..2]);
+            w.write_all(&remaining.as_bytes()[..2])?;
             remaining = &remaining[2..];
             continue;
         }
@@ -330,15 +325,14 @@ fn interpolate(template: &str, record: &SdkLogRecord) -> String {
             .attributes_iter()
             .find(|(key, _)| !placeholder.is_empty() && key.as_str() == placeholder)
         {
-            write!(result, "{}", format_any_value(value)).expect("format_any_value writing to a String cannot fail");
+            write!(w, "{}", format_any_value(value))?;
         } else {
-            result.push_str(&remaining[..placeholder.len() + 2]);
+            w.write_all(&remaining.as_bytes()[..placeholder.len() + 2])?;
         }
         remaining = remainder;
     }
 
-    result.push_str(remaining);
-    result
+    w.write_all(remaining.as_bytes())
 }
 
 #[cfg(test)]

@@ -25,11 +25,13 @@ fn create_record_and_scope(configure: impl FnOnce(&mut SdkLogRecord)) -> (SdkLog
 }
 
 fn format(record: &SdkLogRecord, scope: &InstrumentationScope, config: LogFormatConfig) -> String {
-    let mut buf = Vec::new();
+    let mut buf = [0; 1024];
+    let mut remaining = buf.as_mut_slice();
 
-    print_log_record(&mut buf, record, scope, config).unwrap();
+    print_log_record(&mut remaining, record, scope, config).unwrap();
 
-    String::from_utf8(buf).unwrap()
+    let remaining = remaining.len();
+    String::from_utf8(buf[..buf.len() - remaining].to_vec()).unwrap()
 }
 
 #[test]
@@ -211,6 +213,8 @@ fn missing_body_prints_attributes_and_library_version() {
 fn formatting_reports_write_failures_at_every_output_position() {
     for body in [
         AnyValue::String("request {id}".into()),
+        AnyValue::String("{{id}}".into()),
+        AnyValue::String("{missing}".into()),
         AnyValue::ListAny(Box::new(vec![
             AnyValue::Boolean(true),
             AnyValue::Int(42),
