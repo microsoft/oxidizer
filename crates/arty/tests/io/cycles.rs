@@ -32,10 +32,12 @@ where
         })
         .join()
         .unwrap();
+    let cancelled = worker.spawn(async |_| std::future::pending::<()>().await);
     scenario.fail_normal_cycle.store(true, Ordering::SeqCst);
     scenario.wake_owners();
-    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
+    let cancellation = cancelled.join().unwrap_err();
 
+    assert_eq!(cancellation.source().unwrap().to_string(), "normal driver cycle failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(event_count(&processor, "arty.rt.io.driver.cycle_failed"), 1);
@@ -109,10 +111,12 @@ fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
         })
         .join()
         .unwrap();
+    let cancelled = worker.spawn(async |_| std::future::pending::<()>().await);
     scenario.fail_normal_cycle.store(true, Ordering::SeqCst);
     scenario.wake_owners();
-    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
+    let cancellation = cancelled.join().unwrap_err();
 
+    assert_eq!(cancellation.source().unwrap().to_string(), "normal driver cycle failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(event_count(&processor, "arty.rt.io.driver.cycle_failed"), 1);

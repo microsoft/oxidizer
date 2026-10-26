@@ -4,6 +4,7 @@
 
 - ⚠️ Breaking
 
+  - propagate shutdown causes ([#880](https://github.com/microsoft/oxidizer/pull/880))
   - target tasks by worker coordinate ([#866](https://github.com/microsoft/oxidizer/pull/866))
   - Now requires `0.6.0` of `arty_executor`
   - Now requires `0.4.0` of `arty_io_core`

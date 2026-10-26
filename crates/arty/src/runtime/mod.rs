@@ -44,6 +44,7 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+mod shutdown;
 pub(crate) mod telemetry;
 pub(crate) mod thread;
 mod worker;
@@ -59,12 +60,16 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 
 /// Implementation details for the runtime entry-point macros.
 #[cfg(feature = "macros")]
+#[doc(hidden)]
 pub mod __private {
+    use std::error::Error as _;
+
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
 
@@ -78,7 +83,13 @@ pub mod __private {
             Ok(error) if error.is_panic() => {
                 std::panic::resume_unwind(error.into_panic().expect("the join error was checked as a panic"));
             }
-            Ok(_) => std::panic::resume_unwind(Box::new("runtime is shutting down")),
+            Ok(error) => {
+                let message = error.source().map_or_else(
+                    || "runtime is shutting down".to_owned(),
+                    |source| format!("runtime is shutting down: {source}"),
+                );
+                std::panic::resume_unwind(Box::new(message));
+            }
             Err(error) => std::panic::resume_unwind(Box::new(error.to_string())),
         }
     }
@@ -86,6 +97,8 @@ pub mod __private {
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     mod tests {
+        use std::fmt;
+
         #[test]
         fn non_join_failure_preserves_its_diagnostic_payload() {
             let payload = std::panic::catch_unwind(|| {
@@ -93,6 +106,31 @@ pub mod __private {
             })
             .unwrap_err();
             assert_eq!(*payload.downcast::<String>().unwrap(), "runtime control failed");
+        }
+
+        #[derive(Debug)]
+        struct RuntimeFailure;
+
+        impl fmt::Display for RuntimeFailure {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("driver execute cycle failed")
+            }
+        }
+
+        impl std::error::Error for RuntimeFailure {}
+
+        #[test]
+        fn caused_shutdown_preserves_its_diagnostic_payload() {
+            let join_error = crate::task::JoinError::shutdown(Some(arty_executor::ShutdownError::new(RuntimeFailure)));
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::resume_error(crate::runtime::Error::new(join_error));
+            }))
+            .unwrap_err();
+
+            assert_eq!(
+                *payload.downcast::<String>().unwrap(),
+                "runtime is shutting down: driver execute cycle failed"
+            );
         }
     }
 }

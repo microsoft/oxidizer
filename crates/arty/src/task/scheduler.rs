@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -105,14 +105,14 @@ impl Scheduler {
         ACTIVE_WORKER.set(false);
     }
 
-    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient) {
+    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient, cause: ShutdownCause) {
         _ = CURRENT_WORKER.try_with(|current| {
             let current = current.borrow();
             let Some(current) = current.as_ref() else {
                 return;
             };
             if dispatcher.owns(&current.thread) {
-                current.tasks.begin_shutdown();
+                current.tasks.begin_shutdown(cause);
             }
         });
     }
@@ -192,8 +192,8 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results());
+        if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
+            return join_handle;
         }
         let future_factory = match self.spawn_on_current_worker(future_factory) {
             Ok(join_handle) => return join_handle,
@@ -344,11 +344,11 @@ impl Scheduler {
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        if self.dispatcher.is_shutting_down() {
-            return JoinHandle::shutdown(self.dispatcher.remote_results());
+        if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
+            return join_handle;
         }
         let Some(worker_index) = self.resolve_worker_index(destination) else {
-            return JoinHandle::invalid_destination(self.dispatcher.remote_results());
+            return JoinHandle::invalid_destination();
         };
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker(worker_index, move |cx| {
@@ -468,7 +468,7 @@ mod tests {
         let rejected = runtime
             .scheduler()
             .block_on(async |cx| {
-                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher);
+                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher, ShutdownCause::default());
                 let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
                 matches!(

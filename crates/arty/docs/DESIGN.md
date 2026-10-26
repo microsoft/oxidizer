@@ -80,12 +80,16 @@ join handle neither cancels its task nor waits for it.
 `Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
 Dropping the owner also requests shutdown and normally waits, but cannot return
 errors. Neither waits when called from an async Arty worker or the runtime's own
-blocking callback; `stop` returns an error in those contexts.
+blocking callback. `stop` returns an error in those contexts.
 
 Shutdown rejects new submissions and cancels unfinished async tasks on their
 worker. Rejected factories and queued blocking callbacks do not run.
-Already-running callbacks finish before shutdown completes; one that never
+Already-running callbacks finish before shutdown completes. One that never
 returns can prevent it.
+
+The first shutdown request sets the shutdown cause. Later requests cannot
+replace it. If a runtime failure starts shutdown, cancelled task joins retain
+the failure in their error source chain.
 
 Await required work before requesting shutdown or returning from an
 `#[arty::main]` or `#[arty::test]` body. See the

@@ -177,7 +177,8 @@ use arty_io_core as _;
 /// Runtime construction errors, root-task cancellation, and shutdown errors
 /// become panics. The runtime is stopped before returning the body's value or
 /// resuming its original panic on the calling thread. A root-task failure takes
-/// precedence if shutdown also fails.
+/// precedence if shutdown also fails. If a runtime failure cancels the root
+/// task, the panic message includes that failure.
 ///
 /// An application error returned by the body remains its return value; it is
 /// not converted to a panic. Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build),
@@ -254,6 +255,8 @@ pub use arty_macros::main;
 /// A panic in the body takes precedence over a shutdown error and is resumed
 /// with its original payload, so
 /// `#[should_panic(expected = "...")]` can match the original message.
+/// If a runtime failure cancels the test body, the panic message includes that
+/// failure.
 ///
 /// An application error returned by the body remains its return value. Use
 /// explicit runtime construction, [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on),

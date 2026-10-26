@@ -4,6 +4,7 @@
 
 - ⚠️ Breaking
 
+  - propagate shutdown causes ([#880](https://github.com/microsoft/oxidizer/pull/880))
   - target tasks by worker coordinate ([#866](https://github.com/microsoft/oxidizer/pull/866))
   - Now requires `0.29.1` of `observed`
   - Now requires `0.3.1` of `performables`

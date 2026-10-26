@@ -300,6 +300,7 @@ dependencies = [
  "nm",
  "observed",
  "observed_testing",
+ "ohno",
  "performables",
  "pin-project",
  "plurality",

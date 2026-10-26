@@ -26,17 +26,6 @@ enum State {
 }
 
 #[derive(Debug)]
-struct WorkerPanicked(ThreadId);
-
-impl Display for WorkerPanicked {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "runtime worker {:?} panicked", self.0)
-    }
-}
-
-impl StdError for WorkerPanicked {}
-
-#[derive(Debug)]
 struct SelfJoin(ThreadId);
 
 impl Display for SelfJoin {
@@ -48,7 +37,7 @@ impl Display for SelfJoin {
 impl StdError for SelfJoin {}
 
 fn completion_result(failed_worker: Option<ThreadId>) -> Result<(), Error> {
-    failed_worker.map_or(Ok(()), |worker| Err(Error::new(WorkerPanicked(worker))))
+    failed_worker.map_or(Ok(()), |_worker| Err(Error::worker_panicked()))
 }
 
 impl ThreadWaiter {
