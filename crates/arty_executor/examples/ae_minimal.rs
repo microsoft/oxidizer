@@ -36,7 +36,7 @@ fn main() {
         if !shutdown_started && shutdown_signal.get() {
             shutdown_started = true;
 
-            executor.begin_shutdown();
+            executor.begin_shutdown(arty_executor::ShutdownCause::default());
 
             // No need to yield - we can immediately process the shutdown.
             continue;

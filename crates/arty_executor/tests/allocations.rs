@@ -86,7 +86,7 @@ fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
     assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    executor.begin_shutdown();
+    executor.begin_shutdown(arty_executor::ShutdownCause::default());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
 
@@ -121,6 +121,6 @@ fn remote_spawn_reuses_cross_thread_result_channel_storage() {
     #[cfg(debug_assertions)]
     assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
 
-    executor.begin_shutdown();
+    executor.begin_shutdown(arty_executor::ShutdownCause::default());
     assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
 }
