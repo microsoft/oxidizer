@@ -40,7 +40,7 @@ pub struct LogFormatConfig {
     pub include_event_name: bool,
     /// Format body by expanding attribute placeholders (e.g., `request received, id={request.id}`
     /// becomes `request received, id=10`). When `true`, attributes are inlined into the message
-    /// body template and not printed separately.
+    /// body template and not printed separately. If the body is absent, attributes are printed separately.
     pub format_body: bool,
 }
 
@@ -208,6 +208,17 @@ pub(crate) fn print_resource(w: &mut (impl Write + ?Sized), resource: &Resource)
 ///
 /// Uses `config` to select the fields and format the message body.
 /// Appends a newline. The caller controls buffering and flushing.
+///
+/// The output order is `[timestamp] SEVERITY: target body key=value [scope-version] <event>`.
+/// The timestamp uses [`Rfc3339Nanos`]. If the record timestamp is absent, the observed timestamp is used.
+/// If both timestamps are absent, no timestamp is printed.
+/// Absent severity, target, body, and event fields are skipped.
+/// The configuration controls whether the target, scope, and event are included.
+/// A missing scope version uses `?`.
+///
+/// If `config.format_body` is `true` and a body is present, attributes are not printed separately.
+/// In this case, attribute values replace matching placeholders in string bodies.
+/// If `config.format_body` is `false` or the body is absent, attributes are printed as `key=value` pairs after the body.
 ///
 /// # Examples
 ///
