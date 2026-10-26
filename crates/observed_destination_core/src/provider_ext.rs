@@ -9,7 +9,7 @@ use opentelemetry_sdk::metrics::MeterProviderBuilder;
 
 use crate::{DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination};
 
-/// Convenience extension trait to register log destinations with the OpenTelemetry logger
+/// Convenience trait to register log destinations with the OpenTelemetry logger
 /// provider builder.
 ///
 /// # Examples
@@ -53,7 +53,7 @@ impl LoggerProviderBuilderExt for LoggerProviderBuilder {
     }
 }
 
-/// Convenience extension trait to register metric destinations with the OpenTelemetry meter
+/// Convenience trait to register metric destinations with the OpenTelemetry meter
 /// provider builder.
 ///
 /// # Examples
