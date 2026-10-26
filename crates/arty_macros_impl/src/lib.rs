@@ -41,9 +41,6 @@ impl FromMeta for MonitorSetting {
         let Expr::Path(path) = expr else {
             return Err(invalid_monitor_setting(expr));
         };
-        if path.qself.is_some() || path.path.leading_colon.is_some() {
-            return Err(invalid_monitor_setting(expr));
-        }
         let Some(ident) = path.path.get_ident() else {
             return Err(invalid_monitor_setting(expr));
         };
