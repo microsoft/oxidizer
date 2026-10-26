@@ -378,20 +378,45 @@ mod tests {
 
     #[test]
     fn all_workers_selects_all_available_processors() {
-        for expand in [main, test] {
-            let expansion = expand(
-                quote!(workers = all),
-                quote! {
-                    async fn run(cx: Builtins) {}
-                },
-            )
-            .to_string();
-            assert!(!expansion.contains("compile_error"), "{expansion}");
-            assert!(
-                expansion.contains("workers (:: arty :: runtime :: WorkersPolicy :: all ())"),
-                "{expansion}"
-            );
-        }
+        let input = quote! {
+            async fn run(cx: Builtins) {}
+        };
+        let main_expansion = main(quote!(workers = all), input.clone());
+        let expected_main = quote! {
+            fn run() {
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::all())
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Builtins| {});
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(main_expansion.to_string(), expected_main.to_string());
+
+        let test_expansion = test(quote!(workers = all), input);
+        let expected_test = quote! {
+            #[::core::prelude::v1::test]
+            fn run() {
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::all())
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Builtins| {});
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(test_expansion.to_string(), expected_test.to_string());
     }
 
     #[test]
@@ -401,11 +426,29 @@ mod tests {
             quote! {
                 async fn run(cx: Builtins, time: ClockControl) {}
             },
-        )
-        .to_string();
-        assert!(!expansion.contains("compile_error"), "{expansion}");
-        assert!(expansion.contains("workers (:: arty :: runtime :: WorkersPolicy :: all ())"));
-        assert!(expansion.contains("clock (:: core :: clone :: Clone :: clone (& __arty_clock_control))"));
+        );
+        let expected = quote! {
+            #[::core::prelude::v1::test]
+            fn run() {
+                let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::all())
+                    .clock(::core::clone::Clone::clone(&__arty_clock_control))
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Builtins| {
+                        let time: ClockControl = __arty_clock_control;
+                        {}
+                    });
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string());
     }
 
     #[test]
