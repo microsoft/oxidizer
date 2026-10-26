@@ -22,6 +22,88 @@
 //! on a particular SDK implementation or deriving ownership from cached instruments.
 //! Its flush method uses [`DestinationResult`] so implementations need not
 //! expose an OpenTelemetry SDK's error type.
+//!
+//! # Examples
+//!
+//! These examples store exported data in memory. They use the `testing` feature
+//! of `opentelemetry_sdk` for its in-memory exporters.
+//!
+//! ## Register a log destination
+//!
+//! A destination adds an exporter or processor to the provider builder.
+//! This destination exports each log record as soon as the logger emits it.
+//!
+//! ```
+//! use observed_destination_core::{DestinationResult, LogDestination, LoggerProviderBuilderExt};
+//! use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+//! use opentelemetry_sdk::logs::{InMemoryLogExporter, LoggerProviderBuilder, SdkLoggerProvider};
+//!
+//! #[derive(Debug)]
+//! struct MemoryLogs(InMemoryLogExporter);
+//!
+//! impl LogDestination for MemoryLogs {
+//!     fn register(
+//!         self,
+//!         builder: LoggerProviderBuilder,
+//!     ) -> DestinationResult<LoggerProviderBuilder> {
+//!         Ok(builder.with_simple_exporter(self.0))
+//!     }
+//! }
+//!
+//! let exporter = InMemoryLogExporter::default();
+//! let provider = SdkLoggerProvider::builder()
+//!     .register(MemoryLogs(exporter.clone()))?
+//!     .build();
+//! let logger = provider.logger("example");
+//! let mut record = logger.create_log_record();
+//! record.set_body("request received".into());
+//! logger.emit(record);
+//!
+//! assert_eq!(exporter.get_emitted_logs()?.len(), 1);
+//! # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+//! ```
+//!
+//! ## Register and flush a metric destination
+//!
+//! This destination exports metrics at regular intervals.
+//! The `record_and_flush` function accepts any [`FlushableMetricsProvider`].
+//! It records a measurement and flushes it without depending on a specific SDK.
+//!
+//! ```
+//! use observed_destination_core::{
+//!     DestinationResult, FlushableMetricsProvider, MeterProviderBuilderExt, MetricDestination,
+//! };
+//! use opentelemetry_sdk::metrics::{
+//!     InMemoryMetricExporter, MeterProviderBuilder, SdkMeterProvider,
+//! };
+//!
+//! #[derive(Debug)]
+//! struct MemoryMetrics(InMemoryMetricExporter);
+//!
+//! impl MetricDestination for MemoryMetrics {
+//!     fn register(
+//!         self,
+//!         builder: MeterProviderBuilder,
+//!     ) -> DestinationResult<MeterProviderBuilder> {
+//!         Ok(builder.with_periodic_exporter(self.0))
+//!     }
+//! }
+//!
+//! fn record_and_flush(provider: &impl FlushableMetricsProvider) -> DestinationResult<()> {
+//!     let counter = provider.meter("example").u64_counter("requests").build();
+//!     counter.add(1, &[]);
+//!     provider.force_flush()
+//! }
+//!
+//! let exporter = InMemoryMetricExporter::default();
+//! let provider = SdkMeterProvider::builder()
+//!     .register(MemoryMetrics(exporter.clone()))?
+//!     .build();
+//! record_and_flush(&provider)?;
+//!
+//! assert!(!exporter.get_finished_metrics()?.is_empty());
+//! # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+//! ```
 
 mod filter;
 mod format;
