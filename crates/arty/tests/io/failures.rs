@@ -58,6 +58,59 @@ fn try_context_reports_driver_construction_failure_and_stops_runtime() {
 }
 
 #[test]
+fn driver_failure_is_attached_to_tasks_cancelled_by_shutdown() {
+    let runtime = runtime(1);
+    let worker = worker_schedulers(&runtime, 1).pop().unwrap();
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.fail_driver_at.store(1, Ordering::SeqCst);
+    let (started_tx, started_rx) = mpsc::channel();
+    let pending = worker.spawn(move |_| async move {
+        started_tx.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+
+    let failure = worker.spawn({
+        async move |builtins| {
+            builtins
+                .io()
+                .try_context::<TestContext<ConstructionFailure>>(&scenario)
+                .unwrap_err()
+                .to_string()
+        }
+    });
+
+    assert_eq!(failure.join().unwrap(), "driver construction failed");
+    let cancellation = pending.join().unwrap_err();
+    let shutdown = cancellation
+        .source()
+        .unwrap()
+        .downcast_ref::<arty_executor::ShutdownError>()
+        .unwrap();
+    assert_eq!(shutdown.to_string(), "driver construction failed");
+    let mut source = Some(shutdown.inner());
+    let mut driver_error_found = false;
+    while let Some(error) = source {
+        driver_error_found |= error.downcast_ref::<DriverError>().is_some();
+        source = error.source();
+    }
+    assert!(driver_error_found);
+    assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
+}
+
+#[cfg(feature = "macros")]
+#[arty::test]
+#[should_panic(expected = "runtime is shutting down: driver construction failed")]
+async fn macro_panic_includes_the_runtime_shutdown_cause(cx: arty::task::Builtins) {
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.fail_driver_at.store(1, Ordering::SeqCst);
+
+    let error = cx.io().try_context::<TestContext<ConstructionFailure>>(&scenario).unwrap_err();
+    assert_eq!(error.to_string(), "driver construction failed");
+    std::future::pending::<()>().await;
+}
+
+#[test]
 fn context_panics_after_requesting_shutdown_on_initialization_failure() {
     let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();

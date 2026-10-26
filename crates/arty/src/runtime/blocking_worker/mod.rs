@@ -18,6 +18,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
+use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::execution::prepare_blocking;
 use crate::task::join::JoinHandle;
@@ -164,22 +165,15 @@ impl fmt::Debug for JoinableThreadPool {
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
     pool: BlockingPool,
-    is_shutting_down: Arc<AtomicBool>,
-    runtime_shutdown: Arc<AtomicBool>,
+    runtime_shutdown: Shutdown,
     sink: Sink,
     remote_results: RemotePool,
 }
 
 impl BlockingWorker {
-    #[cfg(test)]
-    pub(crate) fn new(pool: BlockingPool, sink: Sink) -> Arc<Self> {
-        Self::new_with_shutdown(pool, sink, Arc::new(AtomicBool::new(false)))
-    }
-
-    pub(crate) fn new_with_shutdown(pool: BlockingPool, sink: Sink, runtime_shutdown: Arc<AtomicBool>) -> Arc<Self> {
+    pub(crate) fn new(pool: BlockingPool, sink: Sink, runtime_shutdown: Shutdown) -> Arc<Self> {
         Arc::new(Self {
             pool,
-            is_shutting_down: Arc::new(AtomicBool::new(false)),
             runtime_shutdown,
             sink,
             remote_results: RemotePool::new(),
@@ -207,17 +201,16 @@ impl BlockingWorker {
     {
         let identity = Arc::clone(&self.pool.identity);
         let pool = self.pool.clone();
-        let shutdown = Arc::clone(&self.is_shutting_down);
-        let runtime_shutdown = Arc::clone(&self.runtime_shutdown);
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body);
-        if shutdown.load(Ordering::Acquire) || runtime_shutdown.load(Ordering::Acquire) {
+        let runtime_shutdown = self.runtime_shutdown.clone();
+        let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), body);
+        if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
         }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let task = move || {
             let _scope = BlockingTaskScope::enter(identity);
-            if shutdown.load(Ordering::Acquire) || runtime_shutdown.load(Ordering::Acquire) {
+            if matches!(runtime_shutdown.state(), ShutdownState::Started) {
                 drop(task);
             } else {
                 task();
@@ -226,8 +219,7 @@ impl BlockingWorker {
             completion();
         };
 
-        if !self.is_shutting_down.load(Ordering::Acquire)
-            && !self.runtime_shutdown.load(Ordering::Acquire)
+        if matches!(self.runtime_shutdown.state(), ShutdownState::Running)
             && self.pool.execute(task)
             && self.pool.record_saturation_transition()
         {
@@ -241,11 +233,6 @@ impl BlockingWorker {
         }
 
         join_handle
-    }
-
-    /// Rejects new work and cancels queued work; already-running blocking calls finish.
-    pub(crate) fn shutdown(&self) {
-        self.is_shutting_down.store(true, Ordering::Release);
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -408,7 +395,7 @@ impl BlockingPool {
 #[cfg_attr(coverage_nightly, coverage(off))] // The rejected callback is deliberately asserted not to execute.
 fn closed_pool_rejects_worker_submission_after_admission() {
     let pool = BlockingPool::new(NonZeroUsize::new(1));
-    let worker = BlockingWorker::new(pool.clone(), Sink::noop());
+    let worker = BlockingWorker::new(pool.clone(), Sink::noop(), Shutdown::default());
     pool.join();
 
     let invoked = Arc::new(AtomicBool::new(false));
@@ -431,6 +418,7 @@ pub(super) mod blocking_worker_tests {
     use std::thread;
     use std::thread::ThreadId;
 
+    use arty_executor::ShutdownCause;
     use events_once::Event;
     use observed::{Sink, Value};
     use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
@@ -441,6 +429,7 @@ pub(super) mod blocking_worker_tests {
     use crate::runtime::blocking_worker::{
         BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
     };
+    use crate::runtime::shutdown::{Shutdown, ShutdownState};
 
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
@@ -453,7 +442,7 @@ pub(super) mod blocking_worker_tests {
 
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn is_blocking_worker_shutting_down(worker: &BlockingWorker) -> bool {
-        worker.is_shutting_down.load(Ordering::Acquire)
+        matches!(worker.runtime_shutdown.state(), ShutdownState::Started)
     }
 
     #[test]
@@ -594,7 +583,7 @@ pub(super) mod blocking_worker_tests {
         let thread_join_handle = thread::spawn({
             let events = Arc::clone(&events);
             move || {
-                let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+                let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
                 drop(worker.spawn_blocking({
                     let events = Arc::clone(&events);
@@ -611,7 +600,7 @@ pub(super) mod blocking_worker_tests {
                 // hanging.
                 task_start_rx.recv().expect("the worker must run the blocking task");
 
-                worker.shutdown();
+                worker.runtime_shutdown.begin(ShutdownCause::default());
                 worker.join();
                 events.lock_result().unwrap().push("worker joined");
             }
@@ -650,9 +639,9 @@ pub(super) mod blocking_worker_tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop());
+        let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
 
         let work_item = WorkItem {
             dropped: Arc::clone(&dropped),
@@ -670,8 +659,8 @@ pub(super) mod blocking_worker_tests {
 
     #[test]
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
-        let runtime_shutdown = Arc::new(AtomicBool::new(false));
-        let worker = BlockingWorker::new_with_shutdown(BlockingPool::new(Some(limit(1))), Sink::noop(), Arc::clone(&runtime_shutdown));
+        let runtime_shutdown = Shutdown::default();
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop(), runtime_shutdown.clone());
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
@@ -686,20 +675,21 @@ pub(super) mod blocking_worker_tests {
             let invoked = Arc::clone(&invoked);
             move || invoked.store(true, Ordering::Release)
         });
-        runtime_shutdown.store(true, Ordering::Release);
+        runtime_shutdown.begin(ShutdownCause::default());
         release_tx.send(());
 
         running.join().unwrap();
         assert!(queued.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
     #[test]
     fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
-        let runtime_shutdown = Arc::new(AtomicBool::new(true));
-        let worker = BlockingWorker::new_with_shutdown(BlockingPool::new(Some(limit(1))), Sink::noop(), runtime_shutdown);
+        let runtime_shutdown = Shutdown::default();
+        runtime_shutdown.begin(ShutdownCause::default());
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop(), runtime_shutdown);
         let invoked = Arc::new(AtomicBool::new(false));
 
         let rejected = worker.spawn_blocking({
@@ -709,15 +699,15 @@ pub(super) mod blocking_worker_tests {
 
         assert!(rejected.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
     #[test]
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
-        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop());
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop(), Shutdown::default());
         let _scope = BlockingTaskScope::enter(Arc::clone(&worker.pool.identity));
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
 
         let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
 
@@ -883,7 +873,11 @@ pub(super) mod blocking_worker_tests {
     #[cfg_attr(test, mutants::skip)] // Test-only helper.
     fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> (Vec<CapturedEvent>, Vec<usize>) {
         let (sink, processor) = test_emitter(TEST_ID);
-        let worker = BlockingWorker::new(BlockingPool::new(max_thread_count.and_then(NonZeroUsize::new)), sink);
+        let worker = BlockingWorker::new(
+            BlockingPool::new(max_thread_count.and_then(NonZeroUsize::new)),
+            sink,
+            Shutdown::default(),
+        );
 
         // Occupy the pool's single initial thread with a task that blocks until released,
         // so every task spawned afterwards stays queued and counts towards the overload
@@ -926,7 +920,7 @@ pub(super) mod blocking_worker_tests {
 
         // Release the blocker so the queued tasks drain, then wait for the pool to settle.
         release_tx.send(());
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
 
         (events, saturation_counts)
@@ -963,7 +957,7 @@ pub(super) mod blocking_worker_tests {
     #[test]
     fn spawn_blocking_reports_each_distinct_saturation_episode() {
         let (sink, processor) = test_emitter(TEST_ID);
-        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), sink);
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), sink, Shutdown::default());
 
         for expected_events in 1..=2 {
             let (blocker_started_tx, blocker_started_rx) = channel();
@@ -995,14 +989,14 @@ pub(super) mod blocking_worker_tests {
             );
         }
 
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 
     #[test]
     fn task_completion_during_overload_does_not_split_the_episode() {
         let (sink, processor) = test_emitter(TEST_ID);
-        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), sink);
+        let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), sink, Shutdown::default());
         let (first_started_tx, first_started_rx) = channel();
         let (release_first_tx, release_first_rx) = Event::<()>::boxed();
         drop(worker.spawn_blocking(move || {
@@ -1043,7 +1037,7 @@ pub(super) mod blocking_worker_tests {
         );
 
         release_second_tx.send(());
-        worker.shutdown();
+        worker.runtime_shutdown.begin(ShutdownCause::default());
         worker.join();
     }
 

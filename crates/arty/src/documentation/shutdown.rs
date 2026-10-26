@@ -29,6 +29,11 @@
 //! invoking their factories. Pending async tasks are cancelled on their worker,
 //! and queued blocking callbacks do not start.
 //!
+//! If a runtime failure starts shutdown, affected join errors retain that
+//! failure in their [`std::error::Error::source`] chain. [`Runtime::stop`]
+//! reports the same failure. The `main` and `test` macros include the failure
+//! text in their panic message if shutdown cancels the root task.
+//!
 //! Already-running blocking callbacks finish before shutdown completes; one
 //! that never returns can prevent it. Await work you need before stopping the
 //! runtime. Dropping a join handle does not cancel its task.
