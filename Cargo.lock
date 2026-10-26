@@ -1038,6 +1038,7 @@ dependencies = [
  "serde",
  "serial_test",
  "testing_aids",
+ "thread_aware",
  "tick",
  "tokio",
  "tracing",

@@ -100,6 +100,7 @@ seismograph = { path = "../seismograph" }
 serde = { workspace = true, features = ["derive"] }
 serial_test = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing = { workspace = true, features = ["std"] }

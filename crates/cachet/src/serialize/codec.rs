@@ -3,14 +3,14 @@
 
 //! Serialization codecs for converting typed values to/from bytes via serde.
 //!
-//! These codecs serialize values into [`BytesView`] using pool-backed memory,
+//! These codecs serialize values into [`BytesView`] using a caller-supplied memory provider,
 //! avoiding heap allocations. The serialized bytes can then flow through
 //! compression, encryption, and network I/O without additional copies.
 
 use std::borrow::Cow;
 use std::io::Write;
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use bytesbuf::{BytesBuf, BytesView};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -27,20 +27,20 @@ const FORMAT_VERSION: u8 = 1;
 /// For bidirectional serialization/deserialization, use [`PostcardCodec`].
 #[derive(Debug, Clone)]
 pub(crate) struct PostcardEncoder {
-    pool: GlobalPool,
+    memory: OpaqueMemory,
 }
 
 impl PostcardEncoder {
-    /// Creates a new encoder with a shared memory pool.
+    /// Creates a new encoder with a shared memory provider.
     #[must_use]
-    pub(crate) fn new(pool: GlobalPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(memory: OpaqueMemory) -> Self {
+        Self { memory }
     }
 }
 
 impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
-        encode(value, &self.pool)
+        encode(value, &self.memory)
     }
 }
 
@@ -48,24 +48,24 @@ impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
 ///
 /// Implements `Codec<T, BytesView>` for any `T: Serialize + DeserializeOwned + Send + Sync`.
 ///
-/// Serialization writes directly into pool-backed memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
+/// Serialization writes directly into caller-supplied memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
 /// producing a [`BytesView`] with no intermediate heap allocation.
 #[derive(Debug, Clone)]
 pub(crate) struct PostcardCodec {
-    pool: GlobalPool,
+    memory: OpaqueMemory,
 }
 
 impl PostcardCodec {
-    /// Creates a new codec with a shared memory pool.
+    /// Creates a new codec with a shared memory provider.
     #[must_use]
-    pub(crate) fn new(pool: GlobalPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(memory: OpaqueMemory) -> Self {
+        Self { memory }
     }
 }
 
 impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardCodec {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
-        encode(value, &self.pool)
+        encode(value, &self.memory)
     }
 }
 
@@ -92,8 +92,8 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for Post
     }
 }
 
-fn encode<T: Serialize + Send + Sync>(value: &T, pool: &GlobalPool) -> Result<BytesView, Error> {
-    let mut writer = BytesBuf::new().into_writer(pool.clone());
+fn encode<T: Serialize + Send + Sync>(value: &T, memory: &OpaqueMemory) -> Result<BytesView, Error> {
+    let mut writer = BytesBuf::new().into_writer(memory.clone());
     writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
     postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
     Ok(writer.into_inner().peek())
@@ -117,6 +117,7 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytesbuf::mem::GlobalPool;
 
     /// A type whose Serialize impl always fails, used to test the encode error path.
     struct FailSerialize;
@@ -129,13 +130,13 @@ mod tests {
 
     #[test]
     fn encode_serialization_failure_returns_err() {
-        let result = encode(&FailSerialize, &GlobalPool::new());
+        let result = encode(&FailSerialize, &OpaqueMemory::new(GlobalPool::new()));
         assert!(result.is_err(), "encode should propagate serialization errors");
     }
 
     #[test]
     fn decode_empty_payload_returns_soft_failure() {
-        let codec = PostcardCodec::new(GlobalPool::new());
+        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
         let empty = BytesView::from(Vec::<u8>::new());
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(empty);
         assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("empty payload")));
@@ -143,7 +144,7 @@ mod tests {
 
     #[test]
     fn decode_wrong_format_version_returns_soft_failure() {
-        let codec = PostcardCodec::new(GlobalPool::new());
+        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
         let mut data = vec![0xFF];
         data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
         let view = BytesView::from(data);
@@ -153,7 +154,7 @@ mod tests {
 
     #[test]
     fn decode_corrupt_payload_returns_soft_failure() {
-        let codec = PostcardCodec::new(GlobalPool::new());
+        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
         let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
         let view = BytesView::from(data);
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
@@ -162,7 +163,7 @@ mod tests {
 
     #[test]
     fn encode_decode_roundtrip() {
-        let codec = PostcardCodec::new(GlobalPool::new());
+        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
         let original = "hello, world!".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
         let outcome: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
@@ -172,7 +173,7 @@ mod tests {
     #[test]
     fn encoder_encode_produces_valid_output() {
         let value = 42u32;
-        let encoded = PostcardEncoder::new(GlobalPool::new())
+        let encoded = PostcardEncoder::new(OpaqueMemory::new(GlobalPool::new()))
             .encode(&value)
             .expect("encode should succeed");
         let bytes = to_contiguous(&encoded);
@@ -183,7 +184,7 @@ mod tests {
 
     #[test]
     fn decode_multi_span_view() {
-        let codec = PostcardCodec::new(GlobalPool::new());
+        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
         let original = "multi-span test".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
 

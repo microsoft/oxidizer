@@ -202,7 +202,7 @@
 //! When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
 //! to add a postcard serialization boundary. Keys and values are automatically serialized
 //! to [`BytesView`](bytesbuf::BytesView) before reaching the fallback tier, and
-//! deserialized on the way back.
+//! deserialized on the way back. Pass the memory provider that serialized bytes must use.
 //!
 //! ```ignore
 //! use cachet::{Cache, FallbackPromotionPolicy};
@@ -210,11 +210,12 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
+//! let memory = bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new());
 //! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
 //!
 //! let cache = Cache::builder::<String, String>(clock)
 //!     .memory()
-//!     .serialize()
+//!     .serialize(memory)
 //!     .fallback(remote)
 //!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
