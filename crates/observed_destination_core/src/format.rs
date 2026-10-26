@@ -178,7 +178,7 @@ impl From<SystemTime> for Rfc3339Nanos {
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| {
-            if self.0 < SystemTime::UNIX_EPOCH {
+            if self.0.duration_since(SystemTime::UNIX_EPOCH).is_err() {
                 Timestamp::MIN
             } else {
                 Timestamp::MAX
