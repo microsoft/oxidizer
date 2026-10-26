@@ -189,6 +189,15 @@ metabench::main!(
 The installed `gungraun-runner` must match the Gungraun library version
 (currently 0.20.0). Metabench reads that runner’s schema-v7 summaries.
 
+Gungraun 0.20 adds batched execution paths that retain prepared inputs until each batch finishes.
+Do not borrow a temporary in a native case, such as `#[bench::case(&prepare())]`.
+Prepare an owned input, such as a `Box`, and return its owner with the result
+to keep input destruction outside measurement.
+Criterion can continue to borrow its prepared state and select the result
+from the returned tuple.
+See [owned native inputs][__link2]
+for the migration recipe.
+
 Benchmark-level `gungraun_config`, `gungraun_setup`, and
 `gungraun_teardown` options work with native `#[bench::...]` and
 `#[benches::...]` cases:
@@ -214,7 +223,7 @@ A mismatched or missing case name does not error: it silently keeps the
 engines’ rows separate (or drops one engine’s row from the merged view)
 instead of reporting them together.
 
-[`main!`][__link2] accepts suite-level Gungraun settings and named groups with their
+[`main!`][__link3] accepts suite-level Gungraun settings and named groups with their
 own configuration, setup, teardown, comparison, and parallelism:
 
 ```rust
@@ -360,7 +369,7 @@ Renamed native symbols do not automatically reconnect older native histories.
 The system allocator
 is used by default; `main!(..., allocator = MyAllocator)` selects another
 underlying allocator.
-Put `allocator` after `benchmarks` or `groups` in [`main!`][__link3]. The executable
+Put `allocator` after `benchmarks` or `groups` in [`main!`][__link4]. The executable
 may define only one global allocator. Any existing `alloc_tracker`
 instrumentation must resolve to the same Cargo package source as the metabench
 tracker; a registry dependency and a separate path dependency have independent
@@ -382,5 +391,6 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 
  [__link0]: https://crates.io/crates/criterion
  [__link1]: https://crates.io/crates/gungraun
- [__link2]: `main!`
+ [__link2]: https://github.com/microsoft/oxidizer/blob/main/docs/benchmarks.md#owned-native-inputs
  [__link3]: `main!`
+ [__link4]: `main!`

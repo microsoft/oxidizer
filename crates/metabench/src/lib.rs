@@ -184,6 +184,15 @@
 //! The installed `gungraun-runner` must match the Gungraun library version
 //! (currently 0.20.0). Metabench reads that runner's schema-v7 summaries.
 //!
+//! Gungraun 0.20 adds batched execution paths that retain prepared inputs until each batch finishes.
+//! Do not borrow a temporary in a native case, such as `#[bench::case(&prepare())]`.
+//! Prepare an owned input, such as a `Box`, and return its owner with the result
+//! to keep input destruction outside measurement.
+//! Criterion can continue to borrow its prepared state and select the result
+//! from the returned tuple.
+//! See [owned native inputs](https://github.com/microsoft/oxidizer/blob/main/docs/benchmarks.md#owned-native-inputs)
+//! for the migration recipe.
+//!
 //! Benchmark-level `gungraun_config`, `gungraun_setup`, and
 //! `gungraun_teardown` options work with native `#[bench::...]` and
 //! `#[benches::...]` cases:
