@@ -45,6 +45,40 @@ pub struct LogFormatConfig {
 }
 
 impl Default for LogFormatConfig {
+    /// Creates a configuration that includes all fields and leaves message placeholders unchanged.
+    ///
+    /// # Examples
+    ///
+    /// The three `include_*` fields are `true`, so the output includes the target,
+    /// library information, and event name.
+    /// With `format_body` set to `false`, `{request.id}` stays in the message.
+    /// The attribute appears separately as `request.id=10`.
+    ///
+    /// ```
+    /// use observed_destination_core::{LogFormatConfig, print_log_record};
+    /// use opentelemetry::InstrumentationScope;
+    /// use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+    /// use opentelemetry_sdk::logs::SdkLoggerProvider;
+    ///
+    /// let scope = InstrumentationScope::builder("example").with_version("1.0").build();
+    /// let provider = SdkLoggerProvider::builder().build();
+    /// let logger = provider.logger_with_scope(scope.clone());
+    /// let mut record = logger.create_log_record();
+    /// record.set_target("application");
+    /// record.set_event_name("request.received");
+    /// record.set_body("request received, id={request.id}".into());
+    /// record.add_attribute("request.id", 10);
+    ///
+    /// let config = LogFormatConfig::default();
+    /// let mut output = Vec::new();
+    /// print_log_record(&mut output, &record, &scope, config)?;
+    ///
+    /// assert_eq!(
+    ///     output,
+    ///     b"application request received, id={request.id} request.id=10 [example-1.0] <request.received>\n",
+    /// );
+    /// # Ok::<(), opentelemetry_sdk::error::OTelSdkError>(())
+    /// ```
     fn default() -> Self {
         Self {
             include_target: true,
@@ -59,6 +93,36 @@ impl LogFormatConfig {
     /// Creates a minimal format configuration.
     ///
     /// Only timestamp, severity, and message body with placeholders expanded.
+    ///
+    /// # Examples
+    ///
+    /// With `format_body` set to `true`, `{request.id}` becomes `10`.
+    /// Attributes are not printed separately.
+    /// The three `include_*` fields are `false`, so the output omits the target,
+    /// library information, and event name set below.
+    ///
+    /// ```
+    /// use observed_destination_core::{LogFormatConfig, print_log_record};
+    /// use opentelemetry::InstrumentationScope;
+    /// use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+    /// use opentelemetry_sdk::logs::SdkLoggerProvider;
+    ///
+    /// let scope = InstrumentationScope::builder("example").build();
+    /// let provider = SdkLoggerProvider::builder().build();
+    /// let logger = provider.logger_with_scope(scope.clone());
+    /// let mut record = logger.create_log_record();
+    /// record.set_target("application");
+    /// record.set_event_name("request.received");
+    /// record.set_body("request received, id={request.id}".into());
+    /// record.add_attribute("request.id", 10);
+    ///
+    /// let config = LogFormatConfig::minimal();
+    /// let mut output = Vec::new();
+    /// print_log_record(&mut output, &record, &scope, config)?;
+    ///
+    /// assert_eq!(output, b"request received, id=10\n");
+    /// # Ok::<(), opentelemetry_sdk::error::OTelSdkError>(())
+    /// ```
     #[must_use]
     pub fn minimal() -> Self {
         Self {
@@ -81,6 +145,25 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 /// The `{:.9}` precision is what keeps every log line the same width: jiff's
 /// default `Display` for [`Timestamp`] omits trailing zero fractional digits,
 /// which produces inconsistent, occasionally shorter timestamps.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Write as _;
+/// use std::time::{Duration, SystemTime};
+///
+/// use observed_destination_core::Rfc3339Nanos;
+///
+/// let timestamp = Rfc3339Nanos::from(SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+/// let mut output = Vec::new();
+/// writeln!(output, "[{timestamp}] WARN: dropped 3 events")?;
+///
+/// assert_eq!(
+///     output,
+///     b"[1970-01-01T00:00:10.000000000Z] WARN: dropped 3 events\n"
+/// );
+/// # Ok::<(), std::io::Error>(())
+/// ```
 #[derive(Debug)]
 pub struct Rfc3339Nanos(SystemTime);
 
@@ -111,9 +194,32 @@ pub(crate) fn print_resource(w: &mut (impl Write + ?Sized), resource: &Resource)
     .map_err(io_err)
 }
 
-/// Use when exporting SDK log records to a text destination, passing its writer
-/// and formatting configuration. Appends a newline; the caller controls buffering
-/// and flushing.
+/// Writes one formatted log record as a text line to `w`.
+///
+/// Uses `config` to select the fields and format the message body.
+/// Appends a newline. The caller controls buffering and flushing.
+///
+/// # Examples
+///
+/// ```
+/// use observed_destination_core::{LogFormatConfig, print_log_record};
+/// use opentelemetry::InstrumentationScope;
+/// use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+/// use opentelemetry_sdk::logs::SdkLoggerProvider;
+///
+/// let scope = InstrumentationScope::builder("example").build();
+/// let provider = SdkLoggerProvider::builder().build();
+/// let logger = provider.logger_with_scope(scope.clone());
+/// let mut record = logger.create_log_record();
+/// record.set_body("request received, id={request.id}".into());
+/// record.add_attribute("request.id", 10);
+///
+/// let mut output = Vec::new();
+/// print_log_record(&mut output, &record, &scope, LogFormatConfig::minimal())?;
+///
+/// assert_eq!(output, b"request received, id=10\n");
+/// # Ok::<(), opentelemetry_sdk::error::OTelSdkError>(())
+/// ```
 ///
 /// # Errors
 ///
