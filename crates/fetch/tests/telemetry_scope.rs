@@ -6,6 +6,7 @@
 //! client and therefore land on the metrics that client emits.
 
 use bytes::Bytes;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::tokio::TokioDeps;
 use fetch::{HttpClient, HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -94,7 +95,7 @@ async fn custom_transport_scope_attribute() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 
@@ -128,7 +129,7 @@ async fn custom_transport_instrument_inherits_scope() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 

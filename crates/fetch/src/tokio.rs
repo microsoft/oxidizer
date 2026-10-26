@@ -10,6 +10,7 @@
 //! TLS backend (`rustls` and/or `native-tls`).
 
 use anyspawn::Spawner;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_hyper::HyperTransportBuilder;
 use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
@@ -33,13 +34,16 @@ use crate::{HttpClient, HttpClientBuilder};
 ///
 /// Contains the necessary dependencies for HTTP client operations in a Tokio
 /// environment, including clock access and memory management.
+///
+/// Set `memory` to select the provider for HTTP body allocations.
+/// Cloning dependencies clones that provider, and relocation forwards to it.
 #[derive(Debug, Clone, ThreadAware)]
 #[fundle::deps]
 pub struct TokioDeps {
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
-    /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: bytesbuf::mem::GlobalPool,
+    /// Memory provider for HTTP body allocations.
+    pub memory: OpaqueMemory,
 }
 
 impl Default for TokioDeps {
@@ -49,11 +53,11 @@ impl Default for TokioDeps {
 }
 
 impl TokioDeps {
-    /// Creates `TokioDeps` with the given clock and a dedicated HTTP-client memory pool.
+    /// Creates `TokioDeps` with the given clock and the global memory pool.
     #[must_use]
     pub fn with_clock(clock: &Clock) -> Self {
         Self {
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: OpaqueMemory::new(GlobalPool::new()),
             clock: clock.clone(),
         }
     }
@@ -145,7 +149,7 @@ impl HttpClient {
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
         let deps = deps.into();
         let clock = deps.clock.clone();
-        let global_pool = deps.global_pool.clone();
+        let memory = deps.memory.clone();
 
         Self::builder_custom_internal(
             crate::constants::TOKIO_RUNTIME_NAME,
@@ -154,7 +158,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock,
-                global_pool,
+                memory,
                 extras: deps,
             },
         )

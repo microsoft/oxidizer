@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::{HttpClient, HttpClientBuilder};
 use observed::Sink;
@@ -14,7 +14,7 @@ use crate::transport::{TransportInputs, WinHttpTransport};
 
 /// Supplies the environment and transport extras needed by WinHTTP.
 ///
-/// The clock, global memory pool, and telemetry sink are mandatory application
+/// The clock, memory provider, and telemetry sink are mandatory application
 /// services that the transport cannot create for itself. TLS and
 /// WinHTTP-specific options are transport extras and use strict or unlimited
 /// defaults when omitted.
@@ -27,25 +27,28 @@ use crate::transport::{TransportInputs, WinHttpTransport};
 #[non_exhaustive]
 pub struct WinHttpDeps {
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     sink: Sink,
     tls: WinHttpTlsConfig,
 }
 
 impl WinHttpDeps {
     /// Starts building dependencies for the WinHTTP transport.
+    ///
+    /// The memory provider serves request-body and response-body allocations.
+    /// Cloning dependencies clones the provider, and relocation reaches the provider.
     #[must_use]
-    pub fn builder(clock: Clock, global_pool: GlobalPool, sink: Sink) -> WinHttpDepsBuilder {
+    pub fn builder(clock: Clock, memory: OpaqueMemory, sink: Sink) -> WinHttpDepsBuilder {
         WinHttpDepsBuilder {
             clock,
-            global_pool,
+            memory,
             sink,
             tls: WinHttpTlsConfig::default(),
         }
     }
 
-    pub(crate) fn global_pool(&self) -> &GlobalPool {
-        &self.global_pool
+    pub(crate) fn memory(&self) -> &OpaqueMemory {
+        &self.memory
     }
 
     pub(crate) fn sink(&self) -> &Sink {
@@ -66,7 +69,7 @@ impl WinHttpDeps {
 #[non_exhaustive]
 pub struct WinHttpDepsBuilder {
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     sink: Sink,
     tls: WinHttpTlsConfig,
 }
@@ -84,7 +87,7 @@ impl WinHttpDepsBuilder {
     pub fn build(self) -> WinHttpDeps {
         WinHttpDeps {
             clock: self.clock,
-            global_pool: self.global_pool,
+            memory: self.memory,
             sink: self.sink,
             tls: self.tls,
         }
@@ -140,7 +143,7 @@ fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade)
     let inputs = TransportInputs {
         body_builder: context.body_builder,
         clock: context.clock,
-        global_pool: context.extras.global_pool().clone(),
+        memory: context.extras.memory().clone(),
         sink: context.extras.sink().clone(),
         options: context.options,
         tls: context.extras.tls().clone(),
@@ -153,7 +156,7 @@ fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade)
 fn into_custom_deps(deps: WinHttpDeps) -> CustomDeps<WinHttpDeps> {
     CustomDeps {
         clock: deps.clock.clone(),
-        global_pool: deps.global_pool.clone(),
+        memory: deps.memory.clone(),
         extras: deps,
     }
 }
@@ -168,7 +171,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
     use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
@@ -210,8 +213,8 @@ mod tests {
         assert_eq!(custom_deps.extras.sink().id(), Sink::noop().id());
         assert!(custom_deps.extras.tls().accepts_invalid_certs());
 
-        let _body_pool_buffer = custom_deps.global_pool.reserve(1);
-        let _transport_pool_buffer = custom_deps.extras.global_pool().reserve(1);
+        let _body_pool_buffer = custom_deps.memory.reserve(1);
+        let _transport_pool_buffer = custom_deps.extras.memory().reserve(1);
     }
 
     #[test]
@@ -312,7 +315,7 @@ mod tests {
     }
 
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder(clock(), GlobalPool::new(), Sink::noop())
+        WinHttpDeps::builder(clock(), OpaqueMemory::new(GlobalPool::new()), Sink::noop())
     }
 
     fn clock() -> Clock {

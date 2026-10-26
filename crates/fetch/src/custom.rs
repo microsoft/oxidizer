@@ -16,7 +16,7 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
 use performables::arc::{Arc, PerThread};
@@ -45,6 +45,10 @@ pub enum Isolation {
 /// The `Extras` type parameter (defaulting to `()`) lets the caller thread additional
 /// thread-aware dependencies through to [`CustomContext::extras`] — for example a
 /// connection pool, credential provider, or runtime handle.
+///
+/// Request bodies and transport body builders use `memory`.
+/// Cloning dependencies clones the provider.
+/// Thread-aware relocation forwards to the provider.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct CustomDeps<Extras = ()>
 where
@@ -52,8 +56,8 @@ where
 {
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
-    /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: GlobalPool,
+    /// Memory provider for HTTP body allocations.
+    pub memory: OpaqueMemory,
     /// Extra dependencies forwarded verbatim to [`CustomContext::extras`].
     pub extras: Extras,
 }
@@ -66,7 +70,7 @@ where
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CustomContext<Extras = ()> {
-    /// Builder for assembling HTTP response bodies, backed by the client's memory pool.
+    /// Builder for HTTP response bodies, backed by the client's memory provider.
     pub body_builder: HttpBodyBuilder,
     /// Clock for timing operations and timeouts inside the handler.
     pub clock: Clock,
@@ -213,13 +217,13 @@ impl HttpClient {
             runtime_name: runtime.into(),
             name: transport.into(),
             clock: deps.clock.clone(),
-            global_pool: deps.global_pool.clone(),
+            memory: deps.memory.clone(),
             isolation,
             inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
                 let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
                     Box::new(move |options, meter, pool_index| {
                         let context = CustomContext {
-                            body_builder: create_body_builder(&deps.global_pool, &deps.clock, &options),
+                            body_builder: create_body_builder(&deps.memory, &deps.clock, &options),
                             clock: deps.clock.clone(),
                             pool_index,
                             extras: deps.extras.clone(),
@@ -247,7 +251,7 @@ pub(crate) struct Transport {
     name: Cow<'static, str>,
     inner: Arc<TransportFn, PerThread>,
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     isolation: Isolation,
 }
 
@@ -273,7 +277,7 @@ impl Transport {
     }
 
     pub(crate) fn create_body_builder(&self, options: &ClientOptions) -> HttpBodyBuilder {
-        create_body_builder(&self.global_pool, &self.clock, options)
+        create_body_builder(&self.memory, &self.clock, options)
     }
 }
 
@@ -283,8 +287,8 @@ impl Debug for Transport {
     }
 }
 
-pub(crate) fn create_body_builder(pool: &GlobalPool, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
-    HttpBodyBuilder::new(pool.clone(), clock).with_options(options.response_body_options)
+pub(crate) fn create_body_builder(memory: &OpaqueMemory, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
+    HttpBodyBuilder::new(memory.clone(), clock).with_options(options.response_body_options)
 }
 
 #[cfg(test)]
@@ -293,6 +297,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
     use thread_aware::unaware;
@@ -306,7 +311,7 @@ mod tests {
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: OpaqueMemory::new(GlobalPool::new()),
             extras: (),
         }
     }
@@ -353,7 +358,7 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: OpaqueMemory::new(GlobalPool::new()),
             extras: unaware(Arc::clone(&counter)),
         };
 

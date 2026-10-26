@@ -40,9 +40,9 @@ except the constructors arrive through an extension trait this crate implements 
 use fetch::HttpClient;
 use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
 
-// Clock, memory pool, and telemetry sink come from the application's environment.
+// Clock, memory provider, and telemetry sink come from the application's environment.
 // TLS configuration defaults when omitted.
-let deps = WinHttpDeps::builder(clock, global_pool, sink)
+let deps = WinHttpDeps::builder(clock, memory, sink)
     .tls(WinHttpTlsConfig::builder()
         .accept_invalid_certs(true)                 // Schannel knobs, §4
         .build())
@@ -54,7 +54,7 @@ let client = HttpClient::builder_winhttp(deps)
 
 The result is an ordinary `fetch` `HttpClient`; no other caller code changes.
 `WinHttpDeps` carries the mandatory environment dependencies needed by this transport:
-the timer-capable `tick::Clock`, `bytesbuf::mem::GlobalPool`, and `observed::Sink`.
+the timer-capable `tick::Clock`, `bytesbuf::mem::OpaqueMemory`, and `observed::Sink`.
 These values cannot be invented by the crate and therefore have no defaults. Its TLS
 configuration is user configuration and does default. `WinHttpDeps` and its
 component config types are `#[non_exhaustive]` and constructed through builders so new
@@ -64,13 +64,13 @@ fields can be added compatibly:
 /// WinHTTP-specific dependencies. Construct with [`WinHttpDeps::builder`].
 #[derive(thread_aware::ThreadAware)]
 #[non_exhaustive]
-pub struct WinHttpDeps { /* clock, global pool, sink, TLS - private */ }
+pub struct WinHttpDeps { /* clock, memory, sink, TLS - private */ }
 
 impl WinHttpDeps {
     /// Starts building a `WinHttpDeps`.
     pub fn builder(
         clock: tick::Clock,
-        global_pool: bytesbuf::mem::GlobalPool,
+        memory: bytesbuf::mem::OpaqueMemory,
         sink: observed::Sink,
     ) -> WinHttpDepsBuilder;
 }
@@ -83,6 +83,17 @@ pub trait HttpClientWinHttpExt {
 ```
 
 `WinHttpTlsConfig` (§4) follows the same builder + `#[non_exhaustive]` pattern.
+
+The caller supplies a memory provider, which allocates buffers for body data.
+`OpaqueMemory::new(provider)` accepts any `MemoryShared` provider.
+To use the global pool, pass `OpaqueMemory::new(GlobalPool::new())`.
+The transport uses this provider for body construction, response reads, and writer reservations.
+Request bodies can also contain buffers from other providers.
+
+Cloning dependencies clones the supplied provider.
+Thread-aware relocation forwards to that provider.
+The provider decides whether its clones share state.
+Read and write bounds do not depend on the provider's block sizes.
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
 

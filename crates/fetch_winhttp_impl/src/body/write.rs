@@ -6,7 +6,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 use std::pin::Pin;
 use std::ptr::NonNull;
 
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use bytesbuf_io::Write;
 use fetch::{HttpBody, HttpError};
@@ -286,11 +286,11 @@ struct UnsupportedTransferEncodingError;
 pub(crate) struct WinHttpBodyWriter<'guard> {
     guard: &'guard mut RequestGuard,
     bindings: BindingsFacade,
-    memory: GlobalPool,
+    memory: OpaqueMemory,
 }
 
 impl<'guard> WinHttpBodyWriter<'guard> {
-    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: BindingsFacade, memory: GlobalPool) -> Self {
+    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: BindingsFacade, memory: OpaqueMemory) -> Self {
         Self { guard, bindings, memory }
     }
 
@@ -451,13 +451,14 @@ struct UnsupportedBodyFrameError;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use bytesbuf::BytesView;
-    use bytesbuf::mem::{GlobalPool, HasMemory as _, Memory as _};
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
     use http::HeaderValue;
     use ohno::Labeled as _;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use thread_aware::unaware;
 
     use super::{
         RequestBodyError, RequestBodyFraming, RequestBodyFramingError, WinHttpBodyWriter, end_chunked_completion, next_write_len,
@@ -685,16 +686,21 @@ mod tests {
     }
 
     #[test]
-    fn the_writer_reserves_from_the_transport_memory_pool() {
+    fn the_writer_reserves_from_the_transport_memory_provider() {
         // `bytesbuf_io::Write` requires both memory traits so a caller can
         // serialize directly into transport-owned capacity, which must come
-        // from the pool the transport was configured with.
+        // from the provider the transport was configured with.
         let (mut guard, context, contexts, session, closes) = installed();
-        let pool = GlobalPool::new();
-        let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), pool);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
+            requests.lock().unwrap().push(min_bytes);
+            GlobalPool::new().reserve(min_bytes)
+        }));
+        let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), memory);
 
         assert!(writer.reserve(64).capacity() >= 64);
-        assert!(writer.memory().reserve(64).capacity() >= 64);
+        assert!(writer.memory().reserve(128).capacity() >= 128);
+        assert_eq!(*requests.lock().unwrap(), [64, 128]);
 
         // SAFETY: finish requires an installed context whose reclaiming
         // notification has not been delivered, no overlapping notification, and
