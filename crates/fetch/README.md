@@ -626,18 +626,18 @@ features, or enable `compression-all`. Then select the formats through
 let client = builder.decompression(&[DecompressionFormat::Gzip]).build();
 ```
 
-Requests list the formats in `Accept-Encoding`, with the most preferred format first. The client
-decompresses a response that uses a selected format. It removes `Content-Encoding` and
-`Content-Length` because they do not describe the decompressed body. If the response uses a
+Requests list the formats in `Accept-Encoding`, with the most preferred format first. Before the
+client returns a response that uses a selected format, it removes `Content-Encoding` and
+`Content-Length`. It decodes the body lazily as the caller reads it. If the response uses a
 format that was not selected, the client returns it without changes.
 
 [`DecompressionFormat::ALL`][__link82] asks for everything the build can
 decompress.
 
-Decompression is lazy. A malformed body fails when code reads it, not when the response arrives.
-This failure does not trigger a retry. The client uses the `http_compression` defaults. The
-decompressed output limit is 64 MiB. Each decompression stage accepts at most 1,024 concatenated
-streams. `fetch` does not override these defaults.
+A malformed body fails when code reads it, not when the response arrives. This failure does not
+trigger a retry. The client uses the `http_compression` defaults. The decompressed output limit
+is 64 MiB. Each decompression stage accepts at most 1,024 concatenated streams. `fetch` does not
+override these defaults.
 
 [`DecompressionOptions`][__link83] sets limits for decompressed output and
 compressed streams. Pass `None` to
@@ -713,7 +713,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbp41mTQ_ewhEbQWLjGAaS7tUbbq-BooMpkikbV_eElTV_IwphZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbB5_dLcqT3BAbt_7HCfT5w3EbbQxRTsKGBHkbWp9HKW56UwJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
  [__link0]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient::post

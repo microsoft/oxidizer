@@ -732,18 +732,18 @@
 //! # }
 //! ```
 //!
-//! Requests list the formats in `Accept-Encoding`, with the most preferred format first. The client
-//! decompresses a response that uses a selected format. It removes `Content-Encoding` and
-//! `Content-Length` because they do not describe the decompressed body. If the response uses a
+//! Requests list the formats in `Accept-Encoding`, with the most preferred format first. Before the
+//! client returns a response that uses a selected format, it removes `Content-Encoding` and
+//! `Content-Length`. It decodes the body lazily as the caller reads it. If the response uses a
 //! format that was not selected, the client returns it without changes.
 //!
 //! [`DecompressionFormat::ALL`](options::DecompressionFormat::ALL) asks for everything the build can
 //! decompress.
 //!
-//! Decompression is lazy. A malformed body fails when code reads it, not when the response arrives.
-//! This failure does not trigger a retry. The client uses the `http_compression` defaults. The
-//! decompressed output limit is 64 MiB. Each decompression stage accepts at most 1,024 concatenated
-//! streams. `fetch` does not override these defaults.
+//! A malformed body fails when code reads it, not when the response arrives. This failure does not
+//! trigger a retry. The client uses the `http_compression` defaults. The decompressed output limit
+//! is 64 MiB. Each decompression stage accepts at most 1,024 concatenated streams. `fetch` does not
+//! override these defaults.
 //!
 //! [`DecompressionOptions`][options::DecompressionOptions] sets limits for decompressed output and
 //! compressed streams. Pass `None` to

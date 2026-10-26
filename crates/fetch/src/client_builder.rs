@@ -146,9 +146,10 @@ impl HttpClientBuilder {
     /// [`formats`][DecompressionOptions::formats].
     ///
     /// Requests list selected formats in `Accept-Encoding`, with the most preferred format first.
-    /// The client removes `Content-Encoding` and `Content-Length` after decompression. If a
-    /// response uses a format that was not selected, the client returns it without changes.
-    /// Decompression is lazy, so a malformed body fails when code reads it.
+    /// Before it returns a response selected for decompression, the client removes
+    /// `Content-Encoding` and `Content-Length`. Body decoding is lazy and occurs as code reads it,
+    /// so a malformed body fails during that read. If a response uses a format that was not
+    /// selected, the client returns it without changes.
     ///
     /// [`DecompressionFormat::ALL`][crate::options::DecompressionFormat::ALL] selects every
     /// available format. The `compression-all` feature makes all supported formats available.
