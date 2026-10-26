@@ -24,6 +24,7 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.93
+unused-allowed-license = "allow"
 # <<< anvil-managed: anvil-deny-licenses
 
 # `webpki-root-certs` packages Mozilla's CA data under this data license.
