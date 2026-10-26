@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.6.0` of `arty`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+
+- ✨ Features
+
+  - add Arty runtime support ([#863](https://github.com/microsoft/oxidizer/pull/863))
+
 ## [0.9.2] - 2026-10-20
 
 - Published local dependency requirement(s) will move: performables, thread_aware.

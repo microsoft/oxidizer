@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - target tasks by worker coordinate ([#866](https://github.com/microsoft/oxidizer/pull/866))
+  - Now requires `0.29.1` of `observed`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.1.3` of `thread_aware_core`
+  - Now requires `0.8.1` of `tick`
+
+- ⚡ Performance
+
+  - reduce scheduler contention ([#855](https://github.com/microsoft/oxidizer/pull/855))
+
 ## [0.5.0] - 2026-10-20
 
 - Harden executor lifecycle, make construction and retained wakers safe, and update exposed `tick` identities through the Arty version group.

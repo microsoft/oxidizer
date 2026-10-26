@@ -1,11 +1,6 @@
 # Changelog
 
-## [0.29.0] - 2026-10-20
-
-- The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.
-- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed_macros =0.28.0 -> 0.29.0; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
-
-## [Unreleased]
+## [0.29.1] - 2026-10-26
 
 ### Added
 
@@ -24,6 +19,22 @@
 - `EventSamplingContext::sink_id`.
 - `EventSamplingContext::timestamp`.
 - The public `EventSamplingContext::new`.
+
+- 🔧 Maintenance
+
+  - Now requires `0.29.1` of `observed_macros`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.8.1` of `tick`
+
+- ⚡ Performance
+
+  - reduce enrichment allocations and instructions ([#877](https://github.com/microsoft/oxidizer/pull/877))
+
+## [0.29.0] - 2026-10-20
+
+- The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed_macros =0.28.0 -> 0.29.0; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
 
 ## [0.27.0] - 2026-10-05
 

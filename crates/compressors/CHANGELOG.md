@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+
 ## [0.3.0] - 2026-10-20
 
 - Update exposed Bytesbuf identities for Bytesbuf 0.12; runtime codec behavior remains unchanged.

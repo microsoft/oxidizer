@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.1] - 2026-10-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+
+- ✨ Features
+
+  - add Arty runtime support ([#863](https://github.com/microsoft/oxidizer/pull/863))
+
 ## [0.8.0] - 2026-10-20
 
 - Make timer drivers deadline-driven and require an owner `Waker` when activating an inactive clock.

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2026-10-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.3` of `thread_aware_core`
+
+- ✨ Features
+
+  - integrate I/O drivers ([#829](https://github.com/microsoft/oxidizer/pull/829))
+
 ## [0.3.0] - 2026-10-20
 
 - Replace the I/O provider contract with direct `IoContext::driver` creation, `DriverInstance`, owner wakers, and consuming shutdown.

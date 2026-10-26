@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.5.0` of `fetch_winhttp_impl`
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

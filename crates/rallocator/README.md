@@ -56,7 +56,7 @@ an installation facade that can be extended with configuration options later.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbA5kLf_QRxBobNIEVKfwWQqEbWHO4Khw32P0bShTZ4JBR1WBhZIGCanJhbGxvY2F0b3JlMC4zLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbA5kLf_QRxBobNIEVKfwWQqEbWHO4Khw32P0bShTZ4JBR1WBhZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://github.com/microsoft/snmalloc
  [__link1]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
- [__link2]: https://docs.rs/rallocator/0.3.0/rallocator/macro.rallocator.html
+ [__link2]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html

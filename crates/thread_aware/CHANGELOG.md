@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.2] - 2026-10-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.3` of `thread_aware_core`
+
 ## [0.12.1] - 2026-10-20
 
 - Move documentation-only modules to their stable names and expand thread-aware authoring guidance.

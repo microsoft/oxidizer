@@ -177,7 +177,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "anyspawn"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "arty",
  "criterion",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "anyspawn_azure"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyspawn",
  "async-trait",
@@ -251,7 +251,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "arty"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arty_executor",
  "arty_io_core",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "arty_executor"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "arty_io_core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "static_assertions",
  "thread_aware_core",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "arty_io_host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arty_io_core",
  "data_privacy",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "arty_macros"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arty_macros_impl",
  "mutants",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "arty_macros_impl"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "darling",
  "insta",
@@ -974,7 +974,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bytesbuf"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "bytesbuf",
  "future_assert",
@@ -1013,7 +1013,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "compressors"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bolero",
  "brotli",
@@ -1930,7 +1930,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetch"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1984,7 +1984,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp_impl"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytes",
  "bytesbuf",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "http_compression"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytesbuf",
  "compressors",
@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -3655,7 +3655,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "multitude"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
@@ -3875,7 +3875,7 @@ dependencies = [
 
 [[package]]
 name = "observed"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "criterion",
  "data_privacy",
@@ -3898,7 +3898,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "mutants",
  "observed_macros_impl",
@@ -3906,7 +3906,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros_impl"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "criterion",
  "insta",
@@ -3932,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "observed_utils"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arrayvec",
  "const-hex",
@@ -4241,7 +4241,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "performables"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -4739,7 +4739,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rallocator"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "seismograph",
@@ -5308,7 +5308,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -5344,7 +5344,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "futures",
  "http",
@@ -5382,7 +5382,7 @@ dependencies = [
 
 [[package]]
 name = "seismograph"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "mutants",
@@ -5392,7 +5392,7 @@ dependencies = [
 
 [[package]]
 name = "seismograph_cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "clap",
@@ -5409,14 +5409,14 @@ dependencies = [
 
 [[package]]
 name = "seismograph_io"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "seismograph",
 ]
 
 [[package]]
 name = "seismograph_protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
@@ -5427,14 +5427,14 @@ dependencies = [
 
 [[package]]
 name = "seismograph_rallocator"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "seismograph",
 ]
 
 [[package]]
 name = "seismograph_runtime"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "backtrace",
  "seismograph",
@@ -5943,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "futures",
  "mutants",
@@ -5965,7 +5965,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "static_assertions",
 ]
@@ -6001,7 +6001,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "alloc_tracker",
  "chrono",
@@ -6542,7 +6542,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ahash",
  "async-once-cell",
@@ -7170,18 +7170,18 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zstd-safe"
-version = "8.0.0"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae42c0555055784c70058d19ba8e275528e8a99a706684868ace5da4e716a4ab"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",

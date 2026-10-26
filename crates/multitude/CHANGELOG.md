@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+
 ## [0.12.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

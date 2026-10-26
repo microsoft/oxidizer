@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.13.0` of `bytesbuf_io`
+  - Now requires `0.20.0` of `fetch`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.29.1` of `observed`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.8.1` of `tick`
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

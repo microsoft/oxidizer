@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `anyspawn`
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.4.0` of `compressors`
+  - Now requires `0.11.0` of `fetch_hyper`
+  - Now requires `0.4.0` of `http_compression`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.11.1` of `seatbelt`
+  - Now requires `0.12.0` of `seatbelt_http`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.8.1` of `tick`
+
 ## [0.19.0] - 2026-10-20
 
 - Add native-TLS server-name overrides, apply bounded HTTP decompression defaults, and migrate exposed dependency identities to their breaking releases.

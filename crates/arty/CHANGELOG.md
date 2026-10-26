@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.6.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - target tasks by worker coordinate ([#866](https://github.com/microsoft/oxidizer/pull/866))
+  - Now requires `0.6.0` of `arty_executor`
+  - Now requires `0.4.0` of `arty_io_core`
+  - Now requires `0.3.0` of `arty_io_host`
+  - Now requires `0.6.0` of `arty_macros`
+  - Now requires `0.29.1` of `observed`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.1.3` of `thread_aware_core`
+  - Now requires `0.8.1` of `tick`
+
+- ✨ Features
+
+  - integrate I/O drivers ([#829](https://github.com/microsoft/oxidizer/pull/829))
+
+- 🐛 Bug Fixes
+
+  - honor exact worker counts ([#873](https://github.com/microsoft/oxidizer/pull/873))
+
+- ⚡ Performance
+
+  - reduce scheduler contention ([#855](https://github.com/microsoft/oxidizer/pull/855))
+  - optimize synchronization and consolidate ready paths ([#854](https://github.com/microsoft/oxidizer/pull/854))
+
+- 📚 Documentation
+
+  - add repository agent policies ([#865](https://github.com/microsoft/oxidizer/pull/865))
+
 ## [0.5.0] - 2026-10-20
 
 - Adopt the breaking `tick` 0.8 timer contract and harden runtime task, shutdown, panic, and worker lifecycle behavior.

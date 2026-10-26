@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `anyspawn`
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.11.1` of `seatbelt`
+  - Now requires `0.8.1` of `tick`
+
 ## [0.10.0] - 2026-10-20
 
 - Route native-TLS clients through the override-capable connector and migrate exposed Fetch TLS and Tick identities.

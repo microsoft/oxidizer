@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.4.0` of `seismograph`
+  - Now requires `0.4.0` of `seismograph_rallocator`
+
+- ⚡ Performance
+
+  - optimize synchronization and consolidate ready paths ([#854](https://github.com/microsoft/oxidizer/pull/854))
+
 ## [0.3.0] - 2026-10-20
 
 - Replace allocator v1 with native v4, add native macOS support, and expose cooperative Seismograph allocator state.

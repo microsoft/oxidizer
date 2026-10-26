@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `anyspawn`
+  - Now requires `0.8.1` of `tick`
+
 ## [0.5.0] - 2026-10-20
 
 - The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.

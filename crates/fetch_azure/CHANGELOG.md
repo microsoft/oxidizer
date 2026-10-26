@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0] - 2026-10-26
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.20.0` of `fetch`
+
 ## [0.9.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
