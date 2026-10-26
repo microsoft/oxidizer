@@ -1,22 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Composable handlers that process HTTP requests as they flow through the pipeline.
+//! Handlers that process HTTP requests in a pipeline.
 //!
-//! Each handler adds one specific behavior — buffering, metrics, logging, or
-//! network dispatch — and wraps the next handler in the chain. Stacking them
-//! builds the request-processing pipeline used by an
+//! Each handler adds one behavior, such as buffering, metrics, logging, or dispatch. It wraps the
+//! next handler in the chain. Together, the handlers form the pipeline for
 //! [`HttpClient`](crate::HttpClient).
 //!
 //! See [`RequestHandler`][crate::RequestHandler] for how handlers work and how to
 //! write your own.
 //!
-//! # Available Handlers
+//! # Available handlers
 //!
-//! - [`Buffering`][crate::handlers::Buffering]: buffers the entire response body into memory.
-//! - [`Metrics`][crate::handlers::Metrics]: collects performance data for monitoring.
-//! - [`Logging`][crate::handlers::Logging]: adds structured request/response logging.
-//! - [`Dispatch`][crate::handlers::Dispatch]: sends requests to the network (managed by the `HttpClient`).
+//! - [`Buffering`][crate::handlers::Buffering] buffers the response body in memory.
+//! - [`Metrics`][crate::handlers::Metrics] records HTTP metrics.
+//! - [`Logging`][crate::handlers::Logging] records structured request and response events.
+//! - [`Dispatch`][crate::handlers::Dispatch] sends requests through the transport.
 
 mod dispatch;
 pub use dispatch::Dispatch;

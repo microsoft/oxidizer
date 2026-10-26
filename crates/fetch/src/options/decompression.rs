@@ -10,12 +10,10 @@
 ))]
 use compressors::format::Format;
 
-/// A compression format the client can decompress automatically.
+/// A format that the client can decompress automatically.
 ///
-/// Each variant exists only when its Cargo feature is enabled, so the set of
-/// variants is exactly the set this build can handle - and a build with none of
-/// them has no variants at all, links no compression implementation, and can only ask for an empty
-/// set.
+/// A variant exists only when its Cargo feature is enabled. A build without a compression feature
+/// has no variants and links no compression implementation.
 ///
 /// Pass to [`DecompressionOptions::formats`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,19 +39,15 @@ pub enum DecompressionFormat {
 }
 
 impl DecompressionFormat {
-    /// Every format compiled into this build, most recommended first.
+    /// Every format in this build, in preference order.
     ///
-    /// This is the order advertised in `Accept-Encoding`, so a server that
-    /// supports several picks the one earliest in the list:
+    /// Requests use this order in `Accept-Encoding`:
     ///
-    /// 1. `zstd` decompresses several times faster than the rest at a comparable
-    ///    ratio, which is what a client pays for.
-    /// 2. `br` compresses text the hardest, and is the most widely deployed of
-    ///    the two modern compression formats.
-    /// 3. `gzip` is the universally understood fallback.
-    /// 4. `deflate` is last: servers disagree over whether it means the
-    ///    zlib-wrapped form the specification requires or raw DEFLATE, so it is
-    ///    worth accepting but never worth preferring.
+    /// 1. `zstd` has the fastest decompression at a comparable compression ratio.
+    /// 2. `br` has the best text compression and wider deployment than `zstd`.
+    /// 3. `gzip` is the compatibility fallback.
+    /// 4. `deflate` is last because servers disagree about whether it means zlib-wrapped or raw
+    ///    DEFLATE.
     pub const ALL: &'static [Self] = &[
         #[cfg(any(test, feature = "compression-zstd"))]
         Self::Zstd,
@@ -81,8 +75,7 @@ impl DecompressionFormat {
             Self::Brotli => Format::Brotli,
             #[cfg(any(test, feature = "compression-gzip"))]
             Self::Gzip => Format::Gzip,
-            // HTTP's `deflate` is zlib-wrapped, so it maps to `Zlib`, not to the
-            // raw-DEFLATE `Format::Deflate`, which has no HTTP token at all.
+            // HTTP `deflate` is zlib-wrapped. Raw `Format::Deflate` has no HTTP token.
             #[cfg(any(test, feature = "compression-deflate"))]
             Self::Deflate => Format::Zlib,
         }
@@ -91,12 +84,10 @@ impl DecompressionFormat {
 
 /// Configures automatic response decompression and its resource limits.
 ///
-/// Decompression is off until [`formats`][Self::formats] names a format. The
-/// client inherits the safe HTTP defaults from `http_compression`: at most
-/// 64 MiB of decompressed output and 1,024 compressed streams per decompression
-/// stage.
-/// Configured bounds apply while reading the body, including when streaming
-/// without buffering it.
+/// Decompression is off until [`formats`][Self::formats] selects a format. The client uses the
+/// `http_compression` defaults: at most 64 MiB of output and 1,024 compressed streams for each
+/// decompression stage. Configured limits apply while code reads the body, including a streamed
+/// body.
 ///
 /// Pass to [`HttpClientBuilder::decompression`][crate::HttpClientBuilder::decompression].
 ///
@@ -133,8 +124,7 @@ enum StreamLimit {
 }
 
 impl DecompressionOptions {
-    /// Creates options with no enabled formats and no overrides to the safe HTTP
-    /// decompression defaults.
+    /// Creates options with no formats and the default decompression limits.
     ///
     /// This is what [`Default`] returns.
     #[must_use]
@@ -152,11 +142,10 @@ impl DecompressionOptions {
         Self::new().formats(formats)
     }
 
-    /// Decompresses responses using any of `formats`, most preferred first.
+    /// Sets the formats in preference order.
     ///
-    /// Requests advertise these formats in `Accept-Encoding` unless the caller
-    /// supplies that header or makes a range request. An empty list disables both
-    /// automatic decompression and advertisement.
+    /// Requests list these formats in `Accept-Encoding` unless the caller supplies the header or
+    /// makes a range request. An empty list disables decompression and the header.
     ///
     /// [`DecompressionFormat::ALL`] selects every format compiled into this build.
     #[must_use]
@@ -167,14 +156,13 @@ impl DecompressionOptions {
 
     /// Bounds the total decompressed output, in bytes.
     ///
-    /// When this setter is not called, the client inherits the safe HTTP default
-    /// from `http_compression`, currently 64 MiB. Pass a byte count or
-    /// `Some(count)` to replace it, or `None` to explicitly remove the
-    /// output-size bound. An explicit bound applies even when the caller streams
-    /// the body into a file or another service without buffering it in memory.
+    /// The `http_compression` default is currently 64 MiB. Pass a byte count or `Some(count)` to
+    /// replace it. Pass `None` to remove the output limit. An explicit limit also applies when the
+    /// caller streams the body without buffering it in memory.
     ///
-    /// This is independent of [`HttpBodyOptions::buffer_limit`][super::HttpBodyOptions::buffer_limit],
-    /// which limits how much a body-buffering operation may retain.
+    /// This limit is separate from
+    /// [`HttpBodyOptions::buffer_limit`][super::HttpBodyOptions::buffer_limit], which limits memory
+    /// retained while buffering a body.
     ///
     /// # Panics
     ///
@@ -193,10 +181,9 @@ impl DecompressionOptions {
 
     /// Bounds the number of compressed streams decoded by each decompression stage.
     ///
-    /// When this setter is not called, the client inherits the safe HTTP default
-    /// from `http_compression`, currently 1,024 streams. Each concatenated gzip
-    /// member or zstd frame counts as one stream, including empty ones that
-    /// would never reach the output-size bound.
+    /// The `http_compression` default is currently 1,024 streams. Each concatenated gzip member or
+    /// zstd frame counts as one stream, including an empty stream that cannot reach the output
+    /// limit.
     ///
     /// # Panics
     ///
@@ -284,8 +271,7 @@ mod tests {
 
     #[test]
     fn deflate_is_never_preferred() {
-        // Servers disagree over whether `deflate` is zlib-wrapped or raw, so it
-        // is worth accepting but must always rank below the alternatives.
+        // Servers disagree about whether `deflate` is zlib-wrapped or raw, so rank it last.
         assert_eq!(DecompressionFormat::ALL.last().copied(), Some(DecompressionFormat::Deflate));
     }
 

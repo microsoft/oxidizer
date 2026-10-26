@@ -4,13 +4,11 @@
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{DynamicService, DynamicServiceExt, Service};
 
-/// Type-erased transport that performs the actual I/O for a request.
+/// Type-erased transport that performs request I/O.
 ///
-/// All upper layers in the fetch pipeline (logging, metrics, retries,
-/// buffering, ...) eventually delegate to a transport, which turns an
-/// [`HttpRequest`] into bytes on the wire and the response bytes back into an
-/// [`HttpResponse`]. Concrete transports include HTTP/1.1 or HTTP/2 over plain
-/// TCP (`http://`) or TLS (`https://`), and in-process fakes for tests.
+/// Logging, metrics, retries, and buffering delegate to a transport. A transport converts an
+/// [`HttpRequest`] into bytes and response bytes into an [`HttpResponse`]. Transports can use
+/// HTTP/1.1 or HTTP/2 over TCP (`http://`) or TLS (`https://`). Tests can use an in-process fake.
 #[derive(Debug)]
 pub(crate) struct TransportHandler(pub DynamicService<HttpRequest, Result<HttpResponse>>);
 

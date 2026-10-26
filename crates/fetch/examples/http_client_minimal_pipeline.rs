@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to create an HTTP client with a minimal pipeline.
+//! Creates an HTTP client with the minimal pipeline.
 //!
-//! A minimal pipeline is useful in scenarios where the standard pipeline is not required
-//! and the client needs to be as lightweight as possible.
+//! The minimal pipeline contains no middleware.
 
 use fetch::HttpClient;
 
@@ -15,7 +14,7 @@ mod utils;
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    // This client does not use any middleware, it's as lightweight as possible.
+    // This client uses no middleware.
     let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
         .minimal_pipeline()
         .build();

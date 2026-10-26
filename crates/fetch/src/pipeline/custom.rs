@@ -12,15 +12,15 @@ use crate::handlers::Dispatch;
 use crate::pipeline::pipeline_context::PipelineContext;
 use crate::{HttpRequest, HttpResponse, RequestHandler};
 
-/// Callable that constructs a custom request pipeline.
+/// Builds a custom request pipeline.
 type PipelineConstructor = dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync;
 
-/// Type-erased callable that assembles a custom request pipeline.
+/// Type-erased factory for a custom request pipeline.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomPipeline(#[thread_aware(skip)] Arc<PipelineConstructor>);
 
 impl CustomPipeline {
-    /// Erases a concrete request-handler constructor into a reusable pipeline callable.
+    /// Stores a request-handler factory as a reusable type-erased pipeline factory.
     pub(crate) fn new<T: RequestHandler + 'static>(make_handler: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
         let constructor: Box<PipelineConstructor> = Box::new(move |dispatch, context| make_handler(dispatch, context).into_dynamic());
         Self(constructor.into())

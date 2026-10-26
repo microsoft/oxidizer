@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A fast, safe HTTP client that just works.
+//! An HTTP client for resilient and observable services.
 //!
 //! ```
 //! # async fn example(client: &fetch::HttpClient) -> fetch::Result<()> {
@@ -17,80 +17,66 @@
     not(feature = "json"),
     allow(
         rustdoc::broken_intra_doc_links,
-        reason = "json feature disabled, intra-doc links to json types will be broken"
+        reason = "JSON links are unavailable when the json feature is disabled"
     )
 )]
 
-//! This crate provides a powerful HTTP client that works with different async runtimes, handles
-//! security properly by default, and makes testing easy. The [`HttpClient`] provides a clean API
-//! for making HTTP requests without worrying about the complex details of modern HTTP.
+//! [`HttpClient`] supports different async runtimes and transports. It includes secure defaults,
+//! resilience, telemetry, and test utilities.
 //!
 //! # Why a new HTTP client?
 //!
-//! `fetch` bundles the capabilities real-world services need into a single client, ready to use
-//! out of the box:
+//! `fetch` includes the features that services commonly need:
 //!
-//! - **Secure, resilient and observable by default**: Strong TLS validation, built-in resilience
-//!   (retries, circuit breaking, hedging), and OpenTelemetry-compatible observability are
-//!   pre-configured for real-world use.
-//! - **Built-in testability**: The `test-util` feature lets you mock HTTP responses without complex
-//!   setup, making tests fast and deterministic.
-//! - **Composable pipeline**: Modular request handlers make it easy to add or customize behaviors
-//!   like logging, metrics, or retries.
-//! - **Memory efficient**: Uses smart pooling and zero-copy techniques to handle large responses
-//!   with minimal overhead.
+//! - Secure TLS validation, retries, circuit breaking, hedging, and OpenTelemetry telemetry.
+//! - Fake responses through the `test-util` feature.
+//! - A request pipeline that supports custom logging, metrics, retries, and other handlers.
+//! - Memory pooling and zero-copy operations for large responses.
 //!
-//! Crucially, `fetch` delivers these features **without forcing a runtime, an I/O implementation, or
-//! a particular HTTP transport on you**. The request pipeline is built around a *transport handler*
-//! at its leaf that you can swap out, with everything above it — resilience, observability, routing,
-//! logging, retries — layered on top. This makes `fetch`:
+//! `fetch` does not require one runtime, I/O implementation, or HTTP transport. A transport handler
+//! performs I/O at the end of the request pipeline. Resilience, telemetry, routing, logging, and
+//! retries run above that handler.
 //!
-//! - **runtime-agnostic**: Tokio works out of the box, or plug in any async runtime and I/O by
-//!   supplying your own transport handler; and
-//! - **transport-agnostic**: the transport handler is just a [`RequestHandler`] that turns a request
-//!   into a response, so you can keep the bundled hyper transport, wrap a hand-rolled client, or even
-//!   reuse an existing one like [`reqwest`](https://docs.rs/reqwest/).
+//! - Tokio works with the bundled transport. A custom transport can use another runtime and I/O
+//!   implementation.
+//! - A transport implements [`RequestHandler`]. It can use the bundled hyper transport, a custom
+//!   client, or another client such as [`reqwest`](https://docs.rs/reqwest/).
 //!
-//! That makes `fetch` an excellent fit for **libraries that want to stay runtime- and
-//! transport-agnostic**: they depend on `fetch` for its features while leaving the runtime and
-//! transport choice to the consuming application, which plugs in whatever it already uses. See the
-//! [`custom`] module and [`custom::create_builder`] for a worked example.
+//! A library can use `fetch` while the application selects the runtime and transport. See the
+//! [`custom`] module and [`custom::create_builder`] for an example.
 //!
 //! ## How does it compare to `reqwest`?
 //!
-//! By default both `fetch` and [`reqwest`](https://docs.rs/reqwest/) are built on top of the powerful
-//! [`hyper`](https://docs.rs/hyper/) HTTP implementation. While `reqwest` has been the go-to HTTP
-//! client for many Rust applications, `fetch` offers a different set of trade-offs that may
-//! better suit your needs, especially for crates that require resilience and multi-runtime support.
-//! Unlike `reqwest`, `fetch` is not tied to its default transport at all: you can swap hyper out for
-//! any transport — including `reqwest` itself — and keep all of `fetch`'s surrounding features.
+//! Both `fetch` and [`reqwest`](https://docs.rs/reqwest/) use
+//! [`hyper`](https://docs.rs/hyper/) by default. `fetch` also includes resilience and supports
+//! custom runtimes and transports. A custom transport can use `reqwest` while the rest of the
+//! `fetch` pipeline stays unchanged.
 //!
 //! | Feature | `fetch` | `reqwest` |
 //! | ------- | -------------- | --------- |
-//! | **Runtime Support** | ✅ Tokio **and custom runtimes** | ✅ Tokio only |
-//! | **Custom Transport / IO** | ✅ **Built-in** — plug in your own runtime, I/O, or even another HTTP client (e.g. `reqwest`) as the transport | ❌ Not supported |
-//! | **TLS/HTTPS** | ✅ Via rustls or native-tls | ✅ Via rustls or native-tls |
-//! | **Resilience** | ✅ Built-in and default | ❌ Optional, external crates required |
-//! | **JSON support** | ✅ Built-in | ✅ Built-in |
-//! | **Testing tools** | ✅ Built-in | ❌ Custom, external crates required |
-//! | **`OTel` Metrics/Logging** | ✅ Built-in | ❌ Custom implementation needed |
-//! | **Advanced HTTP Client Features [^1]** | ❌ Not yet supported [^2] | ✅ Via optional features |
-//! | **Request Pipeline** | ✅ Built-in | ❌ Custom, external crates required |
-//! | **Zero-copy Buffers** | ✅ Built-in | ❌ Partial, uses `Bytes` |
-//! | **Linux support** | ✅ Full support | ✅ Full support |
+//! | Runtime support | Tokio and custom runtimes | Tokio on native targets; browser implementation on `wasm32` |
+//! | Custom transport or I/O | Built in | Not supported |
+//! | TLS/HTTPS | rustls or native-tls | rustls or native-tls |
+//! | Resilience | Retries and circuit breaking are enabled by default; hedging is built in and optional | Built-in retries; circuit breaking and hedging require external middleware |
+//! | JSON support | Built in | Built in |
+//! | Testing tools | Built in | Requires custom or external tools |
+//! | OpenTelemetry metrics | Built in | Requires custom integration |
+//! | Structured request logging | Built-in tracing events | Requires custom middleware |
+//! | Advanced HTTP client features [^1] | Not supported yet [^2] | Available through optional features |
+//! | Request pipeline | Built in | Requires custom or external tools |
+//! | Zero-copy buffers | Built in | Partial support through `Bytes` |
+//! | Linux support | Full support | Full support |
 //!
-//! [^1]: Advanced HTTP client features include things like file uploads, cookies, proxies, and redirects.
-//! [^2]: The features currently missing (cookies, redirects, forms) may be added in future versions as the
-//! client matures.
+//! [^1]: Advanced HTTP client features include file uploads, cookies, proxies, and redirects.
+//! [^2]: Future versions can add the missing cookies, redirects, and forms features.
 //!
-//! > **Note**: If you're already familiar with `reqwest`, you'll feel right at home with `fetch`.
-//! > The APIs are intentionally similar, with familiar methods like `get()`, `post()`, and `fetch()`. Most
-//! > basic HTTP operations follow the same patterns, making it easy to switch between the two libraries.
+//! > **Note**: `fetch` uses methods such as `get()`, `post()`, and `fetch()`, which are similar to
+//! > `reqwest` methods.
 //!
 //! # Getting Started
 //!
-//! This client runs on the Tokio runtime by default. (Other runtimes can be plugged in via a
-//! custom transport — see the [`custom`] module.)
+//! The bundled transport runs on Tokio. Use a custom transport for another runtime. See the
+//! [`custom`] module.
 //!
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
@@ -99,11 +85,10 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
-//!     // Create a client using the builder
+//!     // Create a client with the bundled Tokio transport.
 //!     let client: HttpClient = HttpClient::new_tokio();
 //!
-//!     // Retrieve the response body as text. This validates the status (returning an
-//!     // error for `4xx`/`5xx` responses) and hands back the body in a single step.
+//!     // Return an error for a `4xx` or `5xx` status, then read the body as text.
 //!     let body: String = client.get("https://example.com").fetch_text_body().await?;
 //!
 //!     println!("response: {body}");
@@ -113,26 +98,21 @@
 //! # }
 //! ```
 //!
-//! > **Customization**: If you need to customize the HTTP client (e.g., add custom handlers, modify timeouts,
-//! > or configure other options), use [`HttpClient::builder_tokio`] instead of `new_tokio` to access
-//! > the full builder API.
+//! > **Note**: Use [`HttpClient::builder_tokio`] to add handlers or change timeouts and other
+//! > configuration.
 //!
 //! # Making Requests
 //!
-//! The HTTP client makes it easy to send different types of requests. Use convenient methods like
-//! [`HttpClient::get`] and [`HttpClient::post`] for common operations, and the builder pattern to customize
-//! your requests.
+//! Use methods such as [`HttpClient::get`] and [`HttpClient::post`] for common requests. Each method
+//! returns a builder for request-specific configuration.
 //!
 //! ## GET Requests
 //!
 //! ```rust
 //! # use fetch::{HttpClient, HttpError, HttpResponse};
 //! # async fn example(client: &HttpClient) -> Result<(), HttpError> {
-//! // Simple GET request
-//! let response: HttpResponse = client
-//!     .get("https://www.example.com")
-//!     .fetch() // Fetch executes the request and returns a response
-//!     .await?;
+//! // Send a GET request.
+//! let response: HttpResponse = client.get("https://www.example.com").fetch().await?;
 //!
 //! # Ok(())
 //! # }
@@ -143,10 +123,10 @@
 //! ```rust
 //! # use fetch::HttpClient;
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // POST request with text body
+//! // Send a POST request with a text body.
 //! let response = client
 //!     .post("https://httpbin.org/post")
-//!     .text("the exact body that is sent") // Attaches a text body to the request
+//!     .text("the exact body that is sent")
 //!     .fetch()
 //!     .await?;
 //!
@@ -154,16 +134,16 @@
 //! # }
 //! ```
 //!
-//! ## Handling Complex Requests
+//! ## Other request methods
 //!
-//! The client supports all standard HTTP methods through dedicated methods like [`HttpClient::put`],
-//! [`HttpClient::delete`], and more. For anything else, use [`HttpClient::request`] with any HTTP method:
+//! The client has methods such as [`HttpClient::put`] and [`HttpClient::delete`]. Use
+//! [`HttpClient::request`] for another HTTP method:
 //!
 //! ```rust
 //! # use fetch::{HttpClient, HttpError};
 //! # use http::Method;
 //! # async fn example(client: &HttpClient) -> Result<(), HttpError> {
-//! // Using a custom method
+//! // Send a PATCH request.
 //! let response = client
 //!     .request(Method::PATCH, "https://api.example.com/items/42")
 //!     .fetch()
@@ -172,7 +152,7 @@
 //! # }
 //! ```
 //!
-//! You can customize requests with headers, specific HTTP versions, or by attaching bodies:
+//! A request can include headers, an HTTP version, and a body:
 //!
 //! ```rust
 //! # use fetch::{HttpClient, HttpError};
@@ -180,10 +160,10 @@
 //! # async fn example(client: &HttpClient) -> Result<(), HttpError> {
 //! let response = client
 //!     .post("https://api.example.com/upload")
-//!     // Add HTTP headers
+//!     // Add HTTP headers.
 //!     .header(header::AUTHORIZATION, "Bearer token123")
 //!     .header(header::CONTENT_TYPE, "application/json")
-//!     // Set HTTP version
+//!     // Select the HTTP version.
 //!     .version(Version::HTTP_2)
 //!     .text("{\"name\": \"document.pdf\"}")
 //!     .fetch()
@@ -192,14 +172,13 @@
 //! # }
 //! ```
 //!
-//! All these methods return a [`HttpRequestBuilder`] object that lets you customize and then execute your request.
+//! These methods return [`HttpRequestBuilder`], which configures and sends the request.
 //!
-//! ## Handling Multiple Requests to the Same Base URI
+//! ## Reuse a base URI
 //!
-//! If you need to make multiple requests to the same base URI efficiently, use the [`HttpClientBuilder::base_uri`] builder method.
-//! This allows you to set a [`BaseUri`] for all requests, so you don't have to repeat the base URI each time.
+//! Use [`HttpClientBuilder::base_uri`] to set one [`BaseUri`] for all requests.
 //!
-//! This setting overrides any base URI set in the URI you pass to the request methods.
+//! The client base URI overrides a base URI in a request.
 //!
 //! ```rust
 //! # #[cfg(feature = "test-util")]
@@ -212,10 +191,11 @@
 //! # use templated_uri::BaseUri;
 //! # async fn example(builder: HttpClientBuilder) -> Result<(), Box<dyn std::error::Error>> {
 //! let client = builder
-//!     .base_uri(BaseUri::from_static("https://example.com/api/v1/")) // Trailing slash is mandatory
+//!     .base_uri(BaseUri::from_static("https://example.com/api/v1/")) // The trailing slash is required.
 //!     .build();
 //!
-//! let response = client.get("/foo/bar").fetch().await?; // Full URL called by this is `https://example.com/api/v1/foo/bar`
+//! // This request uses `https://example.com/api/v1/foo/bar`.
+//! let response = client.get("/foo/bar").fetch().await?;
 //! # Ok(())
 //! # }
 //! # }
@@ -223,35 +203,34 @@
 //!
 //! # Handling Responses
 //!
-//! When you call [`HttpRequestBuilder::fetch`], you get an [`HttpResponse`] with everything about the response -
-//! the body, status code, headers, and more. Under the hood, `HttpResponse` is just a type alias for
-//! [`Response<HttpBody>`].
+//! [`HttpRequestBuilder::fetch`] returns an [`HttpResponse`] with the body, status code, headers,
+//! and extensions. `HttpResponse` is a type alias for [`Response<HttpBody>`].
 //!
-//! Here's what you can do with a response:
+//! A response supports these operations:
 //!
-//! - Check if it worked: [`HttpResponse::ensure_success`] returns an error if the status isn't `2xx`.
-//! - Look at status codes: [`HttpResponse::status`] gives you the HTTP status.
-//! - Read headers: [`HttpResponse::headers`] lets you access the response headers.
-//! - Get the body: [`HttpResponse::into_body`] gives you just the response body.
-//! - Process the data: Convert the body to different formats using methods like [`HttpBody::into_text`],
-//!   [`HttpBody::into_bytes`], or when the `json` feature is enabled, [`HttpBody::into_json`].
+//! - [`HttpResponse::ensure_success`] returns an error if the status is not `2xx`.
+//! - [`HttpResponse::status`] returns the HTTP status.
+//! - [`HttpResponse::headers`] returns the response headers.
+//! - [`HttpResponse::into_body`] returns the response body.
+//! - [`HttpBody::into_text`] and [`HttpBody::into_bytes`] convert the body.
+//! - [`HttpBody::into_json`] converts the body when the `json` feature is enabled.
 //!
 //! ```rust
 //! # use fetch::{HttpBody, HttpClient, HttpResponse, StatusExt};
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Make a GET request
+//! // Send a GET request.
 //! let mut response: HttpResponse = client.get("https://www.example.com").fetch().await?;
 //!
-//! // Check if the response was successful
+//! // Return an error if the status is not successful.
 //! response = response.ensure_success()?;
 //!
-//! // Check the headers
+//! // Read the headers.
 //! println!("Headers: {}", response.headers().len());
 //!
-//! // Consume the response and extract the body
+//! // Consume the response and return its body.
 //! let body: HttpBody = response.into_body();
 //!
-//! // Process the body as text
+//! // Read the body as text.
 //! let text: String = body.into_text().await?;
 //!
 //! println!("Response body: {}", text);
@@ -261,38 +240,33 @@
 //!
 //! ## Specialized Fetch Methods
 //!
-//! Instead of calling [`HttpRequestBuilder::fetch`] and then converting the response body separately, use these
-//! convenient shortcut methods:
+//! These methods fetch a response and convert its body:
 //!
-//! - [`fetch_text`][crate::HttpRequestBuilder::fetch_text]: Gets the response body as a string in one step.
-//! - [`fetch_bytes`][crate::HttpRequestBuilder::fetch_bytes]: Gets the body as a memory-efficient `BytesView`.
-//! - [`fetch_json`][crate::HttpRequestBuilder::fetch_json]: Gets the response body as owned JSON (requires `json` feature).
-//! - [`fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref]: Gets the response body as zero-copy JSON (requires `json` feature).
+//! - [`fetch_text`][crate::HttpRequestBuilder::fetch_text] returns a string.
+//! - [`fetch_bytes`][crate::HttpRequestBuilder::fetch_bytes] returns a `BytesView`.
+//! - [`fetch_json`][crate::HttpRequestBuilder::fetch_json] returns owned JSON and requires `json`.
+//! - [`fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref] returns zero-copy JSON and
+//!   requires `json`.
 //!
-//! These methods automatically convert the response body to the format you want (string, JSON, etc.),
-//! saving you from handling the raw [`HttpBody`] type directly. They return a [`Response<T>`] where `T`
-//! is your desired format, so you still get all response details and can check the status and headers
-//! before using the body.
+//! Each method returns [`Response<T>`]. The response retains its status, headers, and extensions.
 //!
 //! ```rust
 //! # use http::Response;
 //! # use fetch::{HttpClient, StatusExt};
 //! # use serde_json::json;
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Retrieve the response as text
+//! // Return the response with a text body.
 //! let response = client
 //!     .get("https://api.example.com/users")
 //!     .fetch_text()
 //!     .await?;
 //!
-//! // We can examine response metadata before handling the body
+//! // Read response metadata before the body.
 //! println!("Status: {}", response.status());
 //! println!("Content-Type: {:?}", response.headers().get("content-type"));
 //!
-//! // Then ensure success and extract the body
-//! let text: String = response
-//!     .ensure_success()? // Ensure the response was successful
-//!     .into_body(); // Discard the response metadata and get the body as a string
+//! // Return an error for an unsuccessful status, then extract the body.
+//! let text: String = response.ensure_success()?.into_body();
 //!
 //! # Ok(())
 //! # }
@@ -300,18 +274,18 @@
 //!
 //! ## Body-Only Shortcuts
 //!
-//! When you only need the body of a *successful* response, the `_body` variants go one step further:
-//! they call [`ensure_success`][crate::HttpResponse::ensure_success] for you, discard the response
-//! metadata, and return just the materialized body.
+//! The `_body` variants call [`ensure_success`][crate::HttpResponse::ensure_success], discard the
+//! response metadata, and return the converted body.
 //!
-//! - [`fetch_text_body`][crate::HttpRequestBuilder::fetch_text_body]: Validates the status and returns the body as a `String`.
-//! - [`fetch_bytes_body`][crate::HttpRequestBuilder::fetch_bytes_body]: Validates the status and returns the body as a `BytesView`.
-//! - [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body]: Validates the status and deserializes the body into an owned value (requires `json` feature).
+//! - [`fetch_text_body`][crate::HttpRequestBuilder::fetch_text_body] returns a `String`.
+//! - [`fetch_bytes_body`][crate::HttpRequestBuilder::fetch_bytes_body] returns a `BytesView`.
+//! - [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body] returns an owned value and
+//!   requires `json`.
 //!
 //! ```rust
 //! # use fetch::HttpClient;
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Fetch, validate the status, and extract the body in a single call
+//! // Fetch the response, require a successful status, and return the text body.
 //! let text: String = client
 //!     .get("https://api.example.com/users")
 //!     .fetch_text_body()
@@ -322,21 +296,17 @@
 //! ```
 //!
 //! # URL Handling
-//! The HTTP client uses the [`templated_uri`] crate for
-//! URL handling, which provides a powerful and flexible way to work with URIs.
 //!
-//! You can use the [`Uri`] type to build URIs with templated paths and queries, allowing you to
-//! create URLs with dynamic segments and query parameters.
-//! The template format follows [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) level 3,
-//! which means you can use it to easily template more complex paths and queries as well.
+//! The HTTP client uses [`templated_uri`] for URLs. [`Uri`] supports dynamic path segments and
+//! query parameters through templates.
 //!
-//! You can also use the [`Uri`] type or string types to represent URIs for backwards compatibility, or
-//! if you don't need templated paths. In that case, the whole `PathAndQuery` string is treated as a template.
+//! Templates follow [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) level 3. [`Uri`] and
+//! string types also support URLs without typed templates. In that case, the full `PathAndQuery`
+//! string becomes the template.
 //!
-//! [`handlers::Logging`] will log the used URL template as
-//! `url.path.template`
+//! [`handlers::Logging`] records the URL template as `url.path.template`.
 //!
-//! For example, you can create a [`Uri`] with a templated path like this:
+//! This example creates a [`Uri`] with a templated path:
 //!
 //! ```rust
 //! # use fetch::HttpClient;
@@ -345,7 +315,7 @@
 //! #[templated(template = "/users/{user_id}/", unredacted)]
 //! #[derive(Clone)]
 //! struct UserPath {
-//!     user_id: EscapedString, // EscapedString ensures the value is safe for use in URIs
+//!     user_id: EscapedString, // EscapedString escapes the value for use in URIs.
 //! }
 //!
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
@@ -367,10 +337,10 @@
 //! ```
 //!
 //! ## Classification in URLs
-//! `templated_uri` supports classification of URL paths and queries using the `data_privacy` crate.
 //!
-//! You can also use the `classified` attribute to mark [`PathAndQueryTemplate`](templated_uri::PathAndQueryTemplate)
-//! structs as classified, allowing you to use classified types from `data_privacy` in your URL templates.
+//! `templated_uri` uses `data_privacy` to classify URL paths and queries. The `classified` attribute
+//! lets a [`PathAndQueryTemplate`](templated_uri::PathAndQueryTemplate) use classified
+//! `data_privacy` types.
 //!
 //! ```
 //! use data_privacy::Sensitive;
@@ -386,27 +356,26 @@
 //!
 //! # JSON Support
 //!
-//! Working with JSON APIs is straightforward with the `json` feature, which offers:
+//! The `json` feature supports these operations:
 //!
-//! - **Send JSON data**: [`HttpRequestBuilder::json`][crate::HttpRequestBuilder::json] serializes any Rust type to JSON.
-//! - **Receive owned JSON**: [`HttpRequestBuilder::fetch_json`][crate::HttpRequestBuilder::fetch_json] deserializes
-//!   directly into owned Rust types. This is the common case: the data can outlive the response and cross thread boundaries.
-//! - **Receive zero-copy JSON**: [`HttpRequestBuilder::fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref] returns a
-//!   [`Json<T>`][crate::Json] wrapper that borrows strings and byte arrays directly from the response buffer for maximum
-//!   performance. Reach for it in hot paths where you can work with borrowed data.
-//! - **Convert bodies to JSON**: [`HttpBody::into_json`][crate::HttpBody::into_json] transforms response bodies into JSON values.
+//! - [`HttpRequestBuilder::json`][crate::HttpRequestBuilder::json] serializes a Rust type as JSON.
+//! - [`HttpRequestBuilder::fetch_json`][crate::HttpRequestBuilder::fetch_json] deserializes into an
+//!   owned Rust type. The value can outlive the response. It can cross thread boundaries if its
+//!   type implements `Send`.
+//! - [`HttpRequestBuilder::fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref] returns
+//!   [`Json<T>`][crate::Json]. It can borrow strings and byte arrays from the response buffer.
+//! - [`HttpBody::into_json`][crate::HttpBody::into_json] converts a response body into JSON.
 //!
 //! ## Owned JSON with `fetch_json`
 //!
-//! Use `fetch_json` when you need owned data; it deserializes the JSON directly into your
-//! target type with owned `String` fields. This is the most common choice:
+//! Use `fetch_json` for owned data. It deserializes JSON directly into the target type:
 //!
 //! ```rust
 //! # use fetch::{HttpClient, Response, StatusExt};
 //! # use serde::{Deserialize, Serialize};
 //! # #[cfg(feature = "json")]
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Define a Person type with owned data
+//! // Define a type with owned data.
 //! #[derive(Serialize, Deserialize)]
 //! struct Person {
 //!     id: u32,
@@ -418,17 +387,17 @@
 //!     name: "Alice Johnson".to_owned(),
 //! };
 //!
-//! // Send and receive owned JSON
+//! // Send and receive owned JSON.
 //! let response: Response<Person> = client
 //!     .put("https://api.company.com/people")
-//!     .json(&person) // Add JSON payload
-//!     .fetch_json::<Person>() // Returns Response<Person> directly
+//!     .json(&person)
+//!     .fetch_json::<Person>()
 //!     .await?;
 //!
-//! // You can inspect the response metadata if needed
+//! // Read the response metadata.
 //! let response = response.ensure_success()?;
 //!
-//! // Extract the deserialized Person directly - no wrapper needed
+//! // Extract the deserialized value.
 //! let person: Person = response.into_body();
 //!
 //! println!("Person retrieved, name: {}", person.name);
@@ -437,15 +406,14 @@
 //! # }
 //! ```
 //!
-//! If you only need the body of a successful response, [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body]
-//! goes one step further and folds the fetch, status check, and owned deserialization into a single call.
+//! [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body] fetches the response, requires a
+//! successful status, and returns the owned value.
 //!
 //! ## Zero-Copy JSON with `fetch_json_ref`
 //!
-//! Pair `fetch_json_ref` with borrowed string fields (`Cow<'a, str>`) to avoid allocations; the
-//! [`Json<T>`][crate::Json] wrapper borrows directly from the response buffer. Prefer `Cow<'a, str>` over
-//! `&'a str`, as it transparently falls back to an owned value when a JSON string was escaped in the buffer
-//! and cannot be borrowed:
+//! Pair `fetch_json_ref` with borrowed string fields such as `Cow<'a, str>`. [`Json<T>`][crate::Json]
+//! borrows from the response buffer. Prefer `Cow<'a, str>` over `&'a str`. `Cow` uses an owned value
+//! when an escaped JSON string cannot be borrowed.
 //!
 //! ```rust
 //! # use fetch::{HttpClient, Response, StatusExt};
@@ -455,7 +423,7 @@
 //! # use std::borrow::Cow;
 //! # #[cfg(feature = "json")]
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Define a Person type that borrows data to avoid allocations
+//! // Define a type that can borrow string data.
 //! #[derive(Serialize, Deserialize)]
 //! struct Person<'a> {
 //!     id: u32,
@@ -468,17 +436,17 @@
 //!     name: "Alice Johnson".into(),
 //! };
 //!
-//! // Send and receive zero-copy JSON
+//! // Send and receive zero-copy JSON.
 //! let response: Response<Json<Person>> = client
 //!     .put("https://api.company.com/people")
-//!     .json(&person) // Add JSON payload
-//!     .fetch_json_ref::<Person>() // Returns Response<Json<Person>>
+//!     .json(&person)
+//!     .fetch_json_ref::<Person>()
 //!     .await?;
 //!
-//! // You can inspect the response metadata if needed
+//! // Read the response metadata.
 //! let response = response.ensure_success()?;
 //!
-//! // Extract the JSON wrapper from the response
+//! // Extract the JSON wrapper.
 //! let mut json_body: Json<Person> = response.into_body();
 //!
 //! // Parse the JSON data using zero-copy deserialization.
@@ -491,64 +459,55 @@
 //! # }
 //! ```
 //!
-//! This minimizes heap allocations and copying because string fields borrow directly from the
-//! response buffer instead of allocating new memory for each string, at the cost of tying the parsed
-//! value to the response buffer's lifetime.
+//! Borrowed fields reduce heap allocations and copies. The parsed value cannot outlive the response
+//! buffer.
 //!
 //! # Request Pipeline
 //!
-//! The HTTP client uses a pipeline architecture to process requests. Think of it like an assembly
-//! line - every request passes through a sequence of [`RequestHandler`]s, each handling
-//! a specific aspect of HTTP communication.
+//! Each request passes through a sequence of [`RequestHandler`] implementations.
 //!
-//! Each handler in the pipeline can:
+//! A handler can:
 //!
-//! - Modify the request before it's sent
-//! - Intercept the request completely (e.g., for caching)
-//! - Process the response after it's received
-//! - Add cross-cutting functionality like logging or metrics
+//! - Modify the request before the next handler receives it.
+//! - Return a response without calling the next handler, for example to serve a cached response.
+//! - Process the response from the next handler.
+//! - Add logging, metrics, or other shared behavior.
 //!
-//! At the very end of the pipeline sits the **transport handler** — the leaf [`RequestHandler`]
-//! that actually performs the I/O and turns a request into a response. This is the seam that makes
-//! `fetch` transport- and runtime-agnostic: everything above the transport (resilience, telemetry,
-//! routing, logging, …) is supplied by `fetch`, while the transport itself can be the bundled
-//! hyper-based implementation, your own runtime/I/O, or a wrapper around an existing HTTP client
-//! such as [`reqwest`](https://docs.rs/reqwest/). To supply your own transport, see the
-//! [`custom`] module and [`custom::create_builder`].
+//! The transport handler is the final [`RequestHandler`]. It performs I/O and returns a response.
+//! `fetch` supplies the resilience, telemetry, routing, and logging layers above it. The transport
+//! can use the bundled hyper implementation, custom runtime and I/O code, or another client such
+//! as [`reqwest`](https://docs.rs/reqwest/). See [`custom`] and [`custom::create_builder`] for a
+//! custom transport.
 //!
 //! ## Built-in Pipeline Types
 //!
-//! The client offers three types of pipelines to suit different needs - think of them as
-//! different levels of "batteries included":
+//! The client supports three pipeline types:
 //!
 //! ### Standard Pipeline
 //!
-//! The standard pipeline is what you get by default - it includes all the essential handlers
-//! you'll want for production use. Handlers are applied in a nested structure, with the outermost
-//! handler processing the request first and the response last.
+//! The standard pipeline is the default. The outermost handler processes the request first and the
+//! response last.
 //!
-//! See the [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline] and [`HttpClientBuilder::standard_pipeline`]
-//! for more details and examples.
+//! See [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline] and
+//! [`HttpClientBuilder::standard_pipeline`].
 //!
 //! ### Custom Pipeline
 //!
-//! When you need precise control over request processing, you can build a custom pipeline with
-//! exactly the handlers you want. See the [`HttpClientBuilder::custom_pipeline`] method for
-//! more details and examples.
+//! A custom pipeline contains the handlers that its factory returns. See
+//! [`HttpClientBuilder::custom_pipeline`].
 //!
 //! ### Minimal Pipeline
 //!
-//! For maximum flexibility, you can use the minimal pipeline that includes only the
-//! essential [`Dispatch`][crate::handlers::Dispatch] handler that actually sends requests to the network.
-//! This gives you a clean slate to build on:
+//! The minimal pipeline contains only [`Dispatch`][crate::handlers::Dispatch]. `Dispatch` passes
+//! each request to the transport.
 //!
 //! ```rust
 //! # use fetch::HttpClientBuilder;
 //! # fn example(mut builder: HttpClientBuilder) -> Result<(), Box<dyn std::error::Error>> {
-//! // Create a client with just the dispatch handler
+//! // Create a client with only the dispatch handler.
 //! let minimal_client = builder.minimal_pipeline().build();
 //!
-//! // Then wrap it with your own processing logic
+//! // Wrap the client with custom processing.
 //! let wrapped_client = MyHttpWrapper::new(minimal_client);
 //! # Ok(())
 //! # }
@@ -556,28 +515,25 @@
 //! # impl MyHttpWrapper { fn new<T>(_: T) -> Self { Self } }
 //! ```
 //!
-//! This is great when you need to implement your own complete request processing pipeline
-//! or integrate with external middleware systems.
+//! Use this pipeline when another component supplies all middleware.
 //!
 //! ## Creating Custom Handlers
 //!
-//! To add your own processing logic, see the [`RequestHandler`] trait documentation, which covers
-//! patterns for modifying requests, processing responses, and integrating with the pipeline.
+//! See [`RequestHandler`] to implement request or response processing.
 //!
 //! # Testing with the HTTP Client
 //!
-//! The `fetch` crate makes testing easy with its built-in fake response system. Enable the
-//! `test-util` feature to simulate HTTP responses without making real network requests.
+//! Enable `test-util` to return fake responses without network I/O.
 //!
-//! By using the fake HTTP client in your tests, you can:
+//! A fake client can:
 //!
-//! - Test your code's handling of different HTTP responses
-//! - Verify retry behaviors and error handling
-//! - Make tests fast and deterministic by avoiding actual network calls
-//! - Test edge cases that would be challenging to reproduce with real services
+//! - Return different HTTP responses.
+//! - Exercise retry and error handling.
+//! - Keep tests deterministic by avoiding network calls.
+//! - Reproduce cases that are difficult to produce with a service.
 //!
-//! The simplest way to create a test client is `HttpClient::new_fake`, which responds with predefined
-//! responses instead of making real HTTP requests. It accepts various parameters to streamline testing:
+//! `HttpClient::new_fake` creates a client from predefined responses or a
+//! [`FakeHandler`](crate::fake::FakeHandler):
 //!
 //! ```rust
 //! # #[cfg(feature = "test-util")]
@@ -586,24 +542,23 @@
 //! # use fetch::fake::FakeHandler;
 //! # use http::StatusCode;
 //!
-//! // Create a fake HTTP client that always returns a 200 response
+//! // Always return a 200 response.
 //! let client = HttpClient::new_fake(StatusCode::OK);
 //!
-//! // Create a fake HTTP client that returns a sequence of responses without a body
+//! // Return a sequence of responses without bodies.
 //! let client = HttpClient::new_fake(vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR]);
 //!
-//! // Create a fake response
+//! // Create a fake response.
 //! let response = HttpResponseBuilder::new_fake()
 //!     .status(StatusCode::INTERNAL_SERVER_ERROR)
 //!     .text("fake text")
 //!     .build()
 //!     .expect("always succeeds");
 //!
-//! // Create a fake HTTP client that always returns the same response
+//! // Always return the same response.
 //! let client = HttpClient::new_fake(response);
 //!
-//! // Create a fake HTTP client that uses a custom handler. The handler can be
-//! // synchronous or asynchronous. Usually for testing, the synchronous handler is sufficient.
+//! // Use a synchronous or asynchronous custom handler.
 //! let fake_handler = FakeHandler::from_fn(|req| {
 //!     println!("Fake handler called for request, url: {}", req.uri());
 //!
@@ -613,24 +568,23 @@
 //!         .build()
 //! });
 //!
-//! // Create a fake HTTP client that uses the custom handler
+//! // Create a client that uses the custom handler.
 //! let client = HttpClient::new_fake(fake_handler);
 //! # }
 //! ```
 //!
-//! # Smart Memory Management with `BytesView`
+//! # Memory management with `BytesView`
 //!
-//! When handling large HTTP responses or sending big requests, memory usage matters, so `fetch` uses
-//! [`BytesView`] for request and response bodies. Its key features:
+//! `fetch` uses [`BytesView`] for request and response bodies. It provides:
 //!
-//! - **Memory Pooling**: Reuses memory instead of constantly allocating and freeing it.
-//! - **Less Copying**: Smart buffer management reduces unnecessary data copying.
-//! - **Multiple Chunks**: Can handle data as multiple pieces that look like a single buffer.
-//! - **Zero-Copy When Possible**: Avoids copying data when it can for better performance.
-//! - **Works with Ecosystem**: Fully compatible with the popular [`bytes`] crate.
+//! - Memory pooling.
+//! - Reduced copying.
+//! - A single view over multiple chunks.
+//! - Zero-copy operations when the data layout permits them.
+//! - Compatibility with the [`bytes`] crate.
 //!
-//! You can use [`BytesView`] just like other byte buffer types because it implements the same
-//! interfaces ([`Buf`] and [`BufMut`]) as the [`bytes`] crate:
+//! [`BytesView`] implements [`Buf`]. Use [`BytesBuf`], which implements [`BufMut`], to build a
+//! mutable body.
 //!
 //! ```rust
 //! # use fetch::HttpClient;
@@ -638,13 +592,13 @@
 //! # use bytes::Buf;
 //! #
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Fetch the response body directly as a BytesView (validating the status along the way)
+//! // Require a successful status and return the body as BytesView.
 //! let mut body_bytes = client.get("https://example.com").fetch_bytes_body().await?;
 //!
-//! // Work with the BytesView using standard bytes methods
+//! // Use methods from bytes::Buf.
 //! let length = body_bytes.remaining();
 //!
-//! // Easy to extract data when you need it
+//! // Copy part of the body when required.
 //! let mut buffer = vec![0; 10.min(length)];
 //! if !body_bytes.is_empty() {
 //!     body_bytes.copy_to_slice(&mut buffer);
@@ -653,8 +607,7 @@
 //! # }
 //! ```
 //!
-//! This lets your app handle large files, streaming media, or other big data without
-//! wasting memory or hurting performance.
+//! This representation reduces memory use and copies for large bodies.
 //!
 //! [`BytesView`]: bytesbuf::BytesView
 //! [`BytesBuf`]: bytesbuf::BytesBuf
@@ -662,22 +615,22 @@
 //! [`BufMut`]: bytes::BufMut
 //! [`bytes`]: https://docs.rs/bytes
 //!
-//! # Performance Best Practices
+//! # Performance
 //!
-//! Follow these tips for the best performance:
+//! Reuse clients, parse repeated URIs once, and keep binary data in [`BytesView`]:
 //!
 //! ```rust,no_run
 //! # use fetch::{HttpClient, Uri};
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // 1. Create a client ONCE and reuse it
+//! // Create one client and reuse it.
 //! let client = HttpClient::new_tokio();
 //!
-//! // 2. Parse URIs ahead of time for repeated use
+//! // Parse repeated URIs once.
 //! let users_uri: Uri = "https://api.example.com/users".parse()?;
 //! let items_uri: Uri = "https://api.example.com/items".parse()?;
 //!
-//! // 3. Work with raw BytesView to avoid allocations when possible
+//! // Keep binary data in BytesView.
 //! let bytes = client.get(users_uri.clone()).fetch_bytes_body().await?;
 //! process_binary_data(bytes);
 //! # Ok(())
@@ -685,61 +638,48 @@
 //! # fn process_binary_data(bytes: bytesbuf::BytesView) {}
 //! ```
 //!
-//! In detail:
-//!
-//! - **Reuse your client**: Creating an [`HttpClient`] is expensive (connection pooling, security setup).
-//!   Create it once and keep using it throughout your application. Share a single instance across
-//!   multiple tasks.
-//! - **Pre-parse URIs**: If you're repeatedly calling the same endpoints, parse the [`Uri`]s once and
-//!   reuse them to skip the parsing overhead.
-//! - **Work with raw [`BytesView`]**: Converting between formats (like [`BytesView`] to `String`) creates
-//!   allocations and copies data. When handling binary data or large responses, work with [`BytesView`] directly.
+//! Creating an [`HttpClient`] sets up connection pools and security configuration. Create one client
+//! and share it across tasks. Parse repeated [`Uri`] values once. Converting [`BytesView`] to
+//! `String` allocates and copies data, so keep binary or large bodies in [`BytesView`] when possible.
 //!
 //! # Integration with the HTTP Ecosystem
 //!
-//! Instead of creating our own HTTP types from scratch, we use extensions and wrappers around
-//! the widely adopted [`http`] crate. These extensions are defined in the [`http_extensions`] crate
-//! and re-exported here for convenience.
+//! `fetch` uses types from [`http`] and extensions from [`http_extensions`]. It re-exports common
+//! types from both crates.
 //!
 //! # Resilience
 //!
-//! The HTTP client has built-in resilience features powered by the [`seatbelt`] crate. These
-//! resilience patterns help your application handle failures gracefully and maintain availability
-//! even when network issues or server problems occur.
+//! The [`seatbelt`] crate provides the built-in resilience layers.
 //!
-//! The resilience middleware integrates directly into the request pipeline via the
-//! [`Service`][`layered::Service`] trait. Because both the client's handlers and the seatbelt
-//! middleware implement this trait, they compose seamlessly - no adapter code is needed to mix
-//! resilience patterns with other request processing logic.
+//! Client handlers and seatbelt middleware implement [`Service`][`layered::Service`], so the
+//! pipeline can combine them without an adapter.
 //!
-//! Common resilience patterns available include:
+//! The available patterns include:
 //!
-//! - **Retries**: Automatically retry failed requests with configurable backoff strategies
-//! - **Timeouts**: Prevent requests from hanging indefinitely
-//! - **Circuit Breakers**: Fail fast when a service is down to avoid cascading failures
+//! - Retries with configurable backoff.
+//! - Timeouts.
+//! - Circuit breakers.
 //!
-//! These patterns are already configured in the [standard pipeline][crate::pipeline::StandardRequestPipeline] with sensible defaults.
+//! The [standard pipeline][crate::pipeline::StandardRequestPipeline] configures these patterns by
+//! default.
 //!
 //! # TLS Support
 //!
-//! The HTTP client supports two TLS backends for making HTTPS requests:
+//! The client supports two TLS backends:
 //!
-//! - **`rustls`** (default): Uses [`rustls`](https://docs.rs/rustls) with the
-//!   [`aws-lc-rs`](https://docs.rs/aws-lc-rs) crypto provider. This is the recommended
-//!   backend and is selected by default when the `tls` feature is enabled.
-//! - **`native-tls`**: Uses the platform's native TLS implementation (`SChannel` on Windows,
-//!   Security Framework on `macOS`, `OpenSSL` on Linux). This can be explicitly selected, or is
-//!   chosen automatically when the `native-tls` feature is enabled and `rustls` is not.
+//! - `rustls` is the default. It uses [`rustls`](https://docs.rs/rustls) with the
+//!   [`aws-lc-rs`](https://docs.rs/aws-lc-rs) crypto provider. The `tls` feature enables it.
+//! - `native-tls` uses `SChannel` on Windows, Security Framework on `macOS`, and `OpenSSL` on
+//!   Linux. It is selected when `native-tls` is enabled without `rustls`.
 //!
-//! When using the `rustls` backend, the HTTP client validates server certificates against the
-//! platform trust store via [`rustls-platform-verifier`](https://docs.rs/rustls-platform-verifier),
-//! which takes care of essential TLS operations:
+//! With `rustls`, [`rustls-platform-verifier`](https://docs.rs/rustls-platform-verifier) uses the
+//! platform trust store. It:
 //!
-//! - Verifies certificates against the operating system's trusted root `CAs`.
-//! - Validates host names and checks certificate expiration.
-//! - Enforces TLS security policies.
+//! - Validates certificates against the operating system root `CAs`.
+//! - Validates host names and certificate expiration.
+//! - Applies TLS security policies.
 //!
-//! TLS is configured automatically; simply construct a client and make HTTPS requests:
+//! The default client applies the selected TLS backend:
 //!
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
@@ -750,7 +690,7 @@
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = HttpClient::new_tokio();
 //!
-//!     // Now you can make HTTPS requests
+//!     // Send an HTTPS request.
 //!     let response = client.get("https://www.example.com").fetch_text().await?;
 //!
 //!     Ok(())
@@ -758,27 +698,26 @@
 //! # }
 //! ```
 //!
-//! To enable TLS support, add the `tls` feature (which enables `rustls` by default) to your dependencies:
+//! Enable `tls` and `tokio` to use the default rustls transport:
 //!
 //! ```toml
 //! fetch = { version = "*", features = ["tls", "tokio"] }
 //! ```
 //!
-//! To use native TLS instead, enable the `native-tls` feature explicitly:
+//! Enable `native-tls` and `tokio` to use native TLS:
 //!
 //! ```toml
 //! fetch = { version = "*", features = ["native-tls", "tokio"] }
 //! ```
 //!
-//! You can also select the TLS backend at runtime via [`TlsOptions::builder_rustls()`](tls::TlsOptions::builder_rustls) or
-//! `TlsOptions::builder_native_tls()` when both features are enabled, allowing different client
-//! instances to use different backends.
+//! If both backends are enabled, use
+//! [`TlsOptions::builder_rustls()`](tls::TlsOptions::builder_rustls) or
+//! `TlsOptions::builder_native_tls()` to select a backend for each client.
 //!
 //! # Automatic Response Decompression
 //!
-//! The client can automatically decompress response bodies, which is off until it is asked for.
-//! Link the compression formats you want through the `compression-*` features, or enable
-//! `compression-all` for every supported format, then select them through
+//! Automatic response decompression is off by default. Enable the required `compression-*`
+//! features, or enable `compression-all`. Then select the formats through
 //! [`DecompressionOptions`][options::DecompressionOptions]:
 //!
 //! ```
@@ -793,91 +732,85 @@
 //! # }
 //! ```
 //!
-//! Requests then advertise the formats in `Accept-Encoding`, most preferred first, and a matching
-//! response is decompressed before the caller sees it. `Content-Encoding` and `Content-Length` are
-//! removed because neither describes the decompressed body. A response compressed with a format
-//! that was not asked for is handed back untouched rather than failing.
+//! Requests list the formats in `Accept-Encoding`, with the most preferred format first. The client
+//! decompresses a response that uses a selected format. It removes `Content-Encoding` and
+//! `Content-Length` because they do not describe the decompressed body. If the response uses a
+//! format that was not selected, the client returns it without changes.
 //!
 //! [`DecompressionFormat::ALL`](options::DecompressionFormat::ALL) asks for everything the build can
 //! decompress.
 //!
-//! Decompression is lazy, so a malformed body fails when it is read rather than when the response
-//! arrives, and that failure therefore does not trigger a retry. The client
-//! inherits the safe `http_compression` defaults: decompressed output is capped
-//! at 64 MiB, while each decompression stage accepts at most 1,024 concatenated
-//! streams. `fetch` adds no default overrides of its own.
+//! Decompression is lazy. A malformed body fails when code reads it, not when the response arrives.
+//! This failure does not trigger a retry. The client uses the `http_compression` defaults. The
+//! decompressed output limit is 64 MiB. Each decompression stage accepts at most 1,024 concatenated
+//! streams. `fetch` does not override these defaults.
 //!
-//! [`DecompressionOptions`][options::DecompressionOptions] can explicitly bound
-//! decompressed output and the number of compressed streams, or remove the
-//! output-size bound by passing `None` to
-//! [`max_output_len`][options::DecompressionOptions::max_output_len]. These
-//! bounds apply even when streaming without buffering the body; exceeding one
-//! fails the body with the `compression_limit_exceeded` error label.
-//! [`response_body_options`](HttpClientBuilder::response_body_options) separately controls how
-//! much a body-buffering operation may retain in memory, with a 2 GiB default.
+//! [`DecompressionOptions`][options::DecompressionOptions] sets limits for decompressed output and
+//! compressed streams. Pass `None` to
+//! [`max_output_len`][options::DecompressionOptions::max_output_len] to remove the output limit.
+//! The limits also apply to streamed bodies. Exceeding a limit returns the
+//! `compression_limit_exceeded` error label.
+//!
+//! [`response_body_options`](HttpClientBuilder::response_body_options) separately limits memory
+//! used to buffer a body. Its default limit is 2 GiB.
 //!
 //! For server-side compression and decompression, use the
 //! [`http_compression`](https://docs.rs/http_compression) crate directly.
 //!
 //! # Features
 //!
-//! The `fetch` crate provides several optional features that you can enable in your `Cargo.toml`:
+//! Enable optional features in `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
 //! fetch = { version = "*", features = ["json", "tokio", "tls", "compression-gzip"] }
 //! ```
 //!
-//! - **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
-//!   constructor (and `HttpClient::builder_tokio_with_options`, which additionally accepts the
-//!   transport-specific `TokioTransportOptions`) and related APIs for using the HTTP client in a
-//!   Tokio-based application.
+//! - `tokio` enables the Tokio runtime integration. Combine it with `rustls`, `native-tls`, or the
+//!   `tls` alias to provide `HttpClient::builder_tokio`,
+//!   `HttpClient::builder_tokio_with_options`, and related APIs. The bundled transport requires a
+//!   TLS feature even when the client permits HTTP.
 //!
-//! - **`json`**: Adds support for JSON serialization and deserialization, enabling methods like
-//!   `HttpRequestBuilder::json` for sending JSON data and `HttpRequestBuilder::fetch_json` for receiving JSON responses.
+//! - `json` enables JSON serialization and deserialization. It provides methods such as
+//!   `HttpRequestBuilder::json` and `HttpRequestBuilder::fetch_json`.
 //!
-//! - **`tls`**: Enables TLS support using `rustls` with the `aws-lc-rs` crypto provider. This is the
-//!   recommended way to enable HTTPS support and is an alias for the `rustls` feature.
+//! - `tls` enables HTTPS through `rustls` and the `aws-lc-rs` crypto provider. It is an alias for
+//!   `rustls`.
 //!
-//! - **`rustls`**: Enables the `rustls` TLS backend with `aws-lc-rs`. This is the default TLS backend
-//!   and is selected automatically by the `tls` feature.
+//! - `rustls` enables the default TLS backend with `aws-lc-rs`.
 //!
-//! - **`native-tls`**: Enables the platform native TLS backend (`SChannel` on Windows, Security Framework
-//!   on `macOS`, `OpenSSL` on Linux). Use this when you need the platform's native TLS stack. When both
-//!   `rustls` and `native-tls` are enabled, `rustls` is the default but you can select native TLS via
-//!   `TlsOptions::builder_native_tls()`.
+//! - `native-tls` enables `SChannel` on Windows, Security Framework on `macOS`, and `OpenSSL` on
+//!   Linux. If both TLS backends are enabled, `rustls` is the default. Use
+//!   `TlsOptions::builder_native_tls()` to select native TLS.
 //!
-//! - **`test-util`**: Provides APIs to fake responses and HTTP client behavior for testing purposes.
-//!   This feature makes it easy to write fast, deterministic tests without making real network requests.
+//! - `test-util` provides fake responses and client behavior for tests without network I/O.
 //!
-//! The `compression-*` features below select formats for
-//! [automatic response decompression](#automatic-response-decompression). None is on by default,
-//! and a build with none of them links no compression implementation. Enabling one makes a format
-//! *available*; the client decompresses nothing until
+//! The `compression-*` features select formats for
+//! [automatic response decompression](#automatic-response-decompression). They are off by default.
+//! A build without them links no compression implementation. Enabling a feature makes its format
+//! available. The client does not decompress a response until
 //! [`DecompressionOptions::formats`](options::DecompressionOptions::formats)
-//! names it and those options are applied with
+//! selects it and the client applies the options with
 //! [`decompression`](HttpClientBuilder::decompression).
 //!
-//! - **`compression-gzip`**: Links `gzip` compression (RFC 1952) for
-//!   [automatic response decompression](#automatic-response-decompression) and adds
-//!   [`DecompressionFormat::Gzip`](options::DecompressionFormat). The legacy `x-gzip` token selects
-//!   it too.
+//! - `compression-gzip` links `gzip` compression (RFC 1952) and adds
+//!   [`DecompressionFormat::Gzip`](options::DecompressionFormat). The legacy `x-gzip` token also
+//!   selects it.
 //!
-//! - **`compression-deflate`**: Links `deflate` compression and adds
+//! - `compression-deflate` links `deflate` compression and adds
 //!   [`DecompressionFormat::Deflate`](options::DecompressionFormat). Despite the token, the HTTP
-//!   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), *not* raw DEFLATE (RFC 1951).
+//!   `deflate` format is zlib-wrapped DEFLATE (RFC 1950), not raw DEFLATE (RFC 1951).
 //!
-//! - **`compression-brotli`**: Links Brotli compression (`br`, RFC 7932) and adds
+//! - `compression-brotli` links Brotli compression (`br`, RFC 7932) and adds
 //!   [`DecompressionFormat::Brotli`](options::DecompressionFormat).
 //!
-//! - **`compression-zstd`**: Links Zstandard compression (`zstd`, RFC 8878) and adds
+//! - `compression-zstd` links Zstandard compression (`zstd`, RFC 8878) and adds
 //!   [`DecompressionFormat::Zstd`](options::DecompressionFormat).
 //!
-//! - **`compression-all`**: Enables all four compression features above. Use
+//! - `compression-all` enables all four compression features. Use
 //!   [`DecompressionFormat::ALL`](options::DecompressionFormat::ALL) to request decompression with all of them.
 //!
-//! > **Note**: Most users should enable the `tokio` feature along with the `tls` feature for HTTPS
-//! > support. The `json` feature is recommended for most applications that need to work with JSON APIs.
+//! > **Note**: Enable `tokio` and `tls` for HTTPS with the bundled transport. Enable `json` for JSON APIs.
 pub use ::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Version};
 pub use http_extensions::routing;
 pub use seatbelt::{Recovery, RecoveryInfo};
