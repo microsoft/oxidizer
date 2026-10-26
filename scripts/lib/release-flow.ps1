@@ -1182,8 +1182,9 @@ function Update-PackageVersion {
     # dependency declarations in the root Cargo.toml are conventionally one
     # per line and flush-left, matching the layout produced by the test
     # fixture's `Write-RootCargoToml`.
-    $regex = '(?m)(?<=^' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
-    (Get-Content -LiteralPath $rootCargoToml -Raw) -replace $regex, $version | Set-Content -LiteralPath $rootCargoToml -NoNewline -Encoding utf8
+    # Proc-macro facade and implementation versions must stay pinned together.
+    $regex = '(?m)(?<=^' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")(?<exactPin>=\s*)?[^"]+'
+    (Get-Content -LiteralPath $rootCargoToml -Raw) -replace $regex, ('${exactPin}' + $version) | Set-Content -LiteralPath $rootCargoToml -NoNewline -Encoding utf8
 
     return $version
 }

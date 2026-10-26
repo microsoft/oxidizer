@@ -824,6 +824,25 @@ Describe 'Update-PackageVersion' {
         $rootContent | Should -Match 'dependent\s*=\s*\{[^}]*version\s*=\s*"0\.1\.0"'
     }
 
+    It 'preserves an exact workspace dependency requirement <Requirement>' -TestCases @(
+        @{ Requirement = '=0.2.0'; ExpectedRequirement = '=0.2.1' }
+        @{ Requirement = '= 0.2.0'; ExpectedRequirement = '= 0.2.1' }
+    ) {
+        param($Requirement, $ExpectedRequirement)
+
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-exact-pin')
+        $packageCargo = Join-Path $ws.Path 'crates\dependency\Cargo.toml'
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        $rootContent = (Get-Content $rootCargo -Raw).Replace('version = "0.2.0"', "version = `"$Requirement`"")
+        Set-Content -LiteralPath $rootCargo -Value $rootContent -NoNewline -Encoding utf8
+
+        Update-PackageVersion -packageName 'dependency' -version '0.2.1' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
+
+        (Get-Content $packageCargo -Raw) | Should -Match '(?m)^version\s*=\s*"0\.2\.1"'
+        (Get-Content $rootCargo -Raw) | Should -Match ('dependency\s*=\s*\{[^}]*version\s*=\s*"' + [regex]::Escape($ExpectedRequirement) + '"')
+    }
+
     It 'preserves inline dependency version when the [package] version changes' {
         # Earlier, the package-level regex was `(?<=version\s*=\s*")[^"]+` applied
         # via `-replace`, which clobbers every `version = "..."` in the file —
@@ -1236,4 +1255,3 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         $dependentChangelog | Should -Not -Match '⚠️ Breaking'
     }
 }
-
