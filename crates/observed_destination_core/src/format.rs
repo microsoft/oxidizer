@@ -177,14 +177,16 @@ impl From<SystemTime> for Rfc3339Nanos {
 
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| {
-            if self.0.duration_since(SystemTime::UNIX_EPOCH).is_err() {
-                Timestamp::MIN
-            } else {
-                Timestamp::MAX
-            }
-        });
+        let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| timestamp_boundary(self.0));
         write!(f, "{ts:.9}")
+    }
+}
+
+fn timestamp_boundary(system_time: SystemTime) -> Timestamp {
+    if system_time.duration_since(SystemTime::UNIX_EPOCH).is_err() {
+        Timestamp::MIN
+    } else {
+        Timestamp::MAX
     }
 }
 
@@ -326,4 +328,31 @@ fn interpolate(template: &str, record: &SdkLogRecord) -> String {
 
     result.push_str(remaining);
     result
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn timestamp_boundary_before_epoch_is_minimum() {
+        // Test the fallback choice without a date that Windows cannot represent.
+        let timestamp = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+
+        let boundary = timestamp_boundary(timestamp);
+
+        assert_eq!(boundary, Timestamp::MIN);
+    }
+
+    #[test]
+    fn timestamp_boundary_after_epoch_is_maximum() {
+        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+
+        let boundary = timestamp_boundary(timestamp);
+
+        assert_eq!(boundary, Timestamp::MAX);
+    }
 }
