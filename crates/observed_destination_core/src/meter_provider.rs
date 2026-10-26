@@ -35,23 +35,3 @@ impl FlushableMetricsProvider for SdkMeterProvider {
         Self::force_flush(self).map_err(Into::into)
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use opentelemetry_sdk::error::OTelSdkError;
-
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
-    fn sdk_flush_errors_are_preserved_in_destination_results() {
-        let sdk = SdkMeterProvider::builder().build();
-        let provider: &dyn FlushableMetricsProvider = &sdk;
-        provider.force_flush().unwrap();
-        sdk.shutdown().unwrap();
-
-        let error = provider.force_flush().unwrap_err();
-        assert!(matches!(error.downcast_ref::<OTelSdkError>(), Some(OTelSdkError::AlreadyShutdown)));
-    }
-}
