@@ -252,6 +252,35 @@ fn timestamp_conversion_preserves_subseconds() {
 }
 
 #[test]
+fn timestamp_conversion_preserves_pre_epoch_times() {
+    let timestamp = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+
+    let formatted = Rfc3339Nanos::from(timestamp).to_string();
+
+    assert_eq!(formatted, "1969-12-31T23:59:59.000000000Z");
+}
+
+// Windows SystemTime cannot represent dates before 1601.
+#[cfg(not(windows))]
+#[test]
+fn timestamp_conversion_saturates_below_minimum() {
+    let timestamp = SystemTime::UNIX_EPOCH - Duration::from_secs(400_000_000_000);
+
+    let formatted = Rfc3339Nanos::from(timestamp).to_string();
+
+    assert_eq!(formatted, "-009999-01-02T01:59:59.000000000Z");
+}
+
+#[test]
+fn timestamp_conversion_saturates_above_maximum() {
+    let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(400_000_000_000);
+
+    let formatted = Rfc3339Nanos::from(timestamp).to_string();
+
+    assert_eq!(formatted, "9999-12-30T22:00:00.999999999Z");
+}
+
+#[test]
 fn timestamp_width_is_fixed_regardless_of_subsecond() {
     let render = |ts: SystemTime| {
         let (record, scope) = create_record_and_scope(|r| {

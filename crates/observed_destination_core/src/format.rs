@@ -146,6 +146,8 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 /// default `Display` for [`Timestamp`] omits trailing zero fractional digits,
 /// which produces inconsistent, occasionally shorter timestamps.
 ///
+/// Times outside Jiff's range use the nearest supported boundary.
+///
 /// # Examples
 ///
 /// ```
@@ -175,7 +177,13 @@ impl From<SystemTime> for Rfc3339Nanos {
 
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ts = Timestamp::try_from(self.0).unwrap_or(Timestamp::MAX);
+        let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| {
+            if self.0 < SystemTime::UNIX_EPOCH {
+                Timestamp::MIN
+            } else {
+                Timestamp::MAX
+            }
+        });
         write!(f, "{ts:.9}")
     }
 }
