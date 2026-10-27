@@ -20,6 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench"
 [package.metadata.anvil.miri]
 exclude = true
 
+[package.metadata.anvil.examples]
+no-run = ["fake_vtune", "instrumentation_controls", "native_probe_contracts", "threaded_allocations"]
+
 [package.metadata.coverage-gate]
 min-lines-percent = 1
 

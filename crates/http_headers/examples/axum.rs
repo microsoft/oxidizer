@@ -15,7 +15,7 @@ use app::router;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let app = router();
-    let testing = std::env::var_os("IS_TESTING").is_some();
+    let testing = std::env::var_os("IS_TESTING").is_some() || std::env::var_os("ANVIL_EXAMPLE").is_some();
     let address = if testing { "127.0.0.1:0" } else { "127.0.0.1:3000" };
     let listener = TcpListener::bind(address).await?;
     println!("listening on http://{}", listener.local_addr()?);
