@@ -207,9 +207,7 @@ impl Installer {
         if let Ok(result) = (&mut self.startup).await {
             return Ok(Some(result));
         }
-        let Some(join) = self.join.take() else {
-            return Ok(None);
-        };
+        let join = self.join.take().expect("each installer waits for startup at most once");
         match join.await {
             Ok(()) => Ok(None),
             Err(error) => Err(classify_join(error)),
@@ -277,9 +275,10 @@ async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwne
 
     transaction.abort();
     for installer in &mut installers {
-        if let Err(error) = installer.finish().await {
-            failure.get_or_insert(error);
-        }
+        installer
+            .finish()
+            .await
+            .expect("an installer that reported startup exits normally after transaction abort");
     }
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
@@ -314,16 +313,15 @@ async fn install_worker(data: InstallerData) {
     }
 
     let _entered = data.transaction.handle.enter();
-    if data.startup.send(StartupResult::Ready).is_err() {
-        return;
-    }
+    let _send_result = data.startup.send(StartupResult::Ready);
 
     loop {
         match data.transaction.phase() {
             Phase::Preparing => {
-                if data.phase_changed.changed_async().await.is_err() {
-                    return;
-                }
+                data.phase_changed
+                    .changed_async()
+                    .await
+                    .expect("each installer retains the transaction phase sender");
             }
             Phase::Committed => {
                 abort_on_drop.disarm();
