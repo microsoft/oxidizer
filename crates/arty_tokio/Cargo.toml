@@ -17,10 +17,7 @@ include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "arty::task::builtins::Builtins",
-    "tokio::runtime::handle::Handle",
-]
+allowed_external_types = ["arty::task::builtins::Builtins", "tokio::runtime::handle::Handle"]
 
 [package.metadata.docs.rs]
 all-features = true
