@@ -405,6 +405,7 @@ mod tests {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
+                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -433,6 +434,7 @@ mod tests {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
+                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
