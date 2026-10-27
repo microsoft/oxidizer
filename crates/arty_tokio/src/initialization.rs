@@ -62,12 +62,20 @@ impl RuntimeOwner {
         }
     }
 
-    fn handle(&self) -> Handle {
+    fn install(self, control: &arty::runtime::RuntimeControl) -> Handle {
         match self {
-            Self::Internal(runtime) => runtime.handle().clone(),
-            Self::External(handle) => handle.clone(),
+            Self::Internal(runtime) => {
+                let handle = runtime.handle().clone();
+                control.on_shutdown(move || drop(runtime));
+                handle
+            }
+            Self::External(handle) => handle,
             #[cfg(test)]
-            Self::Test(owner) => owner.runtime.handle().clone(),
+            Self::Test(owner) => {
+                let handle = owner.runtime.handle().clone();
+                control.on_shutdown(move || drop(owner));
+                handle
+            }
         }
     }
 }
@@ -97,17 +105,17 @@ impl Drop for TestRuntimeOwner {
 struct Transaction {
     phase: AtomicU8,
     phase_changed: WatchSender<()>,
-    runtime: RuntimeOwner,
+    handle: Handle,
 }
 
 impl Transaction {
-    fn new(runtime: RuntimeOwner) -> (Arc<Self>, WatchReceiver<()>) {
+    fn new(handle: Handle) -> (Arc<Self>, WatchReceiver<()>) {
         let (phase_changed, receiver) = watch(());
         (
             Arc::new(Self {
                 phase: AtomicU8::new(PHASE_PREPARING),
                 phase_changed,
-                runtime,
+                handle,
             }),
             receiver,
         )
@@ -211,7 +219,8 @@ pub(crate) async fn initialize_all_workers(cx: &Builtins, tokio: TokioHandle) ->
 
 async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwner) -> Result<(), InitError> {
     let workers: Vec<Thread> = cx.control().workers().into_iter().cloned().collect();
-    let (transaction, phase_changed) = Transaction::new(runtime);
+    let handle = runtime.install(cx.control());
+    let (transaction, phase_changed) = Transaction::new(handle);
     let mut installers = workers
         .iter()
         .map(|worker| {
@@ -246,7 +255,7 @@ async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwne
         }
     }
 
-    if failure.is_none() && ready == installers.len() && transaction.commit() {
+    if startup_succeeded(failure.as_ref(), ready, installers.len()) && transaction.commit() {
         abort_on_drop.disarm();
         return Ok(());
     }
@@ -259,6 +268,13 @@ async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwne
     }
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
+}
+
+fn startup_succeeded(failure: Option<&InitError>, ready: usize, expected: usize) -> bool {
+    if failure.is_some() {
+        return false;
+    }
+    ready == expected
 }
 
 #[expect(clippy::future_not_send, reason = "the fixed-worker task must retain Tokio's non-Send EnterGuard")]
@@ -275,8 +291,7 @@ async fn install_worker(data: InstallerData) {
         return;
     }
 
-    let handle = data.transaction.runtime.handle();
-    let _entered = handle.enter();
+    let _entered = data.transaction.handle.enter();
     if data.startup.send(StartupResult::Ready).is_err() {
         return;
     }
@@ -303,15 +318,149 @@ async fn install_worker(data: InstallerData) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
     use arty::runtime::{Runtime as ArtyRuntime, WorkersPolicy};
-    use tokio::runtime::Builder;
+    use performables::sync::channel::oneshot;
+    use tokio::runtime::{Builder, Runtime};
 
-    use super::{RuntimeOwner, TestRuntimeOwner, initialize_all_workers_with_runtime};
+    use super::{
+        AbortOnDrop, Installer, Phase, RuntimeOwner, StartupResult, TestRuntimeOwner, Transaction, initialize_all_workers_with_runtime,
+        startup_succeeded,
+    };
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+    fn transaction() -> (Arc<Transaction>, Runtime) {
+        let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+        let handle = runtime.handle().clone();
+        (Transaction::new(handle).0, runtime)
+    }
+
+    #[test]
+    fn raw_phase_values_decode_to_their_states() {
+        assert_eq!(
+            [
+                Phase::from_raw(super::PHASE_PREPARING),
+                Phase::from_raw(super::PHASE_COMMITTED),
+                Phase::from_raw(super::PHASE_ABORTED),
+            ],
+            [Phase::Preparing, Phase::Committed, Phase::Aborted]
+        );
+    }
+
+    #[test]
+    fn transaction_commit_changes_the_phase() {
+        let (transaction, _runtime) = transaction();
+
+        assert!(transaction.commit());
+        assert_eq!(transaction.phase(), Phase::Committed);
+    }
+
+    #[test]
+    fn transaction_abort_changes_the_phase() {
+        let (transaction, _runtime) = transaction();
+
+        transaction.abort();
+
+        assert_eq!(transaction.phase(), Phase::Aborted);
+    }
+
+    #[test]
+    fn armed_guard_aborts_the_transaction() {
+        let (transaction, _runtime) = transaction();
+
+        drop(AbortOnDrop::new(Arc::clone(&transaction)));
+
+        assert_eq!(transaction.phase(), Phase::Aborted);
+    }
+
+    #[test]
+    fn disarmed_guard_preserves_the_transaction() {
+        let (transaction, _runtime) = transaction();
+        let mut guard = AbortOnDrop::new(Arc::clone(&transaction));
+
+        guard.disarm();
+        drop(guard);
+
+        assert_eq!(transaction.phase(), Phase::Preparing);
+    }
+
+    #[test]
+    fn installer_reports_the_startup_result() {
+        let (startup, startup_result) = oneshot();
+        startup.send(StartupResult::Ready).unwrap();
+        let mut installer = Installer {
+            startup: startup_result,
+            join: None,
+        };
+
+        let result = futures::executor::block_on(installer.wait_until_started()).unwrap();
+
+        assert_eq!(result, Some(StartupResult::Ready));
+    }
+
+    #[test]
+    fn installer_finish_reports_join_failure() {
+        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+        let join = runtime
+            .scheduler()
+            .block_on(async |cx| cx.scheduler().spawn(async |_| panic!("expected installer task failure")))
+            .unwrap();
+        let (_startup, startup_result) = oneshot();
+        let mut installer = Installer {
+            startup: startup_result,
+            join: Some(join),
+        };
+
+        let result = futures::executor::block_on(installer.finish());
+        runtime.stop().unwrap();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn startup_requires_every_installer_and_no_failure() {
+        let failure = super::initialization_aborted();
+
+        assert!(startup_succeeded(None, 2, 2));
+        assert!(!startup_succeeded(None, 1, 2));
+        assert!(!startup_succeeded(Some(&failure), 2, 2));
+    }
+
+    #[test]
+    fn successful_initialization_installs_every_worker_context() {
+        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+        let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
+
+        let (result, contexts) = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                let result = initialize_all_workers_with_runtime(&cx, RuntimeOwner::External(tokio.handle().clone())).await;
+                let tasks = cx
+                    .control()
+                    .workers()
+                    .into_iter()
+                    .map(|worker| {
+                        cx.scheduler()
+                            .spawn_at(worker, (), |()| async { tokio::runtime::Handle::try_current().is_ok() })
+                    })
+                    .collect::<Vec<_>>();
+                let mut contexts = Vec::with_capacity(tasks.len());
+                for task in tasks {
+                    contexts.push(task.await.unwrap());
+                }
+                (result, contexts)
+            })
+            .unwrap();
+
+        runtime.stop().unwrap();
+        drop(tokio);
+
+        result.unwrap();
+        assert_eq!(contexts, vec![true, true]);
+    }
 
     // The public lifecycle regression is in tests/lifecycle.rs. This unit test
     // injects the private owner-drop seam, which the public API cannot provide.
