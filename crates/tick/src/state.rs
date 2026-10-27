@@ -478,6 +478,22 @@ mod tests {
     }
 
     #[test]
+    fn unregistered_wakers_are_dropped_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let clock = crate::Clock::new(ClockState::System(SystemClockState::new(storage.clone())));
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantDropWake {
+            storage,
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(Instant::now() + std::time::Duration::from_secs(1), waker);
+
+        clock.unregister_timer(key);
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn private_clock_owner_activation_is_visible_to_driver_liveness() {
         let mut state = ClockState::new_system();
         assert!(state.driver_is_finished());

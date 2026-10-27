@@ -27,6 +27,18 @@ impl Wake for WakeCounter {
     }
 }
 
+struct ReentrantTimestamp {
+    clock: Clock,
+    value: SystemTime,
+}
+
+impl From<ReentrantTimestamp> for SystemTime {
+    fn from(timestamp: ReentrantTimestamp) -> Self {
+        _ = timestamp.clock.system_time();
+        timestamp.value
+    }
+}
+
 #[test]
 fn clock_control_is_send_and_sync() {
     static_assertions::assert_impl_all!(ClockControl: Send, Sync);
@@ -90,6 +102,20 @@ fn set_time_moves_system_and_monotonic_time_backward_together() {
 
     assert_eq!(system_later.duration_since(clock.system_time()).unwrap(), Duration::from_secs(5));
     assert_eq!(instant_later.duration_since(clock.instant()), Duration::from_secs(5));
+}
+
+#[test]
+fn set_time_converts_input_before_locking_the_control() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let target = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+
+    control.set_time(ReentrantTimestamp {
+        clock: clock.clone(),
+        value: target,
+    });
+
+    assert_eq!(clock.system_time(), target);
 }
 
 #[test]

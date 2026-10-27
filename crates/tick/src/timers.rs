@@ -84,9 +84,9 @@ impl Timers {
 
     /// Unregisters a timer with the given key.
     ///
-    /// If the timer was not found, this operation is a no-op.
-    pub(crate) fn unregister(&mut self, id: TimerKey) {
-        self.wakers.remove(&id);
+    /// Returns the removed waker so the caller can drop it after releasing its timer lock.
+    pub(crate) fn unregister(&mut self, id: TimerKey) -> Option<Waker> {
+        self.wakers.remove(&id)
     }
 
     /// Replaces the waker for an existing timer when the awaiting task changes.
@@ -268,7 +268,7 @@ mod tests {
         let id = timers.register(Instant::now(), Waker::noop().clone());
 
         assert!(timers.contains(id));
-        timers.unregister(id);
+        _ = timers.unregister(id);
         assert!(!timers.contains(id));
     }
 

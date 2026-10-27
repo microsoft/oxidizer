@@ -472,11 +472,12 @@ impl Clock {
     }
 
     pub(super) fn unregister_timer(&self, key: TimerKey) {
-        match self.clock_state() {
+        let removed = match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.unregister_timer(key),
             ClockState::System(storage) => storage.with_timers(|timers| timers.unregister(key)),
-        }
+        };
+        drop(removed);
     }
 
     pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) -> bool {

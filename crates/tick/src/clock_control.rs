@@ -404,7 +404,8 @@ impl ClockControl {
     /// Panics if `timestamp` moves the controlled [`SystemTime`] or [`Instant`]
     /// outside the platform range.
     pub fn set_time(&self, timestamp: impl Into<SystemTime>) {
-        self.with_state_and_wake(|state, ready| state.set_time(timestamp.into(), ready));
+        let timestamp = timestamp.into();
+        self.with_state_and_wake(|state, ready| state.set_time(timestamp, ready));
     }
 
     pub(super) fn system_time(&self) -> SystemTime {
@@ -427,8 +428,8 @@ impl ClockControl {
         self.with_state(|state| state.timers.update_waker(key, replacement))
     }
 
-    pub(super) fn unregister_timer(&self, key: TimerKey) {
-        self.with_state(|s| s.timers.unregister(key));
+    pub(super) fn unregister_timer(&self, key: TimerKey) -> Option<Waker> {
+        self.with_state(|state| state.timers.unregister(key))
     }
 
     pub(super) fn timers_len(&self) -> usize {
@@ -673,6 +674,22 @@ mod tests {
         let key = clock.register_timer(clock.instant() + Duration::from_secs(1), waker);
 
         assert!(clock.update_timer_waker(key, Waker::noop()));
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn unregistered_wakers_are_dropped_after_releasing_state_lock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let lock_was_available = Arc::new(AtomicBool::new(false));
+        let waker = Waker::from(Arc::new(ReentrantDropWaker {
+            control: control.clone(),
+            lock_was_available: Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(clock.instant() + Duration::from_secs(1), waker);
+
+        clock.unregister_timer(key);
+
         assert!(lock_was_available.load(Ordering::Relaxed));
     }
 

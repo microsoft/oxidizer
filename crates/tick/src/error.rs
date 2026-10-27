@@ -59,6 +59,9 @@ impl Error {
 
     #[cfg(any(feature = "fmt", test))]
     pub(super) fn jiff(error: jiff::Error) -> Self {
+        if error.is_range() {
+            return Self::out_of_range(error.to_string());
+        }
         Self::from_kind(ErrorKind::Jiff(error))
     }
 
@@ -174,21 +177,17 @@ mod tests {
     use std::backtrace::BacktraceStatus;
     use std::error::Error as StdError;
 
-    use jiff::SignedDuration;
-
     use super::*;
 
     #[test]
     fn private_jiff_variant_preserves_message_and_source() {
         // Public format parsing covers construction; variant identity is intentionally private.
-        let error = jiff::Timestamp::from_duration(SignedDuration::MAX).unwrap_err();
+        let error = "date".parse::<jiff::Timestamp>().unwrap_err();
+        let expected = error.to_string();
         let error = Error::jiff(error);
 
         assert!(matches!(error.kind(), ErrorKind::Jiff(_)));
-        assert_eq!(
-            error.to_string(),
-            "parameter 'Unix timestamp seconds' is not in the required range of -377705023201..=253402207200"
-        );
+        assert_eq!(error.to_string(), expected);
         assert!(error.source().is_some());
     }
 

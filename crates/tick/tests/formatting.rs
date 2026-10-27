@@ -122,8 +122,19 @@ fn ecmascript_parse_normalizes_to_utc_and_fixed_precision() {
 
 #[test]
 fn ecmascript_parse_rejects_invalid_and_overflow_values() {
-    "date".parse::<EcmaScript>().unwrap_err();
-    "10000-12-30T22:00:00.999999999Z".parse::<EcmaScript>().unwrap_err();
+    assert!(!"date".parse::<EcmaScript>().unwrap_err().is_out_of_range());
+    assert!(
+        !"10000-12-30T22:00:00.999999999Z"
+            .parse::<EcmaScript>()
+            .unwrap_err()
+            .is_out_of_range()
+    );
+    assert!(
+        "+010000-12-30T22:00:00.999999999Z"
+            .parse::<EcmaScript>()
+            .unwrap_err()
+            .is_out_of_range()
+    );
 }
 
 #[test]
@@ -198,7 +209,12 @@ fn iso8601_parses_displays_and_converts_public_values() {
 
 #[test]
 fn iso8601_rejects_year_overflow() {
-    "10000-12-30T22:00:00.999999999Z".parse::<Iso8601>().unwrap_err();
+    assert!(
+        "+010000-12-30T22:00:00.999999999Z"
+            .parse::<Iso8601>()
+            .unwrap_err()
+            .is_out_of_range()
+    );
 }
 
 #[test]

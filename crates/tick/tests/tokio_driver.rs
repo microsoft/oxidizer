@@ -32,6 +32,7 @@ async fn tokio_clock_advances_timers_after_relocation() {
 #[tokio::test]
 async fn fast_instant_clock_keeps_driver_timer_scheduling_precise() {
     let clock = Clock::new_tokio().with_fast_instant(true);
+    let precise_clock = clock.clone().with_fast_instant(false);
 
     tokio::time::timeout(Duration::from_secs(1), Delay::new(&clock, Duration::from_millis(5)))
         .await
@@ -39,7 +40,7 @@ async fn fast_instant_clock_keeps_driver_timer_scheduling_precise() {
 
     let mut timer = Timer::new(&clock, Duration::from_millis(1));
     let tick = tokio::time::timeout(Duration::from_secs(1), timer.next()).await.unwrap();
-    assert!(tick.observed_at() <= clock.instant());
+    assert!(tick.observed_at() <= precise_clock.instant());
 }
 
 #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
