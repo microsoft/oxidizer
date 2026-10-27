@@ -345,7 +345,7 @@ mod tests {
     type I = Identity;
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "no need to have 16 different unit tests")]
+    #[expect(clippy::too_many_lines, reason = "one test covers all 16 tuple sizes")]
     fn stack_tuples() {
         let _: () = (I::new(), ()).into_service();
         let _: () = (I::new(), I::new(), ()).into_service();
