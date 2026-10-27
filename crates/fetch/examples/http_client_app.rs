@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to use [`fundle`] to build an HTTP client application with
-//! telemetry (an OpenTelemetry meter provider) and a custom rustls certificate verifier.
+//! Uses [`fundle`] to build an HTTP client with an OpenTelemetry meter provider and a custom rustls
+//! certificate verifier.
 
 use std::sync::Arc;
 
@@ -24,9 +24,8 @@ struct App {
 
 /// Builds a custom rustls server certificate verifier.
 ///
-/// This example delegates to the platform trust store via
-/// [`rustls_platform_verifier::Verifier`], but the same hook accepts any custom
-/// [`ServerCertVerifier`] implementation.
+/// This implementation delegates to the platform trust store through
+/// [`rustls_platform_verifier::Verifier`]. The hook accepts another [`ServerCertVerifier`].
 fn custom_verifier(provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> {
     Arc::new(
         rustls_platform_verifier::Verifier::new(provider)
@@ -36,10 +35,10 @@ fn custom_verifier(provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier>
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // Telemetry is configured up front and shared with the HTTP client.
+    // Create the meter provider that the HTTP client uses.
     let meter_provider = initialize_meter_provider();
 
-    // Initialize and set up the App instance; fundle ensures all fields are properly constructed.
+    // Use fundle to construct App.
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
         .global_pool(|_| GlobalPool::new())
@@ -54,13 +53,13 @@ async fn main() -> Result<(), ohno::AppError> {
         })
         .build();
 
-    // Use the client.
+    // Send a request.
     match app.client.get("https://www.example.com").fetch().await {
         Ok(response) => {
-            println!("response success, status: {}", response.status());
+            println!("Request succeeded, status: {}", response.status());
         }
         Err(e) => {
-            println!("response error, message: {}", e.message());
+            println!("Request failed, message: {}", e.message());
         }
     }
 

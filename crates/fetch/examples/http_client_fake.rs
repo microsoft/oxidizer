@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example shows how to use the `test-util` feature to mock the HTTP client with specific responses.
+//! Uses `test-util` to return specified HTTP responses.
 
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient, HttpResponseBuilder};

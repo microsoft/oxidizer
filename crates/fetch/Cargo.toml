@@ -45,9 +45,8 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
+# `testing_aids::init_tracing!` expands to `#[::ctor::ctor]`. cargo-machete does not scan
+# macro expansions, so it reports `ctor` as unused.
 [package.metadata.cargo-machete]
 ignored = ["ctor"]
 

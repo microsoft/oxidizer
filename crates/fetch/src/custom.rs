@@ -3,15 +3,11 @@
 
 //! Custom transport-handler entry points for [`HttpClient`].
 //!
-//! Every [`HttpClient`] ultimately dispatches requests through a *transport
-//! handler* — the leaf of the request pipeline that actually performs I/O.
-//! This module exposes the types needed to supply your own, while the bundled
-//! transports (the Tokio transport and the test fakes) reuse the same machinery
-//! internally.
+//! A transport handler is the final request-pipeline handler. It performs I/O. This module contains
+//! the types for a custom transport. The bundled Tokio transport and test fakes use the same types.
 //!
-//! The free-standing [`create_builder`][crate::custom::create_builder] function is the entry point: it returns
-//! an [`HttpClientBuilder`] so the pipeline (middleware, options, …) can be
-//! tailored before [`HttpClientBuilder::build`] is called.
+//! [`create_builder`][crate::custom::create_builder] returns an [`HttpClientBuilder`]. Configure
+//! the pipeline before you call [`HttpClientBuilder::build`].
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -31,7 +27,8 @@ use crate::{HttpClient, HttpClientBuilder};
 /// Threading model required by a custom transport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ThreadAware)]
 pub enum Isolation {
-    /// Each runtime thread gets its own pipeline; the factory is invoked once per thread partition.
+    /// Each runtime thread gets a pipeline. The factory runs once for each configured pool slot in
+    /// that thread partition.
     Isolated,
     /// A single pipeline is shared across all runtime threads.
     Shared,
@@ -39,12 +36,11 @@ pub enum Isolation {
 
 /// Runtime-agnostic dependencies required by a custom-transport [`HttpClient`].
 ///
-/// The caller is responsible for supplying a suitable [`Clock`] (e.g. `Clock::new_tokio()`
-/// or a controlled clock for tests), because this type does not assume any specific runtime.
+/// The caller supplies a [`Clock`], such as `Clock::new_tokio()` or a controlled test clock. This
+/// type does not select a runtime.
 ///
-/// The `Extras` type parameter (defaulting to `()`) lets the caller thread additional
-/// thread-aware dependencies through to [`CustomContext::extras`] — for example a
-/// connection pool, credential provider, or runtime handle.
+/// `Extras` defaults to `()`. It passes thread-aware dependencies to
+/// [`CustomContext::extras`], such as a connection pool, credential provider, or runtime handle.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct CustomDeps<Extras = ()>
 where
@@ -54,75 +50,66 @@ where
     pub clock: Clock,
     /// Memory pool for usage-neutral memory allocations.
     pub global_pool: GlobalPool,
-    /// Extra dependencies forwarded verbatim to [`CustomContext::extras`].
+    /// Extra dependencies copied to [`CustomContext::extras`].
     pub extras: Extras,
 }
 
 /// Per-pool-slot context handed to a user-supplied transport factory.
 ///
-/// The client constructs one [`CustomContext`] each time it needs a new transport handler
-/// (typically once per connection pool slot, per thread). `Extras` mirrors the same
-/// parameter on [`CustomDeps`].
+/// The client creates one [`CustomContext`] for each transport handler. It usually creates one for
+/// each connection-pool slot on each thread. `Extras` is the same parameter as on [`CustomDeps`].
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CustomContext<Extras = ()> {
-    /// Builder for assembling HTTP response bodies, backed by the client's memory pool.
+    /// Builds HTTP response bodies with the client memory pool.
     pub body_builder: HttpBodyBuilder,
     /// Clock for timing operations and timeouts inside the handler.
     pub clock: Clock,
-    /// Index of the connection pool slot this handler will service.
+    /// Index of the connection-pool slot that this handler serves.
     pub pool_index: PoolIndex,
     /// Caller-supplied extras, cloned from [`CustomDeps::extras`].
     pub extras: Extras,
 
     /// Transport-level options configured on the client.
     ///
-    /// Custom transports can honor these knobs (connect timeout, keep-alive,
-    /// supported HTTP versions, connection-pool sizing, ...) when establishing
-    /// connections.
+    /// A custom transport can apply the connection timeout, keep-alive, supported HTTP versions,
+    /// connection-pool size, and other transport options.
     pub options: TransportOptions,
 
     /// TLS configuration declared on the client.
     ///
-    /// A custom transport that terminates `https://` connections itself can read
-    /// this to honor the caller's certificate, `ALPN`, and backend preferences.
-    /// The bundled Tokio transport consumes it to build its TLS connector; custom
-    /// transports that only serve `http://` may ignore it.
+    /// A custom HTTPS transport can use the certificate, `ALPN`, and backend preferences. The
+    /// bundled Tokio transport uses them to build its TLS connector. An HTTP-only transport can
+    /// ignore them.
     pub tls: TlsOptions,
 
     /// Telemetry meter the client records its metrics against.
     ///
-    /// A custom transport can use this same [`Meter`] to emit its own instruments
-    /// so that transport-level metrics share the client's meter scope.
+    /// A custom transport can use this [`Meter`] so its metrics share the client meter scope.
     pub meter: Meter,
 }
 
 /// Creates a builder for an HTTP client backed by a custom transport handler.
 ///
-/// `runtime` and `transport` identify the client in telemetry: they are reported
-/// as the `fetch.runtime` and `fetch.transport` attributes on the instrumentation
-/// scope of every metric the resulting client emits. Use short, stable identifiers
-/// (e.g. `runtime = "tokio"`, `transport = "http3_experimental"`).
+/// `runtime` and `transport` identify the client in telemetry. Every metric uses them as the
+/// `fetch.runtime` and `fetch.transport` instrumentation-scope attributes. Use short, stable
+/// identifiers, such as `runtime = "tokio"` and `transport = "http3_experimental"`.
 ///
-/// `factory` is invoked lazily, once per pool slot, with a [`CustomContext`] for that
-/// slot, and must return a [`RequestHandler`] that becomes the transport stage of the
-/// pipeline. The full request pipeline (resilience, telemetry, logging, ...)
-/// is layered on top by the builder.
+/// The client calls `factory` when it needs a handler for a pool slot. The factory receives the
+/// slot [`CustomContext`] and returns the transport [`RequestHandler`]. The builder adds resilience,
+/// telemetry, logging, and other pipeline layers above it.
 ///
-/// `isolation` selects the threading model the underlying transport requires; see
-/// [`Isolation`].
+/// `isolation` selects the transport threading model. See [`Isolation`].
 ///
-/// The `Extras` parameter on [`CustomDeps`] / [`CustomContext`] plumbs additional
-/// thread-aware dependencies through to `factory` without resorting to globals.
-/// Leave it defaulted to `()` when no extras are needed.
+/// `Extras` passes thread-aware dependencies from [`CustomDeps`] through [`CustomContext`] to
+/// `factory`. Use the default `()` when the factory needs no extra dependencies.
 ///
-/// Accept transport-specific tuning through `Extras` rather than [`TransportOptions`], so
-/// unsupported options cannot be silently ignored.
+/// Pass transport-specific options through `Extras`, not [`TransportOptions`]. This prevents a
+/// transport from silently ignoring unsupported options.
 ///
-/// Because the handler is the transport stage, the caller is responsible for TLS:
-/// if `https://` URIs are expected, the handler must negotiate TLS itself.
-/// Otherwise pair the builder with [`HttpClientBuilder::insecure_allow_http`] and
-/// only issue `http://` requests.
+/// The transport handler is responsible for TLS. It must negotiate TLS for `https://` requests.
+/// For an HTTP-only transport, call [`HttpClientBuilder::insecure_allow_http`] and send only
+/// `http://` requests.
 ///
 /// # Examples
 ///
@@ -176,8 +163,7 @@ where
     R: RequestHandler + 'static,
     Extras: ThreadAware + Send + Sync + Clone + 'static,
 {
-    // Type-erase the user-supplied handler into `TransportHandler` once, then
-    // delegate to the in-crate path shared with the bundled transports.
+    // Erase the handler type once, then use the path shared with bundled transports.
     HttpClient::builder_custom_internal(
         runtime,
         transport,
@@ -188,11 +174,11 @@ where
 }
 
 impl HttpClient {
-    /// In-crate variant of [`create_builder`] used by the bundled
-    /// Tokio transport. The factory produces a pre-erased [`TransportHandler`], avoiding a
-    /// redundant boxing step for transports that branch over multiple concrete handler
-    /// types. The `tls`/`meter` fields on [`CustomContext`] are populated unconditionally
-    /// for the bundled transports; user-supplied factories may read or ignore them.
+    /// In-crate variant of [`create_builder`] for the bundled Tokio transport.
+    ///
+    /// The factory returns an erased [`TransportHandler`]. This avoids another boxing step when a
+    /// transport can return several handler types. [`CustomContext`] always contains `tls` and
+    /// `meter`. A factory can use or ignore them.
     pub(crate) fn builder_custom_internal<F, Extras>(
         runtime: impl Into<Cow<'static, str>>,
         transport: impl Into<Cow<'static, str>>,
@@ -204,9 +190,7 @@ impl HttpClient {
         F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
-        // The factory is shared across threads via `performables::Arc`. The original `CustomDeps` is
-        // carried alongside it so its `extras` are cloned into a fresh `CustomContext`
-        // for every handler the per-thread transport builds.
+        // Share the factory across threads. Copy `extras` into each new `CustomContext`.
         let factory = unaware(Arc::new(factory));
 
         let transport = Transport {
@@ -319,8 +303,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn create_builder_serves_requests_through_custom_pipeline() {
-        // `create_builder` exposes the full builder so callers can tweak the pipeline
-        // (here: switch to the minimal pipeline) before driving a real request.
+        // Select the minimal pipeline through the builder before sending a request.
         let client = create_builder("test-runtime", "test", ok_factory, Isolation::Shared, custom_deps())
             .insecure_allow_http()
             .minimal_pipeline()
@@ -335,8 +318,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn isolated_runtime_uses_per_thread_handler() {
-        // `Isolation::Isolated` is the right choice for thread-isolated transports;
-        // it must still serve requests correctly when there is only one thread in play.
+        // An isolated transport also serves requests in a single-thread runtime.
         let client = create_builder("test-runtime", "test", ok_factory, Isolation::Isolated, custom_deps())
             .insecure_allow_http()
             .build();
@@ -348,8 +330,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn extras_are_forwarded_to_factory() {
-        // `Arc<AtomicUsize>` is not `ThreadAware`-deriveable, but it is safe to share
-        // across threads, so wrap it in `unaware` to use as extras.
+        // Wrap Arc<AtomicUsize> in unaware because derive cannot implement ThreadAware for it.
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
@@ -361,8 +342,7 @@ mod tests {
             "test-runtime",
             "test",
             |ctx: CustomContext<thread_aware::Unaware<Arc<AtomicUsize>>>| {
-                // Touching `extras` during factory invocation proves the value travels
-                // all the way through the transport plumbing.
+                // Reading extras proves that the factory received the value.
                 ctx.extras.fetch_add(1, Ordering::Relaxed);
                 FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
             },
@@ -374,15 +354,14 @@ mod tests {
 
         let response = client.get("http://example.com").fetch().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        // The factory must have been called at least once to build the per-slot handler.
+        // Building a handler calls the factory at least once.
         assert!(counter.load(Ordering::Relaxed) >= 1);
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn transport_has_type_name_debug_representation() {
-        // `Transport` holds non-Debug closures, so its Debug impl falls back to the type
-        // name. The builder embeds the transport, so formatting it exercises that impl.
+        // Transport contains closures without Debug, so its Debug output uses the type name.
         let builder = create_builder("test-runtime", "test", ok_factory, Isolation::Shared, custom_deps());
 
         assert!(format!("{builder:?}").contains("Transport"));
