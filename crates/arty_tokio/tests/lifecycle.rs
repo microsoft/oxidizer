@@ -125,3 +125,34 @@ fn cross_runtime_ownership_cycle_is_broken_during_shutdown() {
     assert!(weak.upgrade().is_none());
     stop_bounded(runtime);
 }
+
+#[test]
+fn task_cancellation_releases_tokio_blocking_work_before_runtime_drop() {
+    let runtime = runtime(1);
+    let (release, gate) = mpsc::sync_channel::<()>(1);
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+
+            let (blocking_started, blocking_ready) = oneshot();
+            drop(tokio::task::spawn_blocking(move || {
+                blocking_started.send(()).unwrap();
+                assert!(gate.recv().is_err());
+            }));
+
+            let (holder_started, holder_ready) = oneshot();
+            drop(cx.scheduler().spawn(async move |_| {
+                holder_started.send(()).unwrap();
+                let _release = release;
+                pending::<()>().await;
+            }));
+
+            blocking_ready.await.unwrap();
+            holder_ready.await.unwrap();
+        })
+        .unwrap();
+
+    stop_bounded(runtime);
+}
