@@ -239,6 +239,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "native coverage exercises standard-library backtrace formatting")]
     fn captured_backtrace_is_available_from_the_error() {
         let backtrace = Backtrace::force_capture();
         assert_eq!(backtrace.status(), BacktraceStatus::Captured);
@@ -249,7 +250,8 @@ mod tests {
         };
 
         assert_eq!(error.backtrace().status(), BacktraceStatus::Captured);
-        assert!(error.to_string().contains("\n\nBacktrace:\n"));
+        let display: &dyn fmt::Display = &error;
+        assert!(display.to_string().contains("\n\nBacktrace:\n"));
     }
 
     #[test]
