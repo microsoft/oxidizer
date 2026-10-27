@@ -22,14 +22,18 @@ use tick::Clock;
 #[derive(Debug)]
 struct ObservedMemory {
     reservations: Arc<Mutex<Vec<Reservation>>>,
+    clones: Arc<Mutex<usize>>,
     generation: usize,
     relocated: bool,
 }
 
 impl Clone for ObservedMemory {
+    #[expect(clippy::unwrap_used, reason = "test provider must fail if its observation lock is poisoned")]
     fn clone(&self) -> Self {
+        *self.clones.lock().unwrap() += 1;
         Self {
             reservations: Arc::clone(&self.reservations),
+            clones: Arc::clone(&self.clones),
             generation: self.generation + 1,
             relocated: self.relocated,
         }
@@ -81,8 +85,9 @@ impl Service<HttpRequest> for InMemoryTransport {
 }
 
 /// Builds the same deterministic handler under both supported isolation models.
-fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, options: HttpBodyOptions) -> HttpClient {
-    create_builder(
+fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, options: HttpBodyOptions) -> (HttpClient, Arc<Mutex<usize>>) {
+    let clones = Arc::new(Mutex::new(0));
+    let client = create_builder(
         "test",
         "in-memory",
         |context: CustomContext| InMemoryTransport {
@@ -93,6 +98,7 @@ fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, opt
             clock: Clock::new_frozen(),
             memory: OpaqueMemory::new(ObservedMemory {
                 reservations: Arc::clone(reservations),
+                clones: Arc::clone(&clones),
                 generation: 0,
                 relocated: false,
             }),
@@ -102,7 +108,8 @@ fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, opt
     .insecure_allow_http()
     .minimal_pipeline()
     .response_body_options(options)
-    .build()
+    .build();
+    (client, clones)
 }
 
 /// Observes request, response, and client allocations under both transport isolation models.
@@ -110,7 +117,7 @@ fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, opt
 fn custom_memory_reaches_requests_responses_and_client_memory() {
     for isolation in [Isolation::Shared, Isolation::Isolated] {
         let reservations = Arc::new(Mutex::new(Vec::new()));
-        let client = client(isolation, &reservations, HttpBodyOptions::default());
+        let (client, _) = client(isolation, &reservations, HttpBodyOptions::default());
         let response = block_on(client.post("http://example.test/").text("request payload").fetch()).unwrap();
         assert_eq!(block_on(response.into_body().into_text()).unwrap(), "reply payload");
         assert!(client.reserve(19).capacity() >= 19);
@@ -130,7 +137,7 @@ fn custom_memory_reaches_requests_responses_and_client_memory() {
 fn relocating_a_client_clone_reaches_its_provider() {
     for isolation in [Isolation::Shared, Isolation::Isolated] {
         let reservations = Arc::new(Mutex::new(Vec::new()));
-        let client = client(isolation, &reservations, HttpBodyOptions::default());
+        let (client, _) = client(isolation, &reservations, HttpBodyOptions::default());
         let mut relocated = client.clone();
         _ = Relocator::between_threads().source(false).relocate(&mut relocated);
 
@@ -159,7 +166,7 @@ fn relocating_a_client_clone_reaches_its_provider() {
 fn custom_memory_preserves_response_buffer_limits() {
     let reservations = Arc::new(Mutex::new(Vec::new()));
     // The limit fits either frame alone, but not the complete response.
-    let client = client(Isolation::Shared, &reservations, HttpBodyOptions::default().buffer_limit(8));
+    let (client, _) = client(Isolation::Shared, &reservations, HttpBodyOptions::default().buffer_limit(8));
     let response = block_on(client.post("http://example.test/").text("request payload").fetch()).unwrap();
 
     let error = block_on(response.into_body().into_buffered()).unwrap_err();
@@ -168,6 +175,29 @@ fn custom_memory_preserves_response_buffer_limits() {
         reservations.lock().unwrap().iter().map(|entry| entry.bytes).collect::<Vec<_>>(),
         [15, 6, 7]
     );
+}
+
+/// Keeps repeated allocations on retained providers under both transport isolation models.
+#[test]
+fn repeated_reservations_and_bodies_do_not_clone_the_provider() {
+    for isolation in [Isolation::Shared, Isolation::Isolated] {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let (client, clones) = client(isolation, &reservations, HttpBodyOptions::default());
+        let retained = client.memory();
+        let builder: &HttpBodyBuilder = client.as_ref();
+        let initial_clones = *clones.lock().unwrap();
+
+        // Ordinary request sizes distinguish repeated calls without depending on pool boundaries.
+        for size in [3, 7, 17] {
+            assert!(client.reserve(size).capacity() >= size);
+            assert!(retained.reserve(size).capacity() >= size);
+            assert_eq!(BytesView::try_from(builder.slice(b"payload")).unwrap(), b"payload");
+            assert_eq!(BytesView::try_from(builder.text("payload")).unwrap(), b"payload");
+        }
+
+        assert_eq!(*clones.lock().unwrap(), initial_clones);
+        assert_eq!(reservations.lock().unwrap().len(), 12);
+    }
 }
 
 testing_aids::init_tracing!();

@@ -104,7 +104,8 @@ impl RequestFailure {
 /// failed request consumed body data.
 pub(crate) struct RequestDriver<'body, 'contexts> {
     session: Arc<WinHttpSession>,
-    body_builder: HttpBodyBuilder,
+    // Response wrapping finishes before the transport call returns.
+    body_builder: &'contexts HttpBodyBuilder,
     clock: Clock,
     connect_timeout: Duration,
     memory: OpaqueMemory,
@@ -124,7 +125,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
     pub(crate) fn new(
         request: &'body mut HttpRequest,
         session: Arc<WinHttpSession>,
-        body_builder: HttpBodyBuilder,
+        body_builder: &'contexts HttpBodyBuilder,
         clock: &Clock,
         memory: OpaqueMemory,
         contexts: &'contexts ContextPool,
@@ -221,7 +222,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
 
         let response_metadata = async {
             {
-                let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.memory.clone());
+                let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), &self.memory);
                 send_body(self.body, &mut writer, body_polled).await?;
                 if self.body_framing.automatic_chunking() {
                     writer.end_automatic_chunking().await?;
@@ -267,7 +268,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
 
         let reader = WinHttpBodyReader::new(guard, bindings, self.memory, declared_body_length(&headers));
         let body = self.body_builder.body(WinHttpResponseBody::new(reader), &self.body_options);
-        let mut response = HttpResponseBuilder::new(&self.body_builder)
+        let mut response = HttpResponseBuilder::new(self.body_builder)
             .status(status)
             .version(version)
             .body(body);
@@ -1417,7 +1418,7 @@ mod tests {
         let driver = RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder,
+            &body_builder,
             &clock,
             memory,
             &contexts,
@@ -1701,7 +1702,7 @@ mod tests {
         let driver = RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            response_body_builder,
+            &response_body_builder,
             &Clock::new_frozen(),
             memory,
             &contexts,
@@ -1766,7 +1767,7 @@ mod tests {
         let driver = RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder,
+            &body_builder,
             &clock,
             memory,
             &contexts,
@@ -1853,7 +1854,7 @@ mod tests {
         let driver = RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder,
+            &body_builder,
             &clock,
             memory,
             &contexts,
@@ -1914,7 +1915,7 @@ mod tests {
         let driver = RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder,
+            &body_builder,
             &clock,
             memory,
             &contexts,
@@ -2197,7 +2198,7 @@ mod tests {
         let result = match RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder.clone(),
+            &body_builder,
             &clock,
             memory,
             &contexts,

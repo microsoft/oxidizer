@@ -923,6 +923,10 @@ Each materialized transport receives the retained provider through `CustomContex
 The transport carries it through `TransportInputs`, `ReadyTransport`, and `RequestDriver` to the body reader and writer.
 This keeps allocations under caller control without adding a provider type parameter to the transport.
 Provider clones and relocation follow `OpaqueMemory` forwarding semantics rather than assuming shared pool state.
+The request driver borrows the transport's body builder.
+Its upload writer borrows the driver's memory provider.
+Neither operation needs another owned provider.
+The response reader owns its provider because a lazy response body can outlive the transport call.
 
 ## 6. Request/response body streaming
 

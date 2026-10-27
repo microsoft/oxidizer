@@ -15,10 +15,23 @@ use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
 /// Test data that records reservations and forwards them to a real memory provider.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct CountingMemoryData {
     inner: GlobalPool,
     reservations: Arc<AtomicUsize>,
+    clones: Arc<AtomicUsize>,
+}
+
+impl Clone for CountingMemoryData {
+    fn clone(&self) -> Self {
+        // SeqCst keeps clone observations ordered with the assertion loads.
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            inner: self.inner.clone(),
+            reservations: Arc::clone(&self.reservations),
+            clones: Arc::clone(&self.clones),
+        }
+    }
 }
 
 impl ThreadAware for CountingMemoryData {
@@ -37,22 +50,24 @@ fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
 }
 
 /// Creates an opaque provider with an observable reservation count for public API tests.
-fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>) {
+fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let reservations = Arc::new(AtomicUsize::new(0));
+    let clones = Arc::new(AtomicUsize::new(0));
     let provider = CallbackMemory::new(
         CountingMemoryData {
             inner: GlobalPool::new(),
             reservations: Arc::clone(&reservations),
+            clones: Arc::clone(&clones),
         },
         count_reserve,
     );
-    (OpaqueMemory::new(provider), reservations)
+    (OpaqueMemory::new(provider), reservations, clones)
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn serialize_encode_decode_returns_correct_output() {
-    let (memory, reservations) = counting_memory();
+    let (memory, reservations, clones) = counting_memory();
     let mock_cache_before = MockCache::<String, String>::new();
     let mock_cache_after = MockCache::<BytesView, BytesView>::new();
     let cache = Cache::builder(Clock::new_frozen())
@@ -60,6 +75,7 @@ async fn serialize_encode_decode_returns_correct_output() {
         .serialize(memory)
         .fallback(Cache::builder(Clock::new_frozen()).storage(mock_cache_after.clone()))
         .build();
+    let initial_clones = clones.load(Ordering::SeqCst);
     let expected_key = "greeting".to_string();
     let expected_value = "Hello, world!".to_string();
     cache
@@ -97,6 +113,7 @@ async fn serialize_encode_decode_returns_correct_output() {
 
     // Verify the round-trip: value was serialized, stored, fetched, and deserialized correctly.
     assert_eq!(*actual_value.value(), expected_value);
+    assert_eq!(clones.load(Ordering::SeqCst), initial_clones);
     // Separate codec checks prove key and value provider forwarding.
     // This pipeline check only observes aggregate reservation activity.
     assert!(
@@ -108,7 +125,7 @@ async fn serialize_encode_decode_returns_correct_output() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn serialize_on_fallback_builder() {
-    let (memory, reservations) = counting_memory();
+    let (memory, reservations, clones) = counting_memory();
     // Test .serialize() on a FallbackBuilder (not just CacheBuilder).
     let l1 = MockCache::<String, String>::new();
     let l2 = MockCache::<String, String>::new();
@@ -120,6 +137,7 @@ async fn serialize_on_fallback_builder() {
         .serialize(memory)
         .fallback(Cache::builder(Clock::new_frozen()).storage(l3.clone()))
         .build();
+    let initial_clones = clones.load(Ordering::SeqCst);
 
     cache.insert("key".to_string(), "value".to_string()).await.expect("Insert failed");
 
@@ -127,6 +145,7 @@ async fn serialize_on_fallback_builder() {
     let l3_ops = l3.operations();
     assert_eq!(l3_ops.len(), 1);
     assert!(matches!(&l3_ops[0], CacheOp::Insert { .. }));
+    assert_eq!(clones.load(Ordering::SeqCst), initial_clones);
     assert!(
         reservations.load(Ordering::SeqCst) >= 2,
         "fallback serialization should use caller memory for key and value allocations"

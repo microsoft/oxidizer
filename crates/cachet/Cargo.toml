@@ -121,6 +121,11 @@ name = "refresh"
 harness = false
 required-features = ["test-util"]
 
+[[bench]]
+name = "cachet_serialization"
+harness = false
+required-features = ["serialize"]
+
 [[test]]
 name = "eviction"
 required-features = ["memory", "logs"]

@@ -329,7 +329,7 @@ impl AsRef<HttpBodyBuilder> for HttpClient {
 
 impl Memory for HttpClient {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        self.body_builder.memory().reserve(min_bytes)
+        self.body_builder.reserve(min_bytes)
     }
 }
 

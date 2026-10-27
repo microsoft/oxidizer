@@ -286,11 +286,12 @@ struct UnsupportedTransferEncodingError;
 pub(crate) struct WinHttpBodyWriter<'guard> {
     guard: &'guard mut RequestGuard,
     bindings: BindingsFacade,
-    memory: OpaqueMemory,
+    // The upload ends inside the request driver, which retains the provider.
+    memory: &'guard OpaqueMemory,
 }
 
 impl<'guard> WinHttpBodyWriter<'guard> {
-    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: BindingsFacade, memory: OpaqueMemory) -> Self {
+    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: BindingsFacade, memory: &'guard OpaqueMemory) -> Self {
         Self { guard, bindings, memory }
     }
 
@@ -382,7 +383,7 @@ impl Memory for WinHttpBodyWriter<'_> {
 
 impl HasMemory for WinHttpBodyWriter<'_> {
     fn memory(&self) -> impl MemoryShared {
-        self.memory.clone()
+        OpaqueMemory::clone(self.memory)
     }
 }
 
@@ -697,7 +698,7 @@ mod tests {
             requests.lock().unwrap().push(min_bytes);
             GlobalPool::new().reserve(min_bytes)
         }));
-        let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), memory);
+        let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), &memory);
 
         // Different ordinary requests distinguish the access paths, not pool boundaries.
         assert!(writer.reserve(64).capacity() >= 64);

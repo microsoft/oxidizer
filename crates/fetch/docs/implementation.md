@@ -15,3 +15,8 @@ Thread-aware derives include the memory fields.
 The isolated transport path relocates its stored dependencies before it creates a handler on a new thread.
 The shared transport path retains its shared handler while the client's own body builder follows client relocation.
 `OpaqueMemory` forwards cloning and relocation to the caller's provider.
+
+`HttpClient::reserve` borrows its stored body builder directly.
+It does not acquire an owned provider for each reservation.
+`HttpClient::memory` returns an independent owned provider for callers that need one.
+Callers can retain that result across allocations.
