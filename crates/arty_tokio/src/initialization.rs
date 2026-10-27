@@ -65,11 +65,13 @@ impl RuntimeOwner {
                 let handle = runtime.handle().clone();
                 let runtime = Arc::new(Mutex::new(Some(runtime)));
                 let shutdown_runtime = Arc::clone(&runtime);
-                control.on_shutdown(move || {
-                    if let Some(runtime) = shutdown_runtime.lock().take() {
-                        shutdown_committed_runtime(runtime);
-                    }
-                });
+                control
+                    .on_shutdown(move || {
+                        if let Some(runtime) = shutdown_runtime.lock().take() {
+                            shutdown_committed_runtime(runtime);
+                        }
+                    })
+                    .expect("Tokio initialization runs as an Arty task before shutdown callbacks can complete");
                 InstalledRuntime {
                     handle,
                     rollback: Some(RuntimeRollback { runtime: Some(runtime) }),
