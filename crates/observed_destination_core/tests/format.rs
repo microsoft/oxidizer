@@ -279,7 +279,7 @@ fn timestamp_conversion_saturates_below_minimum() {
 #[cfg(not(windows))]
 #[test]
 fn timestamp_conversion_clamps_to_rfc3339_minimum() {
-    let minimum = SystemTime::UNIX_EPOCH - Duration::from_secs(62_167_219_200);
+    let minimum = SystemTime::UNIX_EPOCH - Duration::from_hours(17_268_672);
     // These dates all convert to Jiff timestamps, including the negative year.
     for (timestamp, expected) in [
         (minimum - Duration::from_nanos(1), "0000-01-01T00:00:00.000000000Z"),
