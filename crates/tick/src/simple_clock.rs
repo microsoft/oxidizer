@@ -199,8 +199,9 @@ impl SimpleClock {
     /// Returns the current system time as a target type.
     ///
     /// This method is intentionally infallible for practical production use.
-    /// Production values come from the operating system clock, and all
-    /// `tick::fmt` types cover that normalized current-time range. Requiring
+    /// Production data means a current value read from the operating system
+    /// clock without test-controlled offsets. All `tick::fmt` types cover that
+    /// range. Requiring
     /// every caller to handle a conversion error would add an error path that
     /// supported production formats cannot reach.
     ///
@@ -221,14 +222,17 @@ impl SimpleClock {
     ///
     /// use tick::SimpleClock;
     ///
-    /// let clock = SimpleClock::new_system();
+    /// # #[cfg(feature = "test-util")]
+    /// # {
+    /// let clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
     /// let time = clock.system_time_as::<SystemTime>();
-    /// assert!(time <= SystemTime::now());
+    /// assert_eq!(time, SystemTime::UNIX_EPOCH);
+    /// # }
     /// ```
     #[expect(
         clippy::match_wild_err_arm,
         clippy::panic,
-        reason = "conversion failure violates the documented normalized-format contract or a controlled test moved time outside the target range"
+        reason = "conversion failure violates the documented production-time contract or a controlled test moved time outside the target range"
     )]
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {

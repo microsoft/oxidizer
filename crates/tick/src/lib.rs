@@ -84,6 +84,9 @@
 //! - [`fmt`] parses and displays `SystemTime`. Enable `fmt` to use it.
 //! - [`runtime`] connects clocks to async runtimes.
 //!
+//! The [design guide](https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md)
+//! explains the stable contracts and the internal timer architecture.
+//!
 //! # Extensions
 //!
 //! - [`FutureExt`] adds timeouts to `Future`.

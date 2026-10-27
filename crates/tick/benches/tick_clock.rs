@@ -15,6 +15,7 @@ use tick::{Clock, Delay};
 const CLOCK: &str = "tick_clock/clock";
 const ADVANCE: &str = "tick_clock/advance_timers";
 
+/// Reuses one active clock for the composite clock-operation workload.
 struct ClockState {
     clock: Clock,
     driver: ClockDriver,
@@ -25,6 +26,7 @@ fn clock_state() -> ClockState {
     ClockState { clock, driver }
 }
 
+/// Owns registrations created before one measured timer-advancement call.
 struct AdvanceState {
     _clock: Clock,
     driver: ClockDriver,
@@ -35,6 +37,8 @@ struct AdvanceState {
 fn advance_state(timer_count: usize, ready: bool) -> AdvanceState {
     let (clock, driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     let now = Instant::now();
+    // The measured call advances by two seconds. One-second timers are ready despite
+    // registration overhead, while 60-second timers remain pending by a wide margin.
     let duration = Duration::from_secs(if ready { 1 } else { 60 });
     let mut delays = Vec::with_capacity(timer_count);
     let mut context = Context::from_waker(Waker::noop());

@@ -128,6 +128,8 @@ impl Future for Delay {
                     this.current_waker = Some(cx.waker().clone());
                     Poll::Pending
                 } else {
+                    // The driver can remove and wake the timer between the time check above
+                    // and this replacement. A missing registration therefore means completion.
                     this.current_timer = None;
                     this.current_waker = None;
                     Poll::Ready(())

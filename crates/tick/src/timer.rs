@@ -103,21 +103,6 @@ pub struct Timer {
     current_waker: Option<Waker>,
 }
 
-/// Information recorded when a [`Timer`] fires.
-#[derive(Debug)]
-#[must_use]
-pub struct TimerTick {
-    observed_at: Instant,
-}
-
-impl TimerTick {
-    /// Returns the clock instant observed when the timer tick completed.
-    #[must_use]
-    pub const fn observed_at(&self) -> Instant {
-        self.observed_at
-    }
-}
-
 impl Timer {
     /// Creates a timer that fires periodically.
     ///
@@ -183,6 +168,8 @@ impl Timer {
                 self.current_waker = Some(cx.waker().clone());
                 Poll::Pending
             } else {
+                // The driver can remove and wake the timer between the time check above
+                // and this replacement. A missing registration therefore means completion.
                 self.current = None;
                 self.current_waker = None;
                 Poll::Ready(TimerTick {
@@ -205,6 +192,21 @@ impl Drop for Timer {
         if let Some(key) = self.current {
             self.clock.unregister_timer(key);
         }
+    }
+}
+
+/// Information recorded when a [`Timer`] fires.
+#[derive(Debug)]
+#[must_use]
+pub struct TimerTick {
+    observed_at: Instant,
+}
+
+impl TimerTick {
+    /// Returns the clock instant observed when the timer tick completed.
+    #[must_use]
+    pub const fn observed_at(&self) -> Instant {
+        self.observed_at
     }
 }
 

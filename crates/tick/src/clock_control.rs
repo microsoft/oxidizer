@@ -693,7 +693,10 @@ mod tests {
         assert!(lock_was_available.load(Ordering::Relaxed));
     }
 
+    // These callbacks run synchronously on the test thread. Relaxed atomics avoid mutable
+    // aliasing without publishing other memory between threads.
     struct ReentrantWaker {
+        // Waking probes whether user code can enter controlled state after its lock is released.
         control: ClockControl,
         lock_was_available: Arc<AtomicBool>,
     }
@@ -706,6 +709,7 @@ mod tests {
     }
 
     struct ReentrantDropWaker {
+        // Waking and destruction probe the two callback paths that can re-enter controlled state.
         control: ClockControl,
         lock_was_available: Arc<AtomicBool>,
     }

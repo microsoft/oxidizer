@@ -98,22 +98,20 @@ impl Error {
     /// ```
     /// # #[cfg(feature = "test-util")]
     /// # {
+    /// use std::future;
     /// use std::time::Duration;
     ///
     /// use tick::{ClockControl, FutureExt};
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # futures::executor::block_on(async {
     /// let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-    /// let error = clock
-    ///     .delay(Duration::from_secs(2))
+    /// let error = future::pending::<()>()
     ///     .timeout(&clock, Duration::from_secs(1))
     ///     .await
-    ///     .err()
-    ///     .ok_or_else(|| std::io::Error::other("future unexpectedly completed"))?;
+    ///     .unwrap_err();
     ///
     /// assert!(error.is_timeout());
-    /// # Ok(())
-    /// # }
+    /// # });
     /// # }
     /// ```
     #[must_use]
@@ -122,6 +120,9 @@ impl Error {
     }
 
     /// Returns whether this error reports a value outside a supported range.
+    ///
+    /// An application can use this classification to distinguish an unsupported
+    /// timestamp from malformed input without matching the error message.
     #[must_use]
     pub const fn is_out_of_range(&self) -> bool {
         #[cfg(any(feature = "fmt", test))]

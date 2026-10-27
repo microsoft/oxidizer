@@ -5,6 +5,7 @@
 
 use std::error::Error as _;
 use std::future::Future as _;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -21,7 +22,7 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(InactiveClock<Shared>: Send, Sync);
     static_assertions::assert_not_impl_any!(InactiveClock<Shared>: Clone);
     static_assertions::assert_impl_all!(Timer: Send, Sync);
-    static_assertions::assert_impl_all!(TimerTick: Send, Sync);
+    static_assertions::assert_impl_all!(TimerTick: Send, Sync, UnwindSafe, RefUnwindSafe);
     static_assertions::assert_not_impl_any!(TimerTick: Clone, Copy);
     static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
     static_assertions::assert_impl_all!(Stopwatch: Send, Sync);

@@ -330,8 +330,8 @@ impl SystemClockStorage {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        // A Vec would allocate on the timer hot path. A bounded stack batch handles ordinary timer
-        // bursts with one lock acquisition and loops for larger bursts without imposing a limit.
+        // The single-slot probe keeps the idle and one-ready-timer paths small. Larger bursts use
+        // eight stack slots per follow-up lock acquisition and loop without imposing a limit.
         const READY_BATCH_SIZE: usize = 8;
 
         let mut first = [None];
@@ -370,6 +370,8 @@ impl SystemClockStorage {
 mod tests {
     use super::*;
 
+    // These callbacks run synchronously on the test thread. Relaxed atomics avoid mutable
+    // aliasing without publishing other memory between threads.
     #[derive(Debug)]
     struct CountingWake(AtomicUsize);
 
@@ -380,6 +382,7 @@ mod tests {
     }
 
     struct ReentrantWake {
+        // Waking probes whether user code can enter timer storage after its lock is released.
         storage: SystemClockStorage,
         lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
@@ -392,6 +395,7 @@ mod tests {
     }
 
     struct ReentrantDropWake {
+        // Waking and destruction probe the two callback paths that can re-enter timer storage.
         storage: SystemClockStorage,
         lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }

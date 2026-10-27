@@ -95,7 +95,7 @@ use crate::timers::TimerKey;
 ///
 /// - A Tokio clock from [`Clock::new_tokio()`] does not relocate its state. One
 ///   background task advances a shared timer set for all clones. Separate
-///   that task cannot advance separate thread-local storage.
+///   thread-local storage cannot be advanced by that shared task.
 ///
 /// For a thread-isolated runtime, clone an
 /// [`InactiveClock`][crate::runtime::InactiveClock]. Relocate each clone to its
@@ -332,8 +332,9 @@ impl Clock {
     ///
     /// This method calls [`system_time()`][Self::system_time] and converts the
     /// result. It is intentionally infallible for practical production use.
-    /// Production values come from the operating system clock, and all
-    /// `tick::fmt` types cover that normalized current-time range. Requiring
+    /// Production data means a current value read from the operating system
+    /// clock without test-controlled offsets. All `tick::fmt` types cover that
+    /// range. Requiring
     /// every caller to handle a conversion error would add an error path that
     /// supported production formats cannot reach.
     ///
@@ -348,8 +349,8 @@ impl Clock {
     /// # Panics
     ///
     /// Panics if the target type cannot represent the current system time.
-    /// Supported `tick` formats must represent normalized production clock
-    /// data. A panic means that the target range is unsupported or a controlled
+    /// Supported `tick` formats must represent production clock data. A panic
+    /// means that the target range is unsupported or a controlled
     /// test clock is outside that range.
     ///
     /// # Examples
@@ -359,9 +360,11 @@ impl Clock {
     ///
     /// use tick::Clock;
     ///
-    /// # fn example(clock: &Clock) {
+    /// # #[cfg(feature = "test-util")]
+    /// # {
+    /// let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH);
     /// let time = clock.system_time_as::<SystemTime>();
-    /// assert_eq!(time, clock.system_time());
+    /// assert_eq!(time, SystemTime::UNIX_EPOCH);
     /// # }
     /// ```
     #[must_use]

@@ -24,8 +24,9 @@
 //!
 //! Use [`Clock::system_time_as`][crate::Clock::system_time_as] to get the
 //! current time in one of these formats. This convenience method is
-//! intentionally infallible for normalized production data and supported
-//! `tick` formats.
+//! intentionally infallible for supported `tick` formats and production data.
+//! Production data is a current operating-system clock value without
+//! test-controlled offsets.
 //!
 //! If conversion failure is expected, call
 //! [`Clock::system_time`][crate::Clock::system_time]. Then call the target

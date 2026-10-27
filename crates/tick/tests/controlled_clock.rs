@@ -28,6 +28,7 @@ impl Wake for WakeCounter {
 }
 
 struct ReentrantTimestamp {
+    // Conversion re-enters the clock to prove that ClockControl converts before locking.
     clock: Clock,
     value: SystemTime,
 }
@@ -265,6 +266,29 @@ fn delay_fires_at_its_exact_controlled_deadline() {
     control.advance(Duration::from_millis(1));
 
     assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
+}
+
+#[test]
+fn delay_replaces_the_waker_without_restarting_the_deadline() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let first_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let second_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let first_waker = Waker::from(Arc::clone(&first_wakes));
+    let second_waker = Waker::from(Arc::clone(&second_wakes));
+    let mut first_context = Context::from_waker(&first_waker);
+    let mut second_context = Context::from_waker(&second_waker);
+    let mut delay = clock.delay(Duration::from_millis(10));
+
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut first_context), Poll::Pending);
+    control.advance(Duration::from_millis(4));
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut second_context), Poll::Pending);
+
+    control.advance(Duration::from_millis(6));
+
+    assert_eq!(first_wakes.0.load(Ordering::Relaxed), 0);
+    assert_eq!(second_wakes.0.load(Ordering::Relaxed), 1);
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut second_context), Poll::Ready(()));
 }
 
 #[test]

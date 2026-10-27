@@ -33,6 +33,7 @@ impl TimerKey {
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
 #[cfg(any(feature = "test-util", test))]
+/// Task wakers removed from timer storage and dispatched after its lock is released.
 pub(crate) type ReadyWakers = BTreeMap<TimerKey, Waker>;
 
 /// Stores one-shot timers.
@@ -133,9 +134,10 @@ impl Timers {
         (count, self.next_timer())
     }
 
-    /// Wakes each timer that is ready.
+    /// Moves ready timer wakers into caller-provided dispatch storage.
     ///
-    /// Returns the next timer instant, or `None` when no timer remains.
+    /// The caller invokes each waker after releasing its timer lock. Returns
+    /// the next timer instant, or `None` when no timer remains.
     #[cfg(any(feature = "test-util", test))]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyWakers) -> Option<Instant> {
