@@ -1,29 +1,90 @@
-# Tick design
+# Runtime-neutral time design
 
 ## Purpose
 
-The `tick` crate gives production code and tests one time API. Production
-clocks read operating system time. Controlled clocks let tests set or advance
-time without a real wait.
+The `tick` crate abstracts time for application code. Code uses one API for
+clock reads, elapsed time, delays, periodic timers, and timeouts. It does not
+need to depend on the time API of one async runtime.
 
-This guide explains the stable contracts and the internal timer design. The
-API documentation remains the source for public behavior.
+The same application code can use a production clock or a controlled test
+clock. Tests can set or advance time without a real wait.
 
-## Clock types
+`tick` can integrate with an async runtime that can:
+
+- Store and invoke a `Waker`.
+- Call a clock driver from its runtime loop.
+- Park until a timer deadline or a driver notification.
+
+The API documentation remains the source for public behavior. This guide
+explains the runtime boundary and its internal design.
+
+## Application boundary
+
+Application code uses `SimpleClock` or `Clock`.
 
 `SimpleClock` reads absolute and monotonic time. It does not own timers and does
 not need a runtime driver.
 
-`Clock` adds delays, periodic timers, and timeouts. A system clock uses a
-`ClockDriver` to advance registered timers. A Tokio clock uses one background
-task for this work.
+`Clock` adds delays, periodic timers, and timeouts. `Delay`, `Timer`, and
+`FutureExt` use the clock instead of a runtime-specific timer type.
 
-`ClockControl` owns controlled test time. Its clones share one state, including
-all registered timers. Its fluent configuration methods update this shared
-state.
+This boundary lets a library accept a clock from its caller. The library does
+not need to know which runtime drives that clock.
 
-`InactiveClock` lets a runtime select isolated or shared timer storage before
-activation. Activation returns a `Clock` and its `ClockDriver`.
+## Runtime integration boundary
+
+The `runtime` module connects `tick` to an async runtime. The runtime completes
+these steps:
+
+1. Create an `InactiveClock`.
+2. Activate it with the waker for the runtime driver.
+3. Give the returned `Clock` to application tasks.
+4. Call `ClockDriver::advance_timers` from the runtime loop.
+5. Park until the returned deadline or a driver notification.
+
+The first timer and each newly earlier timer invoke the driver waker. This
+notification tells the runtime to calculate its next parking deadline again.
+
+A notification can arrive after the driver returns and before the runtime
+parks. The runtime must retain pending notifications or make this transition
+race-free.
+
+The driver waker must not own the related `Clock` or `ClockDriver`. Such
+ownership creates a cycle that can prevent shutdown.
+
+## Runtime storage models
+
+`InactiveClock` supports two timer-storage models.
+
+### Isolated storage
+
+Isolated storage is for runtimes that keep work on stable worker threads. The
+runtime clones and relocates an inactive clock before activation. Each worker
+then gets separate timer storage and its own driver.
+
+This model removes timer-lock contention between workers. A timer is visible
+only to the driver for its storage.
+
+### Shared storage
+
+Shared storage is for work-stealing runtimes where tasks can move between
+threads. The runtime activates one clock and shares it between tasks. One
+driver advances the shared timer set.
+
+The optional Tokio integration uses this model. Tokio is one adapter, not the
+core runtime contract.
+
+## Controlled time
+
+`ClockControl` supplies time for tests. Its clones share one controlled time
+state and one timer set.
+
+Production and test code use the same `Clock` API. A test can replace real time
+with controlled time without changing the code under test.
+
+The owner of a controlled clock advances time and wakes ready timers. Its
+driver has no operating system parking deadline. A runtime must stop its
+controlled driver loop from its own shutdown state.
 
 ## Time conversion
 
@@ -44,16 +105,16 @@ period. `Timer::next` returns `TimerTick`, which records the observed completion
 instant.
 
 `Timer` does not implement a public stream trait. This keeps stream libraries
-out of the public dependency contract. An application can adapt a timer to its
-chosen stream library.
+out of the runtime-neutral dependency contract. An application can adapt a
+timer to its chosen stream library.
 
 A pending wait keeps its registered deadline when its future is canceled. A
 later poll uses the same deadline. If the task changes, the poll replaces the
 registered waker.
 
 The timer registration owns a waker until the deadline fires, the wait resumes,
-or the timer object is dropped. This retention is part of keeping cancellation
-safe without exposing a separate public wait-future type.
+or the timer object is dropped. This retention keeps cancellation safe without
+exposing a separate public wait-future type.
 
 ## Timer storage
 
@@ -72,7 +133,7 @@ avoids heap allocation on the timer advancement path.
 Controlled clocks collect ready wakers while their state is locked. They wake
 the tasks after the state operation releases the lock.
 
-## Races
+## Timer races
 
 A driver can remove and wake a timer after a waiter reads the clock but before
 it replaces the waker. A missing registration during replacement therefore

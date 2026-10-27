@@ -77,7 +77,7 @@ If `test-util` is disabled, its support adds no runtime overhead.
 * [`runtime`][__link12] connects clocks to async runtimes.
 
 The [design guide][__link13]
-explains the stable contracts and the internal timer architecture.
+explains the runtime-neutral boundary and the internal timer architecture.
 
 ## Extensions
 
@@ -276,7 +276,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQboBS9rg3ZHYEbBsoacddu2WYb76VHx0aNNOwbaZwtSrhHzN9hZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbFoRkZ1NFDn4bzfC2ycY87d0bfN9YA_XycQUbtAK1wyfMDJdhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjGCZHRpY2tlMC44LjA
  [__link0]: https://docs.rs/tick/0.8.0/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.8.0/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.8.0/tick/?search=Error

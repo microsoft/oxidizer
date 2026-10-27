@@ -85,7 +85,7 @@
 //! - [`runtime`] connects clocks to async runtimes.
 //!
 //! The [design guide](https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md)
-//! explains the stable contracts and the internal timer architecture.
+//! explains the runtime-neutral boundary and the internal timer architecture.
 //!
 //! # Extensions
 //!
