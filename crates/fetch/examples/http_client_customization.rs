@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to customize the HTTP client. Standard pipeline and resilience
-//! in particular.
+//! Changes resilience layers in the standard HTTP client pipeline.
 
 use std::time::Duration;
 
@@ -19,7 +18,7 @@ mod utils;
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    // Simulate issues with the request by using a fake handler.
+    // Use a fake handler to simulate request failures.
     let fake_handler = FakeHandler::from_fn(|req| {
         let status_code = match fastrand::u32(0..10) {
             0..5 => StatusCode::INTERNAL_SERVER_ERROR,
@@ -35,22 +34,22 @@ async fn main() -> Result<(), ohno::AppError> {
     let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
         .standard_pipeline(|pipeline, _context| {
             pipeline
-                // Increase the total timeout for the pipeline.
+                // Increase the total timeout.
                 .total_timeout(|timeout| timeout.timeout(Duration::from_mins(1)))
-                // Customize the retry behavior.
+                // Change the retry behavior.
                 .retry(|retry| {
                     retry
                         .base_delay(Duration::ZERO)
-                        .max_retry_attempts(50) // we can do many retries, this does not do any external IO
-                        .http_clone(HttpClone::all()) // we clone all idempotent requests (PUT, DELETE, etc)
+                        .max_retry_attempts(50) // The fake handler performs no network I/O.
+                        .http_clone(HttpClone::all()) // Clone requests for every HTTP method.
                         .http_recovery(|response: &HttpResponse| response.recovery())
                 })
                 // Decrease the attempt timeout.
                 .attempt_timeout(|timeout| timeout.timeout(Duration::from_secs(2)))
-                // Optionally, we could also customize the attempt_intercept callback.
+                // Inspect each request attempt.
                 .attempt_intercept(|intercept| {
                     intercept.modify_input(|req| {
-                        // You can inspect/modify the request here.
+                        // The callback can inspect or change the request.
                         println!("attempting request to {}", req.uri());
                         req
                     })

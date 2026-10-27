@@ -17,13 +17,11 @@ use crate::resilience::retry::{HttpRetry, HttpRetryLayer, HttpRetryLayerExt};
 use crate::resilience::timeout::{HttpTimeout, HttpTimeoutLayer, HttpTimeoutLayerExt};
 
 const ATTEMPT_TIMEOUT_NAME: &str = "standard.attempt_timeout";
-/// Ten seconds lets a single attempt survive ordinary network variance while leaving room for
-/// retries within the total request budget.
+/// Ten seconds allows network variance and leaves time for retries in the total request budget.
 const ATTEMPT_TIMEOUT_DURATION: std::time::Duration = std::time::Duration::from_secs(10);
 
 const TOTAL_TIMEOUT_NAME: &str = "standard.total_timeout";
-/// Thirty seconds permits the default initial attempt plus retries without letting one logical
-/// request occupy resources indefinitely.
+/// Thirty seconds permits the initial attempt and retries without an unlimited request duration.
 const TOTAL_TIMEOUT_DURATION: std::time::Duration = std::time::Duration::from_secs(30);
 
 const RETRY_NAME: &str = "standard.retry";
@@ -47,32 +45,31 @@ pub enum RecoveryMode {
 
 /// Configuration for the standard HTTP request pipeline.
 ///
-/// The standard pipeline provides a production-ready configuration with essential
-/// handlers that most applications need. It includes timeouts, automatic retries,
-/// logging, and metrics collection with sensible defaults.
+/// The standard pipeline includes timeouts, retries, logging, and metrics.
 ///
-/// This type is used by [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline]
-/// to configure the default pipeline when creating HTTP clients. Individual layers
-/// are configured through builder methods (such as [`retry`][Self::retry] and
-/// [`attempt_timeout`][Self::attempt_timeout]) that accept a closure receiving the
-/// current layer and returning the modified layer.
+/// [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline] uses this
+/// type to change the default pipeline. Methods such as [`retry`][Self::retry] and
+/// [`attempt_timeout`][Self::attempt_timeout] receive the current layer and return the changed
+/// layer.
 ///
 /// # Handlers
 ///
-/// The standard pipeline creates the following handler chain (from outermost to innermost)
-/// with production-ready defaults:
+/// The handler order is outermost to innermost:
 ///
-/// 1. **total metrics** ([`total_metrics`][Self::total_metrics]): Records the total
-///    request duration (including all retries and hedged attempts) under the
-///    `http.client.request.total_duration` instrument.
-/// 2. **total timeout** ([`total_timeout`][Self::total_timeout]): Enforces a total timeout for the entire request/response cycle.
-/// 3. **retry** ([`retry`][Self::retry]) *or* **hedging** ([`hedging`][Self::hedging]): Recovers from transient failures. Controlled by [`recovery_mode`][Self::recovery_mode].
-/// 4. **breaker** ([`breaker`][Self::breaker]): Circuit breaker that prevents sending requests to a service that is likely to fail.
-/// 5. **attempt timeout** ([`attempt_timeout`][Self::attempt_timeout]): Enforces a per-attempt timeout.
-/// 6. **attempt intercept** ([`attempt_intercept`][Self::attempt_intercept]): An interception layer invoked on each request attempt.
-/// 7. **logging** ([`attempt_logs`][Self::attempt_logs]): Records request and response information via logging events.
-/// 8. **metrics** ([`attempt_metrics`][Self::attempt_metrics]): Collects standardized per-attempt metrics about HTTP requests.
-/// 9. **dispatch** ([`crate::handlers::Dispatch`]): Sends the HTTP request over the network.
+/// 1. Total metrics ([`total_metrics`][Self::total_metrics]) records pipeline execution through an
+///    [`HttpResponse`] or terminal error, including retries and hedged attempts. It uses the
+///    `http.client.request.total_duration` instrument. Later body reads are not included.
+/// 2. Total timeout ([`total_timeout`][Self::total_timeout]) limits pipeline execution through an
+///    [`HttpResponse`] or terminal error. It does not limit later body streaming, buffering, or
+///    lazy decompression.
+/// 3. Retry ([`retry`][Self::retry]) or hedging ([`hedging`][Self::hedging]) handles transient
+///    failures. [`recovery_mode`][Self::recovery_mode] selects the layer.
+/// 4. Breaker ([`breaker`][Self::breaker]) rejects requests when the service is likely to fail.
+/// 5. Attempt timeout ([`attempt_timeout`][Self::attempt_timeout]) limits each attempt.
+/// 6. Attempt intercept ([`attempt_intercept`][Self::attempt_intercept]) runs for each attempt.
+/// 7. Logging ([`attempt_logs`][Self::attempt_logs]) records requests and responses.
+/// 8. Metrics ([`attempt_metrics`][Self::attempt_metrics]) records per-attempt HTTP metrics.
+/// 9. Dispatch ([`crate::handlers::Dispatch`]) sends the request to the transport.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct StandardRequestPipeline {
@@ -117,97 +114,96 @@ impl StandardRequestPipeline {
         }
     }
 
-    /// Configures the total timeout for the entire request/response cycle, including retries.
+    /// Changes the timeout for pipeline execution through an [`HttpResponse`] or terminal error.
+    ///
+    /// The timeout includes retries and hedged attempts. It does not include later body streaming,
+    /// buffering, or lazy decompression.
     ///
     /// # Defaults
     ///
-    /// - **Timeout**: 30 seconds for the entire request/response cycle.
-    /// - **Name**: `standard.total_timeout`
+    /// - Timeout: 30 seconds.
+    /// - Name: `standard.total_timeout`.
     #[must_use]
     pub fn total_timeout(mut self, configure: impl FnOnce(HttpTimeoutLayer) -> HttpTimeoutLayer) -> Self {
         self.total_timeout = configure(self.total_timeout);
         self
     }
 
-    /// Configures the retry layer.
+    /// Changes the retry layer.
     ///
     /// This layer is active when [`recovery_mode`][Self::recovery_mode] is set to
     /// [`RecoveryMode::Retry`] (the default).
     ///
     /// # Defaults
     ///
-    /// - **Max Retries**: 3 retry attempts (4 total attempts including the initial one).
-    /// - **Retry Delay**: 2 seconds between retry attempts. Handles the `Retry-After` header
-    ///   if present.
-    /// - **Retry Policy**: Retries transient errors (5xx status codes, timeouts, and
-    ///   429 Too Many Requests).
-    /// - **Backoff Strategy**: Exponential backoff with jitter.
-    /// - **Retryable Requests**: Only safe HTTP methods (GET, HEAD, OPTIONS, TRACE) with
-    ///   cloneable bodies.
-    /// - **Name**: `standard.retry`
+    /// - Maximum retries: 3, for 4 total attempts.
+    /// - Retry delay: 10 milliseconds. A `Retry-After` header can change the delay.
+    /// - Retry policy: 5xx status codes, timeouts, and 429 Too Many Requests.
+    /// - Backoff: exponential with jitter.
+    /// - Retryable requests: safe HTTP methods (GET, HEAD, OPTIONS, TRACE) with cloneable bodies.
+    /// - Name: `standard.retry`.
     #[must_use]
     pub fn retry(mut self, configure: impl FnOnce(HttpRetryLayer) -> HttpRetryLayer) -> Self {
         self.retry = configure(self.retry);
         self
     }
 
-    /// Configures the hedging layer.
+    /// Changes the hedging layer.
     ///
-    /// Hedging reduces tail latency by sending concurrent requests and returning the
-    /// first successful response. This layer is active when [`recovery_mode`][Self::recovery_mode]
-    /// is set to [`RecoveryMode::Hedging`].
+    /// Hedging sends concurrent requests and returns the first response that the recovery policy
+    /// accepts. It is active when [`recovery_mode`][Self::recovery_mode] is
+    /// [`RecoveryMode::Hedging`].
     ///
     /// # Defaults
     ///
-    /// - **Cloning strategy**: Safe HTTP methods only (GET, HEAD, OPTIONS, TRACE).
-    /// - **Recovery classification**: 5xx, 429, and timeouts are treated as transient.
-    /// - **Name**: `standard.hedging`
+    /// - Cloning: safe HTTP methods only (GET, HEAD, OPTIONS, TRACE).
+    /// - Transient failures: 5xx, 429, and timeouts.
+    /// - Name: `standard.hedging`.
     #[must_use]
     pub fn hedging(mut self, configure: impl FnOnce(HttpHedgingLayer) -> HttpHedgingLayer) -> Self {
         self.hedging = configure(self.hedging);
         self
     }
 
-    /// Configures the circuit breaker layer.
+    /// Changes the circuit breaker layer.
     ///
-    /// The circuit breaker sits between the retry/hedging layer and the attempt timeout,
-    /// preventing requests from being sent to a service that is likely to fail.
+    /// The breaker runs between recovery and the attempt timeout. It rejects requests when a
+    /// service is likely to fail.
     ///
-    /// When the circuit is open, requests are immediately rejected with an
-    /// `HttpError::unavailable` error. The original request is attached to the error
-    /// so that an outer retry layer can restore and re-attempt it.
+    /// An open circuit returns `HttpError::unavailable`. The error contains the original request,
+    /// so an outer retry layer can restore it.
     ///
     /// # Defaults
     ///
-    /// - **Recovery classification**: 5xx, 429, and timeouts are treated as failures.
-    /// - **Rejected request error**: Returns `HttpError::unavailable` when the circuit is open.
-    /// - **Name**: `standard.breaker`
+    /// - Failures: 5xx, 429, and timeouts.
+    /// - Open-circuit error: `HttpError::unavailable`.
+    /// - Name: `standard.breaker`.
     #[must_use]
     pub fn breaker(mut self, configure: impl FnOnce(HttpBreakerLayer) -> HttpBreakerLayer) -> Self {
         self.breaker = configure(self.breaker);
         self
     }
 
-    /// Configures the timeout for each individual request attempt.
+    /// Changes the timeout for each request attempt.
     ///
     /// # Defaults
     ///
-    /// - **Timeout**: 10 seconds per individual request attempt.
-    /// - **Name**: `standard.attempt_timeout`
+    /// - Timeout: 10 seconds.
+    /// - Name: `standard.attempt_timeout`.
     #[must_use]
     pub fn attempt_timeout(mut self, configure: impl FnOnce(HttpTimeoutLayer) -> HttpTimeoutLayer) -> Self {
         self.attempt_timeout = configure(self.attempt_timeout);
         self
     }
 
-    /// Configures the interception layer that is invoked on each request attempt.
+    /// Changes the interception layer for each request attempt.
     ///
-    /// This can be used for custom logging, metrics, or other cross-cutting concerns
-    /// that need to be applied to every attempt, including retries.
+    /// Use it for logging, metrics, or other behavior that must run for retries and the initial
+    /// attempt.
     ///
     /// # Defaults
     ///
-    /// No default behavior; this layer is a no-op unless customized.
+    /// The layer does nothing until it is changed.
     #[must_use]
     pub fn attempt_intercept(
         mut self,
@@ -219,26 +215,25 @@ impl StandardRequestPipeline {
         self
     }
 
-    /// Configures the logging layer that logs each request attempt.
+    /// Changes the logging layer for each request attempt.
     #[must_use]
     pub fn attempt_logs(mut self, configure: impl FnOnce(LoggingLayer) -> LoggingLayer) -> Self {
         self.attempt_logs = configure(self.attempt_logs);
         self
     }
 
-    /// Configures the metrics layer that collects standardized per-attempt HTTP request metrics.
+    /// Changes the layer that records per-attempt HTTP metrics.
     #[must_use]
     pub fn attempt_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
         self.attempt_metrics = configure(self.attempt_metrics);
         self
     }
 
-    /// Configures the total metrics layer.
+    /// Changes the total metrics layer.
     ///
-    /// This is the outermost layer in the pipeline, so it measures the entire
-    /// logical request (including all retries and hedged attempts) and records
-    /// its duration under the `http.client.request.total_duration` instrument,
-    /// distinguishing it from the per-attempt [`attempt_metrics`][Self::attempt_metrics].
+    /// This outermost layer measures the logical request, including retries and hedged attempts.
+    /// It records `http.client.request.total_duration`. [`attempt_metrics`][Self::attempt_metrics]
+    /// records each attempt.
     #[must_use]
     pub fn total_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
         self.total_metrics = configure(self.total_metrics);
@@ -247,13 +242,12 @@ impl StandardRequestPipeline {
 
     /// Selects the recovery strategy for the standard pipeline.
     ///
-    /// This controls whether the pipeline uses sequential retries
-    /// ([`RecoveryMode::Retry`]) or concurrent hedged requests
-    /// ([`RecoveryMode::Hedging`]) for recovering from transient failures.
+    /// Select [`RecoveryMode::Retry`] for sequential retries. Select [`RecoveryMode::Hedging`] for
+    /// concurrent hedged requests.
     ///
     /// # Defaults
     ///
-    /// [`RecoveryMode::Retry`] — sequential retries with exponential backoff.
+    /// [`RecoveryMode::Retry`] uses sequential retries with exponential backoff.
     #[must_use]
     pub fn recovery_mode(mut self, mode: RecoveryMode) -> Self {
         self.recovery_mode = mode;
@@ -385,12 +379,11 @@ mod tests {
         let pipeline1 = StandardRequestPipeline::new(&test_context());
         let pipeline2 = StandardRequestPipeline::new(&test_context());
 
-        // Different instances should have different memory addresses
-        // We can't test this directly, but we can verify they are separate by formatting
+        // Format two separately created pipelines.
         let debug1 = format!("{pipeline1:?}");
         let debug2 = format!("{pipeline2:?}");
 
-        // Both should contain the same structure but be independent instances
+        // Both pipelines contain the standard structure.
         assert!(debug1.contains("StandardRequestPipeline"));
         assert!(debug2.contains("StandardRequestPipeline"));
     }

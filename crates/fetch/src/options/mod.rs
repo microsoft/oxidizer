@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Configuration options for HTTP client behavior.
+//! HTTP client configuration.
 //!
-//! The transport-level option types are defined in the [`fetch_options`] crate
-//! and re-exported here. `ClientOptions` bundles those transport options
-//! together with the response-body, routing, redaction, and TLS configuration
-//! owned by the `fetch` request pipeline.
+//! [`fetch_options`] defines the transport options and this module re-exports them. `ClientOptions`
+//! combines transport options with response-body, routing, redaction, TLS, and decompression
+//! configuration.
 //!
-//! [`fetch_options::SocketOptions`] is re-exported for transport-specific builders. It is not part
-//! of [`fetch_options::TransportOptions`] because only socket-owning transports can honor it.
+//! Transport-specific builders can use [`fetch_options::SocketOptions`]. It is separate from
+//! [`fetch_options::TransportOptions`] because only a transport that owns sockets can apply it.
 
 use data_privacy::RedactionEngine;
 
@@ -27,8 +26,8 @@ use crate::tls::TlsOptions;
 
 /// Aggregated configuration for an [`HttpClient`](crate::HttpClient).
 ///
-/// Transport-level knobs live in [`TransportOptions`]; the remaining fields are
-/// owned by the request pipeline rather than the transport.
+/// [`TransportOptions`] contains transport configuration. The request pipeline owns the other
+/// fields.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ClientOptions {
     /// Transport-level configuration handed to transport handlers.
