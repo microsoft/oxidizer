@@ -131,10 +131,13 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `monitor`.
 //!
 //! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
+//! - **`monitor`** - Enables the Seismograph monitor dependency. It forwards
+//!   `performables` telemetry support when `performables` is enabled. It does
+//!   not start monitoring or emit new telemetry.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -162,6 +165,8 @@ use arty_io_core as _;
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
 ///   are available, multiple worker threads share each processor. Zero fails at
 ///   construction.
+/// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
+///   policy. The default is `enabled`.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
@@ -200,6 +205,15 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
+/// Disable monitoring for the runtime:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(monitor = disabled)]
+/// async fn main(_cx: arty::task::Builtins) {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
 /// Set the async worker count:
 ///
 /// ```
@@ -228,7 +242,10 @@ pub use arty_macros::main;
 /// the test harness runs it.
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// option also applies. By default, a test uses one worker.
+/// and `monitor` options also apply. By default, a test uses one worker and
+/// selects the disabled monitoring policy. This keeps future monitor activation
+/// out of ordinary tests. A test that exercises monitoring must opt in with
+/// `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -274,6 +291,14 @@ pub use arty_macros::main;
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
 /// }
+/// ```
+///
+/// Enable monitoring for a test that exercises monitoring behavior:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(monitor = enabled)]
+/// async fn monitored(_cx: arty::task::Builtins) {}
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

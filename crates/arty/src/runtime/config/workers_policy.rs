@@ -5,7 +5,7 @@ use std::num::{NonZero, NonZeroUsize};
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::BlockingPoolPolicy;
+use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions};
 use crate::runtime::error::Error;
 
 /// A worker-count policy for the async runtime.
@@ -166,11 +166,12 @@ enum WorkersPolicyKind {
 }
 
 /// Resource settings validated during runtime construction.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct RuntimeConfig {
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
+    pub(crate) monitor_options: MonitorOptions,
 }
 
 impl Default for RuntimeConfig {
@@ -181,6 +182,7 @@ impl Default for RuntimeConfig {
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
+            monitor_options: MonitorOptions::default(),
         }
     }
 }

@@ -6,6 +6,14 @@
 //! Use [`Runtime::builder`](crate::runtime::Runtime::builder) when the defaults
 //! do not fit your application. Set your options before calling
 //! [`build`](crate::runtime::RuntimeBuilder::build), which starts the workers.
+//! The monitoring policy is enabled by default. Use
+//! [`RuntimeBuilder::monitor`](crate::runtime::RuntimeBuilder::monitor) with
+//! [`MonitorPolicy::disabled`](crate::runtime::MonitorPolicy::disabled) to
+//! disable it for one runtime.
+//!
+//! The `monitor` Cargo feature enables the Seismograph dependencies for
+//! `performables` and runtime monitoring. This stage only provides configuration
+//! plumbing. It does not start a monitor, instrument tasks, or emit new telemetry.
 //!
 //! # Async workers
 //!
@@ -65,16 +73,19 @@
 //! # Entry-point attributes
 //!
 //! With `macros` enabled, `#[arty::main]` and `#[arty::test]` create and stop
-//! the runtime for you. By default, `main` chooses workers automatically and
-//! `test` uses one worker.
+//! the runtime for you. By default, `main` uses the enabled monitoring policy.
+//! Tests use one worker and select the disabled monitoring policy. This keeps
+//! future monitor activation out of ordinary tests. A test that exercises
+//! monitoring must use `monitor = enabled`.
 //!
-//! Use `workers = N` to set the exact worker count. Build the runtime explicitly
-//! for custom clocks, telemetry, blocking pools, stack sizes, or an
+//! Use `workers = N` to set the exact worker count. Use `monitor = enabled` or
+//! `monitor = disabled` to select the monitoring policy. Build the runtime
+//! explicitly for custom clocks, telemetry, blocking pools, stack sizes, or an
 //! [`at_most`](crate::runtime::WorkersPolicy::at_most) or
 //! [`all`](crate::runtime::WorkersPolicy::all) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
-//! signature and worker option. Build the runtime yourself if you need to
+//! signature and configuration. Build the runtime yourself if you need to
 //! handle construction errors or own its shutdown.
 //!
 //! # Clocks and telemetry

@@ -116,5 +116,5 @@ setup-callgrind:
 # Publish a GitHub release for a crate tag.
 [arg("repository", long)]
 [arg("tag", long)]
-publish-gh-release repository tag: anvil-toolchain-nightly-validate-prereqs
-    cargo '+{{ rust_nightly }}' -Zscript scripts/publish-gh-release.rs --repo "{{ repository }}" "{{ tag }}"
+publish-gh-release $repository $tag: anvil-toolchain-nightly-validate-prereqs
+    cargo '+{{ rust_nightly }}' -Zscript scripts/publish-gh-release.rs --repo "$env:repository" "$env:tag"

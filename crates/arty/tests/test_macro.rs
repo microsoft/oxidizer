@@ -9,6 +9,20 @@
 use arty::task::Builtins;
 use arty::test;
 
+/// Compile-pass fixture for the enabled main policy.
+#[arty::main(monitor = enabled)]
+pub async fn main_with_monitoring_enabled(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// Compile-pass fixture for the disabled main policy with another option.
+#[arty::main(workers = 1, monitor = disabled)]
+pub async fn main_with_monitoring_disabled(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
 #[test]
 async fn simple_main(cx: Builtins) {
     println!("Hello, world!");
@@ -53,6 +67,16 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     for task in tasks {
         assert_eq!(task.await.unwrap(), home);
     }
+}
+
+#[test(monitor = enabled)]
+async fn test_can_enable_monitoring(cx: Builtins) {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
+#[test(monitor = disabled, workers = 1)]
+async fn test_can_disable_monitoring_explicitly(cx: Builtins) {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[test(workers = 3)]
