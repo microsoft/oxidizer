@@ -392,31 +392,53 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 }
 
 #[benchmark(ARTY, "arty_contention/relocated_cache", "Arty")]
-#[bench::concurrency_w1(&ArtyCase::new(1), 10)]
-#[bench::concurrency_w8(&ArtyCase::new(8), 10)]
-fn arty_workload(case: &ArtyCase, concurrency: u64) -> Duration {
-    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+#[bench::concurrency_w1(Box::new(ArtyCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(ArtyCase::new(8)), 10)]
+fn arty_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
 #[benchmark(TOKIO, "arty_contention/relocated_cache", "Tokio")]
-#[bench::concurrency_w1(&TokioCase::new(1), 10)]
-#[bench::concurrency_w8(&TokioCase::new(8), 10)]
-fn tokio_workload(case: &TokioCase, concurrency: u64) -> Duration {
-    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+#[bench::concurrency_w1(Box::new(TokioCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(TokioCase::new(8)), 10)]
+fn tokio_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
 #[benchmark(ARTY_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Arty")]
-#[bench::concurrency_w1(&ArtyNestedRetainedWakerCase::new(1), 10)]
-#[bench::concurrency_w8(&ArtyNestedRetainedWakerCase::new(8), 10)]
-fn arty_nested_retained_waker_workload(case: &ArtyNestedRetainedWakerCase, concurrency: u64) -> Duration {
-    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+#[bench::concurrency_w1(Box::new(ArtyNestedRetainedWakerCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(ArtyNestedRetainedWakerCase::new(8)), 10)]
+fn arty_nested_retained_waker_workload<S: std::borrow::Borrow<ArtyNestedRetainedWakerCase>>(
+    owned_input: S,
+    concurrency: u64,
+) -> (Duration, S) {
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
 #[benchmark(TOKIO_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Tokio")]
-#[bench::concurrency_w1(&TokioNestedRetainedWakerCase::new(1), 10)]
-#[bench::concurrency_w8(&TokioNestedRetainedWakerCase::new(8), 10)]
-fn tokio_nested_retained_waker_workload(case: &TokioNestedRetainedWakerCase, concurrency: u64) -> Duration {
-    case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+#[bench::concurrency_w1(Box::new(TokioNestedRetainedWakerCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(TokioNestedRetainedWakerCase::new(8)), 10)]
+fn tokio_nested_retained_waker_workload<S: std::borrow::Borrow<TokioNestedRetainedWakerCase>>(
+    owned_input: S,
+    concurrency: u64,
+) -> (Duration, S) {
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
 #[cfg(target_os = "linux")]

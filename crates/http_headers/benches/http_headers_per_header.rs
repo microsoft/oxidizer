@@ -543,22 +543,23 @@ macro_rules! finish {
                 }
             )+
 
+            // Gungraun needs the outer argument expression in this macro's hygiene context.
             #[metabench::benchmark(COMPETITOR, "http_headers_per_header/per_header", "headers")]
-            $(#[bench::$supported(setup = [<$supported _headers_case>])])+
+            $(#[bench::$supported(std::hint::black_box([<$supported _headers_case>]()))])+
             fn competitor(case: BenchmarkCase) {
                 case.run();
             }
 
             #[metabench::benchmark(OWNED, "http_headers_per_header/per_header", "http_headers_owned")]
-            $(#[bench::$supported(setup = [<$supported _owned_case>])])+
-            $(#[bench::$ours(setup = [<$ours _owned_case>])])+
+            $(#[bench::$supported(std::hint::black_box([<$supported _owned_case>]()))])+
+            $(#[bench::$ours(std::hint::black_box([<$ours _owned_case>]()))])+
             fn owned(case: BenchmarkCase) {
                 case.run();
             }
 
             #[metabench::benchmark(BORROWED, "http_headers_per_header/per_header", "http_headers_borrowed")]
-            $(#[bench::$supported(setup = [<$supported _borrowed_case>])])+
-            $(#[bench::$ours(setup = [<$ours _borrowed_case>])])+
+            $(#[bench::$supported(std::hint::black_box([<$supported _borrowed_case>]()))])+
+            $(#[bench::$ours(std::hint::black_box([<$ours _borrowed_case>]()))])+
             fn borrowed(case: BenchmarkCase) {
                 case.run();
             }
