@@ -276,6 +276,7 @@ dependencies = [
  "pin-project",
  "plurality",
  "scopeguard",
+ "seismograph",
  "static_assertions",
  "testing_aids",
  "thread_aware",

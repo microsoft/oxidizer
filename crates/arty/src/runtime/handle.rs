@@ -61,6 +61,8 @@ impl Runtime {
     /// Creates and starts a runtime with the default configuration.
     ///
     /// Equivalent to [`Runtime::builder().build()`](RuntimeBuilder::build).
+    /// The default monitoring policy is
+    /// [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled).
     ///
     /// # Errors
     ///

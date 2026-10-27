@@ -24,20 +24,53 @@ use syn::{Expr, Ident, ItemFn, Lit, parse_quote, parse2};
 
 #[derive(Debug, FromMeta)]
 struct Args {
+    #[darling(default)]
+    monitor: Option<MonitorSetting>,
     #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
     workers: Option<Expr>,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum MonitorSetting {
+    Enabled,
+    Disabled,
+}
+
+impl FromMeta for MonitorSetting {
+    fn from_expr(expr: &Expr) -> darling::Result<Self> {
+        let Expr::Path(path) = expr else {
+            return Err(invalid_monitor_setting(expr));
+        };
+        let Some(ident) = path.path.get_ident() else {
+            return Err(invalid_monitor_setting(expr));
+        };
+        match ident.to_string().as_str() {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            _ => Err(invalid_monitor_setting(expr)),
+        }
+    }
+}
+
+fn invalid_monitor_setting(expr: &Expr) -> darling::Error {
+    darling::Error::custom("`monitor` must be the bare identifier `enabled` or `disabled`").with_span(expr)
+}
+
 impl Args {
     fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        if self.workers.is_none() && clock.is_none() && !test {
+        let monitor = self.monitor.or_else(|| test.then_some(MonitorSetting::Disabled));
+        if self.workers.is_none() && clock.is_none() && monitor.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
         let workers = self.workers.as_ref().map(worker_count).transpose()?;
         let workers = workers.map(|count| quote!(#count)).or_else(|| test.then(|| quote!(1)));
         let workers = workers.map(|count| quote!(.workers(#runtime_path::runtime::WorkersPolicy::exactly(#count))));
+        let monitor = monitor.map(|monitor| match monitor {
+            MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::enabled())),
+            MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
+        });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
-        Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #clock .build()))
+        Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #clock .build()))
     }
 }
 
@@ -295,6 +328,7 @@ mod tests {
         fn fails() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
                 .workers(::arty::runtime::WorkersPolicy::exactly(1))
+                .monitor(::arty::runtime::MonitorPolicy::disabled())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -313,7 +347,7 @@ mod tests {
     #[test]
     fn workers_selects_exactly_the_literal_count() {
         let expansion = main(
-            quote!(workers = 4usize),
+            quote!(workers = 4usize, monitor = disabled),
             quote! {
                 pub async fn run(cx: <App as Types>::Context) -> AppResult {
                     run(cx).await
@@ -324,6 +358,7 @@ mod tests {
             pub fn run() -> AppResult {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::exactly(4usize))
+                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -341,7 +376,7 @@ mod tests {
     #[test]
     fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
         let expansion = test(
-            quote!(workers = 1),
+            quote!(monitor = enabled, workers = 1),
             quote! {
                 #[ignore = "manual test"]
                 #[should_panic(expected = "original payload")]
@@ -358,6 +393,7 @@ mod tests {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::exactly(1))
+                    .monitor(::arty::runtime::MonitorPolicy::enabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -388,11 +424,105 @@ mod tests {
                 }
             },
         );
-        let expansion = expansion.to_string();
-        assert!(expansion.contains(":: arty :: runtime :: Runtime :: builder"));
-        assert!(expansion.contains(":: arty :: runtime :: __private :: ClockControl :: new"));
-        assert!(expansion.contains("workers"));
-        assert!(expansion.contains("WorkersPolicy :: exactly (1)"));
+        let expected = quote! {
+            #[::core::prelude::v1::test]
+            fn run() {
+                let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::exactly(1))
+                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .clock(::core::clone::Clone::clone(&__arty_clock_control))
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Builtins| {
+                        let time: ClockControl = __arty_clock_control;
+                        {
+                            run(cx, time).await;
+                        }
+                    });
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+
+        assert_eq!(expansion.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn main_monitor_settings_are_forwarded_exactly() {
+        for (setting, policy) in [(quote!(enabled), quote!(enabled)), (quote!(disabled), quote!(disabled))] {
+            let expansion = main(
+                quote!(monitor = #setting),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            );
+            let expected = quote! {
+                fn run() {
+                    let __arty_runtime = ::arty::runtime::Runtime::builder()
+                        .monitor(::arty::runtime::MonitorPolicy::#policy())
+                        .build()
+                        .expect("failed to create the runtime for the entry point");
+                    let __arty_result = __arty_runtime
+                        .scheduler()
+                        .block_on(async move |cx: Builtins| {});
+                    let __arty_shutdown = __arty_runtime.stop();
+                    __arty_result
+                        .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                        .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+                }
+            };
+
+            assert_eq!(expansion.to_string(), expected.to_string(), "monitor = {setting}");
+        }
+    }
+
+    #[test]
+    fn test_monitor_settings_are_forwarded_exactly() {
+        for (setting, policy) in [(quote!(enabled), quote!(enabled)), (quote!(disabled), quote!(disabled))] {
+            let expansion = test(
+                quote!(monitor = #setting),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            );
+            let expected = quote! {
+                #[::core::prelude::v1::test]
+                fn run() {
+                    let __arty_runtime = ::arty::runtime::Runtime::builder()
+                        .workers(::arty::runtime::WorkersPolicy::exactly(1))
+                        .monitor(::arty::runtime::MonitorPolicy::#policy())
+                        .build()
+                        .expect("failed to create the runtime for the entry point");
+                    let __arty_result = __arty_runtime
+                        .scheduler()
+                        .block_on(async move |cx: Builtins| {});
+                    let __arty_shutdown = __arty_runtime.stop();
+                    __arty_result
+                        .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                        .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+                }
+            };
+
+            assert_eq!(expansion.to_string(), expected.to_string(), "monitor = {setting}");
+        }
+    }
+
+    #[test]
+    fn monitor_composes_independently_of_argument_order() {
+        for expand in [main, test] {
+            let input = quote! {
+                async fn run(cx: Builtins) {}
+            };
+            let workers_first = expand(quote!(workers = 2, monitor = disabled), input.clone());
+            let monitor_first = expand(quote!(monitor = disabled, workers = 2), input);
+
+            assert_eq!(workers_first.to_string(), monitor_first.to_string());
+        }
     }
 
     #[test]
@@ -458,6 +588,48 @@ mod tests {
                 assert!(expansion.contains("compile_error"), "workers = {workers}: {expansion}");
                 assert!(expansion.contains("nonnegative integer literal"), "{expansion}");
             }
+        }
+    }
+
+    #[test]
+    fn invalid_monitor_settings_report_errors() {
+        let expected = quote!(::core::compile_error! { "`monitor` must be the bare identifier `enabled` or `disabled`" }).to_string();
+        for monitor in [
+            quote!(true),
+            quote!(false),
+            quote!("enabled"),
+            quote!("disabled"),
+            quote!(automatic),
+            quote!(MonitorPolicy::enabled()),
+            quote!(::enabled),
+        ] {
+            for expand in [main, test] {
+                let expansion = expand(
+                    quote!(monitor = #monitor),
+                    quote! {
+                        async fn run(cx: Builtins) {}
+                    },
+                )
+                .to_string();
+
+                assert_eq!(expansion, expected, "monitor = {monitor}");
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_monitor_settings_report_errors() {
+        let expected = quote!(::core::compile_error! { "Duplicate field `monitor`" }).to_string();
+        for expand in [main, test] {
+            let expansion = expand(
+                quote!(monitor = enabled, monitor = disabled),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            )
+            .to_string();
+
+            assert_eq!(expansion, expected);
         }
     }
 
