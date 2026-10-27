@@ -385,7 +385,7 @@ mod tests {
             command_tx,
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             signal,
             MonitorPolicy::disabled().into(),
         );

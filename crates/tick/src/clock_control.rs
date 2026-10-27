@@ -683,7 +683,7 @@ mod tests {
         let clock = control.to_clock();
         let lock_was_available = Arc::new(AtomicBool::new(false));
         let waker = Waker::from(Arc::new(ReentrantDropWaker {
-            control: control.clone(),
+            control,
             lock_was_available: Arc::clone(&lock_was_available),
         }));
         let key = clock.register_timer(clock.instant() + Duration::from_secs(1), waker);
