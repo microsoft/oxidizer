@@ -598,7 +598,12 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(WorkersPolicy::all(), &hardware.processors(), Sink::noop());
+        let runtime = runtime_with_processors(
+            WorkersPolicy::all(),
+            MonitorPolicy::disabled().into(),
+            &hardware.processors(),
+            Sink::noop(),
+        );
         let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = builtins
             .control()
