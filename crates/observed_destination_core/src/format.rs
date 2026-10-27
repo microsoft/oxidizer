@@ -142,11 +142,7 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 /// Renders a [`SystemTime`] as a fixed-width, nanosecond-precision RFC 3339 UTC
 /// timestamp (e.g. `1970-01-01T00:00:10.000000000Z`).
 ///
-/// The `{:.9}` precision is what keeps every log line the same width: jiff's
-/// default `Display` for [`Timestamp`] omits trailing zero fractional digits,
-/// which produces inconsistent, occasionally shorter timestamps.
-///
-/// Times outside Jiff's range use the nearest supported boundary.
+/// Times outside the supported range use the nearest supported boundary.
 ///
 /// # Examples
 ///
@@ -178,6 +174,8 @@ impl From<SystemTime> for Rfc3339Nanos {
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| timestamp_boundary(self.0));
+        // Jiff's default Display omits trailing fractional zeros.
+        // The explicit precision keeps nine fractional digits.
         write!(f, "{ts:.9}")
     }
 }

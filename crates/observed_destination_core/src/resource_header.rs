@@ -14,10 +14,11 @@ use crate::format::print_resource;
 /// Tracks a [`Resource`] and prints it exactly once on the first call to
 /// [`ResourceHeader::print_once`].
 ///
-/// Uses an [`AtomicBool`] internally so `print_once` only requires `&self`.
+/// The header can be printed through a shared reference.
 #[derive(Debug)]
 pub struct ResourceHeader {
     resource: Resource,
+    // AtomicBool lets print_once update the flag through a shared reference.
     emitted: AtomicBool,
 }
 
