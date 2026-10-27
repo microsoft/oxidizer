@@ -26,7 +26,8 @@ use opentelemetry_sdk::logs::SdkLogRecord;
 /// // Default includes everything
 /// let config = LogFormatConfig::default();
 ///
-/// // Minimal format: timestamp, severity, body only (with placeholders expanded)
+/// // Minimal format: timestamp, severity, and body with placeholders expanded.
+/// // If the body is absent, attributes appear as key=value pairs.
 /// let config = LogFormatConfig::minimal();
 /// ```
 #[derive(Debug, Copy, Clone)]
@@ -57,15 +58,16 @@ impl Default for LogFormatConfig {
     /// The attribute appears separately as `request.id=10`.
     ///
     /// ```
-    /// use observed_destination_core::{LogFormatConfig, print_log_record};
-    /// use opentelemetry::InstrumentationScope;
-    /// use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
-    /// use opentelemetry_sdk::logs::SdkLoggerProvider;
+    /// # use observed_destination_core::{LogFormatConfig, print_log_record};
+    /// # use opentelemetry::InstrumentationScope;
+    /// # use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+    /// # use opentelemetry_sdk::logs::SdkLoggerProvider;
     ///
-    /// let scope = InstrumentationScope::builder("example").with_version("1.0").build();
-    /// let provider = SdkLoggerProvider::builder().build();
-    /// let logger = provider.logger_with_scope(scope.clone());
+    /// # let scope = InstrumentationScope::builder("example").with_version("1.0").build();
+    /// # let provider = SdkLoggerProvider::builder().build();
+    /// # let logger = provider.logger_with_scope(scope.clone());
     /// let mut record = logger.create_log_record();
+    ///
     /// record.set_target("application");
     /// record.set_event_name("request.received");
     /// record.set_body("request received, id={request.id}".into());
@@ -73,6 +75,7 @@ impl Default for LogFormatConfig {
     ///
     /// let config = LogFormatConfig::default();
     /// let mut output = Vec::new();
+    ///
     /// print_log_record(&mut output, &record, &scope, config)?;
     ///
     /// assert_eq!(
@@ -94,25 +97,27 @@ impl Default for LogFormatConfig {
 impl LogFormatConfig {
     /// Creates a minimal format configuration.
     ///
-    /// Only timestamp, severity, and message body with placeholders expanded.
+    /// Includes the timestamp, severity, and message body with placeholders expanded.
+    /// If the body is absent, prints attributes as `key=value` pairs.
     ///
     /// # Examples
     ///
     /// With `format_body` set to `true`, `{request.id}` becomes `10`.
-    /// Attributes are not printed separately.
+    /// With a body present, attributes are not printed separately.
     /// The three `include_*` fields are `false`, so the output omits the target,
     /// library information, and event name set below.
     ///
     /// ```
-    /// use observed_destination_core::{LogFormatConfig, print_log_record};
-    /// use opentelemetry::InstrumentationScope;
-    /// use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
-    /// use opentelemetry_sdk::logs::SdkLoggerProvider;
+    /// # use observed_destination_core::{LogFormatConfig, print_log_record};
+    /// # use opentelemetry::InstrumentationScope;
+    /// # use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+    /// # use opentelemetry_sdk::logs::SdkLoggerProvider;
     ///
-    /// let scope = InstrumentationScope::builder("example").build();
-    /// let provider = SdkLoggerProvider::builder().build();
-    /// let logger = provider.logger_with_scope(scope.clone());
+    /// # let scope = InstrumentationScope::builder("example").build();
+    /// # let provider = SdkLoggerProvider::builder().build();
+    /// # let logger = provider.logger_with_scope(scope.clone());
     /// let mut record = logger.create_log_record();
+    ///
     /// record.set_target("application");
     /// record.set_event_name("request.received");
     /// record.set_body("request received, id={request.id}".into());
@@ -120,6 +125,7 @@ impl LogFormatConfig {
     ///
     /// let config = LogFormatConfig::minimal();
     /// let mut output = Vec::new();
+    ///
     /// print_log_record(&mut output, &record, &scope, config)?;
     ///
     /// assert_eq!(output, b"request received, id=10\n");
