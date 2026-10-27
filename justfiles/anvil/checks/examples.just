@@ -6,6 +6,8 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
+# Repository override: build each selected example before its execution timeout.
+#
 # Affected tier.
 
 # Build and run selected examples.
@@ -85,6 +87,19 @@ anvil-examples package="" example="" timeout="30": anvil-examples-validate-prere
     $cargo = (Get-Command cargo -ErrorAction Stop).Source
     $failed = $false
     foreach ($target in $targets) {
+        $targetArgs = @(
+            '--package', $target.id, '--example', $target.example,
+            '--all-features', '--locked'
+        )
+        # Match the run's package feature set before applying the execution timeout.
+        Write-Host "anvil-examples: building $($target.package)::$($target.example)"
+        Push-Location $meta.workspace_root
+        try {
+            & $cargo @stableArgs build @targetArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally {
+            Pop-Location
+        }
         Write-Host "anvil-examples: running $($target.package)::$($target.example)"
         $start = [System.Diagnostics.ProcessStartInfo]::new()
         $start.FileName = $cargo
@@ -96,10 +111,7 @@ anvil-examples package="" example="" timeout="30": anvil-examples-validate-prere
         # The metadata package ID is a source-qualified package spec: it
         # selects exactly this member even when a registry dependency shares
         # its name and version, or the root is outside `default-members`.
-        foreach ($arg in @($stableArgs) + @(
-            'run', '--package', $target.id, '--example', $target.example,
-            '--all-features', '--locked'
-        )) {
+        foreach ($arg in @($stableArgs) + @('run') + $targetArgs) {
             $start.ArgumentList.Add($arg)
         }
         $process = [System.Diagnostics.Process]::new()

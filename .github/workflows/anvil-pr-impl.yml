@@ -226,12 +226,11 @@ jobs:
         # Codecov coalesces multiple uploads against the same commit;
         # the `flags:` tag distinguishes the per-leg slices in the
         # Codecov UI without changing the union total.
-        # The released-surface-filtered lcov-*.info files are produced and
-        # gated by cargo-coverage-gate inside anvil-pr-test (one per feature
-        # config), so Codecov receives the exact reports behind the local
-        # verdict. If the affected set was empty the recipe no-ops and there
-        # are no files to upload. `always()` keeps completed reports publishable
-        # after the gate or a later recipe fails. The separate hashFiles predicates require both feature
+        # lcov-*.info are produced by the anvil-llvm-cov recipe inside
+        # anvil-pr-test (one per feature config); if the affected set was
+        # empty the recipe no-ops and there are no files to upload. `always()`
+        # keeps completed reports publishable after the gate or a later recipe
+        # fails. The separate hashFiles predicates require both feature
         # configurations; one multi-pattern call would accept a partial pair.
         if: always() && matrix.os != 'windows-arm' && hashFiles('target/coverage/lcov-all-features.info') != '' && hashFiles('target/coverage/lcov-no-default.info') != ''
         uses: codecov/codecov-action@v7.1.1 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
