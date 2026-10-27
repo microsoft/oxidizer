@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::sync::{Arc, OnceLock};
+use std::task::Waker;
 
 use arty_executor::{ShutdownCause, ShutdownError};
 
@@ -10,6 +11,8 @@ use arty_executor::{ShutdownCause, ShutdownError};
 pub(crate) struct Shutdown {
     #[debug(ignore)]
     cause: Arc<OnceLock<ShutdownCause>>,
+    #[debug(ignore)]
+    panic_notifier: Arc<OnceLock<Waker>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,6 +28,14 @@ impl Shutdown {
     /// replace it, including a default cause without an error.
     pub(crate) fn begin(&self, cause: ShutdownCause) -> bool {
         self.cause.set(cause).is_ok()
+    }
+
+    pub(crate) fn initialize_panic_notifier(&self, notifier: Waker) {
+        _ = self.panic_notifier.set(notifier);
+    }
+
+    pub(crate) fn panic_notifier(&self) -> Waker {
+        self.panic_notifier.get().cloned().unwrap_or_else(|| Waker::noop().clone())
     }
 
     #[must_use]

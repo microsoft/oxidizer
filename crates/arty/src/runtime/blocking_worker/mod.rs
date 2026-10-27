@@ -185,16 +185,20 @@ impl BlockingWorker {
         &self.sink
     }
 
+    fn panic_notifier(&self) -> Waker {
+        self.runtime_shutdown.panic_notifier()
+    }
+
     /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
-    pub(crate) fn spawn_blocking<F, R>(&self, body: F, panic_notifier: Waker) -> JoinHandle<R>
+    pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_blocking_with_completion(body, panic_notifier, || {})
+        self.spawn_blocking_with_completion(body, || {})
     }
 
-    fn spawn_blocking_with_completion<F, R, C>(&self, body: F, panic_notifier: Waker, completion: C) -> JoinHandle<R>
+    fn spawn_blocking_with_completion<F, R, C>(&self, body: F, completion: C) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -203,7 +207,7 @@ impl BlockingWorker {
         let identity = Arc::clone(&self.pool.identity);
         let pool = self.pool.clone();
         let runtime_shutdown = self.runtime_shutdown.clone();
-        let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), panic_notifier, body);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), self.panic_notifier(), body);
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -400,13 +404,10 @@ fn closed_pool_rejects_worker_submission_after_admission() {
     pool.join();
 
     let invoked = Arc::new(AtomicBool::new(false));
-    let join = worker.spawn_blocking(
-        {
-            let invoked = Arc::clone(&invoked);
-            move || invoked.store(true, Ordering::Relaxed)
-        },
-        Waker::noop().clone(),
-    );
+    let join = worker.spawn_blocking({
+        let invoked = Arc::clone(&invoked);
+        move || invoked.store(true, Ordering::Relaxed)
+    });
 
     assert!(join.join().unwrap_err().is_shutdown());
     assert!(!invoked.load(Ordering::Relaxed));
@@ -419,7 +420,6 @@ pub(super) mod blocking_worker_tests {
     use std::num::NonZeroUsize;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
-    use std::task::Waker;
     use std::thread;
     use std::thread::ThreadId;
 
@@ -590,17 +590,14 @@ pub(super) mod blocking_worker_tests {
             move || {
                 let worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
-                drop(worker.spawn_blocking(
-                    {
-                        let events = Arc::clone(&events);
-                        move || {
-                            events.lock_result().unwrap().push("task started");
-                            task_start_tx.send(()).unwrap();
-                            events.lock_result().unwrap().push("task finished");
-                        }
-                    },
-                    Waker::noop().clone(),
-                ));
+                drop(worker.spawn_blocking({
+                    let events = Arc::clone(&events);
+                    move || {
+                        events.lock_result().unwrap().push("task started");
+                        task_start_tx.send(()).unwrap();
+                        events.lock_result().unwrap().push("task finished");
+                    }
+                }));
 
                 // The sender lives only inside the blocking task. A worker that never runs
                 // the task drops it (and its sender) instead, so `recv` observes an
@@ -656,12 +653,9 @@ pub(super) mod blocking_worker_tests {
             work_done: Arc::clone(&work_done),
         };
 
-        let task = worker.spawn_blocking(
-            move || {
-                work_item.do_work();
-            },
-            Waker::noop().clone(),
-        );
+        let task = worker.spawn_blocking(move || {
+            work_item.do_work();
+        });
 
         assert!(dropped.load(Ordering::Acquire));
         assert!(!work_done.load(Ordering::Acquire));
@@ -675,23 +669,17 @@ pub(super) mod blocking_worker_tests {
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
-        let running = worker.spawn_blocking(
-            move || {
-                started_tx.send(()).unwrap();
-                futures::executor::block_on(release_rx).unwrap();
-            },
-            Waker::noop().clone(),
-        );
+        let running = worker.spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            futures::executor::block_on(release_rx).unwrap();
+        });
         started_rx.recv().unwrap();
 
         let invoked = Arc::new(AtomicBool::new(false));
-        let queued = worker.spawn_blocking(
-            {
-                let invoked = Arc::clone(&invoked);
-                move || invoked.store(true, Ordering::Release)
-            },
-            Waker::noop().clone(),
-        );
+        let queued = worker.spawn_blocking({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Release)
+        });
         runtime_shutdown.begin(ShutdownCause::default());
         release_tx.send(());
 
@@ -709,13 +697,10 @@ pub(super) mod blocking_worker_tests {
         let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), Sink::noop(), runtime_shutdown);
         let invoked = Arc::new(AtomicBool::new(false));
 
-        let rejected = worker.spawn_blocking(
-            {
-                let invoked = Arc::clone(&invoked);
-                move || invoked.store(true, Ordering::Release)
-            },
-            Waker::noop().clone(),
-        );
+        let rejected = worker.spawn_blocking({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Release)
+        });
 
         assert!(rejected.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
@@ -729,7 +714,7 @@ pub(super) mod blocking_worker_tests {
         let _scope = BlockingTaskScope::enter(Arc::clone(&worker.pool.identity));
         worker.runtime_shutdown.begin(ShutdownCause::default());
 
-        let rejected = worker.spawn_blocking(|| 7, Waker::noop().clone()).join().unwrap_err();
+        let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
 
         assert!(rejected.is_shutdown());
         worker.join();
@@ -906,19 +891,16 @@ pub(super) mod blocking_worker_tests {
         let (release_tx, release_rx) = Event::<()>::boxed();
         let release_rx = Arc::new(Mutex::<Option<_>>::new(Some(release_rx)));
 
-        drop(worker.spawn_blocking(
-            {
-                let release_rx = Arc::clone(&release_rx);
-                move || {
-                    blocker_started_tx.send(()).unwrap();
-                    futures::executor::block_on(async {
-                        let release_rx = release_rx.lock_result().unwrap().take().unwrap();
-                        release_rx.await.unwrap();
-                    });
-                }
-            },
-            Waker::noop().clone(),
-        ));
+        drop(worker.spawn_blocking({
+            let release_rx = Arc::clone(&release_rx);
+            move || {
+                blocker_started_tx.send(()).unwrap();
+                futures::executor::block_on(async {
+                    let release_rx = release_rx.lock_result().unwrap().take().unwrap();
+                    release_rx.await.unwrap();
+                });
+            }
+        }));
 
         // The sender lives only inside the blocker task. A worker that never runs the
         // task drops it (and its sender) instead, so `recv` observes an immediate
@@ -929,7 +911,7 @@ pub(super) mod blocking_worker_tests {
         // Each spawn re-evaluates the saturation guard; capture whatever it emits.
         let mut saturation_counts = Vec::with_capacity(queued_task_count);
         for _ in 0..queued_task_count {
-            drop(worker.spawn_blocking(|| {}, Waker::noop().clone()));
+            drop(worker.spawn_blocking(|| {}));
             saturation_counts.push(
                 processor
                     .events()
@@ -985,20 +967,17 @@ pub(super) mod blocking_worker_tests {
         for expected_events in 1..=2 {
             let (blocker_started_tx, blocker_started_rx) = channel();
             let (release_tx, release_rx) = Event::<()>::boxed();
-            drop(worker.spawn_blocking(
-                move || {
-                    blocker_started_tx.send(()).unwrap();
-                    futures::executor::block_on(release_rx).unwrap();
-                },
-                Waker::noop().clone(),
-            ));
+            drop(worker.spawn_blocking(move || {
+                blocker_started_tx.send(()).unwrap();
+                futures::executor::block_on(release_rx).unwrap();
+            }));
             blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
 
             for _ in 0..=BlockingPool::MAX_TASKS_PER_THREAD {
-                drop(worker.spawn_blocking(|| {}, Waker::noop().clone()));
+                drop(worker.spawn_blocking(|| {}));
             }
             let (completed_tx, completed_rx) = channel();
-            drop(worker.spawn_blocking_with_completion(|| {}, Waker::noop().clone(), move || completed_tx.send(()).unwrap()));
+            drop(worker.spawn_blocking_with_completion(|| {}, move || completed_tx.send(()).unwrap()));
             release_tx.send(());
             completed_rx.recv_timeout(TEST_TIMEOUT).unwrap();
             assert!(
@@ -1025,26 +1004,20 @@ pub(super) mod blocking_worker_tests {
         let worker = BlockingWorker::new(BlockingPool::new(Some(limit(1))), sink, Shutdown::default());
         let (first_started_tx, first_started_rx) = channel();
         let (release_first_tx, release_first_rx) = Event::<()>::boxed();
-        drop(worker.spawn_blocking(
-            move || {
-                first_started_tx.send(()).unwrap();
-                futures::executor::block_on(release_first_rx).unwrap();
-            },
-            Waker::noop().clone(),
-        ));
+        drop(worker.spawn_blocking(move || {
+            first_started_tx.send(()).unwrap();
+            futures::executor::block_on(release_first_rx).unwrap();
+        }));
         first_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
 
         let (second_started_tx, second_started_rx) = channel();
         let (release_second_tx, release_second_rx) = Event::<()>::boxed();
-        drop(worker.spawn_blocking(
-            move || {
-                second_started_tx.send(()).unwrap();
-                futures::executor::block_on(release_second_rx).unwrap();
-            },
-            Waker::noop().clone(),
-        ));
+        drop(worker.spawn_blocking(move || {
+            second_started_tx.send(()).unwrap();
+            futures::executor::block_on(release_second_rx).unwrap();
+        }));
         for _ in 0..BlockingPool::MAX_TASKS_PER_THREAD {
-            drop(worker.spawn_blocking(|| {}, Waker::noop().clone()));
+            drop(worker.spawn_blocking(|| {}));
         }
         assert_eq!(
             processor
@@ -1057,7 +1030,7 @@ pub(super) mod blocking_worker_tests {
 
         release_first_tx.send(());
         second_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
-        drop(worker.spawn_blocking(|| {}, Waker::noop().clone()));
+        drop(worker.spawn_blocking(|| {}));
         assert_eq!(
             processor
                 .events()

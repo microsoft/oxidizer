@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::thread::ThreadId;
 
@@ -78,7 +78,6 @@ pub(crate) struct DispatcherCore {
 
     remote_results: RemotePool,
     panic_shutdown_cause: Option<ShutdownCause>,
-    panic_notifier: OnceLock<Waker>,
 }
 
 struct PanicShutdownWake(Weak<DispatcherCore>);
@@ -136,7 +135,6 @@ impl DispatcherCore {
             sink,
             remote_results: RemotePool::new(),
             panic_shutdown_cause: panic_policy.starts_shutdown().then(ShutdownCause::panic),
-            panic_notifier: OnceLock::new(),
         }
     }
 
@@ -151,20 +149,16 @@ impl DispatcherCore {
     }
 
     pub(crate) fn initialize_panic_notifier(&self, weak: Weak<Self>) {
-        self.panic_notifier.get_or_init(|| {
-            if self.shuts_down_on_panic() {
-                Waker::from(StdArc::new(PanicShutdownWake(weak)))
-            } else {
-                Waker::noop().clone()
-            }
-        });
+        let notifier = if self.shuts_down_on_panic() {
+            Waker::from(StdArc::new(PanicShutdownWake(weak)))
+        } else {
+            Waker::noop().clone()
+        };
+        self.shutdown.initialize_panic_notifier(notifier);
     }
 
     pub(crate) fn panic_notifier(&self) -> Waker {
-        self.panic_notifier
-            .get()
-            .expect("DispatcherClient initializes the panic notifier")
-            .clone()
+        self.shutdown.panic_notifier()
     }
 
     /// Stops the runtime. Safe to call multiple times.

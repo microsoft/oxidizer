@@ -416,7 +416,7 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.binding.blocking_worker.spawn_blocking(body, self.dispatcher.panic_notifier())
+        self.binding.blocking_worker.spawn_blocking(body)
     }
 
     #[cfg(test)]
