@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use arty_executor::discard_task_panic_payload;
@@ -12,13 +13,13 @@ pub(crate) type ShutdownCallback = Box<dyn FnOnce() + Send + 'static>;
 #[derive(derive_more::Debug)]
 pub(crate) struct OnShutdown {
     #[debug(ignore)]
-    callbacks: Mutex<Option<Vec<ShutdownCallback>>>,
+    callbacks: Mutex<Option<VecDeque<ShutdownCallback>>>,
 }
 
 impl Default for OnShutdown {
     fn default() -> Self {
         Self {
-            callbacks: Mutex::new(Some(Vec::new())),
+            callbacks: Mutex::new(Some(VecDeque::new())),
         }
     }
 }
@@ -33,31 +34,26 @@ impl OnShutdown {
         let Some(callbacks) = callbacks.as_mut() else {
             return Some(callback);
         };
-        callbacks.push(callback);
+        callbacks.push_back(callback);
         None
     }
 
     pub(crate) fn invoke_and_clear(&self) {
         let mut first_panic = None;
         loop {
-            let callbacks = {
+            let callback = {
                 let mut callbacks = self.callbacks.lock();
-                match callbacks.as_mut() {
-                    Some(callbacks) if !callbacks.is_empty() => std::mem::take(callbacks),
-                    Some(_) => {
-                        *callbacks = None;
-                        break;
-                    }
-                    None => break,
-                }
+                let Some(callback) = callbacks.as_mut().and_then(VecDeque::pop_front) else {
+                    *callbacks = None;
+                    break;
+                };
+                callback
             };
-            for callback in callbacks {
-                if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
-                    if first_panic.is_none() {
-                        first_panic = Some(panic);
-                    } else {
-                        discard_task_panic_payload(panic);
-                    }
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
+                if first_panic.is_none() {
+                    first_panic = Some(panic);
+                } else {
+                    discard_task_panic_payload(panic);
                 }
             }
         }
@@ -102,6 +98,7 @@ mod tests {
         let callbacks = OnShutdown::default();
         let calls = Arc::new(AtomicUsize::new(0));
         assert!(callbacks.register(|| panic!("first callback")).is_none());
+        assert!(callbacks.register(|| panic!("second callback")).is_none());
         let observed_calls = Arc::clone(&calls);
         assert!(
             callbacks

@@ -196,6 +196,7 @@ impl Runtime {
         wait_error.map_or(Ok(()), Err)
     }
 
+    #[cfg_attr(test, mutants::skip)] // Mutating wait detection can only turn the tested path into an uninterruptible join.
     fn shutdown_wait_error(&self) -> Option<Error> {
         let current_thread = std::thread::current().id();
         let is_registered_worker = self.scheduler.dispatcher.worker_index(current_thread).is_some();

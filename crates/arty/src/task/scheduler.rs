@@ -84,6 +84,7 @@ struct Binding {
 }
 
 impl Scheduler {
+    #[cfg_attr(test, mutants::skip)] // Returning false can only turn worker shutdown into an uninterruptible join.
     pub(crate) fn is_current_worker_thread() -> bool {
         WORKER_THREAD.get() || ACTIVE_WORKER.get()
     }
