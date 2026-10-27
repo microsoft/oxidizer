@@ -31,6 +31,7 @@ use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::AsyncWorker;
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
+use crate::task::Scheduler;
 
 pub(crate) fn build(
     processor_config: RuntimeConfig,
@@ -192,6 +193,7 @@ impl AsyncWorkerStartInfo {
     }
 
     fn run_worker_thread(self) {
+        Scheduler::mark_worker_thread();
         let Self {
             command_rx,
             stack_size: _stack_size,

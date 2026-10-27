@@ -15,6 +15,11 @@ use crate::task::execution::DeferredTask;
 use crate::task::join::JoinHandle;
 
 thread_local! {
+    // Set by worker bootstrap before user thread-local values can be initialized.
+    // It stays set until thread exit so user thread-local destructors retain the
+    // no-blocking worker guard after the scheduler context is cleared.
+    static WORKER_THREAD: Cell<bool> = const { Cell::new(false) };
+
     // Remains set while executor shutdown destroys user futures, even after the
     // direct-registration context is cleared.
     static ACTIVE_WORKER: Cell<bool> = const { Cell::new(false) };
@@ -80,7 +85,11 @@ struct Binding {
 
 impl Scheduler {
     pub(crate) fn is_current_worker_thread() -> bool {
-        ACTIVE_WORKER.get()
+        WORKER_THREAD.get() || ACTIVE_WORKER.get()
+    }
+
+    pub(crate) fn mark_worker_thread() {
+        assert!(!WORKER_THREAD.replace(true), "worker bootstrap marked this thread more than once");
     }
 
     pub(crate) fn current_thread() -> Option<Thread> {
@@ -498,6 +507,20 @@ mod tests {
         ACTIVE_WORKER.set(true);
         Scheduler::clear_worker_thread();
         assert!(!Scheduler::is_current_worker_thread());
+    }
+
+    #[test]
+    fn bootstrap_worker_marker_survives_scheduler_context_cleanup() {
+        std::thread::spawn(|| {
+            Scheduler::mark_worker_thread();
+            ACTIVE_WORKER.set(true);
+
+            Scheduler::clear_worker_thread();
+
+            assert!(Scheduler::is_current_worker_thread());
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
