@@ -1,17 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tower interoperability for layered services.
+//! Tower support for layered services.
 //!
-//! Use Tower services and middleware with layered services through the [`Adapter`] type.
-//! Provides bidirectional conversion between Tower and layered service traits.
+//! The [`Adapter`] type converts between Tower services and layered services.
 //!
 //! # Requirements
 //!
-//! - Services must be `Clone` for concurrent usage
-//! - All types must be `Send` for async compatibility
-//! - Layered services must return `Result<T, E>` when used with Tower
-//! - Tower's back-pressure (`poll_ready`) is handled automatically
+//! - Each wrapped service must implement `Clone`.
+//! - A layered service used through Tower must return `Result<T, E>`.
+//! - Its request, response, and error types must implement `Send + 'static`.
+//! - A Tower service used through layered must implement `Send + Sync`.
+//! - Its request and future types must implement `Send`.
+//! - The adapter handles Tower back-pressure through `poll_ready`.
 //!
 //! # Examples
 //!
@@ -62,11 +63,10 @@ use tower_layer::Layer;
 
 use crate::Service;
 
-/// Bidirectional adapter between layered and Tower service traits.
+/// Converts between layered and Tower service traits.
 ///
-/// Wraps a service to convert between `layered`'s [`Service`] and Tower's
-/// [`tower_service::Service`]. Handles back-pressure
-/// and async execution differences automatically.
+/// This type wraps a service and implements the service trait from the other system.
+/// It handles Tower back-pressure and the different async interfaces.
 #[derive(Debug, Clone)]
 pub struct Adapter<S>(pub S);
 
@@ -83,7 +83,7 @@ where
 
     #[cfg_attr(test, mutants::skip)] // causes unkillable mutants
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Layered services don't have back-pressure - they're always ready to accept requests
+        // Layered services do not use back-pressure, so they are always ready.
         Poll::Ready(Ok(()))
     }
 
@@ -104,15 +104,15 @@ where
         let mut clone = self.0.clone();
 
         async move {
-            // Wait for the Tower service to be ready (handle back-pressure)
+            // Wait until the Tower service is ready.
             poll_fn(|cx| clone.poll_ready(cx)).await?;
-            // Execute the request
+            // Send the request to the Tower service.
             clone.call(input).await
         }
     }
 }
 
-/// Wraps a Tower layer for use with layered services.
+/// Wraps a Tower layer for use in a layered stack.
 ///
 /// # Examples
 ///
@@ -126,9 +126,9 @@ pub fn tower_layer<L>(tower_layer: L) -> AdapterLayer<L> {
     AdapterLayer(tower_layer)
 }
 
-/// Layer adapter that applies Tower layers to layered services.
+/// Applies a Tower layer to a layered service.
 ///
-/// Wraps a Tower layer to handle service trait conversions automatically.
+/// The adapter converts the service traits before and after the Tower layer runs.
 #[derive(Debug, Clone)]
 pub struct AdapterLayer<L>(L);
 
@@ -139,11 +139,11 @@ where
     type Service = Adapter<L::Service>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        // 1. Wrap the layered service to make it Tower-compatible
+        // Convert the layered service to a Tower service.
         let tower_adapted = Adapter(inner);
-        // 2. Apply the Tower layer
+        // Apply the Tower layer.
         let tower_layered = self.0.layer(tower_adapted);
-        // 3. Wrap the result back for compatibility with layered services
+        // Convert the result back to a layered service.
         Adapter(tower_layered)
     }
 }
@@ -208,7 +208,7 @@ mod tests {
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
-        // Multiple calls should return the same result
+        // Every call returns the same ready result.
         for _ in 0..3 {
             let result = adapter.poll_ready(&mut cx);
             assert_eq!(result, Poll::Ready(Ok(())));
@@ -228,8 +228,7 @@ mod tests {
 
     #[test]
     fn poll_ready_mutation_equivalence() {
-        // This test specifically addresses the mutation testing result
-        // Both Poll::Ready(Ok(())) and Poll::from(Ok(())) should be functionally equivalent
+        // Both constructors produce the same ready result.
         let mock_service = MockService::new(Poll::Ready(Ok(())), Ok("success".to_string()));
         let mut adapter = Adapter(mock_service);
 
@@ -239,7 +238,7 @@ mod tests {
         let result1 = adapter.poll_ready(&mut cx);
         let result2 = Poll::from(Ok::<(), String>(()));
 
-        // Both should be Poll::Ready(Ok(()))
+        // Compare both values with `Poll::Ready(Ok(()))`.
         assert_eq!(result1, Poll::Ready(Ok(())));
         assert_eq!(result2, Poll::Ready(Ok(())));
         assert_eq!(result1, result2);

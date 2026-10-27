@@ -5,9 +5,9 @@ use std::fmt::{Debug, Formatter};
 
 use crate::Service;
 
-/// Wraps a function or closure as a [`Service`].
+/// Wraps a function or closure in a [`Service`].
 ///
-/// Use `Execute` to turn any async function into a service without defining a custom type.
+/// Use `Execute` when a separate service type is not needed.
 ///
 /// # Examples
 ///
@@ -36,7 +36,7 @@ use crate::Service;
 pub struct Execute<E>(E);
 
 impl<E> Execute<E> {
-    /// Creates a new service from a function or closure.
+    /// Creates a service from a function or closure.
     ///
     /// # Examples
     ///
