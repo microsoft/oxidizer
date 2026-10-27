@@ -184,15 +184,9 @@ impl Runtime {
     }
 
     fn wait(&self) -> Result<(), Error> {
-        let current_thread = std::thread::current().id();
-        let is_registered_worker = self.scheduler.dispatcher.worker_index(current_thread).is_some();
-        if Scheduler::is_current_worker_thread() || is_registered_worker {
+        if let Some(error) = self.shutdown_wait_error() {
             crate::runtime::dispatch::DispatcherCore::wait_for_shutdown_in_background(Arc::clone(&self.scheduler.dispatcher.core));
-            return Err(Error::shutdown_wait_from_worker());
-        }
-        if blocking_worker::is_current_blocking_thread() || self.scheduler.dispatcher.is_current_blocking_thread() {
-            crate::runtime::dispatch::DispatcherCore::wait_for_shutdown_in_background(Arc::clone(&self.scheduler.dispatcher.core));
-            return Err(Error::shutdown_wait_from_blocking_callback());
+            return Err(error);
         }
         let wait_error = self.scheduler.dispatcher.wait().err();
         self.scheduler.dispatcher.core.finish_shutdown_after_wait();
@@ -200,6 +194,18 @@ impl Runtime {
             return Err(Error::shutdown_failure(error));
         }
         wait_error.map_or(Ok(()), Err)
+    }
+
+    fn shutdown_wait_error(&self) -> Option<Error> {
+        let current_thread = std::thread::current().id();
+        let is_registered_worker = self.scheduler.dispatcher.worker_index(current_thread).is_some();
+        if Scheduler::is_current_worker_thread() || is_registered_worker {
+            return Some(Error::shutdown_wait_from_worker());
+        }
+        if blocking_worker::is_current_blocking_thread() || self.scheduler.dispatcher.is_current_blocking_thread() {
+            return Some(Error::shutdown_wait_from_blocking_callback());
+        }
+        None
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient) -> Self {
@@ -391,10 +397,12 @@ mod tests {
         let control = target.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let (callback_started, callback_ready) = oneshot();
         let (release_callback, callback_gate) = mpsc::sync_channel(1);
-        control.on_shutdown(move || {
-            callback_started.send(()).unwrap();
-            callback_gate.recv().unwrap();
-        });
+        control
+            .on_shutdown(move || {
+                callback_started.send(()).unwrap();
+                callback_gate.recv().unwrap();
+            })
+            .unwrap();
         control.request_stop();
         dispatcher.wait().unwrap();
 

@@ -67,15 +67,19 @@ impl RuntimeControl {
     /// with the normal shutdown [`JoinError`](crate::task::JoinError). It does
     /// not run the submitted body.
     ///
-    /// Registration after shutdown completion runs immediately on an external
-    /// thread. Registration from an Arty worker or blocking callback moves the
-    /// callback to a separate thread and does not wait for it.
+    /// Callbacks registered while shutdown callbacks are running join the same
+    /// completion barrier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::runtime::Error) if shutdown callbacks already
+    /// completed. The callback does not run in that case.
     #[doc(hidden)]
-    pub fn on_shutdown<F>(&self, callback: F)
+    pub fn on_shutdown<F>(&self, callback: F) -> Result<(), crate::runtime::Error>
     where
         F: FnOnce() + Send + 'static,
     {
-        self.dispatcher.core.on_shutdown(callback);
+        self.dispatcher.core.on_shutdown(callback)
     }
 
     /// Requests shutdown without blocking the calling thread.

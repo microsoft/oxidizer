@@ -23,9 +23,9 @@ use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
 use crate::runtime::{Error, Workers};
+use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
-use crate::task::{Builtins, Scheduler};
 
 #[derive(Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -225,30 +225,14 @@ impl DispatcherCore {
         &self.shutdown
     }
 
-    pub(crate) fn on_shutdown<F>(&self, callback: F)
+    pub(crate) fn on_shutdown<F>(&self, callback: F) -> Result<(), Error>
     where
         F: FnOnce() + Send + 'static,
     {
-        let Some(callback) = self.on_shutdown.register(callback) else {
-            return;
-        };
-        let current_thread = thread::current().id();
-        if Scheduler::is_current_worker_thread()
-            || self.worker_index(current_thread).is_some()
-            || crate::runtime::blocking_worker::is_current_blocking_thread()
-            || self.is_current_blocking_thread()
-        {
-            thread::Builder::new()
-                .name("arty-shutdown".to_owned())
-                .spawn(move || {
-                    if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
-                        discard_task_panic_payload(panic);
-                    }
-                })
-                .expect("shutdown callback thread creation must succeed");
-        } else {
-            callback();
+        if self.on_shutdown.register(callback).is_some() {
+            return Err(Error::shutdown_callback_registration());
         }
+        Ok(())
     }
 
     pub(crate) fn finish_shutdown_after_wait(&self) {

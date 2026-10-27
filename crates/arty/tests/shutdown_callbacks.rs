@@ -14,7 +14,7 @@ use std::sync::{Arc, mpsc};
 use std::task::Waker;
 
 use arty::core::{Thread, ThreadAware};
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeControl, WorkersPolicy};
 use arty::task::{Builtins, JoinError, JoinHandle};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use performables::sync::channel::{OneshotSender, oneshot};
@@ -91,6 +91,7 @@ impl Driver for ShutdownDriver {
 
 thread_local! {
     static THREAD_LOCAL_RUNTIME: RefCell<Option<ThreadLocalRuntime>> = const { RefCell::new(None) };
+    static THREAD_LOCAL_REGISTRATION: RefCell<Option<ThreadLocalRegistration>> = const { RefCell::new(None) };
 }
 
 struct ThreadLocalRuntime {
@@ -102,6 +103,20 @@ impl Drop for ThreadLocalRuntime {
     fn drop(&mut self) {
         drop(self.runtime.take());
         self.dropped.send(()).unwrap();
+    }
+}
+
+struct ThreadLocalRegistration {
+    control: RuntimeControl,
+    callback_ran: Arc<AtomicBool>,
+    outcome: mpsc::SyncSender<Result<(), arty::runtime::Error>>,
+}
+
+impl Drop for ThreadLocalRegistration {
+    fn drop(&mut self) {
+        let callback_ran = Arc::clone(&self.callback_ran);
+        let outcome = self.control.on_shutdown(move || callback_ran.store(true, Ordering::SeqCst));
+        self.outcome.send(outcome).unwrap();
     }
 }
 
@@ -173,23 +188,25 @@ fn callback_runs_after_tasks_and_driver_teardown() {
         queued_body.store(true, Ordering::SeqCst);
     });
 
-    control.on_shutdown({
-        let async_dropped = Arc::clone(&async_dropped);
-        let blocking_finished = Arc::clone(&blocking_finished);
-        let queued_body_ran = Arc::clone(&queued_body_ran);
-        let driver_stopped = Arc::clone(&driver_stopped);
-        move || {
-            callback_entered
-                .send((
-                    async_dropped.load(Ordering::SeqCst),
-                    blocking_finished.load(Ordering::SeqCst),
-                    queued_body_ran.load(Ordering::SeqCst),
-                    driver_stopped.load(Ordering::SeqCst),
-                ))
-                .unwrap();
-            callback_gate.recv().unwrap();
-        }
-    });
+    control
+        .on_shutdown({
+            let async_dropped = Arc::clone(&async_dropped);
+            let blocking_finished = Arc::clone(&blocking_finished);
+            let queued_body_ran = Arc::clone(&queued_body_ran);
+            let driver_stopped = Arc::clone(&driver_stopped);
+            move || {
+                callback_entered
+                    .send((
+                        async_dropped.load(Ordering::SeqCst),
+                        blocking_finished.load(Ordering::SeqCst),
+                        queued_body_ran.load(Ordering::SeqCst),
+                        driver_stopped.load(Ordering::SeqCst),
+                    ))
+                    .unwrap();
+                callback_gate.recv().unwrap();
+            }
+        })
+        .unwrap();
 
     let (stopped, shutdown_complete) = mpsc::sync_channel(1);
     let stopping = std::thread::spawn(move || {
@@ -214,10 +231,12 @@ fn external_drop_waits_for_callback_completion() {
     let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let (callback_started, callback_ready) = mpsc::sync_channel(1);
     let (release_callback, callback_gate) = mpsc::sync_channel(1);
-    control.on_shutdown(move || {
-        callback_started.send(()).unwrap();
-        callback_gate.recv().unwrap();
-    });
+    control
+        .on_shutdown(move || {
+            callback_started.send(()).unwrap();
+            callback_gate.recv().unwrap();
+        })
+        .unwrap();
     let (dropped, drop_complete) = mpsc::sync_channel(1);
 
     let dropping = std::thread::spawn(move || {
@@ -230,6 +249,41 @@ fn external_drop_waits_for_callback_completion() {
     release_callback.send(()).unwrap();
     drop_complete.recv_timeout(TEST_TIMEOUT).unwrap();
     dropping.join().unwrap();
+}
+
+#[test]
+fn callback_registered_during_callback_runs_before_stop_returns() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
+    let (first_started, first_ready) = mpsc::sync_channel(1);
+    let (release_first, first_gate) = mpsc::sync_channel(1);
+    control
+        .on_shutdown(move || {
+            first_started.send(()).unwrap();
+            first_gate.recv().unwrap();
+        })
+        .unwrap();
+    let (stopped, shutdown_complete) = mpsc::sync_channel(1);
+    let stopping = std::thread::spawn(move || {
+        stopped.send(runtime.stop()).unwrap();
+    });
+    first_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let (second_started, second_ready) = mpsc::sync_channel(1);
+    let (release_second, second_gate) = mpsc::sync_channel(1);
+    control
+        .on_shutdown(move || {
+            second_started.send(()).unwrap();
+            second_gate.recv().unwrap();
+        })
+        .unwrap();
+    release_first.send(()).unwrap();
+    second_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    assert!(matches!(shutdown_complete.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    release_second.send(()).unwrap();
+    shutdown_complete.recv_timeout(TEST_TIMEOUT).unwrap().unwrap();
+    stopping.join().unwrap();
 }
 
 #[test]
@@ -246,20 +300,22 @@ fn callback_submissions_are_rejected_without_running_their_bodies() {
             let blocking_body_ran = Arc::clone(&blocking_body_ran);
             async move |cx| {
                 let scheduler = cx.scheduler().clone();
-                cx.control().on_shutdown(move || {
-                    let async_task = scheduler.spawn(async move |_| {
-                        async_body_ran.store(true, Ordering::SeqCst);
-                    });
-                    let blocking_task = scheduler.spawn_blocking(move || {
-                        blocking_body_ran.store(true, Ordering::SeqCst);
-                    });
-                    reported
-                        .send((
-                            futures::executor::block_on(async_task).unwrap_err().is_shutdown(),
-                            blocking_task.join().unwrap_err().is_shutdown(),
-                        ))
-                        .unwrap();
-                });
+                cx.control()
+                    .on_shutdown(move || {
+                        let async_task = scheduler.spawn(async move |_| {
+                            async_body_ran.store(true, Ordering::SeqCst);
+                        });
+                        let blocking_task = scheduler.spawn_blocking(move || {
+                            blocking_body_ran.store(true, Ordering::SeqCst);
+                        });
+                        reported
+                            .send((
+                                futures::executor::block_on(async_task).unwrap_err().is_shutdown(),
+                                blocking_task.join().unwrap_err().is_shutdown(),
+                            ))
+                            .unwrap();
+                    })
+                    .unwrap();
             }
         })
         .unwrap();
@@ -283,7 +339,7 @@ fn owner_drop_on_its_worker_defers_callback_until_worker_teardown() {
 
     scheduler
         .spawn(async move |cx| {
-            cx.control().on_shutdown(move || reported.send(()).unwrap());
+            cx.control().on_shutdown(move || reported.send(()).unwrap()).unwrap();
             drop(runtime);
         })
         .join()
@@ -304,7 +360,7 @@ fn owner_stop_on_its_worker_defers_callback_until_worker_teardown() {
 
     let outcome = scheduler
         .spawn(async move |cx| {
-            cx.control().on_shutdown(move || reported.send(()).unwrap());
+            cx.control().on_shutdown(move || reported.send(()).unwrap()).unwrap();
             runtime.stop()
         })
         .join()
@@ -320,9 +376,11 @@ fn repeated_stop_requests_run_callback_once() {
     let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_calls = Arc::clone(&calls);
-    control.on_shutdown(move || {
-        observed_calls.fetch_add(1, Ordering::SeqCst);
-    });
+    control
+        .on_shutdown(move || {
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
 
     control.request_stop();
     control.request_stop();
@@ -350,9 +408,11 @@ fn foreign_worker_drop_returns_before_target_blocking_work_finishes() {
             blocking_finished_in_task.store(true, Ordering::SeqCst);
         });
         futures::executor::block_on(blocking_ready).unwrap();
-        control.on_shutdown(move || {
-            callback_entered.send(blocking_finished.load(Ordering::SeqCst)).unwrap();
-        });
+        control
+            .on_shutdown(move || {
+                callback_entered.send(blocking_finished.load(Ordering::SeqCst)).unwrap();
+            })
+            .unwrap();
 
         let drop_target = caller.scheduler().spawn_anywhere(
             thread_aware::Unaware((target, target_dropped)),
@@ -389,7 +449,7 @@ fn owner_drop_in_its_blocking_callback_returns_before_callback_runs() {
     let (callback_entered, callback_observed) = mpsc::sync_channel(1);
     let (owner_dropped, drop_observed) = mpsc::sync_channel(1);
     let (release_blocking, blocking_gate) = mpsc::sync_channel(1);
-    control.on_shutdown(move || callback_entered.send(()).unwrap());
+    control.on_shutdown(move || callback_entered.send(()).unwrap()).unwrap();
 
     let blocking = scheduler.spawn_blocking(move || {
         drop(runtime);
@@ -426,7 +486,7 @@ fn foreign_blocking_callback_drop_returns_before_target_work_finishes() {
         });
         futures::executor::block_on(target_ready).unwrap();
         let (callback_entered, callback_observed) = mpsc::sync_channel(1);
-        target_control.on_shutdown(move || callback_entered.send(()).unwrap());
+        target_control.on_shutdown(move || callback_entered.send(()).unwrap()).unwrap();
         let (target_dropped, drop_observed) = mpsc::sync_channel(1);
 
         let drop_target = caller.scheduler().spawn_blocking(move || {
@@ -484,7 +544,9 @@ fn thread_local_owner_drop_waits_for_every_worker_before_callback() {
         })
         .unwrap();
     futures::executor::block_on(blocking_ready).unwrap();
-    control.on_shutdown(move || reported.send(blocking_finished.load(Ordering::SeqCst)).unwrap());
+    control
+        .on_shutdown(move || reported.send(blocking_finished.load(Ordering::SeqCst)).unwrap())
+        .unwrap();
 
     scheduler
         .spawn(async move |_| {
@@ -509,33 +571,38 @@ fn thread_local_owner_drop_waits_for_every_worker_before_callback() {
 }
 
 #[test]
-fn late_registration_on_a_foreign_worker_runs_on_a_non_worker_thread() {
+fn late_registration_in_foreign_worker_thread_local_teardown_returns_an_error() {
     let target = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = target.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     target.stop().unwrap();
     let caller = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let (callback_started, callback_ready) = mpsc::sync_channel(1);
-    let (release_callback, callback_gate) = mpsc::sync_channel(1);
+    let callback_ran = Arc::new(AtomicBool::new(false));
     let (registration_returned, registration_observed) = mpsc::sync_channel(1);
 
     let registration = caller.scheduler().spawn_anywhere(
-        thread_aware::Unaware((control, callback_started, callback_gate, registration_returned)),
-        |cx, thread_aware::Unaware((control, callback_started, callback_gate, registration_returned))| async move {
-            let worker = cx.thread().id();
-            control.on_shutdown(move || {
-                callback_started.send((worker, std::thread::current().id())).unwrap();
-                callback_gate.recv().unwrap();
+        thread_aware::Unaware((control, Arc::clone(&callback_ran), registration_returned)),
+        |_, thread_aware::Unaware((control, callback_ran, registration_returned))| async move {
+            THREAD_LOCAL_REGISTRATION.with(|registration| {
+                assert!(
+                    registration
+                        .replace(Some(ThreadLocalRegistration {
+                            control,
+                            callback_ran,
+                            outcome: registration_returned,
+                        }))
+                        .is_none()
+                );
             });
-            registration_returned.send(()).unwrap();
         },
     );
 
-    let (worker, callback_thread) = callback_ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    registration_observed.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_ne!(worker, callback_thread);
-    release_callback.send(()).unwrap();
     registration.join().unwrap();
     caller.stop().unwrap();
+    assert_eq!(
+        registration_observed.recv_timeout(TEST_TIMEOUT).unwrap().unwrap_err().to_string(),
+        "runtime shutdown callbacks already completed"
+    );
+    assert!(!callback_ran.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -543,8 +610,8 @@ fn callback_panic_does_not_skip_remaining_callbacks() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let (reported, result) = mpsc::sync_channel(1);
-    control.on_shutdown(|| panic!("shutdown callback panic"));
-    control.on_shutdown(move || reported.send(()).unwrap());
+    control.on_shutdown(|| panic!("shutdown callback panic")).unwrap();
+    control.on_shutdown(move || reported.send(()).unwrap()).unwrap();
 
     let panic = catch_unwind(AssertUnwindSafe(|| runtime.stop())).unwrap_err();
 

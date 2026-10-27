@@ -61,6 +61,10 @@ impl Error {
         Self::new(RuntimeShuttingDownError::new())
     }
 
+    pub(crate) fn shutdown_callback_registration() -> Self {
+        Self::new(ShutdownCallbackRegistrationError::new())
+    }
+
     pub(crate) fn io_failure(error: Arc<DriverError>) -> Self {
         Self::new(IoFailure::caused_by(SharedDriverError(error)))
     }
@@ -127,6 +131,10 @@ struct IoOutsideWorkerError;
 #[ohno::error]
 #[display("the runtime is shutting down")]
 struct RuntimeShuttingDownError;
+
+#[ohno::error]
+#[display("runtime shutdown callbacks already completed")]
+struct ShutdownCallbackRegistrationError;
 
 #[ohno::error]
 struct IoFailure;

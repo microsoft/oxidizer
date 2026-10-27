@@ -38,14 +38,26 @@ impl OnShutdown {
     }
 
     pub(crate) fn invoke_and_clear(&self) {
-        let callbacks = self.callbacks.lock().take().unwrap_or_default();
         let mut first_panic = None;
-        for callback in callbacks {
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
-                if first_panic.is_none() {
-                    first_panic = Some(panic);
-                } else {
-                    discard_task_panic_payload(panic);
+        loop {
+            let callbacks = {
+                let mut callbacks = self.callbacks.lock();
+                match callbacks.as_mut() {
+                    Some(callbacks) if !callbacks.is_empty() => std::mem::take(callbacks),
+                    Some(_) => {
+                        *callbacks = None;
+                        break;
+                    }
+                    None => break,
+                }
+            };
+            for callback in callbacks {
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
+                    if first_panic.is_none() {
+                        first_panic = Some(panic);
+                    } else {
+                        discard_task_panic_payload(panic);
+                    }
                 }
             }
         }
@@ -120,5 +132,32 @@ mod tests {
 
         callback();
         assert_eq!(called.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn callbacks_registered_during_invocation_are_drained() {
+        let callbacks = Arc::new(OnShutdown::default());
+        let called = Arc::new(AtomicUsize::new(0));
+        let nested_callbacks = Arc::clone(&callbacks);
+        let nested_called = Arc::clone(&called);
+        assert!(
+            callbacks
+                .register(move || {
+                    let nested_called = Arc::clone(&nested_called);
+                    assert!(
+                        nested_callbacks
+                            .register(move || {
+                                nested_called.fetch_add(1, Ordering::SeqCst);
+                            })
+                            .is_none()
+                    );
+                })
+                .is_none()
+        );
+
+        callbacks.invoke_and_clear();
+
+        assert_eq!(called.load(Ordering::SeqCst), 1);
+        assert!(callbacks.register(|| {}).is_some());
     }
 }
