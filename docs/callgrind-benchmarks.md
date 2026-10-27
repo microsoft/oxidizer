@@ -315,6 +315,9 @@ strict string equality on the version and any drift surfaces as a
 `VersionMismatch` runtime error. The setup recipe derives the required version
 from that workspace dependency.
 
+On Linux, `just anvil-examples-setup` installs the same runner.
+The example prerequisite check reports an installation command if Valgrind is missing.
+
 Then:
 
 ```bash
