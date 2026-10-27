@@ -194,7 +194,6 @@ impl From<SystemTimeError> for Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::backtrace::BacktraceStatus;
     use std::error::Error as StdError;
 
     use super::*;
