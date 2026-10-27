@@ -7,7 +7,7 @@
 - Catch panics from code Arty explicitly runs for the user: async task polling,
   task factories, and blocking callbacks.
 - A contained task or callback panic becomes `JoinError`. Apply the configured
-  `PanicPolicy` after the panic result and panic telemetry are published.
+  `PanicPolicy` at the governed boundary without replacing the original panic.
 - The shutdown policy starts coordinated runtime shutdown. The ignore policy
   leaves the scheduler usable.
 - Add cleanup containment only when needed for memory safety or exact-once

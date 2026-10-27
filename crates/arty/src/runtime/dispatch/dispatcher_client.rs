@@ -3,8 +3,6 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::Arc as StdArc;
-use std::task::{Wake, Waker};
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -22,18 +20,6 @@ use crate::task::join::JoinHandle;
 #[derive(Clone)]
 pub(crate) struct DispatcherClient {
     core: Arc<DispatcherCore>,
-}
-
-struct PanicShutdownWake(DispatcherClient);
-
-impl Wake for PanicShutdownWake {
-    fn wake(self: StdArc<Self>) {
-        self.0.record_panic();
-    }
-
-    fn wake_by_ref(self: &StdArc<Self>) {
-        self.0.record_panic();
-    }
 }
 
 impl DispatcherClient {
@@ -144,10 +130,6 @@ impl DispatcherClient {
         self.core.record_panic();
     }
 
-    pub(crate) fn panic_result_hook(&self) -> Waker {
-        Waker::from(StdArc::new(PanicShutdownWake(self.clone())))
-    }
-
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
         self.core.access_io(worker_index, access)
     }
@@ -176,6 +158,8 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::task::Waker;
+
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
     use performables::sync::channel;

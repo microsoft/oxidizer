@@ -27,8 +27,8 @@ The `#[arty::main]` and `#[arty::test]` attributes accept the same values:
 
 Both attributes use the shutdown policy when `panic` is omitted.
 
-Arty publishes the panicking task result before it starts shutdown. The task
-join remains a panic failure. Pending work and later submissions receive
+Arty requests shutdown when it catches the panic. The task join remains a panic
+failure with its original payload. Pending work and later submissions receive
 shutdown failures under the existing cancellation rules.
 
 The runtime shutdown cause records that a contained runtime operation panicked.

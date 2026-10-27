@@ -78,7 +78,17 @@ pub struct ShutdownCause {
     error: Option<ShutdownError>,
 }
 
+#[ohno::error]
+#[display("a contained runtime operation panicked")]
+struct ContainedRuntimePanic;
+
 impl ShutdownCause {
+    /// Creates a shutdown cause for a contained runtime panic.
+    #[must_use]
+    pub fn panic() -> Self {
+        ShutdownError::new(ContainedRuntimePanic::new()).into()
+    }
+
     /// Creates a shutdown cause from an error.
     #[must_use]
     pub fn from_error(error: ShutdownError) -> Self {
@@ -148,6 +158,16 @@ mod tests {
 
         assert!(cause.as_error().is_none());
         assert!(clone.as_error().is_none());
+    }
+
+    #[test]
+    fn panic_cause_preserves_its_diagnostic() {
+        let cause = ShutdownCause::panic();
+
+        assert_eq!(
+            cause.as_error().unwrap().inner().to_string(),
+            "a contained runtime operation panicked"
+        );
     }
 
     #[test]

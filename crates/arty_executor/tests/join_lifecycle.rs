@@ -29,7 +29,6 @@ thread_local! {
 
 struct ReentrantSubmissionProcessor;
 struct OwnerDropProcessor;
-struct PanicTelemetryProbe(Arc<AtomicBool>);
 
 struct ContextValue;
 
@@ -95,20 +94,6 @@ impl EventProcessor for OwnerDropProcessor {
         drop(state.owner);
         let nested = state.tasks.add(async { 42 }, TaskOptions::default());
         assert!(state.nested.replace(Some(nested)).is_none());
-    }
-
-    fn flush(&self) -> Result<(), observed::FlushError> {
-        Ok(())
-    }
-}
-
-impl EventProcessor for PanicTelemetryProbe {
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        description.name() == "arty.rt.task.panicked"
-    }
-
-    fn process(&self, _event: &EventView<'_>) {
-        self.0.store(true, Ordering::Release);
     }
 
     fn flush(&self) -> Result<(), observed::FlushError> {
@@ -449,75 +434,6 @@ impl Wake for PanickingRemoteJoinWake {
         self.0.store(true, Ordering::Release);
         panic!("remote join disconnect notification");
     }
-}
-
-struct JoinReadyWake(Arc<AtomicBool>);
-
-impl Wake for JoinReadyWake {
-    fn wake(self: Arc<Self>) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
-struct PanicResultHook {
-    join_ready: Arc<AtomicBool>,
-    telemetry_reported: Arc<AtomicBool>,
-    called: Arc<AtomicBool>,
-}
-
-impl Wake for PanicResultHook {
-    fn wake(self: Arc<Self>) {
-        self.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        assert!(
-            self.join_ready.load(Ordering::Acquire),
-            "the remote panic result must be published before the panic hook runs"
-        );
-        assert!(
-            self.telemetry_reported.load(Ordering::Acquire),
-            "panic telemetry must be emitted before the panic hook runs"
-        );
-        self.called.store(true, Ordering::Release);
-    }
-}
-
-#[test]
-fn remote_panic_hook_runs_after_join_result_publication() {
-    let telemetry_reported = Arc::new(AtomicBool::new(false));
-    let sink = Sink::builder("panic-hook-order")
-        .processors(vec![Arc::new(PanicTelemetryProbe(Arc::clone(&telemetry_reported)))])
-        .build();
-    let mut executor = Executor::builder().sink(sink).build();
-    let tasks = executor.tasks();
-    let (result_tx, mut remote_join) = RemotePool::new().channel::<usize>();
-    let join_ready = Arc::new(AtomicBool::new(false));
-    let called = Arc::new(AtomicBool::new(false));
-    let join_waker = Waker::from(Arc::new(JoinReadyWake(Arc::clone(&join_ready))));
-    let hook = Waker::from(Arc::new(PanicResultHook {
-        join_ready: Arc::clone(&join_ready),
-        telemetry_reported,
-        called: Arc::clone(&called),
-    }));
-    assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&join_waker)).is_pending());
-    tasks.add_with_remote_result(
-        async { panic!("task panic") },
-        TaskOptions::default().panic_result_hook(hook),
-        result_tx,
-    );
-
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-    assert!(called.load(Ordering::Acquire));
-    assert!(matches!(
-        Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
-        Poll::Ready(Err(JoinError::Panicked(_)))
-    ));
 }
 
 #[test]

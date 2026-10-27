@@ -79,10 +79,6 @@ pub(crate) struct DispatcherCore {
     panic_shutdown_cause: Option<ShutdownCause>,
 }
 
-#[ohno::error]
-#[display("a contained runtime operation panicked")]
-struct ContainedRuntimePanic;
-
 impl DispatcherCore {
     pub(crate) fn new(
         wait_for_shutdown: ThreadWaiter,
@@ -123,9 +119,7 @@ impl DispatcherCore {
             next_async_worker_index: AtomicUsize::new(0),
             sink,
             remote_results: RemotePool::new(),
-            panic_shutdown_cause: panic_policy
-                .starts_shutdown()
-                .then(|| ShutdownError::new(ContainedRuntimePanic::new()).into()),
+            panic_shutdown_cause: panic_policy.starts_shutdown().then(ShutdownCause::panic),
         }
     }
 

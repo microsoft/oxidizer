@@ -24,6 +24,7 @@ thread_local! {
 #[pin_project]
 pub(crate) struct DeferredTask<FF, F> {
     factory: Option<(FF, Builtins)>,
+    dispatcher: DispatcherClient,
     #[pin]
     future: Option<F>,
     cancelled: bool,
@@ -31,8 +32,10 @@ pub(crate) struct DeferredTask<FF, F> {
 
 impl<FF, F> DeferredTask<FF, F> {
     pub(crate) fn new(factory: FF, builtins: Builtins) -> Self {
+        let dispatcher = builtins.dispatcher().clone();
         Self {
             factory: Some((factory, builtins)),
+            dispatcher,
             future: None,
             cancelled: false,
         }
@@ -66,13 +69,27 @@ where
                 return Poll::Pending;
             }
             let (factory, builtins) = this.factory.take().expect("a deferred task factory is invoked exactly once");
-            this.future.set(Some(factory(builtins)));
+            let future = catch_unwind(AssertUnwindSafe(|| factory(builtins)));
+            this.future.set(Some(resume_governed_panic(this.dispatcher, future)));
         }
-        this.future
-            .as_mut()
-            .as_pin_mut()
-            .expect("the deferred future is initialized above")
-            .poll(cx)
+        let poll = catch_unwind(AssertUnwindSafe(|| {
+            this.future
+                .as_mut()
+                .as_pin_mut()
+                .expect("the deferred future is initialized above")
+                .poll(cx)
+        }));
+        resume_governed_panic(this.dispatcher, poll)
+    }
+}
+
+fn resume_governed_panic<T>(dispatcher: &DispatcherClient, outcome: std::thread::Result<T>) -> T {
+    match outcome {
+        Ok(value) => value,
+        Err(panic) => {
+            dispatcher.record_panic();
+            std::panic::resume_unwind(panic);
+        }
     }
 }
 
@@ -203,12 +220,11 @@ where
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let panic_result_hook = cx.panic_result_hook();
+        let options = TaskOptions::observed(parent_task_enrichment, placement);
         let inner = DeferredTask::new(future_factory, cx);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options = TaskOptions::observed(parent_task_enrichment, placement).panic_result_hook(panic_result_hook);
         tasks.add_with_remote_result(inner, options, result_tx.into_sender());
     });
     (future_factory, JoinHandle::new(result_rx))
