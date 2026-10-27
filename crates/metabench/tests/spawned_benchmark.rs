@@ -761,6 +761,19 @@ fn criterion_worker_bypasses_allocation_tracking() {
     });
 }
 
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn shared_case_registration_keeps_gungraun_unavailable_on_unsupported_hosts() {
+    let output = run_target("native_probe_contracts", &["--gungraun".as_ref(), "--test".as_ref()]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Gungraun is supported only on Linux"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("native suite setup"));
+}
+
 #[test]
 fn native_probe_cases_reuse_iterators_conditionals_and_lifecycle_hooks() {
     with_cargo_lock(|| {

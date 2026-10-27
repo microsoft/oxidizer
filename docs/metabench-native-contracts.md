@@ -47,6 +47,12 @@ The Linux smoke and report contracts are
 not compiled on Windows; Windows' unsupported native-mode behavior is
 unchanged. Test output reports each executed contract by name.
 
+On hosts other than Linux, native registration reuses the probe adapters.
+This keeps the cases, configuration, and lifecycle hooks type-checked without
+compiling a second copy of Gungraun's perf harness. Linux retains separate
+native and probe adapters so collection controls stay outside native measurements.
+The unsupported-host contract confirms that this reuse does not enable Gungraun.
+
 Unit regressions also check collector activation, report boundary values,
 generated probe registration, bounded pipe draining, and exact worker cleanup
 deadlines. Platform-specific mutation configurations exclude only adapters

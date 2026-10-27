@@ -300,7 +300,15 @@ fn expand_native_group(group: &Group, metabench: &TokenStream2) -> TokenStream2 
         .collect::<Vec<_>>();
     let adapter_imports = group.benchmarks.iter().zip(&adapter_names).map(|(identity, adapter_name)| {
         let adapter_module = support_ident("native", &identity.to_string());
-        quote!(use super::#adapter_module::#adapter_name;)
+        let probe_module = support_ident("probe", &identity.to_string());
+        // Gungraun only runs on Linux. Other hosts can type-check its registration
+        // through the probe adapter without compiling a second perf harness.
+        quote! {
+            #[cfg(target_os = "linux")]
+            use super::#adapter_module::#adapter_name;
+            #[cfg(not(target_os = "linux"))]
+            use super::#probe_module::#adapter_name;
+        }
     });
     let config = group.config.as_ref().map(|value| quote!(config = #value;));
     let compare_by_id = group.compare_by_id.as_ref().map(|value| quote!(compare_by_id = #value;));
@@ -440,6 +448,18 @@ mod tests {
         assert!(output.contains("use::metabench::__private::gungraun"));
         assert!(output.contains("::metabench::__private::gungraun::library_benchmark_group!"));
         assert!(!output.contains("::metabench::gungraun"));
+    }
+
+    #[test]
+    fn native_groups_reuse_probe_adapters_on_unsupported_hosts() {
+        let output = expand(quote!(criterion = benches, groups = { GROUP { benchmarks = [ONE, TWO] } })).unwrap();
+        for identity in ["ONE", "TWO"] {
+            let native = super::support_ident("native", identity);
+            let probe = super::support_ident("probe", identity);
+            let benchmark = super::native_ident("benchmark", identity);
+            assert!(output.contains(&format!("#[cfg(target_os=\"linux\")]usesuper::{native}::{benchmark};")));
+            assert!(output.contains(&format!("#[cfg(not(target_os=\"linux\"))]usesuper::{probe}::{benchmark};")));
+        }
     }
 
     #[test]

@@ -148,6 +148,10 @@
 //! Calls to annotated functions during setup cannot consume the measurement.
 //! Collection guards stop on unwinding.
 //!
+//! On hosts other than Linux, native registration reuses the probe adapters.
+//! This keeps native cases and group hooks type-checked without compiling both
+//! adapters. Gungraun execution remains Linux-only.
+//!
 //! No new registration language or public measurement helper is required. Probes
 //! do not run Criterion registration or infer its arbitrary callbacks. A
 //! Criterion-only case without a corresponding native declaration has no probe
