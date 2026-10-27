@@ -3,8 +3,7 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::Arc as StdArc;
-use std::task::{Wake, Waker};
+use std::task::Waker;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -24,20 +23,9 @@ pub(crate) struct DispatcherClient {
     core: Arc<DispatcherCore>,
 }
 
-struct PanicShutdownWake(DispatcherClient);
-
-impl Wake for PanicShutdownWake {
-    fn wake(self: StdArc<Self>) {
-        self.0.record_panic();
-    }
-
-    fn wake_by_ref(self: &StdArc<Self>) {
-        self.0.record_panic();
-    }
-}
-
 impl DispatcherClient {
-    pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
+    pub(crate) fn new(core: Arc<DispatcherCore>) -> Self {
+        core.initialize_panic_notifier(Arc::downgrade(&core));
         Self { core }
     }
 
@@ -140,16 +128,8 @@ impl DispatcherClient {
         self.core.stop_with_error(error)
     }
 
-    pub(crate) fn record_panic(&self) {
-        self.core.record_panic();
-    }
-
     pub(crate) fn panic_notifier(&self) -> Waker {
-        if self.core.shuts_down_on_panic() {
-            Waker::from(StdArc::new(PanicShutdownWake(self.clone())))
-        } else {
-            Waker::noop().clone()
-        }
+        self.core.panic_notifier()
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
@@ -210,6 +190,7 @@ mod tests {
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
+        assert!(client.panic_notifier().will_wake(&clone.panic_notifier()));
 
         client.stop();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Started);
