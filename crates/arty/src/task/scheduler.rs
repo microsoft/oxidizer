@@ -11,7 +11,7 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::DeferredTask;
+use crate::task::execution::{DeferredTask, call_governed};
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -415,9 +415,10 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        let dispatcher = self.dispatcher.clone();
         self.binding
             .blocking_worker
-            .spawn_blocking_with_dispatcher(self.dispatcher.clone(), body)
+            .spawn_blocking(move || call_governed(&dispatcher, body))
     }
 
     #[cfg(test)]
