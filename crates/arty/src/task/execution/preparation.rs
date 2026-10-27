@@ -209,10 +209,7 @@ where
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
         let options = TaskOptions::observed(parent_task_enrichment, placement);
-        let result_tx = match panic_notifier {
-            Some(notifier) => result_tx.into_sender().with_panic_notifier(notifier),
-            None => result_tx.into_sender(),
-        };
+        let result_tx = result_tx.into_sender().with_panic_notifier(panic_notifier);
         tasks.add_with_remote_result(inner, options, result_tx);
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -221,7 +218,7 @@ where
 pub(crate) fn prepare_blocking<F, R>(
     result_pool: &RemotePool,
     shutdown: Shutdown,
-    panic_notifier: Option<std::task::Waker>,
+    panic_notifier: std::task::Waker,
     body: F,
 ) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
 where
@@ -229,10 +226,7 @@ where
     R: Send + 'static,
 {
     let (result_tx, result_rx) = result_pool.channel();
-    let result_tx = match panic_notifier {
-        Some(notifier) => result_tx.with_panic_notifier(notifier),
-        None => result_tx,
-    };
+    let result_tx = result_tx.with_panic_notifier(panic_notifier);
     let task = BlockingTask {
         pending: Some((body, result_tx)),
         shutdown,
@@ -241,10 +235,7 @@ where
 }
 
 pub(crate) fn with_panic_notifier<R: Send + 'static>(dispatcher: &DispatcherClient, sender: RemoteSender<R>) -> RemoteSender<R> {
-    match dispatcher.panic_notifier() {
-        Some(notifier) => sender.with_panic_notifier(notifier),
-        None => sender,
-    }
+    sender.with_panic_notifier(dispatcher.panic_notifier())
 }
 
 struct BlockingTask<F, R: Send + 'static> {
@@ -418,7 +409,7 @@ mod tests {
     #[test]
     fn blocking_task_delivers_its_result() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || 42);
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), Waker::noop().clone(), || 42);
         task();
 
         assert_eq!(block_on(handle).unwrap(), 42);
@@ -427,7 +418,7 @@ mod tests {
     #[test]
     fn blocking_panic_is_delivered_to_joiner() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || panic!("blocking task"));
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), Waker::noop().clone(), || panic!("blocking task"));
         task();
 
         assert!(block_on(handle).unwrap_err().is_panic());
@@ -459,7 +450,7 @@ mod tests {
         let result_pool = RemotePool::new();
         let shutdown = Shutdown::default();
         shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
-        let (task, handle) = prepare_blocking(&result_pool, shutdown, None, || 42);
+        let (task, handle) = prepare_blocking(&result_pool, shutdown, Waker::noop().clone(), || 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
@@ -503,7 +494,7 @@ mod tests {
 
         let capture = PanicOnDrop;
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, move || drop(capture));
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), Waker::noop().clone(), move || drop(capture));
         catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
         assert!(block_on(handle).unwrap_err().is_shutdown());
     }
@@ -511,7 +502,7 @@ mod tests {
     #[test]
     fn discarded_blocking_task_contains_join_waker_panic() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || 42);
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), Waker::noop().clone(), || 42);
         let mut handle = pin!(handle);
         let waker = Waker::from(Arc::new(PanicWake));
         assert!(handle.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());

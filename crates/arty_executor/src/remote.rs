@@ -59,7 +59,7 @@ impl Pool {
         (
             Sender {
                 tx: Some(tx),
-                panic_notifier: None,
+                panic_notifier: task::Waker::noop().clone(),
             },
             JoinHandle { rx },
         )
@@ -105,7 +105,7 @@ impl<R: Send + 'static> Debug for JoinHandle<R> {
 /// The sending endpoint for a [`JoinHandle`].
 pub struct Sender<R: Send + 'static> {
     tx: Option<PooledSender<TaskResult<R>>>,
-    panic_notifier: Option<task::Waker>,
+    panic_notifier: task::Waker,
 }
 
 impl<R: Send + 'static> Sender<R> {
@@ -121,7 +121,7 @@ impl<R: Send + 'static> Sender<R> {
     #[doc(hidden)]
     #[must_use]
     pub fn with_panic_notifier(mut self, notifier: task::Waker) -> Self {
-        self.panic_notifier = Some(notifier);
+        self.panic_notifier = notifier;
         self
     }
 
@@ -141,9 +141,7 @@ impl<R: Send + 'static> Sender<R> {
     /// Returns a panic payload if notifying the result receiver panics.
     pub fn panicked(mut self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         let delivery = self.send(TaskResult::Panicked(panic));
-        if let Some(notifier) = self.panic_notifier.take() {
-            notifier.wake();
-        }
+        self.panic_notifier.wake_by_ref();
         delivery
     }
 

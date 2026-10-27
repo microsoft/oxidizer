@@ -144,10 +144,12 @@ impl DispatcherClient {
         self.core.record_panic();
     }
 
-    pub(crate) fn panic_notifier(&self) -> Option<Waker> {
-        self.core
-            .shuts_down_on_panic()
-            .then(|| Waker::from(StdArc::new(PanicShutdownWake(self.clone()))))
+    pub(crate) fn panic_notifier(&self) -> Waker {
+        if self.core.shuts_down_on_panic() {
+            Waker::from(StdArc::new(PanicShutdownWake(self.clone())))
+        } else {
+            Waker::noop().clone()
+        }
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
