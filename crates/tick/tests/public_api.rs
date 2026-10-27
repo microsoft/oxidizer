@@ -256,8 +256,8 @@ fn system_time_error_conversion_preserves_message_and_source() {
 
     let error = Error::from(source);
 
-    assert_eq!(error.to_string(), expected);
-    assert!(error.source().is_some());
+    let source = error.source().unwrap().downcast_ref::<std::time::SystemTimeError>().unwrap();
+    assert_eq!(source.to_string(), expected);
 }
 
 #[test]

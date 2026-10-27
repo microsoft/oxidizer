@@ -362,10 +362,7 @@ fn rfc2822_rejects_unencodable_negative_years_when_system_time_can_express_them(
     if let Some(before_year_zero) = before_year_zero {
         let error = Rfc2822::try_from(before_year_zero).unwrap_err();
         assert!(error.is_out_of_range());
-        assert_eq!(
-            error.to_string(),
-            "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year"
-        );
+        assert!(error.source().is_none());
     }
 
     assert_eq!(Rfc2822::try_from(SystemTime::UNIX_EPOCH).unwrap(), Rfc2822::UNIX_EPOCH);

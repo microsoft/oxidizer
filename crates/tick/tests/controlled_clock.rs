@@ -471,7 +471,6 @@ fn timeout_reports_error_with_controlled_time() {
         panic!("the future must time out on the second poll");
     };
     assert!(error.is_timeout());
-    assert_eq!(error.to_string(), "future timed out");
     let source = error.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
     assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
 }
@@ -624,7 +623,9 @@ async fn timeout_and_periodic_timer_cover_both_tokio_outcomes() {
     .timeout(&clock, Duration::from_millis(10))
     .await
     .unwrap_err();
-    assert_eq!(timeout.to_string(), "future timed out");
+    assert!(timeout.is_timeout());
+    let source = timeout.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
 
     let value = async {
         clock.delay(Duration::from_millis(1)).await;

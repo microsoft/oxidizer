@@ -248,7 +248,9 @@ mod tests {
         assert!(min < Rfc2822::UNIX_EPOCH);
 
         for earlier in [SignedDuration::from_secs(1), SignedDuration::from_nanos(1)] {
-            let error = Rfc2822::new_checked(*MIN_TIMESTAMP - earlier).unwrap_err();
+            let error = Rfc2822::new_checked(*MIN_TIMESTAMP - earlier)
+                .unwrap_err()
+                .with_disabled_backtrace();
 
             assert_eq!(
                 error.to_string(),
@@ -259,8 +261,9 @@ mod tests {
         if crate::fmt::checked_system_time(*MIN_TIMESTAMP).is_some() {
             assert_eq!(Rfc2822::new_checked(*MIN_TIMESTAMP).unwrap(), min);
         } else {
+            let error = Rfc2822::new_checked(*MIN_TIMESTAMP).unwrap_err().with_disabled_backtrace();
             assert_eq!(
-                Rfc2822::new_checked(*MIN_TIMESTAMP).unwrap_err().to_string(),
+                error.to_string(),
                 "the instant is outside the range that `SystemTime` can represent on this platform"
             );
         }

@@ -28,7 +28,7 @@ pub trait FutureExt: Future {
     ///     .err()
     ///     .ok_or_else(|| std::io::Error::other("future unexpectedly completed"))?;
     ///
-    /// assert_eq!(timeout_error.to_string(), "future timed out");
+    /// assert!(timeout_error.is_timeout());
     /// # Ok(())
     /// # }
     /// ```

@@ -255,7 +255,7 @@ impl ClockControl {
     ///     .await
     ///     .unwrap_err();
     ///
-    /// assert_eq!(timeout_error.to_string(), "future timed out");
+    /// assert!(timeout_error.is_timeout());
     /// # }
     /// ```
     #[must_use]

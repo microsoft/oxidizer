@@ -147,6 +147,12 @@ impl Error {
     const fn kind(&self) -> &ErrorKind {
         &self.kind
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_disabled_backtrace(mut self) -> Self {
+        self.backtrace = Backtrace::disabled();
+        self
+    }
 }
 
 impl fmt::Display for Error {
@@ -203,7 +209,7 @@ mod tests {
         // Public format parsing covers construction; variant identity is intentionally private.
         let error = "date".parse::<jiff::Timestamp>().unwrap_err();
         let expected = error.to_string();
-        let error = Error::jiff(error);
+        let error = Error::jiff(error).with_disabled_backtrace();
 
         assert!(matches!(error.kind(), ErrorKind::Jiff(_)));
         assert_eq!(error.to_string(), expected);
@@ -213,7 +219,7 @@ mod tests {
     #[test]
     fn private_out_of_range_variant_has_no_source() {
         // The public error type deliberately exposes no variant introspection.
-        let error = Error::out_of_range("test");
+        let error = Error::out_of_range("test").with_disabled_backtrace();
 
         assert!(matches!(error.kind(), ErrorKind::OutOfRange { .. }));
         assert!(error.is_out_of_range());
@@ -225,7 +231,7 @@ mod tests {
     #[test]
     fn private_other_variant_preserves_message_and_source() {
         // No public constructor accepts an arbitrary boxed source.
-        let error = Error::other(std::io::Error::other("dummy"));
+        let error = Error::other(std::io::Error::other("dummy")).with_disabled_backtrace();
 
         assert!(matches!(error.kind(), ErrorKind::Other(_)));
         assert_eq!(error.to_string(), "dummy");
