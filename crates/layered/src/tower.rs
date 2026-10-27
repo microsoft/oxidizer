@@ -8,6 +8,7 @@
 //! # Requirements
 //!
 //! - Each wrapped service must implement `Clone`.
+//! - A layered service used through Tower must implement `'static`.
 //! - A layered service used through Tower must return `Result<T, E>`.
 //! - Its request, response, and error types must implement `Send + 'static`.
 //! - A Tower service used through layered must implement `Send + Sync`.

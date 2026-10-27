@@ -150,8 +150,7 @@ where
     /// Executes the wrapped service and applies the configured operations.
     ///
     /// The order is input observers, input modifiers, service execution, output observers,
-    /// and output modifiers. An input modifier can return `ControlFlow::Break` to skip the
-    /// service and return an output.
+    /// and output modifiers.
     async fn execute(&self, mut input: In) -> Self::Out {
         match self.inner.before_execute(input) {
             ControlFlow::Break(output) => return output,
