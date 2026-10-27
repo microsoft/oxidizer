@@ -43,6 +43,7 @@
 //!
 //! # #[arty::main]
 //! # async fn main(cx: Builtins) -> Result<(), JoinError> {
+//! let home = cx.thread().clone();
 //! let (worker, scheduler) = cx
 //!     .scheduler()
 //!     .spawn_anywhere(cx.clone(), |moved| async move {
@@ -51,14 +52,16 @@
 //!     })
 //!     .await?;
 //! let child = scheduler.spawn(async |child| child.thread().id()).await?;
-//! assert_eq!(child, worker.id());
+//! assert_eq!(child, home.id());
+//! // The coordinate records where the task ran; the scheduler rebinds on return.
+//! let _executed_on = worker;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! The runtime may choose the original worker. If a task only needs its own
-//! services, use the `Builtins` passed to its factory instead of moving an
-//! existing value.
+//! services, the runtime-wide scheduler passes `Builtins` to its factory instead
+//! of requiring an existing value to be moved.
 //!
 //! # What stays put
 //!
@@ -67,7 +70,11 @@
 //! Scheduler handles and worker coordinates do not keep the runtime alive.
 //!
 //! Ordinary `spawn` and `block_on` do not relocate captures or returned values.
-//! `spawn_anywhere` relocates its explicit payload, but not its result.
+//! Worker-bound `spawn_anywhere` and `spawn_at` relocate their explicit payloads
+//! and, when joined on an Arty worker, relocate their results to the joining
+//! worker. This is normally the source worker; moving the join to another worker
+//! changes the destination. Joining outside Arty does not relocate the result.
+//! Runtime-wide `spawn_anywhere` does not relocate its result.
 //!
 //! `ThreadAware` builds on `Send`: values must remain safe to move even without
 //! relocation. See the [`ThreadAware` contract](crate::core::ThreadAware) when

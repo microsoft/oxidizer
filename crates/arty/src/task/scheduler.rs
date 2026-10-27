@@ -83,6 +83,10 @@ impl Scheduler {
         ACTIVE_WORKER.get()
     }
 
+    pub(crate) fn current_thread() -> Option<Thread> {
+        CURRENT_WORKER.with_borrow(|current| current.as_ref().map(|current| current.thread.clone()))
+    }
+
     pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
         assert!(!ACTIVE_WORKER.replace(true), "a worker is already active on this thread");
         CURRENT_WORKER.with_borrow_mut(|current| {
@@ -233,7 +237,11 @@ impl Scheduler {
     /// before calling `f`. The runtime may choose the same worker.
     ///
     /// `f` is a function pointer: pass values as `data` instead of capturing
-    /// them. The result must implement [`ThreadAware`] and is not relocated.
+    /// them. The result must implement [`ThreadAware`]. When its join completes
+    /// on an Arty worker, the result is relocated from the task's worker to the
+    /// joining worker before being returned. Normally this is the source worker;
+    /// moving the join to another worker changes the return destination.
+    /// Joining outside an Arty worker does not relocate the result.
     ///
     /// # Examples
     ///
@@ -273,7 +281,7 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn(async move |cx| {
+        self.dispatcher.spawn_relocating(async move |cx| {
             let mut data = data;
             data.relocate(Some(&source), cx.thread());
             f(data).await
@@ -287,9 +295,12 @@ impl Scheduler {
     /// Before calling `f`, Arty relocates `data` from this scheduler's worker to
     /// the destination.
     ///
-    /// Futures need not be [`Send`]. Results must implement [`ThreadAware`]
-    /// and are not relocated. Shutdown or an unsupported destination rejects
-    /// the submission without relocating `data` or invoking `f`.
+    /// Futures need not be [`Send`]. Results must implement [`ThreadAware`].
+    /// When the join completes on an Arty worker, the result is relocated from
+    /// `destination` to the joining worker, normally this scheduler's worker.
+    /// Joining outside Arty does not relocate the result. Shutdown or an
+    /// unsupported destination rejects the submission without relocating
+    /// `data` or invoking `f`.
     ///
     /// # Examples
     ///
@@ -351,7 +362,7 @@ impl Scheduler {
             return JoinHandle::invalid_destination();
         };
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_at_worker(worker_index, move |cx| {
+        self.dispatcher.spawn_at_worker_relocating(worker_index, move |cx| {
             let mut data = data;
             async move {
                 data.relocate(Some(&source), cx.thread());

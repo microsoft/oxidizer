@@ -7,6 +7,7 @@ use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
 use performables::arc::Arc;
+use thread_aware::ThreadAware;
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
@@ -93,15 +94,6 @@ impl DispatcherClient {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
 
-    pub(crate) fn spawn_at_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
-    where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.core.spawn_at_worker(worker_index, future_factory)
-    }
-
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,
@@ -109,6 +101,24 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_relocating(future_factory)
+    }
+
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    where
+        FF: FnOnce(Builtins) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: ThreadAware + 'static,
+    {
+        self.core.spawn_at_worker_relocating(worker_index, future_factory)
     }
 
     pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
@@ -148,7 +158,7 @@ mod tests {
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
     use performables::sync::channel;
-    use thread_aware::{Thread, ThreadAware};
+    use thread_aware::Thread;
 
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
