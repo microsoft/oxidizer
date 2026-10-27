@@ -10,14 +10,14 @@ use crate::RecoveryInfo;
 impl From<ErrorKind> for RecoveryInfo {
     /// Creates recovery information from an I/O error kind.
     ///
-    /// This conversion provides default classifications for common I/O errors.
-    /// A future version can change the classification of a variant.
-    /// If a default does not meet your requirements, implement your own conversion.
+    /// This conversion defines default classifications for common I/O errors.
+    /// A future version can change a classification. If a default does not meet
+    /// your requirements, implement a conversion for your error type.
     ///
     /// # Retry
     ///
-    /// These transient errors return [`RecoveryInfo::retry`].
-    /// They usually resolve within seconds or minutes without external action:
+    /// These transient errors return [`RecoveryInfo::retry`]. They usually
+    /// resolve within seconds or minutes without external action:
     ///
     /// - [`ErrorKind::WouldBlock`]: A resource is temporarily unavailable.
     /// - [`ErrorKind::TimedOut`]: One request timed out.
@@ -37,9 +37,9 @@ impl From<ErrorKind> for RecoveryInfo {
     ///
     /// # Unavailable
     ///
-    /// These infrastructure errors return [`RecoveryInfo::unavailable`].
-    /// They can take minutes or hours to resolve.
-    /// Callers can use a circuit breaker or a fallback:
+    /// These infrastructure errors return [`RecoveryInfo::unavailable`]. They
+    /// can take minutes or hours to resolve. Callers can use a circuit breaker
+    /// or a fallback:
     ///
     /// - [`ErrorKind::HostUnreachable`]: A routing or infrastructure problem blocks the host.
     /// - [`ErrorKind::NetworkUnreachable`]: The system cannot reach the network segment.
@@ -50,10 +50,10 @@ impl From<ErrorKind> for RecoveryInfo {
     /// # Never
     ///
     /// All other error kinds return [`RecoveryInfo::never`] by default.
-    /// Many of these errors are permanent, such as missing files, denied permissions, or invalid data.
-    /// This group also includes ambiguous variants such as [`ErrorKind::Other`].
-    /// Such variants can contain transient errors.
-    /// If your application receives them, implement a conversion for its specific errors.
+    /// Many of these errors are permanent, such as missing files, denied
+    /// permissions, or invalid data. This group also includes ambiguous variants
+    /// such as [`ErrorKind::Other`], which can contain transient errors.
+    /// Implement a conversion for your error type when it uses these variants.
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::WouldBlock

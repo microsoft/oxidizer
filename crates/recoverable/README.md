@@ -13,13 +13,10 @@
 
 </div>
 
-Recovery classifications for resilient operations.
+Recovery classifications for operations.
 
-This crate classifies whether an operation can recover after a condition occurs.
-Error types and resilience middleware can use the same classification.
-
-Recovery information does not report whether an operation succeeded.
-It reports whether a recovery attempt can change the outcome.
+This crate reports whether a recovery attempt can change an outcome.
+Error types and resilience middleware can share this information.
 Use [`RecoveryInfo::never`][__link0] for successful operations and permanent failures.
 
 ## Core types
@@ -86,7 +83,7 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbr2p35Ft-e6Ab7SodP0ZOk-Eb88AyOJKgnPMbElRkLosz9oFhZIGCa3JlY292ZXJhYmxlZTAuMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbFfusAnUguqAbg9Xa1nlv2rEbzRFetduUG_kbpjhP8zOme8FhZIGCa3JlY292ZXJhYmxlZTAuMy4w
  [__link0]: https://docs.rs/recoverable/0.3.0/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.3.0/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.3.0/recoverable/trait.Recovery.html
