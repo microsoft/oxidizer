@@ -30,14 +30,10 @@
 //!   policies.
 //!
 //! * **Redaction**: The process of removing or obscuring sensitive information from data.
-//!   A redactor can replace sensitive data with fixed text or a hash. Hash-based redactors
-//!   can support correlation, but do not by themselves guarantee that the original value
-//!   cannot be recovered.
+//!   Hash-based redactors support correlation. Other redactors replace or erase sensitive values.
 //!
-//! Redaction differs from deletion: it can replace sensitive data instead of removing it entirely.
-//! Some redactors produce the same output for the same input. This lets applications correlate log records
-//! without writing the original value directly.
-//! Non-cryptographic hashes, such as `xxH3`, do not provide cryptographic protection, even when used with a secret.
+//! `xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
+//! such as organizational email addresses, phone numbers, and IP addresses.
 //!
 //! # Traits
 //!

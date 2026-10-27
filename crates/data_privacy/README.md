@@ -39,14 +39,10 @@ Before continuing, it’s important to understand a few concepts:
   policies.
 
 * **Redaction**: The process of removing or obscuring sensitive information from data.
-  A redactor can replace sensitive data with fixed text or a hash. Hash-based redactors
-  can support correlation, but do not by themselves guarantee that the original value
-  cannot be recovered.
+  Hash-based redactors support correlation. Other redactors replace or erase sensitive values.
 
-Redaction differs from deletion: it can replace sensitive data instead of removing it entirely.
-Some redactors produce the same output for the same input. This lets applications correlate log records
-without writing the original value directly.
-Non-cryptographic hashes, such as `xxH3`, do not provide cryptographic protection, even when used with a secret.
+`xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
+such as organizational email addresses, phone numbers, and IP addresses.
 
 ## Traits
 
@@ -191,7 +187,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKniesAWKGNYbTz04QVz4wBgbZ1sH_GETVwUbyzNGqnifBlBhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2I5dj5j_4vsbUyl-Ha-vRf0bzQCM1X4XrrQbaxEmwKBob6thZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
  [__link0]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified

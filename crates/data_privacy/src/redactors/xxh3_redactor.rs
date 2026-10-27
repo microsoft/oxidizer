@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A redactor based on the non-cryptographic `xxH3` hash.
+//! A redactor based on `xxh3`.
 
 use core::fmt::Write;
 
@@ -14,11 +14,8 @@ pub const REDACTED_LEN: usize = 16;
 
 /// A redactor that replaces the original string with the `xxH3` hash of the string.
 ///
-/// # Security
-///
-/// `xxH3` is not a cryptographic hash, even when used with a secret.
-/// This redactor supports correlation but does not guarantee that the original value cannot be recovered.
-/// If you need to remove sensitive values, use [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor) to replace or erase them.
+/// `xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
+/// such as organizational email addresses, phone numbers, and IP addresses.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"
