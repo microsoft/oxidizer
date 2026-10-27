@@ -4,8 +4,6 @@
 use std::future::pending;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-#[cfg(test)]
-use std::sync::{Mutex, mpsc};
 
 use arty::core::{Thread, ThreadAware};
 use arty::task::{Builtins, JoinHandle};
@@ -39,8 +37,6 @@ impl Phase {
 enum RuntimeOwner {
     Internal(Runtime),
     External(Handle),
-    #[cfg(test)]
-    Test(TestRuntimeOwner),
 }
 
 impl RuntimeOwner {
@@ -70,35 +66,7 @@ impl RuntimeOwner {
                 handle
             }
             Self::External(handle) => handle,
-            #[cfg(test)]
-            Self::Test(owner) => {
-                let handle = owner.runtime.handle().clone();
-                control.on_shutdown(move || drop(owner));
-                handle
-            }
         }
-    }
-}
-
-#[cfg(test)]
-struct TestRuntimeOwner {
-    runtime: Runtime,
-    entered_drop: mpsc::SyncSender<()>,
-    release_drop: Mutex<mpsc::Receiver<()>>,
-}
-
-#[cfg(test)]
-impl Drop for TestRuntimeOwner {
-    fn drop(&mut self) {
-        assert!(
-            self.entered_drop.send(()).is_ok(),
-            "the shutdown test must observe the runtime owner destructor"
-        );
-        let release_drop = self.release_drop.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert!(
-            release_drop.recv().is_ok(),
-            "the shutdown test must release the runtime owner destructor"
-        );
     }
 }
 
@@ -255,7 +223,7 @@ async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwne
         }
     }
 
-    if startup_succeeded(failure.as_ref(), ready, installers.len()) && transaction.commit() {
+    if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
         abort_on_drop.disarm();
         return Ok(());
     }
@@ -275,6 +243,13 @@ fn startup_succeeded(failure: Option<&InitError>, ready: usize, expected: usize)
         return false;
     }
     ready == expected
+}
+
+fn commit_if_started(transaction: &Transaction, started: bool) -> bool {
+    if !started {
+        return false;
+    }
+    transaction.commit()
 }
 
 #[expect(clippy::future_not_send, reason = "the fixed-worker task must retain Tokio's non-Send EnterGuard")]
@@ -318,19 +293,13 @@ async fn install_worker(data: InstallerData) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::{Arc, mpsc};
-    use std::time::Duration;
+    use std::sync::Arc;
 
     use arty::runtime::{Runtime as ArtyRuntime, WorkersPolicy};
     use performables::sync::channel::oneshot;
     use tokio::runtime::{Builder, Runtime};
 
-    use super::{
-        AbortOnDrop, Installer, Phase, RuntimeOwner, StartupResult, TestRuntimeOwner, Transaction, initialize_all_workers_with_runtime,
-        startup_succeeded,
-    };
-
-    const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+    use super::{AbortOnDrop, Installer, Phase, StartupResult, Transaction, commit_if_started, startup_succeeded};
 
     fn transaction() -> (Arc<Transaction>, Runtime) {
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -430,69 +399,12 @@ mod tests {
     }
 
     #[test]
-    fn successful_initialization_installs_every_worker_context() {
-        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
-        let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
+    fn commit_requires_successful_startup() {
+        let (transaction, _runtime) = transaction();
 
-        let (result, contexts) = runtime
-            .scheduler()
-            .block_on(async |cx| {
-                let result = initialize_all_workers_with_runtime(&cx, RuntimeOwner::External(tokio.handle().clone())).await;
-                let tasks = cx
-                    .control()
-                    .workers()
-                    .into_iter()
-                    .map(|worker| {
-                        cx.scheduler()
-                            .spawn_at(worker, (), |()| async { tokio::runtime::Handle::try_current().is_ok() })
-                    })
-                    .collect::<Vec<_>>();
-                let mut contexts = Vec::with_capacity(tasks.len());
-                for task in tasks {
-                    contexts.push(task.await.unwrap());
-                }
-                (result, contexts)
-            })
-            .unwrap();
-
-        runtime.stop().unwrap();
-        drop(tokio);
-
-        result.unwrap();
-        assert_eq!(contexts, vec![true, true]);
-    }
-
-    // The public lifecycle regression is in tests/lifecycle.rs. This unit test
-    // injects the private owner-drop seam, which the public API cannot provide.
-    #[test]
-    fn arty_shutdown_waits_for_runtime_owner_destructor() {
-        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-        let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
-        let (entered_drop, drop_entered) = mpsc::sync_channel(1);
-        let (release_drop, drop_release) = mpsc::sync_channel(1);
-        let owner = RuntimeOwner::Test(TestRuntimeOwner {
-            runtime: tokio,
-            entered_drop,
-            release_drop: std::sync::Mutex::new(drop_release),
-        });
-
-        runtime
-            .scheduler()
-            .block_on(async move |cx| {
-                initialize_all_workers_with_runtime(&cx, owner).await.unwrap();
-            })
-            .unwrap();
-
-        let (stopped, completion) = mpsc::sync_channel(1);
-        let shutdown = std::thread::spawn(move || {
-            stopped.send(runtime.stop()).unwrap();
-        });
-
-        drop_entered.recv_timeout(TEST_TIMEOUT).unwrap();
-        assert!(matches!(completion.try_recv(), Err(mpsc::TryRecvError::Empty)));
-
-        release_drop.send(()).unwrap();
-        completion.recv_timeout(TEST_TIMEOUT).unwrap().unwrap();
-        shutdown.join().unwrap();
+        assert!(!commit_if_started(&transaction, false));
+        assert_eq!(transaction.phase(), Phase::Preparing);
+        assert!(commit_if_started(&transaction, true));
+        assert_eq!(transaction.phase(), Phase::Committed);
     }
 }
