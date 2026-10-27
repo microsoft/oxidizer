@@ -147,21 +147,7 @@ impl HttpClient {
     /// # }
     /// ```
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
-        let deps = deps.into();
-        let clock = deps.clock.clone();
-        let memory = deps.memory.clone();
-
-        Self::builder_custom_internal(
-            crate::constants::TOKIO_RUNTIME_NAME,
-            crate::constants::HYPER_TRANSPORT_NAME,
-            move |cx| TransportHandler(build_tokio_handler(cx, &options).into()),
-            Isolation::Shared,
-            CustomDeps {
-                clock,
-                memory,
-                extras: deps,
-            },
-        )
+        create_tokio_builder(deps.into(), move |cx| TransportHandler(build_tokio_handler(cx, &options).into()))
     }
 
     /// Creates a new HTTP client for the Tokio runtime.
@@ -176,6 +162,27 @@ impl HttpClient {
     pub fn new_tokio() -> Self {
         Self::builder_tokio(TokioDeps::default()).build()
     }
+}
+
+/// Shares Tokio dependency forwarding with tests that supply a controlled transport.
+fn create_tokio_builder(
+    deps: TokioDeps,
+    factory: impl Fn(CustomContext<TokioDeps>) -> TransportHandler + Send + Sync + 'static,
+) -> HttpClientBuilder {
+    let clock = deps.clock.clone();
+    let memory = deps.memory.clone();
+
+    HttpClient::builder_custom_internal(
+        crate::constants::TOKIO_RUNTIME_NAME,
+        crate::constants::HYPER_TRANSPORT_NAME,
+        factory,
+        Isolation::Shared,
+        CustomDeps {
+            clock,
+            memory,
+            extras: deps,
+        },
+    )
 }
 
 /// Plain-TCP connector for the Tokio transport.
@@ -351,7 +358,8 @@ mod tests {
     use thread_aware::{Relocator, unaware};
     use tick::Clock;
 
-    use super::TokioDeps;
+    use super::{TokioDeps, create_tokio_builder};
+    use crate::handlers::TransportHandler;
     use crate::pipeline::Pipeline;
     use crate::{HttpClient, HttpResponseBuilder};
 
@@ -363,17 +371,27 @@ mod tests {
             reservations.lock().unwrap().push(min_bytes);
             GlobalPool::new().reserve(min_bytes)
         });
-        let client = HttpClient::builder_tokio(TokioDeps {
-            clock: Clock::new_frozen(),
-            memory: OpaqueMemory::new(memory),
-        })
+        let client = create_tokio_builder(
+            TokioDeps {
+                clock: Clock::new_frozen(),
+                memory: OpaqueMemory::new(memory),
+            },
+            |cx| {
+                // Exercise both factory inputs without initializing TLS or opening sockets.
+                assert!(cx.body_builder.reserve(17).capacity() >= 17);
+                assert!(cx.extras.memory.reserve(19).capacity() >= 19);
+                TransportHandler::new(FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().build()))
+            },
+        )
         .minimal_pipeline()
         .build();
+        let cloned = client.clone();
 
         // Different ordinary requests distinguish the access paths, not pool boundaries.
         assert!(client.reserve(29).capacity() >= 29);
         assert!(client.memory().reserve(31).capacity() >= 31);
-        assert_eq!(*reservations.lock().unwrap(), [29, 31]);
+        assert!(cloned.reserve(37).capacity() >= 37);
+        assert_eq!(*reservations.lock().unwrap(), [17, 19, 29, 31, 37]);
     }
 
     #[cfg_attr(miri, ignore)]

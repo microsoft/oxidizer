@@ -167,17 +167,17 @@ mod tests {
     use std::ffi::c_void;
     use std::fmt::Debug;
     use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
     use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
     use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
-    use thread_aware::{Relocator, ThreadAware};
+    use thread_aware::{Relocator, ThreadAware, unaware};
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
@@ -215,6 +215,38 @@ mod tests {
 
         let _body_pool_buffer = custom_deps.memory.reserve(1);
         let _transport_pool_buffer = custom_deps.extras.memory().reserve(1);
+    }
+
+    /// Observes provider forwarding and cloning without calling the Windows API.
+    #[test]
+    fn client_and_clone_use_the_supplied_provider() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = OpaqueMemory::new(CallbackMemory::new(
+            unaware(Arc::clone(&reservations)),
+            |reservations, min_bytes| {
+                reservations.lock().unwrap().push(min_bytes);
+                GlobalPool::new().reserve(min_bytes)
+            },
+        ));
+        let deps = WinHttpDeps::builder(clock(), memory, Sink::noop()).build();
+        let custom_deps = into_custom_deps(deps.clone());
+        // The transport reads its provider from extras, while fetch uses the common dependency.
+        assert!(custom_deps.memory.reserve(17).capacity() >= 17);
+        assert!(custom_deps.extras.memory().reserve(19).capacity() >= 19);
+
+        let (facade, opens, closes) = successful_bindings_facade(1);
+        let client = create_builder_with_bindings(deps, facade).minimal_pipeline().build();
+        let cloned = client.clone();
+
+        // Different ordinary requests identify each access path, not pool boundaries.
+        assert!(client.reserve(29).capacity() >= 29);
+        assert!(client.memory().reserve(31).capacity() >= 31);
+        assert!(cloned.reserve(37).capacity() >= 37);
+        assert_eq!(*reservations.lock().unwrap(), [17, 19, 29, 31, 37]);
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        drop(cloned);
+        drop(client);
+        assert_eq!(closes.load(Ordering::SeqCst), 1);
     }
 
     #[test]
