@@ -133,6 +133,7 @@ mod tests {
         }
     }
 
+    /// Records reservations made by the unit-test memory provider.
     #[derive(Clone, Debug)]
     struct CountingMemoryData {
         inner: GlobalPool,
@@ -145,11 +146,15 @@ mod tests {
         }
     }
 
+    /// Counts a reservation and forwards it to the provider that supplies test memory.
     fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
+        // The counter and its loads use SeqCst so reservation observations share one
+        // global order across test threads. The total is the only state under observation.
         data.reservations.fetch_add(1, Ordering::SeqCst);
         data.inner.reserve(min_bytes)
     }
 
+    /// Creates an observable memory provider for encoding unit tests.
     fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>) {
         let reservations = Arc::new(AtomicUsize::new(0));
         let data = CountingMemoryData {
@@ -218,7 +223,7 @@ mod tests {
         let (memory, reservations) = counting_memory();
         let encoder = PostcardEncoder::new(memory);
 
-        _ = encoder.encode(&42u32).expect("encode should succeed");
+        _ = encoder.encode(&42u32).unwrap();
 
         assert!(
             reservations.load(Ordering::SeqCst) > 0,
@@ -231,7 +236,7 @@ mod tests {
         let (memory, reservations) = counting_memory();
         let codec = PostcardCodec::new(memory);
 
-        _ = codec.encode(&42u32).expect("encode should succeed");
+        _ = codec.encode(&42u32).unwrap();
 
         assert!(
             reservations.load(Ordering::SeqCst) > 0,

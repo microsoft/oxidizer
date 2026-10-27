@@ -97,9 +97,11 @@ async fn serialize_encode_decode_returns_correct_output() {
 
     // Verify the round-trip: value was serialized, stored, fetched, and deserialized correctly.
     assert_eq!(*actual_value.value(), expected_value);
+    // Separate codec checks prove key and value provider forwarding.
+    // This pipeline check only observes aggregate reservation activity.
     assert!(
         reservations.load(Ordering::SeqCst) >= 2,
-        "serialization should reserve key and value memory from the caller provider"
+        "serialization pipeline should reserve memory from the caller provider"
     );
 }
 
