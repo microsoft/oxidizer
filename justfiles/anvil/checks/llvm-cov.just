@@ -6,14 +6,12 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Affected tier. Runs on the pinned nightly toolchain: cargo-llvm-cov
-# only sets the `cfg(coverage_nightly)` that gates the workspace's
-# `#[cfg_attr(coverage_nightly, coverage(off))]` exclusions when it
-# instruments on nightly. On stable those exclusions are inert and
-# untestable code (process-shelling error paths, script-only crates,
-# etc.) wrongly counts against coverage.
+# Affected tier. cargo-coverage-gate selects the pinned nightly for every
+# collection subprocess through this Cargo invocation. It owns nextest
+# execution, released-surface filtering, stable LCOV publication, threshold
+# evaluation, and the Windows error-206 response-file recovery.
 
-# Measure test coverage and enforce the coverage gate.
+# Measure released-surface coverage and enforce the coverage gate.
 [group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
@@ -25,225 +23,19 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         Write-Host 'anvil-llvm-cov: no affected packages; skipping'
         exit 0
     }
-    $pkg = @(if ($include) { -split $include } else { '--workspace' })
-    $allTestPkg = $pkg
-    # Separate coverage-opted-out packages from the measured set. A crate that
-    # is entirely `#![cfg_attr(coverage_nightly, coverage(off))]` (e.g. a
-    # script-only crate) compiles to a test binary with no __llvm_covmap,
-    # and `llvm-cov export` aborts with "no coverage data found" whenever
-    # such a package is the *only* object in the report (e.g. it is the
-    # sole affected crate). Opt-out is declared via
-    # [package.metadata.coverage-gate] min-lines-percent = 0 -- the same
-    # marker cargo-coverage-gate already treats as NO DATA -> OK. Opted-out
-    # packages still run through plain nextest; opting out of measurement
-    # never opts a changed package out of tests.
-    $testOnlyPkg = [System.Collections.Generic.List[string]]::new()
-    if ($pkg -contains '--package') {
-        $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error 'anvil-llvm-cov: cargo metadata failed'
-            exit $LASTEXITCODE
-        }
-        $optedOut = @(
-            ($metadataJson | ConvertFrom-Json).packages |
-                Where-Object { $null -ne $_.metadata.'coverage-gate'.'min-lines-percent' -and [double]$_.metadata.'coverage-gate'.'min-lines-percent' -eq 0 } |
-                ForEach-Object { $_.name }
-        )
-        if ($optedOut.Count -gt 0) {
-            $filtered = [System.Collections.Generic.List[string]]::new()
-            for ($i = 0; $i -lt $pkg.Count; $i++) {
-                # Impact emits version-qualified specs (name@version);
-                # compare the bare name against the opt-out set, but keep
-                # the full name@version token in $pkg so the llvm-cov
-                # measurement below resolves unambiguously.
-                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains (($pkg[$i + 1] -split '@', 2)[0])) {
-                    $testOnlyPkg.Add('--package')
-                    $testOnlyPkg.Add($pkg[$i + 1])
-                    $i++
-                    continue
-                }
-                $filtered.Add($pkg[$i])
-            }
-            $pkg = $filtered.ToArray()
-        }
-    }
-    $configs = @(
-        @{ name = 'all-features'; flag = '--all-features' },
-        @{ name = 'no-default';   flag = '--no-default-features' }
+    # An empty selector list is cargo-coverage-gate's full-workspace mode.
+    # Impact-selected values remain version-qualified (`name@version`) so
+    # collection resolves the intended workspace member unambiguously.
+    $packageArgs = @(if ($include -and $include -ne '--workspace') { -split $include })
+    $collectionArgs = @(
+        '--configuration', 'all-features',
+        '--configuration', 'no-default-features',
+        '--coverage-dir', 'target/coverage',
+        # LLVM produces unusable coverage profiles on Windows ARM, so
+        # coverage-gate runs that target's tests without measuring coverage.
+        '--no-coverage-target', 'aarch64-pc-windows-msvc'
     )
-    # cargo-llvm-cov doesn't work on aarch64-pc-windows-msvc: the
-    # llvm-profdata that ships with the rust toolchain there fails
-    # to merge the .profraw set ("no profile can be merged"). Fall
-    # back to plain `cargo nextest run` on that target so we still
-    # get test execution; coverage data from this leg wouldn't have
-    # been used anyway (coverage upload is gated on Linux only).
-    if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
-        Write-Host 'anvil-llvm-cov: aarch64-pc-windows-msvc -- skipping coverage; running plain nextest'
-        foreach ($cfg in $configs) {
-            & cargo '+{{ rust_nightly }}' nextest run @allTestPkg $cfg.flag --no-tests=pass --locked
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
-        exit 0
-    }
-    if ($testOnlyPkg.Count -gt 0) {
-        Write-Host 'anvil-llvm-cov: running tests without coverage for opted-out packages'
-        foreach ($cfg in $configs) {
-            & cargo '+{{ rust_nightly }}' nextest run @testOnlyPkg $cfg.flag --no-tests=pass --locked
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
-    }
-    if ($pkg.Count -eq 0 -and $testOnlyPkg.Count -gt 0) {
-        Write-Host 'anvil-llvm-cov: all affected packages opted out of coverage; tests completed'
-        exit 0
-    }
-    # The *report* output directory (target/coverage/) is something we
-    # choose and must exist before --output-path runs.
-    [System.IO.Directory]::CreateDirectory('target/coverage') | Out-Null
-    function Invoke-AnvilLcovReport {
-        param(
-            [Parameter(Mandatory)][string] $OutputPath,
-            [Parameter(Mandatory)][string[]] $PackageArgs
-        )
-
-        # Capture cargo-llvm-cov's diagnostic because it is the only place its
-        # private object discovery result is exposed. Keep displaying it so a
-        # non-retriable failure has the same evidence as a direct invocation.
-        $reportOutput = @()
-        $reportExitCode = 1
-        & cargo '+{{ rust_nightly }}' llvm-cov report @PackageArgs --lcov --output-path $OutputPath 2>&1 |
-            Tee-Object -Variable reportOutput |
-            ForEach-Object { Write-Host $_.ToString() }
-        $reportExitCode = $LASTEXITCODE
-        if ($reportExitCode -eq 0) { return 0 }
-
-        $reportText = ($reportOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-        if (-not $IsWindows -or $reportText -notmatch '\(os error 206\)') {
-            return $reportExitCode
-        }
-
-        # Best-effort bridge until cargo-llvm-cov uses response files itself.
-        # Its process diagnostic is shell-shaped text rather than a stable API,
-        # so fail closed if the expected llvm-cov export form changes.
-        $failedProcess = [regex]::Match(
-            $reportText,
-            '(?s)could not execute process `(?<command>.*?)` \(never executed\).*?\(os error 206\)'
-        )
-        if (-not $failedProcess.Success) {
-            Write-Warning 'anvil-llvm-cov: could not parse the Windows error 206 process diagnostic'
-            return $reportExitCode
-        }
-        $command = [regex]::Match(
-            $failedProcess.Groups['command'].Value,
-            '(?s)^(?:"(?<quoted>[^"]+)"|''(?<singleQuoted>[^'']+)''|(?<bare>\S+))\s+export\s+(?<arguments>.*)$'
-        )
-        if (-not $command.Success) {
-            Write-Warning 'anvil-llvm-cov: the failed process was not an llvm-cov export command'
-            return $reportExitCode
-        }
-        $llvmCov = if ($command.Groups['quoted'].Success) {
-            $command.Groups['quoted'].Value
-        } elseif ($command.Groups['singleQuoted'].Success) {
-            $command.Groups['singleQuoted'].Value
-        } else {
-            $command.Groups['bare'].Value
-        }
-        if ([System.IO.Path]::GetFileNameWithoutExtension($llvmCov) -ne 'llvm-cov') {
-            Write-Warning 'anvil-llvm-cov: the failed export executable was not named llvm-cov'
-            return $reportExitCode
-        }
-        $responsePath = [System.IO.Path]::GetFullPath("$OutputPath.llvm-cov.rsp")
-        $responseArguments = [regex]::Replace(
-            $command.Groups['arguments'].Value,
-            "'(?<value>[^']*)'",
-            { param($match) '"' + $match.Groups['value'].Value.Replace('"', '\"') + '"' }
-        )
-        try {
-            [System.IO.File]::WriteAllText(
-                $responsePath,
-                $responseArguments,
-                [System.Text.UTF8Encoding]::new($false)
-            )
-            Write-Host 'anvil-llvm-cov: retrying Windows error 206 with an LLVM response file'
-            & $llvmCov export "@$responsePath" > $OutputPath
-            $retryExitCode = $LASTEXITCODE
-            if ($retryExitCode -ne 0) {
-                Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
-            }
-            return $retryExitCode
-        } finally {
-            Remove-Item -LiteralPath $responsePath -Force -ErrorAction SilentlyContinue
-        }
-    }
-    # Instrument and run tests once per feature configuration, each as a
-    # SELF-CONTAINED llvm-cov run that exports only its own config's
-    # objects. Dual config (--all-features + --no-default-features) catches
-    # lines that only execute under one feature configuration (feature-gated
-    # code dead with default features off, plus default-only code paths).
-    #
-    # Crucially this does NOT merge both configs' objects into one report.
-    # A single `llvm-cov report` over the union shells one `--object=` per
-    # test binary and reaches the Windows CreateProcess command-line limit
-    # sooner. A sufficiently large single config can still overflow, so the
-    # report helper retries that specific failure through a response file.
-    # The two configs are reconciled *downstream* instead of via a merged
-    # report:
-    #   * cargo-coverage-gate merges the two lcov files at the line level
-    #     (per-line counts summed) -- this is the gate;
-    #   * Codecov ingests both lcov files (it coalesces uploads);
-    #   * ADO's PublishCodeCoverageResults coalesces both lcov files.
-    # This also avoids needing a platform-specific lcov merger (`lcov -a`
-    # is Linux-only). HTML output is dropped -- it had no cloud-workflow
-    # consumer and would reintroduce the overflowing union report; run
-    # `cargo llvm-cov --html` ad hoc for a local viewer.
-    #
-    # A full `llvm-cov clean` between configs wipes the prior config's
-    # objects so each `report` is scoped to the current config only.
-    #
-    # Note: nextest's exit-4 ("no tests to run") IS treated as a failure
-    # here -- a llvm-cov run that finds no tests almost always means a
-    # config mistake (wrong package filter, missing test target, etc.), not
-    # a legitimate empty set. anvil-miri is the exception (see its comment).
-    foreach ($cfg in $configs) {
-        cargo '+{{ rust_nightly }}' llvm-cov clean --workspace
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg $cfg.flag --locked --no-report
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        # The same lcov report feeds the gate, Codecov, and ADO. On Windows,
-        # retry only CreateProcess error 206 through llvm-cov's response-file
-        # support; all other cargo-llvm-cov failures propagate unchanged.
-        $reportExitCode = Invoke-AnvilLcovReport "target/coverage/lcov-$($cfg.name).info" $pkg
-        if ($reportExitCode -ne 0) { exit $reportExitCode }
-    }
-    # Local coverage gate: cargo-coverage-gate compares per-package line
-    # coverage against per-package thresholds carried in Cargo.toml
-    # ([package.metadata.coverage-gate] min-lines-percent, falling back to
-    # [workspace.metadata.coverage-gate], then the built-in 100.0 default).
-    # It merges the two per-config lcovs (line-level) so the gate sees the
-    # union coverage. Exits non-zero when any gated package falls below its
-    # threshold, so coverage regressions fail the PR locally and in cloud
-    # workflows -- the Codecov upload stays purely for display, not the gate.
-    #
-    # Scope the gate to the same package set we measured. When impact
-    # scoping is active, $pkg holds `--package X@ver ...` (already opt-out
-    # filtered above); pass those through so the gate only gates packages
-    # that were actually instrumented -- otherwise unmeasured members would
-    # report NO DATA and fail the gate. When unscoped, $pkg is `--workspace`
-    # (no gate flag); drop it so the gate defaults to every member.
-    #
-    # cargo-coverage-gate keys on bare package names from cargo metadata, so
-    # strip the @version qualifier the measurement used for disambiguation.
-    $gateArgs = [System.Collections.Generic.List[string]]::new()
-    for ($i = 0; $i -lt $pkg.Count; $i++) {
-        if ($pkg[$i] -eq '--workspace') { continue }
-        if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-            $gateArgs.Add('--package')
-            $gateArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
-            $i++
-            continue
-        }
-        $gateArgs.Add($pkg[$i])
-    }
-    & cargo {{_anvil_stable_toolchain_args}} coverage-gate @gateArgs --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info
+    & cargo '+{{ rust_nightly }}' coverage-gate run @packageArgs @collectionArgs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-test members (shared with scheduled-test) ---
