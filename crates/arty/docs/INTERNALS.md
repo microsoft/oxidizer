@@ -39,6 +39,21 @@ barrier because a pool thread may still be running thread-local destructors.
 Blocking-thread membership remains registered through those destructors so a
 runtime owner released there requests shutdown without waiting on itself.
 
+### Relocated result delivery
+
+Worker schedulers relocate the explicit input for `spawn_anywhere` and
+`spawn_at` before the task starts. The dispatcher also records the worker that
+executes the task on the returned join handle. This registration is optional,
+so ordinary join handles keep a `Send` result bound without requiring
+`ThreadAware`.
+
+When an Arty worker polls a registered join to successful completion, the join
+relocates the result from the execution worker to the receiving worker. Polling
+the join outside an Arty worker returns the result without relocation.
+Runtime-wide submissions use the ordinary path and do not register result
+relocation. See the [scheduling guide](../src/documentation/scheduling.rs) for
+the public contract.
+
 ### Shutdown guard tests
 
 Tests that consume or drop a runtime owner on an async worker must retain a

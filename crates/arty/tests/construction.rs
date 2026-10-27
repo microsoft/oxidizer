@@ -8,8 +8,52 @@
 
 use std::error::Error as StdError;
 
-use arty::runtime::{BlockingPoolPolicy, Error, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, WorkersPolicy};
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
+
+#[test]
+fn monitor_policy_defaults_to_enabled() {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .monitor(MonitorPolicy::default())
+        .build()
+        .unwrap();
+
+    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn explicit_monitor_policies_preserve_runtime_behavior() {
+    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
+        let runtime = Runtime::builder()
+            .workers(WorkersPolicy::exactly(1))
+            .monitor(policy)
+            .build()
+            .unwrap();
+
+        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
+        runtime.stop().unwrap();
+    }
+}
+
+#[test]
+fn default_runtime_construction_uses_one_worker() {
+    for runtime in [
+        Runtime::new().unwrap(),
+        Runtime::builder().build().unwrap(),
+        Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
+    ] {
+        runtime
+            .scheduler()
+            .block_on(async |cx| {
+                let workers: Vec<_> = cx.control().workers().into_iter().collect();
+                assert_eq!(workers, vec![cx.thread()]);
+            })
+            .unwrap();
+        runtime.stop().unwrap();
+    }
+}
 
 #[test]
 fn zero_counts_are_rejected_when_the_runtime_is_built() {

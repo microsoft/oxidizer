@@ -5,7 +5,7 @@ use std::num::{NonZero, NonZeroUsize};
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::BlockingPoolPolicy;
+use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions};
 use crate::runtime::error::Error;
 
 /// A worker-count policy for the async runtime.
@@ -14,7 +14,7 @@ use crate::runtime::error::Error;
 /// one worker can share a processor when an exact count exceeds the available
 /// processor count. Pass a policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
-/// [`Default`] lets Arty choose the count. Use [`at_most`](Self::at_most) for
+/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) for
 /// an upper bound, [`exactly`](Self::exactly) for a fixed worker count, or
 /// [`all`](Self::all) to use all available processors.
 ///
@@ -28,7 +28,7 @@ use crate::runtime::error::Error;
 ///
 /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
 /// ```
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkersPolicy(WorkersPolicyKind);
 
 impl WorkersPolicy {
@@ -113,8 +113,16 @@ impl WorkersPolicy {
                     .expect("the requested count fits in the available processor set");
                 Ok(WorkerPlacements::from_selected(&selected))
             }
-            WorkersPolicyKind::Auto | WorkersPolicyKind::All => Ok(WorkerPlacements::from_selected(available)),
+            WorkersPolicyKind::All => Ok(WorkerPlacements::from_selected(available)),
         }
+    }
+}
+
+impl Default for WorkersPolicy {
+    fn default() -> Self {
+        // Keep implicit runtime construction independent of host processor count.
+        // Applications opt into more worker threads when they need them.
+        Self::exactly(1)
     }
 }
 
@@ -156,21 +164,20 @@ impl IntoIterator for WorkerPlacements {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkersPolicyKind {
-    #[default]
-    Auto,
     Exactly(usize),
     AtMost(usize),
     All,
 }
 
 /// Resource settings validated during runtime construction.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct RuntimeConfig {
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
+    pub(crate) monitor_options: MonitorOptions,
 }
 
 impl Default for RuntimeConfig {
@@ -181,6 +188,7 @@ impl Default for RuntimeConfig {
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
+            monitor_options: MonitorOptions::default(),
         }
     }
 }
@@ -265,9 +273,9 @@ mod tests {
     }
 
     #[test]
-    fn automatic_count_uses_all_available_processors() {
+    fn default_count_uses_one_processor() {
         let available = fake_processors(4);
-        assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), available.len(),);
+        assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), 1);
     }
 
     #[test]

@@ -15,10 +15,10 @@
 
 Single-threaded, thread-aware application runtime.
 
-An Arty runtime can have several workers, but each async task stays on one
-worker throughout its life. This lets it use thread-local and non-[`Send`][__link0]
-state across awaits. Thread-aware values can be explicitly relocated when
-starting new work on another worker.
+An Arty runtime defaults to one worker and can be configured with several,
+but each async task stays on one worker throughout its life. This lets it use
+thread-local and non-[`Send`][__link0] state across awaits. Thread-aware values can be
+explicitly relocated when starting new work on another worker.
 
 There is no process-global runtime: each instance owns its workers and
 services. Workers use thread-local bookkeeping rather than a global
@@ -127,10 +127,13 @@ it is not part of the public API available to applications.
 
 ## Features
 
-The default feature set enables `rt` and `macros`.
+The default feature set enables `rt`, `macros`, and `monitor`.
 
 * **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 * **`macros`** - Enables [`main`][__link25] and [`test`][__link26], and implies `rt`.
+* **`monitor`** - Enables the Seismograph monitor dependency. It forwards
+  `performables` telemetry support when `performables` is enabled. It does
+  not start monitoring or emit new telemetry.
 * **`time`** - Enables clocks, timers, and timeouts.
 * **`test-util`** - Enables testing utilities, including [`ClockControl`][__link27] with `time`.
   Enable it in dev-dependencies, not production dependencies.
@@ -141,7 +144,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbxDG2VhA1Ub8b-Ef6DhM45acbiLTIIjihtHYbYo-yVm57hulhZIOCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4wgmhvYnNlcnZlZGYwLjI5LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbCvI0paKaZdgbXUOp2RZSfPsbllXwkvkd25AbHDOBNpqu_kdhZIOCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4wgmhvYnNlcnZlZGYwLjI5LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock

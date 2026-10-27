@@ -16,6 +16,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
@@ -93,6 +94,7 @@ pub(crate) struct AsyncWorker {
     // System timer advancement and I/O wait accounting require precise elapsed time.
     physical_time: SimpleClock,
     signal: Arc<WorkerSignal>,
+    monitor_options: MonitorOptions,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -110,6 +112,7 @@ impl AsyncWorker {
         blocking_worker: &BlockingWorker,
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
+        monitor_options: MonitorOptions,
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -136,6 +139,7 @@ impl AsyncWorker {
             time,
             physical_time: SimpleClock::new_system(),
             signal,
+            monitor_options,
             _single_threaded: PhantomData,
         }
     }
@@ -144,6 +148,9 @@ impl AsyncWorker {
     /// The configuration-facing `RuntimeBuilder` delegates construction to bootstrap.
     /// After this method returns, the thread will end.
     pub(crate) fn run(&mut self) {
+        // Keep the worker-owned policy available at the boundary where monitoring
+        // will be attached in a later stage.
+        let _monitor_policy = self.monitor_options.policy();
         self.execute_phase();
     }
 
@@ -329,6 +336,7 @@ mod tests {
     use super::*;
     use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
+    use crate::runtime::config::MonitorPolicy;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::execution::RemoteFutureFactory;
@@ -367,6 +375,22 @@ mod tests {
             ),
             Duration::ZERO
         );
+    }
+
+    #[test]
+    fn worker_preserves_monitor_options() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let signal = Arc::new(WorkerSignal::default());
+        let worker = test_worker_with_monitor_options(
+            command_tx,
+            command_rx,
+            test_blocking_worker(),
+            InactiveClock::default(),
+            signal,
+            MonitorPolicy::disabled().into(),
+        );
+
+        assert!(!worker.monitor_options.policy().is_enabled());
     }
 
     #[test]
@@ -622,6 +646,17 @@ mod tests {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
     ) -> AsyncWorker {
+        test_worker_with_monitor_options(command_tx, command_rx, blocking, clock, signal, MonitorOptions::default())
+    }
+
+    fn test_worker_with_monitor_options(
+        command_tx: channel::Sender<AsyncWorkerCommand>,
+        command_rx: channel::Receiver<AsyncWorkerCommand>,
+        blocking: (Arc<BlockingWorker>, Shutdown),
+        clock: InactiveClock,
+        signal: Arc<WorkerSignal>,
+        monitor_options: MonitorOptions,
+    ) -> AsyncWorker {
         let (blocking_worker, shutdown) = blocking;
         let sink = Sink::noop();
         let thread = ThreadBuilder::default().build(thread::current().id());
@@ -642,7 +677,17 @@ mod tests {
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        AsyncWorker::new(command_rx, dispatcher, thread, sink, io, blocking_worker.as_ref(), clock, signal)
+        AsyncWorker::new(
+            command_rx,
+            dispatcher,
+            thread,
+            sink,
+            io,
+            blocking_worker.as_ref(),
+            clock,
+            signal,
+            monitor_options,
+        )
     }
 
     fn replenishing_command(sender: channel::Sender<AsyncWorkerCommand>, processed: Arc<AtomicUsize>) -> AsyncWorkerCommand {

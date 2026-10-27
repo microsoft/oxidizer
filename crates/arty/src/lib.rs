@@ -13,10 +13,10 @@
 
 //! Single-threaded, thread-aware application runtime.
 //!
-//! An Arty runtime can have several workers, but each async task stays on one
-//! worker throughout its life. This lets it use thread-local and non-[`Send`]
-//! state across awaits. Thread-aware values can be explicitly relocated when
-//! starting new work on another worker.
+//! An Arty runtime defaults to one worker and can be configured with several,
+//! but each async task stays on one worker throughout its life. This lets it use
+//! thread-local and non-[`Send`] state across awaits. Thread-aware values can be
+//! explicitly relocated when starting new work on another worker.
 //!
 //! There is no process-global runtime: each instance owns its workers and
 //! services. Workers use thread-local bookkeeping rather than a global
@@ -131,10 +131,13 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `monitor`.
 //!
 //! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
+//! - **`monitor`** - Enables the Seismograph monitor dependency. It forwards
+//!   `performables` telemetry support when `performables` is enabled. It does
+//!   not start monitoring or emit new telemetry.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -162,15 +165,19 @@ use arty_io_core as _;
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
 ///   are available, multiple worker threads share each processor. Zero fails at
 ///   construction.
+/// - `workers = all` starts one async worker per available processor.
+/// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
+///   policy. The default is `enabled`.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// The default is one worker, for both applications and tests.
 /// Each worker uses an operating-system thread and its configured stack.
 /// Large counts can exceed operating-system thread or memory limits.
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
 /// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an at-most/all-workers policy must be configured.
+/// or an at-most worker policy must be configured.
 ///
 /// # Panics
 ///
@@ -197,6 +204,15 @@ use arty_io_core as _;
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
 /// # }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
+/// Disable monitoring for the runtime:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(monitor = disabled)]
+/// async fn main(_cx: arty::task::Builtins) {}
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -228,7 +244,10 @@ pub use arty_macros::main;
 /// the test harness runs it.
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// option also applies. By default, a test uses one worker.
+/// and `monitor` options also apply. By default, a test uses one worker and
+/// selects the disabled monitoring policy. This keeps future monitor activation
+/// out of ordinary tests. A test that exercises monitoring must opt in with
+/// `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -274,6 +293,14 @@ pub use arty_macros::main;
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
 /// }
+/// ```
+///
+/// Enable monitoring for a test that exercises monitoring behavior:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(monitor = enabled)]
+/// async fn monitored(_cx: arty::task::Builtins) {}
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

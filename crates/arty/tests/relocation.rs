@@ -102,6 +102,179 @@ fn relocating_builtins_leaves_shared_source_clones_on_the_source_worker() {
     runtime.stop().unwrap();
 }
 
+// Records the relocation coordinates and callback thread for both task input
+// delivery and successful result delivery.
+struct ReturnedProbe {
+    thread: arty::core::Thread,
+    relocations: Vec<(Option<arty::core::Thread>, arty::core::Thread, ThreadId)>,
+}
+
+impl ThreadAware for ReturnedProbe {
+    fn relocate(&mut self, source: Option<&arty::core::Thread>, destination: &arty::core::Thread) {
+        self.thread = destination.clone();
+        self.relocations
+            .push((source.cloned(), destination.clone(), thread::current().id()));
+    }
+}
+
+#[test]
+fn spawn_anywhere_relocates_results_on_the_source_worker() {
+    for (runtime, workers) in [
+        (Runtime::new().unwrap(), 1),
+        (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
+    ] {
+        runtime
+            .scheduler()
+            .block_on(async move |cx| {
+                let source = cx.thread().clone();
+                let tasks = (0..workers).map(|_| {
+                    cx.scheduler().spawn_anywhere(
+                        ReturnedProbe {
+                            thread: source.clone(),
+                            relocations: Vec::new(),
+                        },
+                        |probe| async move {
+                            testing_aids::YieldFuture::default().await;
+                            probe
+                        },
+                    )
+                });
+                let mut executed_elsewhere = false;
+                for result in join_all(tasks).await {
+                    let result = result.unwrap();
+                    assert_eq!(result.thread, source);
+                    assert_eq!(result.relocations.len(), 2);
+                    let (input_source, executed, input_callback) = &result.relocations[0];
+                    let (output_source, returned, output_callback) = &result.relocations[1];
+                    assert_eq!(input_source.as_ref(), Some(&source));
+                    assert_eq!(*input_callback, executed.id());
+                    assert_eq!(output_source.as_ref(), Some(executed));
+                    assert_eq!(returned, &source);
+                    assert_eq!(*output_callback, source.id());
+                    executed_elsewhere |= executed != &source;
+                }
+                assert_eq!(executed_elsewhere, workers > 1);
+            })
+            .unwrap();
+        runtime.stop().unwrap();
+    }
+}
+
+#[test]
+fn spawn_at_relocates_results_to_the_source_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let source = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let destination = source
+        .control()
+        .workers()
+        .into_iter()
+        .find(|worker| worker != &source.thread())
+        .cloned()
+        .unwrap();
+    let task = source.scheduler().spawn_at(
+        &destination,
+        ReturnedProbe {
+            thread: source.thread().clone(),
+            relocations: Vec::new(),
+        },
+        |probe| async move { probe },
+    );
+
+    source
+        .scheduler()
+        .spawn(async move |cx| {
+            let result = task.await.unwrap();
+            assert_eq!(&result.thread, cx.thread());
+            assert_eq!(result.relocations.len(), 2);
+            let (input_source, executed, input_callback) = &result.relocations[0];
+            let (output_source, returned, output_callback) = &result.relocations[1];
+            assert_eq!(input_source.as_ref(), Some(cx.thread()));
+            assert_eq!(executed, &destination);
+            assert_eq!(*input_callback, destination.id());
+            assert_eq!(output_source.as_ref(), Some(&destination));
+            assert_eq!(returned, cx.thread());
+            assert_eq!(*output_callback, cx.thread().id());
+        })
+        .join()
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+// Return Builtins and schedule child work to prove that its services bind to
+// the worker that receives the result.
+#[test]
+fn spawn_anywhere_returns_builtins_bound_to_the_source_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().clone();
+            for task in (0..2).map(|_| cx.scheduler().spawn_anywhere(cx.clone(), |moved| async move { moved })) {
+                let returned = task.await.unwrap();
+                assert_eq!(returned.thread(), &source);
+                assert_eq!(
+                    returned.scheduler().spawn(async |child| child.thread().id()).await.unwrap(),
+                    source.id()
+                );
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+// Poll the join on a different worker to prove that the receiving worker,
+// rather than the submitting worker, selects the result destination.
+#[test]
+fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let source = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let destination = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    assert_ne!(source.thread(), destination.thread());
+    let task = source.scheduler().spawn_anywhere(
+        ReturnedProbe {
+            thread: source.thread().clone(),
+            relocations: Vec::new(),
+        },
+        |probe| async move { probe },
+    );
+    destination
+        .scheduler()
+        .spawn(async move |cx| {
+            let result = task.await.unwrap();
+            assert_eq!(&result.thread, cx.thread());
+            assert_eq!(result.relocations.len(), 2);
+            let (_, returned, callback) = &result.relocations[1];
+            assert_eq!(returned, cx.thread());
+            assert_eq!(*callback, thread::current().id());
+        })
+        .join()
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+// Poll outside the runtime to prove that result relocation requires a receiving
+// Arty worker.
+#[test]
+fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let source = runtime.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let result = scheduler
+        .spawn_anywhere(
+            ReturnedProbe {
+                thread: source.clone(),
+                relocations: Vec::new(),
+            },
+            |probe| async move { probe },
+        )
+        .join()
+        .unwrap();
+    assert_eq!(result.thread, source);
+    assert_eq!(result.relocations.len(), 1);
+    assert_eq!(result.relocations[0].2, source.id());
+    runtime.stop().unwrap();
+}
+
 #[cfg(not(miri))]
 #[test]
 fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
