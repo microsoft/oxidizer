@@ -13,7 +13,7 @@
 
 </div>
 
-An HTTP client for resilient and observable services.
+A fast, safe HTTP client that works across runtimes and transports.
 
 ```rust
 let response = client.get("https://example.com").fetch().await?;
@@ -713,7 +713,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbB5_dLcqT3BAbt_7HCfT5w3EbbQxRTsKGBHkbWp9HKW56UwJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0ln95Baxpa0b38KaVl3eFr0bei6yo0MfQlMbmdeNHfsx5EJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
  [__link0]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient::post

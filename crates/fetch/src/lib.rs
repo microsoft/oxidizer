@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! An HTTP client for resilient and observable services.
+//! A fast, safe HTTP client that works across runtimes and transports.
 //!
 //! ```
 //! # async fn example(client: &fetch::HttpClient) -> fetch::Result<()> {
