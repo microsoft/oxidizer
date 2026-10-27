@@ -8,4 +8,4 @@
 
 mod preparation;
 
-pub(crate) use preparation::{DeferredTask, RemoteFutureFactory, call_governed, prepare_blocking, prepare_remote};
+pub(crate) use preparation::{DeferredTask, RemoteFutureFactory, prepare_blocking, prepare_remote, with_panic_notifier};

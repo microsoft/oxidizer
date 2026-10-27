@@ -11,7 +11,7 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::{DeferredTask, call_governed};
+use crate::task::execution::{DeferredTask, with_panic_notifier};
 use crate::task::join::JoinHandle;
 
 thread_local! {
@@ -223,6 +223,7 @@ impl Scheduler {
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
             let (result_tx, result_rx) = current.results.channel();
+            let result_tx = with_panic_notifier(builtins.dispatcher(), result_tx);
             let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add_with_remote_result(inner, options, result_tx);
@@ -415,10 +416,7 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let dispatcher = self.dispatcher.clone();
-        self.binding
-            .blocking_worker
-            .spawn_blocking(move || call_governed(&dispatcher, body))
+        self.binding.blocking_worker.spawn_blocking(body, self.dispatcher.panic_notifier())
     }
 
     #[cfg(test)]

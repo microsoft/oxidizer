@@ -56,7 +56,13 @@ impl Pool {
     #[must_use]
     pub fn channel<R: Send + 'static>(&self) -> (Sender<R>, JoinHandle<R>) {
         let (tx, rx) = self.events.rent();
-        (Sender { tx: Some(tx) }, JoinHandle { rx })
+        (
+            Sender {
+                tx: Some(tx),
+                panic_notifier: None,
+            },
+            JoinHandle { rx },
+        )
     }
 }
 
@@ -99,12 +105,24 @@ impl<R: Send + 'static> Debug for JoinHandle<R> {
 /// The sending endpoint for a [`JoinHandle`].
 pub struct Sender<R: Send + 'static> {
     tx: Option<PooledSender<TaskResult<R>>>,
+    panic_notifier: Option<task::Waker>,
 }
 
 impl<R: Send + 'static> Sender<R> {
-    fn send(mut self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
+    fn send(&mut self, result: TaskResult<R>) -> Result<(), TaskPanicPayload> {
         let tx = self.tx.take().expect("a remote task sender publishes at most one result");
         catch_unwind(AssertUnwindSafe(|| tx.send(result)))
+    }
+
+    /// Configures a runtime-integration notification for a captured task panic.
+    ///
+    /// The sender wakes the notifier after publishing the panic result.
+    /// Applications should use `arty` instead of this integration API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_panic_notifier(mut self, notifier: task::Waker) -> Self {
+        self.panic_notifier = Some(notifier);
+        self
     }
 
     /// Sends a successfully completed result.
@@ -112,7 +130,7 @@ impl<R: Send + 'static> Sender<R> {
     /// # Errors
     ///
     /// Returns a panic payload if notifying the result receiver panics.
-    pub fn completed(self, result: R) -> Result<(), TaskPanicPayload> {
+    pub fn completed(mut self, result: R) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Completed(result))
     }
 
@@ -121,8 +139,12 @@ impl<R: Send + 'static> Sender<R> {
     /// # Errors
     ///
     /// Returns a panic payload if notifying the result receiver panics.
-    pub fn panicked(self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
-        self.send(TaskResult::Panicked(panic))
+    pub fn panicked(mut self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
+        let delivery = self.send(TaskResult::Panicked(panic));
+        if let Some(notifier) = self.panic_notifier.take() {
+            notifier.wake();
+        }
+        delivery
     }
 
     /// Sends executor shutdown as the task outcome.
@@ -130,7 +152,7 @@ impl<R: Send + 'static> Sender<R> {
     /// # Errors
     ///
     /// Returns a panic payload if notifying the result receiver panics.
-    pub fn shutdown(self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
+    pub fn shutdown(mut self, cause: ShutdownCause) -> Result<(), TaskPanicPayload> {
         self.send(TaskResult::Shutdown(cause))
     }
 }
@@ -156,7 +178,9 @@ impl<R: Send + 'static> Drop for Sender<R> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
-    use std::task::{Context, Poll, Waker};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
 
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -167,6 +191,14 @@ mod tests {
     assert_not_impl_any!(JoinHandle<u8>: Sync);
     assert_impl_all!(Sender<u8>: Debug, Send, Unpin);
     assert_not_impl_any!(Sender<u8>: Sync);
+
+    struct PanicNotifier(AtomicBool);
+
+    impl Wake for PanicNotifier {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
 
     fn poll_ready<R: Send + 'static>(handle: JoinHandle<R>) -> Result<R, JoinError> {
         let mut handle = pin!(handle);
@@ -197,6 +229,19 @@ mod tests {
             poll_ready(handle),
             Err(JoinError::Shutdown(cause)) if cause.as_error().is_none()
         ));
+    }
+
+    #[test]
+    fn panic_result_notifies_runtime_integration() {
+        let pool = Pool::new();
+        let notifier = Arc::new(PanicNotifier(AtomicBool::new(false)));
+        let (sender, handle) = pool.channel::<u8>();
+        let sender = sender.with_panic_notifier(Waker::from(Arc::clone(&notifier)));
+
+        sender.panicked(Box::new("task panic")).unwrap();
+
+        assert!(notifier.0.load(Ordering::Acquire));
+        assert!(matches!(poll_ready(handle), Err(JoinError::Panicked(_))));
     }
 
     #[test]

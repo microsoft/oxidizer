@@ -129,6 +129,10 @@ impl DispatcherCore {
         }
     }
 
+    pub(crate) const fn shuts_down_on_panic(&self) -> bool {
+        self.panic_shutdown_cause.is_some()
+    }
+
     /// Stops the runtime. Safe to call multiple times.
     #[cfg_attr(test, mutants::skip)] // Removing the public stop boundary strands runtime workers before tests can assert.
     pub(crate) fn stop(&self) -> ShutdownCause {

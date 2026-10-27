@@ -11,7 +11,6 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::execution::call_governed;
 use crate::task::{Builtins, JoinHandle, Scheduler};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -225,10 +224,9 @@ impl RuntimeScheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let dispatcher = self.dispatcher.clone();
         self.dispatcher
             .next_blocking_worker()
-            .spawn_blocking(move || call_governed(&dispatcher, body))
+            .spawn_blocking(body, self.dispatcher.panic_notifier())
     }
 }
 
