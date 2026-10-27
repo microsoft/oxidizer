@@ -36,7 +36,7 @@ struct InstallerPanicError;
 #[display("Tokio compatibility initialization stopped before commit")]
 struct InitializationAbortedError;
 
-/// An error returned when a worker cannot enter the Tokio runtime context.
+/// Internal details for a Tokio compatibility initialization error.
 #[ohno::error]
 #[from(RuntimeBuildError)]
 #[from(UnsupportedRuntimeError)]
@@ -47,7 +47,10 @@ struct InitializationAbortedError;
 #[from(InitializationAbortedError)]
 struct InitErrorInner;
 
-/// An error returned when a worker cannot enter the Tokio runtime context.
+/// Reports that Tokio compatibility could not be initialized.
+///
+/// The display message describes the failure. [`Error::source`] retains the
+/// private underlying cause for diagnostics.
 pub struct InitError {
     inner: InitErrorInner,
 }
@@ -157,7 +160,7 @@ mod tests {
         let invalid = futures::executor::block_on(builtins.scheduler().spawn_at(&foreign, (), |()| async {})).unwrap_err();
         let panic =
             futures::executor::block_on(builtins.scheduler().spawn(async |_| panic!("installer panic classification"))).unwrap_err();
-        builtins.operations().request_stop();
+        builtins.control().request_stop();
         let shutdown = futures::executor::block_on(builtins.scheduler().spawn(async |_| ())).unwrap_err();
 
         assert!(has_source::<InvalidDestinationError>(&classify_join(invalid)));

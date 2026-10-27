@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Uses an application-owned Tokio runtime from an Arty application.
+//! Uses an application-owned Tokio runtime from an Arty task.
 
 use arty::task::Builtins;
 use tokio::runtime::Builder;

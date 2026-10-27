@@ -26,7 +26,7 @@ assert_impl_all!(arty_tokio::InitError: std::error::Error, Send, Sync);
 
 async fn worker_contexts(cx: &Builtins) -> Vec<bool> {
     let tasks = cx
-        .operations()
+        .control()
         .workers()
         .into_iter()
         .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { Handle::try_current().is_ok() }))
@@ -50,7 +50,7 @@ fn default_init_makes_tokio_available_on_every_worker() {
         .scheduler()
         .block_on(async |cx| {
             arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
-            let workers = cx.operations().workers().into_iter().cloned().collect::<Vec<_>>();
+            let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
             let tasks = workers
                 .iter()
                 .map(|worker| {
@@ -166,7 +166,7 @@ fn shutdown_during_submission_is_a_typed_init_error() {
     let error = runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.operations().request_stop();
+            cx.control().request_stop();
             arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap_err()
         })
         .unwrap();
@@ -234,7 +234,7 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     let (builtins, scheduler, workers) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers = cx.operations().workers().into_iter().cloned().collect::<Vec<_>>();
+            let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
             (cx.clone(), cx.scheduler().clone(), workers)
         })
         .unwrap();
