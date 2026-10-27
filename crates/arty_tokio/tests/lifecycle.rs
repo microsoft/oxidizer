@@ -156,3 +156,22 @@ fn task_cancellation_releases_tokio_blocking_work_before_runtime_drop() {
 
     stop_bounded(runtime);
 }
+
+#[test]
+fn arty_stop_from_owned_tokio_blocking_thread_uses_background_shutdown() {
+    let runtime = runtime(1);
+    let handle = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+            tokio::runtime::Handle::current()
+        })
+        .unwrap();
+    let (stopped, outcome) = mpsc::sync_channel(1);
+
+    drop(handle.spawn_blocking(move || {
+        stopped.send(runtime.stop()).unwrap();
+    }));
+
+    outcome.recv_timeout(TEST_TIMEOUT).unwrap().unwrap();
+}
