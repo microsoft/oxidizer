@@ -3,6 +3,7 @@
 
 //! Log-level filtering for log destinations.
 
+use std::any::type_name;
 use std::sync::atomic;
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ pub struct SeverityFilter<T: LogProcessor> {
 
 impl<T: LogProcessor> SeverityFilter<T> {
     /// Creates a new [`SeverityFilter`] that wraps the given inner processor.
+    ///
     /// For `severity`, `None` disables all logging, while `Some(severity)` drops records below that severity.
     pub fn new(severity: Option<Severity>, inner: T) -> Self {
         Self {
@@ -36,7 +38,8 @@ impl<T: LogProcessor> std::fmt::Debug for SeverityFilter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "SeverityFilter({}, {:?})",
+            "{}({}, {:?})",
+            type_name::<Self>(),
             self.severity.map_or("None", |s| s.name()),
             self.inner
         )
@@ -86,6 +89,7 @@ impl<T: LogProcessor> LogProcessor for SeverityFilter<T> {
 }
 
 /// Converts a [`log::LevelFilter`] to an `OTel` [`Severity`].
+///
 /// Returns `None` for `log::LevelFilter::Off` which disables all logging.
 #[must_use]
 pub const fn severity_of_level(level: log::LevelFilter) -> Option<Severity> {
@@ -102,17 +106,20 @@ pub const fn severity_of_level(level: log::LevelFilter) -> Option<Severity> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use log::LevelFilter;
     use opentelemetry::InstrumentationScope;
     use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
     use opentelemetry_sdk::Resource;
-    use opentelemetry_sdk::logs::SdkLoggerProvider;
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider, SimpleLogProcessor};
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
 
     use super::*;
+
+    static_assertions::assert_impl_all!(SeverityFilter<InterestProbe>: UnwindSafe, RefUnwindSafe);
 
     #[derive(Debug, Default)]
     struct RecordingProcessor(Arc<Mutex<Vec<&'static str>>>);
@@ -155,8 +162,9 @@ mod tests {
     fn severity_threshold_preserves_lifecycle_and_accepts_unspecified_severity() {
         let inner = RecordingProcessor::default();
         let calls = Arc::clone(&inner.0);
+        let expected_debug = format!("{}(WARN, {inner:?})", type_name::<SeverityFilter<RecordingProcessor>>());
         let mut filter = SeverityFilter::new(Some(Severity::Warn), inner);
-        assert!(format!("{filter:?}").contains("WARN"));
+        assert_eq!(format!("{filter:?}"), expected_debug);
 
         filter.set_resource(&Resource::builder_empty().with_service_name("example").build());
 
@@ -200,8 +208,6 @@ mod tests {
 
     #[test]
     fn severity_interest_matches_emission_for_each_log_level() {
-        use opentelemetry_sdk::logs::{InMemoryLogExporter, SimpleLogProcessor};
-
         for level in [
             LevelFilter::Trace,
             LevelFilter::Debug,

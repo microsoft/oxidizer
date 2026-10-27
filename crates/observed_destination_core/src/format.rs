@@ -38,8 +38,10 @@ pub struct LogFormatConfig {
     pub include_library: bool,
     /// Include event name (e.g., `<database_tracker.run.started>`).
     pub include_event_name: bool,
-    /// Format body by expanding attribute placeholders (e.g., `request received, id={request.id}`
-    /// becomes `request received, id=10`). When `true`, attributes are inlined into the message
+    /// Expand attribute placeholders in the message body.
+    ///
+    /// For example, `request received, id={request.id}` becomes `request received, id=10`.
+    /// When `true`, attributes are inlined into the message
     /// body template and not printed separately. If the body is absent, attributes are printed separately.
     pub format_body: bool,
 }
@@ -139,8 +141,9 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
     OTelSdkError::InternalFailure(e.to_string())
 }
 
-/// Renders a [`SystemTime`] as a fixed-width, nanosecond-precision RFC 3339 UTC
-/// timestamp (e.g. `1970-01-01T00:00:10.000000000Z`).
+/// Renders a [`SystemTime`] as a fixed-width RFC 3339 UTC timestamp with nanosecond precision.
+///
+/// For example, `1970-01-01T00:00:10.000000000Z`.
 ///
 /// Times before `0000-01-01T00:00:00Z` use that boundary.
 /// Times above the supported range use the maximum supported timestamp.
@@ -308,6 +311,8 @@ pub fn print_log_record(
     .map_err(io_err)
 }
 
+/// Expands placeholders by scanning only the original template, so inserted values remain literal.
+/// Doubled opening braces preserve escaped text in the Observed message syntax.
 fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &SdkLogRecord) -> std::io::Result<()> {
     let mut remaining = template;
 
@@ -342,9 +347,13 @@ fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &Sd
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::time::Duration;
 
     use super::*;
+
+    static_assertions::assert_impl_all!(LogFormatConfig: UnwindSafe, RefUnwindSafe);
+    static_assertions::assert_impl_all!(Rfc3339Nanos: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn timestamp_boundary_before_epoch_is_minimum() {

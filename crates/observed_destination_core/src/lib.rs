@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! # Observed Destination Core
 //!
@@ -105,12 +106,6 @@
 //! # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 //! ```
 
-mod filter;
-mod format;
-mod meter_provider;
-mod provider_ext;
-mod resource_header;
-
 pub use filter::{SeverityFilter, severity_of_level};
 pub use format::{LogFormatConfig, Rfc3339Nanos, print_log_record};
 pub use meter_provider::FlushableMetricsProvider;
@@ -201,6 +196,12 @@ impl<D: MetricDestination + 'static> IntoMetricDestination for D {
         self
     }
 }
+
+mod filter;
+mod format;
+mod meter_provider;
+mod provider_ext;
+mod resource_header;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

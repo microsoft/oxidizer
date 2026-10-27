@@ -68,6 +68,7 @@ impl ResourceHeader {
 }
 
 impl Default for ResourceHeader {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
@@ -80,10 +81,14 @@ mod tests {
     //! Tests other than the default-constructor smoke test use detector-free resource fixtures
     //! to exercise the real header without querying the host executable.
 
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::error::OTelSdkError;
 
     use super::*;
+
+    static_assertions::assert_impl_all!(ResourceHeader: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn default_header_starts_unprinted() {

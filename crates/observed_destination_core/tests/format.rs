@@ -250,9 +250,9 @@ fn formatting_reports_write_failures_at_every_output_position() {
 fn timestamp_conversion_preserves_subseconds() {
     let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(10_123);
 
-    let formatted = Rfc3339Nanos::from(timestamp).to_string();
+    let timestamp = Rfc3339Nanos::from(timestamp).to_string();
 
-    assert_eq!(formatted, "1970-01-01T00:00:10.123000000Z");
+    assert_eq!(timestamp, "1970-01-01T00:00:10.123000000Z");
 }
 
 #[test]
