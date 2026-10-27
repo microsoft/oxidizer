@@ -100,7 +100,8 @@ impl MeterProviderBuilderExt for MeterProviderBuilder {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::fmt::Debug;
+    use std::error::Error;
+    use std::fmt::{Debug, Display, Formatter};
     use std::sync::{Arc, Mutex};
 
     use crate::{LogDestination, LoggerProviderBuilderExt, MeterProviderBuilderExt, MetricDestination};
@@ -122,6 +123,19 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct RegistrationError {
+        id: u32,
+    }
+
+    impl Display for RegistrationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "RegistrationError, id: {}", self.id)
+        }
+    }
+
+    impl Error for RegistrationError {}
+
     impl LogDestination for TestDestination {
         fn register(
             self,
@@ -131,7 +145,7 @@ mod tests {
                 *self.registered_log.lock().unwrap() = true;
                 Ok(builder)
             } else {
-                Err("Failed to register log destination".into())
+                Err(RegistrationError { id: 1 }.into())
             }
         }
     }
@@ -145,7 +159,7 @@ mod tests {
                 *self.registered_metric.lock().unwrap() = true;
                 Ok(builder)
             } else {
-                Err("Failed to register metric destination".into())
+                Err(RegistrationError { id: 1 }.into())
             }
         }
     }
@@ -168,10 +182,13 @@ mod tests {
         let result = opentelemetry_sdk::logs::SdkLoggerProvider::builder().register(TestDestination::new(false));
 
         assert!(result.is_err(), "Expected registration to fail, but it succeeded");
-        assert!(
-            result.unwrap_err().to_string().contains("Failed to register log destination"),
-            "Unexpected error message"
-        );
+
+        let registration_error = result.unwrap_err().downcast::<RegistrationError>();
+        assert!(registration_error.is_ok(), "Unexpected error type");
+
+        let registration_error = registration_error.unwrap();
+        assert_eq!(registration_error.id, 1, "Error details not preserved");
+        assert_eq!(registration_error.to_string(), "RegistrationError, id: 1");
     }
 
     #[test]
@@ -192,9 +209,12 @@ mod tests {
         let result = opentelemetry_sdk::metrics::SdkMeterProvider::builder().register(TestDestination::new(false));
 
         assert!(result.is_err(), "Expected registration to fail, but it succeeded");
-        assert!(
-            result.unwrap_err().to_string().contains("Failed to register metric destination"),
-            "Unexpected error message"
-        );
+
+        let registration_error = result.unwrap_err().downcast::<RegistrationError>();
+        assert!(registration_error.is_ok(), "Unexpected error type");
+
+        let registration_error = registration_error.unwrap();
+        assert_eq!(registration_error.id, 1, "Error details not preserved");
+        assert_eq!(registration_error.to_string(), "RegistrationError, id: 1");
     }
 }
