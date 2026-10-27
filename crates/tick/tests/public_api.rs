@@ -110,7 +110,7 @@ fn stopwatch_accepts_every_public_time_source_shape() {
     let (clock, _driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     let clock_ref: &Clock = clock.as_ref();
 
-    assert!(std::ptr::eq(clock_ref, &clock));
+    assert!(std::ptr::eq(std::ptr::from_ref(clock_ref), std::ptr::from_ref(&clock)));
     let _ = Stopwatch::new(&clock);
     let _ = Stopwatch::new(clock);
     let _ = Stopwatch::new(&simple_clock);
