@@ -591,6 +591,36 @@ mod tests {
         runtime.stop().unwrap();
     }
 
+    // Prove that all-worker startup creates distinct running workers while the
+    // fake topology keeps processor capacity independent of the test host.
+    #[test]
+    fn all_workers_use_fake_processor_capacity() {
+        const PROCESSORS: usize = 4;
+
+        let hardware = fake_hardware(PROCESSORS);
+        let runtime = runtime_with_processors(
+            WorkersPolicy::all(),
+            MonitorPolicy::disabled().into(),
+            &hardware.processors(),
+            Sink::noop(),
+        );
+        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let workers: HashSet<_> = builtins
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| {
+                builtins
+                    .scheduler()
+                    .spawn_at(worker, (), |()| async move { thread::current().id() })
+            })
+            .map(|task| task.join().unwrap())
+            .collect();
+
+        assert_eq!(workers.len(), PROCESSORS);
+        runtime.stop().unwrap();
+    }
+
     fn fake_hardware(processors: usize) -> SystemHardware {
         SystemHardware::fake(HardwareBuilder::from_counts(
             NonZero::new(processors).unwrap(),
