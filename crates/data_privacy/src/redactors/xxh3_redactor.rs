@@ -16,6 +16,7 @@ pub const REDACTED_LEN: usize = 16;
 ///
 /// `xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
 /// such as organizational email addresses, phone numbers, and IP addresses.
+/// Low-entropy inputs can be recovered by brute-force guessing.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"

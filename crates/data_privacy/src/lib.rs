@@ -14,7 +14,7 @@
 //! mechanisms to reduce the risk of unintentionally exposing sensitive data.
 //!
 //! This crate's approach uses wrapping to isolate sensitive data and avoid accidental exposure.
-//! Redactors control how sensitive values appear in telemetry.
+//! Mechanisms are provided to automatically process sensitive data to make it safe to use in telemetry.
 //!
 //! # Concepts
 //!
@@ -30,10 +30,15 @@
 //!   policies.
 //!
 //! * **Redaction**: The process of removing or obscuring sensitive information from data.
-//!   Hash-based redactors support correlation. Other redactors replace or erase sensitive values.
+//!   Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
+//!   value that in general is not reversible. This allows the data to be used for analysis or processing
+//!   without exposing the sensitive information.
 //!
-//! `xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
-//! such as organizational email addresses, phone numbers, and IP addresses.
+//! It's important to note that redaction is different from deletion. Redaction typically replaces sensitive data
+//! with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece
+//! of sensitive data will always produce the same redacted value. This makes it possible to look at many different
+//! log records and correlate them to a specific user or entity without exposing the sensitive data itself. It's possible
+//! to tell over time that an operation is attributed to the same piece of state without knowing what the state is.
 //!
 //! # Traits
 //!
