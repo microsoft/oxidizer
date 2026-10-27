@@ -331,10 +331,14 @@ impl Clock {
     /// Returns the current system time as `T`.
     ///
     /// This method calls [`system_time()`][Self::system_time] and converts the
-    /// result. It is intentionally infallible for normalized production clock
-    /// data and all supported `tick` formats. See
-    /// [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as] for
-    /// the panic boundary.
+    /// result. It is intentionally infallible for practical production use.
+    /// Production values come from the operating system clock, and all
+    /// `tick::fmt` types cover that normalized current-time range. Requiring
+    /// every caller to handle a conversion error would add an error path that
+    /// supported production formats cannot reach.
+    ///
+    /// Use [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as]
+    /// for the same conversion without timer support.
     ///
     /// # Type Parameters
     ///

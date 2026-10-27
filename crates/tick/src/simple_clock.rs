@@ -198,8 +198,11 @@ impl SimpleClock {
 
     /// Returns the current system time as a target type.
     ///
-    /// This method is intentionally infallible for normalized clock data. Each
-    /// format supported by `tick` must accept production clock values.
+    /// This method is intentionally infallible for practical production use.
+    /// Production values come from the operating system clock, and all
+    /// `tick::fmt` types cover that normalized current-time range. Requiring
+    /// every caller to handle a conversion error would add an error path that
+    /// supported production formats cannot reach.
     ///
     /// If conversion failure is expected, call [`Self::system_time`]. Then call
     /// the target type's [`TryFrom<SystemTime>`] implementation. Do not change
