@@ -4,6 +4,7 @@
 //! Public API contracts available without optional features.
 
 use std::error::Error as _;
+use std::fmt::{self, Write as _};
 use std::future::Future as _;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::task::{Context, Poll, Waker};
@@ -12,6 +13,14 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tick::runtime::{ClockDriver, InactiveClock, Isolated, Shared};
 use tick::{Clock, Delay, Error, SimpleClock, Stopwatch, Timer, TimerTick};
+
+struct FailingWriter;
+
+impl fmt::Write for FailingWriter {
+    fn write_str(&mut self, _value: &str) -> fmt::Result {
+        Err(fmt::Error)
+    }
+}
 
 #[test]
 fn public_types_have_their_threading_and_clone_contracts() {
@@ -99,7 +108,9 @@ fn simple_system_clock_is_monotonic() {
 fn stopwatch_accepts_every_public_time_source_shape() {
     let simple_clock = SimpleClock::new_system();
     let (clock, _driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let clock_ref: &Clock = clock.as_ref();
 
+    assert!(std::ptr::eq(clock_ref, &clock));
     let _ = Stopwatch::new(&clock);
     let _ = Stopwatch::new(clock);
     let _ = Stopwatch::new(&simple_clock);
@@ -286,6 +297,9 @@ fn system_time_error_conversion_preserves_message_and_source() {
 
     let error = Error::from(source);
 
+    assert_eq!(error.to_string(), expected);
+    assert!(!error.is_out_of_range());
+    assert_eq!(write!(FailingWriter, "{error}"), Err(fmt::Error));
     let source = error.source().unwrap().downcast_ref::<std::time::SystemTimeError>().unwrap();
     assert_eq!(source.to_string(), expected);
 }

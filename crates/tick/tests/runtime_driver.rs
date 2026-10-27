@@ -3,6 +3,7 @@
 
 //! Public custom-runtime driver behavior.
 
+use std::future::Future as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::task::{Context, RawWaker, RawWakerVTable, Wake, Waker};
@@ -11,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::{ThreadAware, ThreadBuilder};
-use tick::Clock;
 use tick::runtime::InactiveClock;
+use tick::{Clock, Timer};
 
 #[derive(Debug)]
 struct CountingWake(AtomicUsize);
@@ -91,6 +92,39 @@ impl Drop for ClockOwningWake {
     fn drop(&mut self) {
         drop(self.clock.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).take());
     }
+}
+
+#[test]
+fn delay_completes_when_the_driver_consumes_its_timer_during_waker_replacement() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let mut delay = std::pin::pin!(clock.delay(Duration::from_mins(1)));
+    let first_waker = Waker::noop().clone();
+    let mut first_context = Context::from_waker(&first_waker);
+    assert!(delay.as_mut().poll(&mut first_context).is_pending());
+    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+    let replacement_waker = clone_hook_waker(move || {
+        assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+    });
+    let mut replacement_context = Context::from_waker(&replacement_waker);
+
+    assert!(delay.as_mut().poll(&mut replacement_context).is_ready());
+}
+
+#[test]
+fn periodic_timer_yields_when_the_driver_consumes_its_timer_during_waker_replacement() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
+    let mut next = std::pin::pin!(timer.next());
+    let first_waker = Waker::noop().clone();
+    let mut first_context = Context::from_waker(&first_waker);
+    assert!(next.as_mut().poll(&mut first_context).is_pending());
+    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+    let replacement_waker = clone_hook_waker(move || {
+        assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+    });
+    let mut replacement_context = Context::from_waker(&replacement_waker);
+
+    assert!(next.as_mut().poll(&mut replacement_context).is_ready());
 }
 
 #[test]
