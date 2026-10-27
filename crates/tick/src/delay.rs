@@ -109,12 +109,13 @@ impl Future for Delay {
             None if this.duration == Duration::MAX => Poll::Pending,
             None if this.duration == Duration::ZERO => Poll::Ready(()),
             None => this.register_timer(cx.waker()),
-            Some(key) if key.tick() <= this.clock.timer_instant() => {
+            Some(key) if key.tick() <= this.clock.timer_instant() || !this.clock.contains_timer(key) => {
                 this.current_timer = None;
                 this.current_waker = None;
 
-                // Unregister the timer, just in case this call was explicit
-                // and not due to timers advancing.
+                // Unregister the timer if precise time reached the deadline before the driver did.
+                // If the driver already consumed the key, its wake is authoritative even when a
+                // coarse driver timestamp led the precise clock.
                 this.clock.unregister_timer(key);
 
                 Poll::Ready(())

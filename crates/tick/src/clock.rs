@@ -494,6 +494,10 @@ impl Clock {
         exists
     }
 
+    pub(super) fn contains_timer(&self, key: TimerKey) -> bool {
+        self.state.contains_timer(key)
+    }
+
     pub(crate) fn clock_state(&self) -> &ClockState {
         &self.state
     }

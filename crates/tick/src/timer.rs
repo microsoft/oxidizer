@@ -149,13 +149,14 @@ impl Timer {
 
         if let Some(key) = self.current {
             let observed_at = self.clock.timer_instant();
-            if key.tick() <= observed_at {
+            if key.tick() <= observed_at || !self.clock.contains_timer(key) {
                 // Reset the timer. It will be registered again on the next poll.
                 self.current = None;
                 self.current_waker = None;
 
-                // Unregister the timer, just in case this call was explicit and not due to
-                // timers advancing.
+                // Unregister the timer if precise time reached the deadline before the driver did.
+                // If the driver already consumed the key, its wake is authoritative even when a
+                // coarse driver timestamp led the precise clock.
                 self.clock.unregister_timer(key);
 
                 return Poll::Ready(TimerTick { observed_at });
