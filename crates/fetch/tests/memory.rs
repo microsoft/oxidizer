@@ -36,14 +36,6 @@ impl Clone for ObservedMemory {
     }
 }
 
-/// Identifies the configured provider instance that serves each allocation.
-#[derive(Debug)]
-struct Reservation {
-    bytes: usize,
-    generation: usize,
-    relocated: bool,
-}
-
 impl ThreadAware for ObservedMemory {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
         self.relocated = true;
@@ -60,6 +52,14 @@ impl Memory for ObservedMemory {
         });
         GlobalPool::new().reserve(min_bytes)
     }
+}
+
+/// Identifies the configured provider instance that serves each allocation.
+#[derive(Debug)]
+struct Reservation {
+    bytes: usize,
+    generation: usize,
+    relocated: bool,
 }
 
 /// Allocates response frames through the factory's body builder, without network I/O.
