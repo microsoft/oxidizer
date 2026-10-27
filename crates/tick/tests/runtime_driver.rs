@@ -4,7 +4,7 @@
 //! Public custom-runtime driver behavior.
 
 use std::future::Future as _;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::task::{Context, RawWaker, RawWakerVTable, Wake, Waker};
 use std::thread;
@@ -34,6 +34,19 @@ struct SharedCountingWake(Arc<AtomicUsize>);
 impl Wake for SharedCountingWake {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
+struct DropWake(Arc<AtomicBool>);
+
+impl Wake for DropWake {
+    fn wake(self: Arc<Self>) {}
+}
+
+impl Drop for DropWake {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 
@@ -100,8 +113,9 @@ fn delay_completes_when_the_driver_consumes_its_timer_during_waker_replacement()
     let mut delay = std::pin::pin!(clock.delay(Duration::from_mins(1)));
     let first_waker = Waker::noop().clone();
     let mut first_context = Context::from_waker(&first_waker);
+    let before_registration = Instant::now();
     assert!(delay.as_mut().poll(&mut first_context).is_pending());
-    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
     let replacement_waker = clone_hook_waker(move || {
         assert_eq!(driver.advance_timers(deadline).unwrap(), None);
     });
@@ -117,14 +131,54 @@ fn periodic_timer_yields_when_the_driver_consumes_its_timer_during_waker_replace
     let mut next = std::pin::pin!(timer.next());
     let first_waker = Waker::noop().clone();
     let mut first_context = Context::from_waker(&first_waker);
+    let before_registration = Instant::now();
     assert!(next.as_mut().poll(&mut first_context).is_pending());
-    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
     let replacement_waker = clone_hook_waker(move || {
         assert_eq!(driver.advance_timers(deadline).unwrap(), None);
     });
     let mut replacement_context = Context::from_waker(&replacement_waker);
 
     assert!(next.as_mut().poll(&mut replacement_context).is_ready());
+}
+
+#[test]
+fn driver_consumption_releases_a_cancelled_delay_waker() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let before_registration = Instant::now();
+    let mut delay = clock.delay(Duration::from_mins(1));
+    {
+        let waker = Waker::from(Arc::new(DropWake(Arc::clone(&dropped))));
+        let mut context = Context::from_waker(&waker);
+        assert!(std::pin::Pin::new(&mut delay).poll(&mut context).is_pending());
+    }
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert!(dropped.load(Ordering::Relaxed));
+    drop(delay);
+}
+
+#[test]
+fn driver_consumption_releases_a_cancelled_timer_waker() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let before_registration = Instant::now();
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
+    {
+        let waker = Waker::from(Arc::new(DropWake(Arc::clone(&dropped))));
+        let mut context = Context::from_waker(&waker);
+        let mut next = std::pin::pin!(timer.next());
+        assert!(next.as_mut().poll(&mut context).is_pending());
+    }
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert!(dropped.load(Ordering::Relaxed));
+    drop(timer);
 }
 
 #[test]

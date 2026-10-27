@@ -89,6 +89,7 @@ fn clock_operations(state: &mut ClockState) {
 #[bench::idle(&mut advance_state(0, false))]
 #[bench::pending_5(&mut advance_state(5, false))]
 #[bench::ready_5(&mut advance_state(5, true))]
+#[bench::ready_10(&mut advance_state(10, true))]
 fn advance_timers(state: &mut AdvanceState) -> Result<Option<Instant>, ClockGone> {
     let at = state.now + Duration::from_secs(2);
     state.driver.advance_timers(black_box(at))
@@ -97,13 +98,18 @@ fn advance_timers(state: &mut AdvanceState) -> Result<Option<Instant>, ClockGone
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut clock = criterion.benchmark_group(CLOCK);
     let mut state = clock_state();
-    clock.bench_function(CLOCK_OPERATIONS.benchmark_name(), |bencher| {
+    clock.bench_function(BenchmarkId::new(CLOCK_OPERATIONS.benchmark_name(), "run"), |bencher| {
         bencher.iter(|| clock_operations(black_box(&mut state)));
     });
     clock.finish();
 
     let mut advance = criterion.benchmark_group(ADVANCE);
-    for (name, timer_count, ready) in [("idle", 0, false), ("pending_5", 5, false), ("ready_5", 5, true)] {
+    for (name, timer_count, ready) in [
+        ("idle", 0, false),
+        ("pending_5", 5, false),
+        ("ready_5", 5, true),
+        ("ready_10", 10, true),
+    ] {
         advance.bench_function(BenchmarkId::new(ADVANCE_TIMERS.benchmark_name(), name), |bencher| {
             bencher.iter_batched_ref(
                 || advance_state(timer_count, ready),

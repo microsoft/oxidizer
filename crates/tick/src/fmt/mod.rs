@@ -244,8 +244,9 @@ mod tests {
         let error = ensure_system_time_representable(Timestamp::MIN);
 
         if checked_system_time(Timestamp::MIN).is_none() {
+            let error = error.unwrap_err().with_disabled_backtrace();
             assert_eq!(
-                error.unwrap_err().to_string(),
+                error.to_string(),
                 "the instant is outside the range that `SystemTime` can represent on this platform"
             );
         } else {
@@ -257,8 +258,9 @@ mod tests {
     fn private_system_time_range_error_describes_the_platform_limit() {
         // `checked_system_time` can only fail where `SystemTime` is narrower than the jiff
         // range, so the error is built directly to keep it exercised on every platform.
+        let error = system_time_out_of_range().with_disabled_backtrace();
         assert_eq!(
-            system_time_out_of_range().to_string(),
+            error.to_string(),
             "the instant is outside the range that `SystemTime` can represent on this platform"
         );
     }

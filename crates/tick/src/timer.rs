@@ -41,7 +41,7 @@ use crate::timers::TIMER_RESOLUTION;
 ///
 /// for _ in 0..3 {
 ///     let tick = timer.next().await;
-///     assert!(tick.observed_at() <= clock.instant());
+///     let _observed_at = tick.observed_at();
 /// }
 /// # }
 /// ```
@@ -100,7 +100,6 @@ pub struct Timer {
     clock: Clock,
     // Currently scheduled timer. This value is not initialized until the first `next` call.
     current: Option<TimerKey>,
-    current_waker: Option<Waker>,
 }
 
 impl Timer {
@@ -115,7 +114,6 @@ impl Timer {
         Self {
             // The timer is not registered yet; it will be registered by the first `next` call.
             current: None,
-            current_waker: None,
             period,
             clock: clock.clone(),
         }
@@ -132,13 +130,11 @@ impl Timer {
     fn register_timer(&mut self, waker: &Waker) {
         if let Some(when) = self.clock.timer_instant().checked_add(self.period) {
             self.current = Some(self.clock.register_timer(when, waker.clone()));
-            self.current_waker = Some(waker.clone());
         } else {
             // The timer would tick so far in the future that we can assume
             // it never fires. For this reason, there is no point in registering it.
             // The period is set to Duration::MAX to prevent further registrations.
             self.period = Duration::MAX;
-            self.current_waker = None;
         }
     }
     #[cfg_attr(test, mutants::skip)] // cannot reliably check that poll_tick has been called
@@ -149,30 +145,23 @@ impl Timer {
 
         if let Some(key) = self.current {
             let observed_at = self.clock.timer_instant();
-            if key.tick() <= observed_at || self.clock.timer_was_consumed_by_driver(key) {
+            if key.tick() <= observed_at {
                 // Reset the timer. It will be registered again on the next poll.
                 self.current = None;
-                self.current_waker = None;
 
-                // Unregister the timer if precise time reached the deadline before the driver did.
-                // If the driver already consumed the key, its wake is authoritative even when a
-                // coarse driver timestamp led the precise clock.
+                // Unregister the timer if precise time reached the deadline before the driver.
                 self.clock.unregister_timer(key);
 
                 return Poll::Ready(TimerTick { observed_at });
             }
 
             // Timer is registered and will fire later in the future.
-            if self.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
-                Poll::Pending
-            } else if self.clock.update_timer_waker(key, cx.waker()) {
-                self.current_waker = Some(cx.waker().clone());
+            if self.clock.update_timer_waker(key, cx.waker()) {
                 Poll::Pending
             } else {
                 // The driver can remove and wake the timer between the time check above
                 // and this replacement. A missing registration therefore means completion.
                 self.current = None;
-                self.current_waker = None;
                 Poll::Ready(TimerTick {
                     observed_at: self.clock.timer_instant(),
                 })

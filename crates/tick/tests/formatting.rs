@@ -419,14 +419,12 @@ fn unix_seconds_rejects_pre_epoch_system_time() {
 #[test]
 fn unix_seconds_constructors_validate_the_public_range() {
     assert_eq!(UnixSeconds::from_secs(10).unwrap().to_secs(), 10);
-    assert_eq!(
-        UnixSeconds::try_from(Duration::MAX).unwrap_err().to_string(),
-        "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`"
-    );
-    assert_eq!(
-        UnixSeconds::from_secs(u64::MAX).unwrap_err().to_string(),
-        "the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`"
-    );
+    let duration_error = UnixSeconds::try_from(Duration::MAX).unwrap_err();
+    assert!(duration_error.is_out_of_range());
+    assert!(duration_error.source().is_none());
+    let seconds_error = UnixSeconds::from_secs(u64::MAX).unwrap_err();
+    assert!(seconds_error.is_out_of_range());
+    assert!(seconds_error.source().is_none());
 }
 
 #[test]

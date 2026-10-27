@@ -292,6 +292,21 @@ fn delay_replaces_the_waker_without_restarting_the_deadline() {
 }
 
 #[test]
+fn fired_delay_completes_after_controlled_time_moves_backward() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let waker = Waker::noop().clone();
+    let mut context = Context::from_waker(&waker);
+    let mut delay = clock.delay(Duration::from_millis(10));
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut context), Poll::Pending);
+
+    control.advance(Duration::from_millis(10));
+    control.set_time(SystemTime::UNIX_EPOCH);
+
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut context), Poll::Ready(()));
+}
+
+#[test]
 fn controlled_advance_wakes_a_ready_delay_once() {
     let control = ClockControl::new();
     let clock = control.to_clock();
@@ -384,6 +399,25 @@ fn periodic_timer_replaces_the_waker_without_restarting_the_period() {
         panic!("the timer must keep its original deadline");
     };
     assert_eq!(tick.observed_at(), clock.instant());
+}
+
+#[test]
+fn fired_timer_yields_after_controlled_time_moves_backward() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let waker = Waker::noop().clone();
+    let mut context = Context::from_waker(&waker);
+    let mut timer = Timer::new(&clock, Duration::from_millis(10));
+    {
+        let mut next = std::pin::pin!(timer.next());
+        assert!(next.as_mut().poll(&mut context).is_pending());
+    }
+
+    control.advance(Duration::from_millis(10));
+    control.set_time(SystemTime::UNIX_EPOCH);
+
+    let mut next = std::pin::pin!(timer.next());
+    assert!(next.as_mut().poll(&mut context).is_ready());
 }
 
 #[test]

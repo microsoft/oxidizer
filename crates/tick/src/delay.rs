@@ -40,7 +40,6 @@ pub struct Delay {
     // Currently scheduled timer. This value is not initialized before
     // actually calling the `Future::poll` method.
     current_timer: Option<TimerKey>,
-    current_waker: Option<Waker>,
     clock: Clock,
     duration: Duration,
 }
@@ -74,7 +73,6 @@ impl Delay {
         Self {
             duration,
             current_timer: None,
-            current_waker: None,
             clock: clock.clone(),
         }
     }
@@ -84,14 +82,12 @@ impl Delay {
 
         if let Some(when) = when {
             self.current_timer = Some(self.clock.register_timer(when, waker.clone()));
-            self.current_waker = Some(waker.clone());
         } else {
             // We have moved past the maximum instant value; this delay never completes.
             self.duration = Duration::MAX;
             if let Some(key) = self.current_timer.take() {
                 self.clock.unregister_timer(key);
             }
-            self.current_waker = None;
         }
 
         Poll::Pending
@@ -109,30 +105,21 @@ impl Future for Delay {
             None if this.duration == Duration::MAX => Poll::Pending,
             None if this.duration == Duration::ZERO => Poll::Ready(()),
             None => this.register_timer(cx.waker()),
-            Some(key) if key.tick() <= this.clock.timer_instant() || this.clock.timer_was_consumed_by_driver(key) => {
+            Some(key) if key.tick() <= this.clock.timer_instant() => {
                 this.current_timer = None;
-                this.current_waker = None;
 
-                // Unregister the timer if precise time reached the deadline before the driver did.
-                // If the driver already consumed the key, its wake is authoritative even when a
-                // coarse driver timestamp led the precise clock.
+                // Unregister the timer if precise time reached the deadline before the driver.
                 this.clock.unregister_timer(key);
 
                 Poll::Ready(())
             }
             Some(key) => {
-                if this.current_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) {
-                    return Poll::Pending;
-                }
-
                 if this.clock.update_timer_waker(key, cx.waker()) {
-                    this.current_waker = Some(cx.waker().clone());
                     Poll::Pending
                 } else {
                     // The driver can remove and wake the timer between the time check above
                     // and this replacement. A missing registration therefore means completion.
                     this.current_timer = None;
-                    this.current_waker = None;
                     Poll::Ready(())
                 }
             }

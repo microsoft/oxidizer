@@ -6,7 +6,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use criterion::Criterion;
+use criterion::{BenchmarkId, Criterion};
 use tick::SimpleClock;
 
 const RETRIEVAL: &str = "tick_instant/retrieval";
@@ -28,10 +28,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let fast_clock = precise_clock.clone().with_fast_instant(true);
     let mut group = criterion.benchmark_group(RETRIEVAL);
 
-    group.bench_function(INSTANT.benchmark_name(), |bencher| {
+    group.bench_function(BenchmarkId::new(INSTANT.benchmark_name(), "precise"), |bencher| {
         bencher.iter(|| instant(black_box(&precise_clock)));
     });
-    group.bench_function(INSTANT_FAST.benchmark_name(), |bencher| {
+    group.bench_function(BenchmarkId::new(INSTANT_FAST.benchmark_name(), "fast"), |bencher| {
         bencher.iter(|| instant_fast(black_box(&fast_clock)));
     });
 

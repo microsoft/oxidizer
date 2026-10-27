@@ -494,14 +494,6 @@ impl Clock {
         exists
     }
 
-    pub(super) fn timer_was_consumed_by_driver(&self, key: TimerKey) -> bool {
-        match self.clock_state() {
-            #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(_) => false,
-            ClockState::System(storage) => !storage.with_timers(|timers| timers.contains(key)),
-        }
-    }
-
     pub(crate) fn clock_state(&self) -> &ClockState {
         &self.state
     }
