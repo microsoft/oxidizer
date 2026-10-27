@@ -12,11 +12,9 @@ use crate::{DataClass, Redactor};
 /// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;
 
-/// A redactor that replaces the original string with the `xxH3` hash of the string.
+/// A redactor that replaces text with a non-cryptographic `xxH3` hash for correlation.
 ///
-/// `xxH3` is not a cryptographic hash. Avoid using it for PII from enumerable domains,
-/// such as organizational email addresses, phone numbers, and IP addresses.
-/// Low-entropy inputs can be recovered by brute-force guessing.
+/// Do not rely on this redactor to keep the original values confidential.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"
