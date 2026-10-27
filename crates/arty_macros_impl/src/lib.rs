@@ -838,6 +838,7 @@ mod tests {
             quote!("shutdown"),
             quote!("ignore"),
             quote!(continue),
+            quote!(abort),
             quote!(PanicPolicy::shutdown()),
             quote!(::shutdown),
         ] {
