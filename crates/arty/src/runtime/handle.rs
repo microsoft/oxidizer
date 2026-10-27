@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use performables::arc::Arc;
+
+use crate::runtime::blocking_worker;
 use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
@@ -181,13 +184,18 @@ impl Runtime {
     }
 
     fn wait(&self) -> Result<(), Error> {
-        if Scheduler::is_current_worker_thread() {
+        let current_thread = std::thread::current().id();
+        let is_registered_worker = self.scheduler.dispatcher.worker_index(current_thread).is_some();
+        if Scheduler::is_current_worker_thread() || is_registered_worker {
+            crate::runtime::dispatch::DispatcherCore::wait_for_shutdown_in_background(Arc::clone(&self.scheduler.dispatcher.core));
             return Err(Error::shutdown_wait_from_worker());
         }
-        if self.scheduler.dispatcher.is_current_blocking_thread() {
+        if blocking_worker::is_current_blocking_thread() || self.scheduler.dispatcher.is_current_blocking_thread() {
+            crate::runtime::dispatch::DispatcherCore::wait_for_shutdown_in_background(Arc::clone(&self.scheduler.dispatcher.core));
             return Err(Error::shutdown_wait_from_blocking_callback());
         }
         let wait_error = self.scheduler.dispatcher.wait().err();
+        self.scheduler.dispatcher.core.finish_shutdown_after_wait();
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
@@ -222,12 +230,12 @@ mod worker_wait_guards_tests;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::mpsc;
     use std::task::Waker;
     use std::thread;
 
     use observed::Sink;
-    use performables::arc::Arc;
-    use performables::sync::channel;
+    use performables::sync::channel::{self, oneshot};
     use testing_aids::TEST_TIMEOUT;
     use thread_aware::{ThreadBuilder, Unaware};
 
@@ -370,6 +378,51 @@ mod tests {
         release.send(()).unwrap();
         assert_eq!(blocking.join().unwrap(), 42);
         dispatcher.wait().unwrap();
+        caller.stop().unwrap();
+    }
+
+    #[test]
+    fn dropping_a_completed_runtime_on_a_foreign_worker_defers_callbacks() {
+        let target = Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let dispatcher = target.scheduler.dispatcher.clone();
+        let control = target.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
+        let (callback_started, callback_ready) = oneshot();
+        let (release_callback, callback_gate) = mpsc::sync_channel(1);
+        control.on_shutdown(move || {
+            callback_started.send(()).unwrap();
+            callback_gate.recv().unwrap();
+        });
+        control.request_stop();
+        dispatcher.wait().unwrap();
+
+        let caller = Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let (dropped, drop_observed) = mpsc::sync_channel(1);
+        let drop_target = caller
+            .scheduler()
+            .spawn_anywhere(Unaware((target, dropped)), |_, Unaware((target, dropped))| async move {
+                drop(target);
+                dropped.send(()).unwrap();
+            });
+        let (released, release_observed) = mpsc::sync_channel(1);
+        let release = caller.scheduler().spawn_anywhere(
+            Unaware((callback_ready, release_callback, released)),
+            |_, Unaware((callback_ready, release_callback, released))| async move {
+                callback_ready.await.unwrap();
+                release_callback.send(()).unwrap();
+                released.send(()).unwrap();
+            },
+        );
+
+        drop_observed.recv_timeout(TEST_TIMEOUT).unwrap();
+        release_observed.recv_timeout(TEST_TIMEOUT).unwrap();
+        futures::executor::block_on(drop_target).unwrap();
+        futures::executor::block_on(release).unwrap();
         caller.stop().unwrap();
     }
 }

@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
+use std::thread;
 use std::thread::ThreadId;
 
 use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, ShutdownError, TaskPlacement};
+use arty_executor::{ShutdownCause, ShutdownError, TaskPlacement, discard_task_panic_payload};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
@@ -15,14 +17,15 @@ use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::on_shutdown::OnShutdown;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
 use crate::runtime::{Error, Workers};
-use crate::task::Builtins;
 use crate::task::execution::prepare_remote;
 use crate::task::join::JoinHandle;
+use crate::task::{Builtins, Scheduler};
 
 #[derive(Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -58,6 +61,7 @@ pub(crate) struct DispatcherCore {
     wait_for_shutdown: ThreadWaiter,
 
     shutdown: Shutdown,
+    on_shutdown: OnShutdown,
     stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
@@ -109,6 +113,7 @@ impl DispatcherCore {
         Self {
             wait_for_shutdown,
             shutdown,
+            on_shutdown: OnShutdown::default(),
             stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             workers,
@@ -218,6 +223,48 @@ impl DispatcherCore {
 
     pub(crate) const fn shutdown(&self) -> &Shutdown {
         &self.shutdown
+    }
+
+    pub(crate) fn on_shutdown<F>(&self, callback: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let Some(callback) = self.on_shutdown.register(callback) else {
+            return;
+        };
+        let current_thread = thread::current().id();
+        if Scheduler::is_current_worker_thread()
+            || self.worker_index(current_thread).is_some()
+            || crate::runtime::blocking_worker::is_current_blocking_thread()
+            || self.is_current_blocking_thread()
+        {
+            thread::Builder::new()
+                .name("arty-shutdown".to_owned())
+                .spawn(move || {
+                    if let Err(panic) = catch_unwind(AssertUnwindSafe(callback)) {
+                        discard_task_panic_payload(panic);
+                    }
+                })
+                .expect("shutdown callback thread creation must succeed");
+        } else {
+            callback();
+        }
+    }
+
+    pub(crate) fn finish_shutdown_after_wait(&self) {
+        self.on_shutdown.invoke_and_clear();
+    }
+
+    pub(crate) fn wait_for_shutdown_in_background(core: Arc<Self>) {
+        thread::Builder::new()
+            .name("arty-shutdown".to_owned())
+            .spawn(move || {
+                _ = core.join();
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| core.on_shutdown.invoke_and_clear())) {
+                    discard_task_panic_payload(panic);
+                }
+            })
+            .expect("shutdown completion thread creation must succeed");
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.

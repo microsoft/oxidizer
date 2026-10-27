@@ -49,5 +49,9 @@ const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&Builtins) -> &RuntimeControl = Builtins::control;
 const _: fn(&RuntimeControl) = RuntimeControl::request_stop;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
+fn register_shutdown_callback(control: &RuntimeControl) {
+    control.on_shutdown(|| {});
+}
+const _: fn(&RuntimeControl) = register_shutdown_callback;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

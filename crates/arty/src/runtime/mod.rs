@@ -44,6 +44,7 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+mod on_shutdown;
 mod shutdown;
 pub(crate) mod telemetry;
 pub(crate) mod thread;

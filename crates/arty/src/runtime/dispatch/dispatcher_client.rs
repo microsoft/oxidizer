@@ -19,7 +19,7 @@ use crate::task::join::JoinHandle;
 /// Cheap shared access to one runtime's routing and shutdown state.
 #[derive(Clone)]
 pub(crate) struct DispatcherClient {
-    core: Arc<DispatcherCore>,
+    pub(crate) core: Arc<DispatcherCore>,
 }
 
 impl DispatcherClient {

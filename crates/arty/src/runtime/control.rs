@@ -56,6 +56,28 @@ impl RuntimeControl {
         self.dispatcher.workers()
     }
 
+    /// Registers a callback for the end of runtime shutdown.
+    ///
+    /// The runtime runs the callback once after all async tasks are cancelled,
+    /// all blocking callbacks finish or are rejected, and worker driver
+    /// teardown finishes. Runtime shutdown waits for the callback to return.
+    ///
+    /// The runtime is already in shutdown mode when the callback runs.
+    /// A captured [`Scheduler`] rejects new async tasks and blocking callbacks
+    /// with the normal shutdown [`JoinError`](crate::task::JoinError). It does
+    /// not run the submitted body.
+    ///
+    /// Registration after shutdown completion runs immediately on an external
+    /// thread. Registration from an Arty worker or blocking callback moves the
+    /// callback to a separate thread and does not wait for it.
+    #[doc(hidden)]
+    pub fn on_shutdown<F>(&self, callback: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.dispatcher.core.on_shutdown(callback);
+    }
+
     /// Requests shutdown without blocking the calling thread.
     ///
     /// May be called repeatedly from any thread. Pending tasks are cancelled,

@@ -252,6 +252,10 @@ pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
     CURRENT_POOL.with_borrow(|current| current.as_ref().is_some_and(|current| Arc::ptr_eq(current, pool)))
 }
 
+pub(crate) fn is_current_blocking_thread() -> bool {
+    CURRENT_POOL.with_borrow(Option::is_some)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct BlockingPool {
     pool: Arc<Mutex<Option<JoinableThreadPool>>>,
