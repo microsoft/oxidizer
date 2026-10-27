@@ -739,3 +739,63 @@ _anvil-impact-include tier:
     } else {
         Write-Output $default
     }
+
+# Private. Same contract as _anvil-impact-include, but a member list is
+# returned as aggregate Cargo selection: "--workspace --exclude <name> ...".
+# Cargo resolves --exclude against workspace members only, so this stays
+# unambiguous when a registry dependency shares a member's name and version
+# (where `--package name@version` fails). "--skip", "--workspace" and the
+# empty modified default pass through unchanged, so callers keep their
+# explicit skip: excluding every member is a Cargo error, not a no-op.
+
+# Resolve a tier's scope as workspace-exclude Cargo selection.
+[script("pwsh", "-NoProfile")]
+_anvil-impact-exclude tier:
+    Set-StrictMode -Version 3.0
+    $ErrorActionPreference = 'Stop'
+    $include = (& "{{ just_executable() }}" _anvil-impact-include '{{ tier }}')
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
+    if ($include -notmatch '(^|\s)--package\s') { Write-Output $include; exit 0 }
+    $specs = @(-split $include | Where-Object { $_ -ne '--package' })
+    & "{{ just_executable() }}" _anvil-workspace-exclude @specs
+    exit $LASTEXITCODE
+
+# Private. Prints "--workspace --exclude <name> ..." selecting exactly the
+# given workspace-member name@version specs. Fails when a spec is not a
+# workspace member, so a stale selection never widens silently.
+
+# Convert workspace-member specs to workspace-exclude Cargo selection.
+[script("pwsh", "-NoProfile")]
+_anvil-workspace-exclude +specs:
+    Set-StrictMode -Version 3.0
+    $ErrorActionPreference = 'Stop'
+    $selected = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($spec in -split '{{ specs }}') { [void]$selected.Add($spec) }
+    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
+    $metadataExit = $LASTEXITCODE
+    if ($metadataExit -ne 0) {
+        [Console]::Error.WriteLine('anvil: cargo metadata failed')
+        exit $metadataExit
+    }
+    $meta = $metadataJson | ConvertFrom-Json
+    $workspaceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($id in $meta.workspace_members) { [void]$workspaceIds.Add("$id") }
+    $selection = [System.Collections.Generic.List[string]]::new()
+    $selection.Add('--workspace')
+    $found = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($p in @($meta.packages | Where-Object { $workspaceIds.Contains("$($_.id)") })) {
+        $spec = "$($p.name)@$($p.version)"
+        if ($selected.Contains($spec)) {
+            [void]$found.Add($spec)
+        } else {
+            $selection.Add('--exclude')
+            $selection.Add($p.name)
+        }
+    }
+    $missing = @($selected | Where-Object { -not $found.Contains($_) })
+    if ($missing.Count -gt 0) {
+        [Console]::Error.WriteLine("anvil: not workspace members: $($missing -join ', ')")
+        exit 1
+    }
+    Write-Output ($selection -join ' ')

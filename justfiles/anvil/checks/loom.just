@@ -28,8 +28,8 @@
 #     (source swaps std<->loom atomics on `#[cfg(loom)]`, and
 #     `[target.'cfg(loom)'.dependencies] loom` links only under the cfg).
 #     The feature does NOT replace the cfg; both are required.
-# We scope `cargo test` to the owning package with `-p` (never
-# `--workspace`) so a global `--cfg loom` never leaks into deps reachable
+# We scope `cargo test` to the owning package (via cargo-each's
+# source-qualified `{cargo-spec}`, never `--workspace`) so a global `--cfg loom` never leaks into deps reachable
 # only through *other* members (e.g. concurrent-queue), and run
 # single-threaded (loom drives its own scheduling). --release per the
 # loom docs: permutation exploration is wall-clock dominated by the SUT.
@@ -63,31 +63,20 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $meta = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Optional impact-scoping: recover bare package names from the
-    # impact step's version-qualified `--package name@version` pairs.
-    # Full-workspace modes (`--workspace` -- e.g. the scheduled tier,
-    # ANVIL_IMPACT=off, or no impact cache) carry no `--package` tokens,
-    # so $affected stays $null and the package set is left unfiltered
-    # (filtering on an empty set would wrongly skip every loom target).
-    $affected = $null
-    $tokens = @(-split $include)
-    for ($i = 0; $i -lt $tokens.Count; $i++) {
-        if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
-            if ($null -eq $affected) { $affected = @() }
-            $affected += ($tokens[$i + 1] -split '@', 2)[0]
-            $i++
-        }
-    }
+    # Impact scoping keeps the packages whose `name@version` spec the impact
+    # step selected. Full-workspace modes (`--workspace` -- e.g. the scheduled
+    # tier, ANVIL_IMPACT=off, or no impact cache) leave the set unfiltered.
     $pkgs = $meta.packages
-    if ($null -ne $affected) {
-        $pkgs = @($pkgs | Where-Object { $_.name -in $affected })
+    if ($include -match '(^|\s)--package\s') {
+        $affected = @(-split $include | Where-Object { $_ -ne '--package' })
+        $pkgs = @($pkgs | Where-Object { "$($_.name)@$($_.version)" -in $affected })
     }
 
     # Authoritative detection: [[test]] targets with required-features = ["loom"].
     $loomTargets = @(foreach ($pkg in $pkgs) {
         foreach ($t in $pkg.targets) {
             if (($t.kind -contains 'test') -and ($t.'required-features' -contains 'loom')) {
-                [pscustomobject]@{ pkg = $pkg.name; target = $t.name }
+                [pscustomobject]@{ pkg = $pkg.name; spec = "$($pkg.name)@$($pkg.version)"; target = $t.name }
             }
         }
     })
@@ -113,18 +102,21 @@ anvil-loom: anvil-loom-validate-prereqs anvil-impact
     $env:RUSTFLAGS = "--cfg loom $($env:RUSTFLAGS)".Trim()
     foreach ($lt in $loomTargets) {
         Write-Host "anvil-loom: $($lt.pkg) :: $($lt.target)"
-        & cargo {{_anvil_stable_toolchain_args}} test -p $lt.pkg --release --all-features --locked --test $lt.target -- --test-threads=1
+        # cargo-each resolves the spec against workspace members and passes
+        # Cargo a source-qualified '{cargo-spec}', which stays unambiguous
+        # when a registry dependency shares the member's name and version.
+        & cargo {{_anvil_stable_toolchain_args}} each --package $lt.spec '--' cargo {{_anvil_stable_toolchain_args}} test --package '{cargo-spec}' --release --all-features --locked --test $lt.target '--' --test-threads=1
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
-# loom is a regular cargo-test invocation with RUSTFLAGS=--cfg loom;
-# no dedicated tool to install. The rust toolchain (rustc + cargo)
-# is the only prerequisite.
+# loom is a regular cargo-test invocation with RUSTFLAGS=--cfg loom,
+# run through cargo-each for unambiguous package selection. The rust
+# toolchain (rustc + cargo) and cargo-each are the prerequisites.
 
 # Install prerequisites for the `anvil-loom` recipe.
 [private]
-anvil-loom-setup installer="install": anvil-toolchain-stable-install
+anvil-loom-setup installer="install": anvil-toolchain-stable-install (anvil-tool-cargo-each-install installer)
 
 # Validate prerequisites for the `anvil-loom` recipe.
 [private]
-anvil-loom-validate-prereqs: anvil-tool-rustc-validate-prereqs
+anvil-loom-validate-prereqs: anvil-tool-rustc-validate-prereqs anvil-tool-cargo-each-validate-prereqs
