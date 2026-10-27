@@ -79,7 +79,7 @@ jobs:
     # be retargeted, so init/analyze below are intentionally left pinned to the tag, not a SHA.
     # See https://github.com/github/codeql-action/releases/tag/v4.38.2
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4.38.2
+      uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
@@ -109,6 +109,6 @@ jobs:
 
     # See the immutable-release note above (github/codeql-action) — same tag, same rationale.
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4.38.2
+      uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
       with:
         category: "/language:${{matrix.language}}"
