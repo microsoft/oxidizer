@@ -102,6 +102,8 @@ fn relocating_builtins_leaves_shared_source_clones_on_the_source_worker() {
     runtime.stop().unwrap();
 }
 
+// Records the relocation coordinates and callback thread for both task input
+// delivery and successful result delivery.
 struct ReturnedProbe {
     thread: arty::core::Thread,
     relocations: Vec<(Option<arty::core::Thread>, arty::core::Thread, ThreadId)>,
@@ -198,6 +200,8 @@ fn spawn_at_relocates_results_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
+// Return Builtins and schedule child work to prove that its services bind to
+// the worker that receives the result.
 #[test]
 fn spawn_anywhere_returns_builtins_bound_to_the_source_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
@@ -218,6 +222,8 @@ fn spawn_anywhere_returns_builtins_bound_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
+// Poll the join on a different worker to prove that the receiving worker,
+// rather than the submitting worker, selects the result destination.
 #[test]
 fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
@@ -246,6 +252,8 @@ fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     runtime.stop().unwrap();
 }
 
+// Poll outside the runtime to prove that result relocation requires a receiving
+// Arty worker.
 #[test]
 fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();

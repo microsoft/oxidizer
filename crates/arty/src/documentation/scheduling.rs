@@ -22,13 +22,14 @@
 //! capturing it in a closure. The order in which you submit tasks does not
 //! determine when they finish.
 //!
-//! Results from worker-bound `Scheduler::spawn_anywhere` and `spawn_at` must
-//! also implement [`ThreadAware`](crate::core::ThreadAware), which includes
-//! `Send`. Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts any `Send`
-//! result. Joining a worker-bound `spawn_anywhere` or `spawn_at` on an Arty
-//! worker relocates the result to that worker, normally the source. Joining
-//! outside Arty does not relocate the result. Other submission methods leave
-//! results unchanged.
+//! When you call `spawn_anywhere` or `spawn_at` through a `Scheduler` from
+//! `Builtins`, the result must also implement
+//! [`ThreadAware`](crate::core::ThreadAware), which includes `Send`. If an Arty
+//! worker awaits the returned handle, Arty relocates a successful result to that
+//! worker. This is usually the worker that submitted the task. If code outside
+//! an Arty worker awaits the handle, Arty returns the result without relocation.
+//! Runtime-wide `RuntimeScheduler::spawn_anywhere` accepts any `Send` result.
+//! Other submission methods do not relocate results.
 //!
 //! # Create local state on a worker
 //!

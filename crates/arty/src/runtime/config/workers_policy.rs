@@ -118,6 +118,14 @@ impl WorkersPolicy {
     }
 }
 
+impl Default for WorkersPolicy {
+    fn default() -> Self {
+        // Keep implicit runtime construction independent of host processor count.
+        // Applications opt into more worker threads when they need them.
+        Self::exactly(1)
+    }
+}
+
 fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
     processors.sort_by_key(|processor| processor.processors().first().id());
@@ -153,12 +161,6 @@ impl IntoIterator for WorkerPlacements {
 
     fn into_iter(self) -> Self::IntoIter {
         self.workers.into_iter()
-    }
-}
-
-impl Default for WorkersPolicy {
-    fn default() -> Self {
-        Self::exactly(1)
     }
 }
 

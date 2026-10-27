@@ -14,11 +14,6 @@ use crate::runtime::Shutdown;
 use crate::runtime::blocking_worker::is_current_blocking_pool;
 use crate::task::Scheduler;
 
-struct ResultRelocation<R> {
-    source: Thread,
-    relocate: fn(&mut R, Option<&Thread>, &Thread),
-}
-
 /// A handle for receiving an async or blocking task's result.
 ///
 /// Await the handle inside async code. Completion produces `Ok(result)`. A task
@@ -65,6 +60,15 @@ where
     blocking_pool: Option<Arc<()>>,
     #[debug(ignore)]
     relocation: Option<ResultRelocation<R>>,
+}
+
+/// Optional metadata for relocating a successful result.
+///
+/// `source` is the worker that executed the task. The function pointer keeps
+/// the [`ThreadAware`] bound on registration instead of every join handle.
+struct ResultRelocation<R> {
+    source: Thread,
+    relocate: fn(&mut R, Option<&Thread>, &Thread),
 }
 
 enum State<R>
@@ -127,6 +131,7 @@ where
         self
     }
 
+    /// Opts a successful result into relocation from its execution worker when received.
     pub(crate) fn relocate_result_from(mut self, source: Thread) -> Self
     where
         R: ThreadAware,

@@ -79,9 +79,10 @@
 //! exercises monitoring must use `monitor = enabled`.
 //!
 //! Use `workers = N` to set the exact worker count, or `workers = all` to use
-//! all available processors. Use `monitor = enabled` or `monitor = disabled`
-//! to select the monitoring policy. Build the runtime explicitly for custom
-//! clocks, telemetry, blocking pools, stack sizes, or an
+//! all available processors. If `N` exceeds the available processor count,
+//! Arty assigns multiple workers to each processor. Use `monitor = enabled` or
+//! `monitor = disabled` to select the monitoring policy. Build the runtime
+//! explicitly for custom clocks, telemetry, blocking pools, stack sizes, or an
 //! [`at_most`](crate::runtime::WorkersPolicy::at_most) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported

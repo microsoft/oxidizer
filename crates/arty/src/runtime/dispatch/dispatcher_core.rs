@@ -258,6 +258,7 @@ impl DispatcherCore {
         self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
     }
 
+    /// Records the execution worker so a successful result can relocate when its join is polled.
     fn spawn_relocating_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Builtins) -> F + Send + 'static,

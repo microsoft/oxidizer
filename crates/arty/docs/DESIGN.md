@@ -51,8 +51,10 @@ Moving or cloning alone does not change its worker association.
 `spawn_anywhere` and `spawn_at` relocate their explicit input to the destination
 worker before starting the task. On a worker's `Scheduler`, their results must
 also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts any `Send` result.
-Joining does not relocate results; ordinary `spawn` and `block_on` do not
-relocate captures or results either.
+Joining a worker-bound `spawn_anywhere` or `spawn_at` on an Arty worker relocates
+the result to that worker. Joining outside Arty does not relocate the result.
+Runtime-wide `spawn_anywhere`, ordinary `spawn`, and `block_on` do not relocate
+results.
 
 Relocation does not transfer Arty's worker-bound handles to another runtime.
 See the

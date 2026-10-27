@@ -591,6 +591,8 @@ mod tests {
         runtime.stop().unwrap();
     }
 
+    // Prove that all-worker startup creates distinct running workers while the
+    // fake topology keeps processor capacity independent of the test host.
     #[test]
     fn all_workers_use_fake_processor_capacity() {
         const PROCESSORS: usize = 4;
