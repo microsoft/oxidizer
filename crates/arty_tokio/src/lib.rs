@@ -66,7 +66,8 @@
 //! Initialization prepares every worker before it commits. If any worker
 //! fails, [`init`] removes the contexts created by that attempt. Canceling
 //! [`init`] starts the same cleanup. A later call can retry after cleanup
-//! finishes.
+//! finishes. If this crate created a runtime for the failed attempt, it starts
+//! non-waiting Tokio shutdown during rollback.
 //!
 //! # External runtime
 //!
@@ -126,9 +127,14 @@
 //!
 //! Installer tasks stay parked until Arty stops. Arty drops each installer on
 //! its worker, which leaves the Tokio context. If this crate owns the runtime,
-//! it then drops the runtime. Tokio waits for blocking work to finish during
+//! it then shuts down the runtime. Tokio waits for blocking work during normal
 //! runtime drop, so long [`tokio::task::spawn_blocking`] work can delay Arty
 //! shutdown.
+//!
+//! If Arty shutdown completes on a Tokio runtime thread, this crate starts
+//! background Tokio shutdown instead. This prevents that thread from waiting
+//! for itself. In this case, Arty shutdown does not wait for outstanding Tokio
+//! blocking work.
 
 use tokio::runtime::Handle;
 

@@ -68,7 +68,8 @@ The complete runnable version is in the `tokio_library` example:
 Initialization prepares every worker before it commits. If any worker
 fails, [`init`][__link4] removes the contexts created by that attempt. Canceling
 [`init`][__link5] starts the same cleanup. A later call can retry after cleanup
-finishes.
+finishes. If this crate created a runtime for the failed attempt, it starts
+non-waiting Tokio shutdown during rollback.
 
 ## External runtime
 
@@ -124,9 +125,14 @@ The `tokio_drivers` example uses a timer and a loopback TCP connection:
 
 Installer tasks stay parked until Arty stops. Arty drops each installer on
 its worker, which leaves the Tokio context. If this crate owns the runtime,
-it then drops the runtime. Tokio waits for blocking work to finish during
+it then shuts down the runtime. Tokio waits for blocking work during normal
 runtime drop, so long [`tokio::task::spawn_blocking`][__link17] work can delay Arty
 shutdown.
+
+If Arty shutdown completes on a Tokio runtime thread, this crate starts
+background Tokio shutdown instead. This prevents that thread from waiting
+for itself. In this case, Arty shutdown does not wait for outstanding Tokio
+blocking work.
 
 
 <hr/>
@@ -134,7 +140,7 @@ shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_mu4cCS57rIbveDnnWDfAVMbA3c8GOlQT9sbTchK_ev24SBhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb66eNWx1hT7QbUyGyxYq1_MQb2DMouymmJrkbT406ukrYapNhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
  [__link0]: https://crates.io/crates/arty/0.5.0
  [__link1]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link10]: https://docs.rs/tokio/1.53.3/tokio/?search=spawn

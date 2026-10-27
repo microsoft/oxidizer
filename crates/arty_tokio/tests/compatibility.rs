@@ -8,7 +8,7 @@
 mod support;
 
 use std::error::Error as _;
-use std::future::{poll_fn, ready};
+use std::future::{pending, poll_fn, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -40,6 +40,14 @@ async fn worker_contexts(cx: &Builtins) -> Vec<bool> {
 
 fn worker_has_context(scheduler: &Scheduler, worker: &Thread) -> bool {
     futures::executor::block_on(scheduler.spawn_at(worker, (), |()| async { Handle::try_current().is_ok() })).unwrap()
+}
+
+struct DropSignal(mpsc::SyncSender<()>);
+
+impl Drop for DropSignal {
+    fn drop(&mut self) {
+        let _send_result = self.0.send(());
+    }
 }
 
 #[test]
@@ -79,16 +87,24 @@ fn default_init_makes_tokio_available_on_every_worker() {
 fn duplicate_init_rolls_back_without_removing_existing_contexts() {
     let runtime = runtime(2);
 
-    let (error, contexts) = runtime
+    let (errors, contexts) = runtime
         .scheduler()
         .block_on(async |cx| {
             arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
-            let error = arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap_err();
-            (error, worker_contexts(&cx).await)
+            let mut errors = Vec::new();
+            for _ in 0..3 {
+                errors.push(
+                    arty_tokio::init(&cx, arty_tokio::TokioHandle::default())
+                        .await
+                        .unwrap_err()
+                        .to_string(),
+                );
+            }
+            (errors, worker_contexts(&cx).await)
         })
         .unwrap();
 
-    assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
+    assert_eq!(errors, vec!["an Arty worker already has a Tokio runtime context"; 3]);
     assert_eq!(contexts, vec![true, true]);
     stop_bounded(runtime);
 }
@@ -319,10 +335,11 @@ fn partial_conflict_rolls_back_and_allows_retry() {
 #[test]
 fn cancelled_init_rolls_back_and_allows_retry() {
     let runtime = runtime(2);
+    let (runtime_dropped, runtime_drop_observed) = mpsc::sync_channel(1);
 
     runtime
         .scheduler()
-        .block_on(async |cx| {
+        .block_on(async move |cx| {
             let mut initialization = Box::pin(arty_tokio::init(&cx, arty_tokio::TokioHandle::default()));
             poll_fn(|context| match initialization.as_mut().poll(context) {
                 std::task::Poll::Pending => std::task::Poll::Ready(()),
@@ -333,6 +350,13 @@ fn cancelled_init_rolls_back_and_allows_retry() {
             .await;
 
             assert_eq!(worker_contexts(&cx).await, vec![true, true]);
+            let (task_started, task_ready) = oneshot();
+            drop(tokio::spawn(async move {
+                let _drop_signal = DropSignal(runtime_dropped);
+                task_started.send(()).unwrap();
+                pending::<()>().await;
+            }));
+            task_ready.await.unwrap();
             drop(initialization);
 
             let deadline = Instant::now() + TEST_TIMEOUT;
@@ -345,6 +369,7 @@ fn cancelled_init_rolls_back_and_allows_retry() {
         })
         .unwrap();
 
+    runtime_drop_observed.recv_timeout(TEST_TIMEOUT).unwrap();
     stop_bounded(runtime);
 }
 
