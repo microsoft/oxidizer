@@ -272,23 +272,23 @@ fn delay_fires_at_its_exact_controlled_deadline() {
 fn delay_replaces_the_waker_without_restarting_the_deadline() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let first_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
-    let second_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
-    let first_waker = Waker::from(Arc::clone(&first_wakes));
-    let second_waker = Waker::from(Arc::clone(&second_wakes));
-    let mut first_context = Context::from_waker(&first_waker);
-    let mut second_context = Context::from_waker(&second_waker);
+    let old_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let new_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let previous_waker = Waker::from(Arc::clone(&old_count));
+    let current_waker = Waker::from(Arc::clone(&new_count));
+    let mut previous_context = Context::from_waker(&previous_waker);
+    let mut current_context = Context::from_waker(&current_waker);
     let mut delay = clock.delay(Duration::from_millis(10));
 
-    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut first_context), Poll::Pending);
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut previous_context), Poll::Pending);
     control.advance(Duration::from_millis(4));
-    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut second_context), Poll::Pending);
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut current_context), Poll::Pending);
 
     control.advance(Duration::from_millis(6));
 
-    assert_eq!(first_wakes.0.load(Ordering::Relaxed), 0);
-    assert_eq!(second_wakes.0.load(Ordering::Relaxed), 1);
-    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut second_context), Poll::Ready(()));
+    assert_eq!(old_count.0.load(Ordering::Relaxed), 0);
+    assert_eq!(new_count.0.load(Ordering::Relaxed), 1);
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut current_context), Poll::Ready(()));
 }
 
 #[test]
