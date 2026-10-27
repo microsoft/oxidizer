@@ -121,6 +121,14 @@ runs:
       shell: bash
       run: sudo apt-get update && sudo apt-get install -y libclang-dev
 
+    - name: Install Valgrind (Linux example groups)
+      if: runner.environment == 'github-hosted' && runner.os == 'Linux' && (inputs.group == '' || inputs.group == 'examples' || inputs.group == 'pr-test' || inputs.group == 'scheduled-test' || inputs.group == 'pr' || inputs.group == 'scheduled' || inputs.group == 'full')
+      shell: bash
+      run: |
+        sudo apt-get update --quiet
+        sudo apt-get install --yes --quiet valgrind
+        valgrind --version
+
     - name: Install just
       shell: pwsh -NoProfile -Command ". '{0}'"
       env:
@@ -187,18 +195,6 @@ runs:
           "")   just anvil-setup binstall ;;
           *)    just "anvil-$ANVIL_GROUP-setup" binstall ;;
         esac
-
-    - name: Install native benchmark tools (Linux example groups)
-      if: runner.os == 'Linux' && (inputs.group == '' || inputs.group == 'examples' || inputs.group == 'pr-test' || inputs.group == 'scheduled-test' || inputs.group == 'pr' || inputs.group == 'scheduled' || inputs.group == 'full')
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: |
-        sudo apt-get update --quiet
-        sudo apt-get install --yes --quiet valgrind
-        just _install-tool gungraun-runner "$(just --evaluate gungraun_runner_version)" binstall
-        gungraun-runner --version
-        valgrind --version
 
     # Save the cache as the LAST step of setup, regardless of whether
     # any earlier install step partially failed. `actions/cache`
