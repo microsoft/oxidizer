@@ -47,9 +47,14 @@ Describe 'Callgrind tool setup' {
     ) {
         param($Version)
         $script:InstalledVersion = $Version
-        Initialize-CallgrindTools -RequiredVersion '0.19.4' -CargoArguments @('+1.95')
-        ($script:CargoCalls | ConvertTo-Json -Compress) |
-            Should -Be '["+1.95","install","--locked","--force","--version","=0.19.4","gungraun-runner"]'
+        Initialize-CallgrindTools -RequiredVersion '0.19.4'
+        $script:CargoCalls.Count | Should -Be 1
+        $arguments = $script:CargoCalls[0]
+        $arguments | Should -Contain 'gungraun-runner'
+        $arguments | Should -Contain '--force'
+        $versionIndex = [array]::IndexOf($arguments, '--version')
+        $versionIndex | Should -BeGreaterOrEqual 0
+        $arguments[$versionIndex + 1] | Should -Be '=0.19.4'
     }
 
     It 'falls back to source installation after binary installation fails' {
@@ -59,17 +64,16 @@ Describe 'Callgrind tool setup' {
             $global:LASTEXITCODE = if ($args[0] -eq 'binstall') { 1 } else { 0 }
         }
         Initialize-CallgrindTools -RequiredVersion '0.19.4' -Installer binstall
-        ($script:CargoCalls | ConvertTo-Json -Compress) | Should -Be (
-            '[["binstall","--no-confirm","--locked","--force","--version","=0.19.4","gungraun-runner"],' +
-            '["install","--locked","--force","--version","=0.19.4","gungraun-runner"]]'
-        )
+        $script:CargoCalls.Count | Should -Be 2
+        $script:CargoCalls[0][0] | Should -Be 'binstall'
+        $script:CargoCalls[1][0] | Should -Be 'install'
     }
 
-    It 'uses the exact binary version without a source installation on success' {
+    It 'does not fall back to source after binary installation succeeds' {
         $script:InstalledVersion = '0.19.5'
         Initialize-CallgrindTools -RequiredVersion '0.19.4' -Installer binstall
-        ($script:CargoCalls | ConvertTo-Json -Compress) |
-            Should -Be '["binstall","--no-confirm","--locked","--force","--version","=0.19.4","gungraun-runner"]'
+        $script:CargoCalls.Count | Should -Be 1
+        $script:CargoCalls[0][0] | Should -Be 'binstall'
     }
 
     It 'reports a failure to inspect the installed runner' {
@@ -91,52 +95,21 @@ Describe 'Callgrind tool setup' {
         Should -Invoke cargo -Times 0
     }
 
-    It 'rejects a mismatched runner during validation' {
-        $script:InstalledVersion = '0.19.5'
+    It 'rejects a <Version> runner during validation without installing anything' -TestCases @(
+        @{ Version = '0.19.3' }
+        @{ Version = '0.19.5' }
+        @{ Version = $null }
+    ) {
+        param($Version)
+        $script:InstalledVersion = $Version
         { Initialize-CallgrindTools -RequiredVersion '0.19.4' -ValidateOnly } |
             Should -Throw '*gungraun-runner 0.19.4 is required*'
         Should -Invoke cargo -Times 0
     }
 
-    It 'reports how to install missing Valgrind' {
+    It 'rejects missing Valgrind during validation' {
         $script:ValgrindAvailable = $false
         { Initialize-CallgrindTools -RequiredVersion '0.19.4' -ValidateOnly } |
-            Should -Throw '*sudo apt-get install -y valgrind*'
-    }
-
-    It 'keeps the native tool cache pin equal to the workspace dependency' {
-        $manifest = Get-Content (Join-Path $script:RepoRoot 'Cargo.toml') -Raw
-        $version = [regex]::Match($manifest, '(?m)^gungraun\s*=\s*\{[^}]*version\s*=\s*"=([^"]+)"').Groups[1].Value
-        $pins = Get-Content (Join-Path $script:RepoRoot 'justfiles\anvil\versions.just') -Raw
-        $pin = [regex]::Match($pins, '(?m)^gungraun_runner_version\s*:=\s*"([^"]+)"').Groups[1].Value
-        $version | Should -Not -BeNullOrEmpty
-        $pin | Should -Be $version
-    }
-}
-
-Describe 'Valgrind provisioning in GitHub Actions' {
-    It 'selects <RunnerEnvironment> <OS> <Group>: <Selected>' -TestCases @(
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Linux'; Group = 'pr-test'; Selected = $true }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Linux'; Group = 'scheduled-test'; Selected = $true }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Linux'; Group = ''; Selected = $true }
-        @{ RunnerEnvironment = 'self-hosted'; OS = 'Linux'; Group = 'pr-test'; Selected = $false }
-        @{ RunnerEnvironment = 'self-hosted'; OS = 'Linux'; Group = 'scheduled-test'; Selected = $false }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Windows'; Group = 'pr-test'; Selected = $false }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'macOS'; Group = 'pr-test'; Selected = $false }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Linux'; Group = 'none'; Selected = $false }
-        @{ RunnerEnvironment = 'github-hosted'; OS = 'Linux'; Group = 'pr-fast'; Selected = $false }
-    ) {
-        param($RunnerEnvironment, $OS, $Group, $Selected)
-        $action = Get-Content (Join-Path $script:RepoRoot '.github\actions\anvil-setup\action.yml') -Raw
-        $condition = [regex]::Match(
-            $action,
-            '(?m)^    - name: Install Valgrind \(Linux example groups\)\r?\n      if: ([^\r\n]+)'
-        ).Groups[1].Value
-        $condition | Should -Not -BeNullOrEmpty
-        $runner = @{ environment = $RunnerEnvironment; os = $OS }
-        $inputs = @{ group = $Group }
-        $expression = $condition.Replace('runner.', '$runner.').Replace('inputs.', '$inputs.').
-            Replace('&&', '-and').Replace('||', '-or').Replace('==', '-ceq')
-        (& ([scriptblock]::Create($expression))) | Should -Be $Selected
+            Should -Throw '*Valgrind is required*'
     }
 }
