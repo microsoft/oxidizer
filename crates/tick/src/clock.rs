@@ -457,11 +457,7 @@ impl Clock {
         crate::Stopwatch::new(self)
     }
 
-    /// Returns time in the same comparison domain used to advance this clock's timers.
-    ///
-    /// Controlled timers must follow their manually advanced clock. System timers must instead
-    /// use the precise source used by the driver: a coarse read can still lag after the driver
-    /// removes and wakes a deadline, leaving the future pending without another wake-up.
+    /// Returns time in the comparison domain used to register this clock's timers.
     pub(super) fn timer_instant(&self) -> Instant {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
@@ -484,6 +480,10 @@ impl Clock {
             ClockState::ClockControl(control) => control.unregister_timer(key),
             ClockState::System(storage) => storage.with_timers(|timers| timers.unregister(key)),
         }
+    }
+
+    pub(super) fn contains_timer(&self, key: TimerKey) -> bool {
+        self.state.contains_timer(key)
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {

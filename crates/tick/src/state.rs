@@ -151,6 +151,14 @@ impl ClockState {
         }
     }
 
+    pub(crate) fn contains_timer(&self, key: crate::timers::TimerKey) -> bool {
+        match self {
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(control) => control.contains_timer(key),
+            Self::System(storage) => storage.with_timers(|timers| timers.contains(key)),
+        }
+    }
+
     pub(crate) fn alive(&self) -> bool {
         match self {
             #[cfg(any(feature = "test-util", test))]

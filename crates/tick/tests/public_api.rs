@@ -180,6 +180,18 @@ fn completing_a_delay_removes_its_public_driver_deadline() {
 }
 
 #[test]
+fn driver_consumed_delay_completes_before_the_precise_clock_reaches_its_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut delay = Delay::new(&clock, Duration::from_mins(1));
+    assert_eq!(poll_delay(&mut delay), Poll::Pending);
+    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
+}
+
+#[test]
 fn periodic_timer_is_lazy_and_first_poll_is_pending() {
     let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
     let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
@@ -236,6 +248,19 @@ fn completing_a_periodic_tick_removes_its_public_driver_deadline() {
     assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
 
     assert_eq!(driver.advance_timers(before_registration).unwrap(), None);
+}
+
+#[test]
+fn driver_consumed_periodic_timer_yields_before_precise_time_reaches_its_deadline() {
+    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let mut timer = PeriodicTimer::new(&clock, Duration::from_mins(1));
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    let deadline = driver.advance_timers(Instant::now()).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    assert_eq!(poll_timer(&mut timer), Poll::Pending);
 }
 
 #[test]

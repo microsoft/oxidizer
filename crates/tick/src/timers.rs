@@ -60,8 +60,7 @@ impl Timers {
         self.alive
     }
 
-    #[cfg(test)]
-    fn contains(&self, id: TimerKey) -> bool {
+    pub(crate) fn contains(&self, id: TimerKey) -> bool {
         self.wakers.contains_key(&id)
     }
 

@@ -433,6 +433,10 @@ impl ClockControl {
         self.with_state(|s| s.timers.unregister(key));
     }
 
+    pub(super) fn contains_timer(&self, key: TimerKey) -> bool {
+        self.with_state(|s| s.timers.contains(key))
+    }
+
     pub(super) fn timers_len(&self) -> usize {
         self.with_state(|s| s.timers.len())
     }

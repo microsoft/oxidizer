@@ -131,12 +131,13 @@ impl Stream for PeriodicTimer {
         }
 
         match this.current_timer {
-            Some(key) if key.tick() <= this.clock.timer_instant() => {
+            Some(key) if key.tick() <= this.clock.timer_instant() || !this.clock.contains_timer(key) => {
                 // Reset the timer. It will be registered again on the next poll.
                 this.current_timer = None;
 
-                // Unregister the timer, just in case this call was explicit and not due to
-                // timers advancing.
+                // Unregister the timer if precise time reached the deadline before the driver did.
+                // If the driver already consumed the key, its wake is authoritative even when a
+                // coarse driver timestamp led the precise clock.
                 this.clock.unregister_timer(key);
 
                 Poll::Ready(Some(()))
