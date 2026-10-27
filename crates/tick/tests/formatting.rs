@@ -209,12 +209,10 @@ fn iso8601_parses_displays_and_converts_public_values() {
 
 #[test]
 fn iso8601_rejects_year_overflow() {
-    assert!(
-        "+010000-12-30T22:00:00.999999999Z"
-            .parse::<Iso8601>()
-            .unwrap_err()
-            .is_out_of_range()
-    );
+    let error = "+010000-12-30T22:00:00.999999999Z".parse::<Iso8601>().unwrap_err();
+
+    assert!(error.is_out_of_range());
+    assert!(error.source().unwrap().downcast_ref::<jiff::Error>().is_some());
 }
 
 #[test]
@@ -228,8 +226,10 @@ fn iso8601_round_trips_system_time() {
 #[test]
 fn iso8601_classifies_system_time_above_its_range() {
     let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+    let error = Iso8601::try_from(overflow).unwrap_err();
 
-    assert!(Iso8601::try_from(overflow).unwrap_err().is_out_of_range());
+    assert!(error.is_out_of_range());
+    assert!(error.source().unwrap().downcast_ref::<jiff::Error>().is_some());
 }
 
 #[test]

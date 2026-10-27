@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::backtrace::Backtrace;
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fmt;
 use std::time::SystemTimeError;
 
@@ -37,7 +37,10 @@ enum ErrorKind {
     #[cfg(any(feature = "fmt", test))]
     Jiff(jiff::Error),
     #[cfg(any(feature = "fmt", test))]
-    OutOfRange(std::borrow::Cow<'static, str>),
+    OutOfRange {
+        message: std::borrow::Cow<'static, str>,
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    },
     #[cfg(any(feature = "fmt", test))]
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
     SystemTimeError(SystemTimeError),
@@ -54,13 +57,24 @@ impl Error {
 
     #[cfg(any(feature = "fmt", test))]
     pub(super) fn out_of_range(message: impl Into<std::borrow::Cow<'static, str>>) -> Self {
-        Self::from_kind(ErrorKind::OutOfRange(message.into()))
+        Self::from_kind(ErrorKind::OutOfRange {
+            message: message.into(),
+            source: None,
+        })
+    }
+
+    #[cfg(any(feature = "fmt", test))]
+    pub(super) fn out_of_range_from(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::from_kind(ErrorKind::OutOfRange {
+            message: error.to_string().into(),
+            source: Some(Box::new(error)),
+        })
     }
 
     #[cfg(any(feature = "fmt", test))]
     pub(super) fn jiff(error: jiff::Error) -> Self {
         if error.is_range() {
-            return Self::out_of_range(error.to_string());
+            return Self::out_of_range_from(error);
         }
         Self::from_kind(ErrorKind::Jiff(error))
     }
@@ -112,7 +126,7 @@ impl Error {
     pub const fn is_out_of_range(&self) -> bool {
         #[cfg(any(feature = "fmt", test))]
         {
-            matches!(&self.kind, ErrorKind::OutOfRange(_))
+            matches!(&self.kind, ErrorKind::OutOfRange { .. })
         }
 
         #[cfg(not(any(feature = "fmt", test)))]
@@ -141,12 +155,18 @@ impl fmt::Display for Error {
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::Jiff(err) => err.fmt(f),
             #[cfg(any(feature = "fmt", test))]
-            ErrorKind::OutOfRange(msg) => write!(f, "{msg}"),
+            ErrorKind::OutOfRange { message, .. } => write!(f, "{message}"),
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::Other(err) => err.fmt(f),
             ErrorKind::SystemTimeError(err) => err.fmt(f),
             ErrorKind::Timeout(err) => err.fmt(f),
+        }?;
+
+        if self.backtrace.status() == BacktraceStatus::Captured {
+            write!(f, "\n\nBacktrace:\n{}", self.backtrace)?;
         }
+
+        Ok(())
     }
 }
 
@@ -156,7 +176,7 @@ impl std::error::Error for Error {
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::Jiff(err) => Some(err),
             #[cfg(any(feature = "fmt", test))]
-            ErrorKind::OutOfRange(_) => None,
+            ErrorKind::OutOfRange { source, .. } => source.as_deref().map(|error| error as _),
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::Other(err) => Some(err.as_ref()),
             ErrorKind::SystemTimeError(err) => Some(err),
@@ -196,7 +216,7 @@ mod tests {
         // The public error type deliberately exposes no variant introspection.
         let error = Error::out_of_range("test");
 
-        assert!(matches!(error.kind(), ErrorKind::OutOfRange(_)));
+        assert!(matches!(error.kind(), ErrorKind::OutOfRange { .. }));
         assert!(error.is_out_of_range());
         assert!(!error.is_timeout());
         assert_eq!(error.to_string(), "test");
@@ -224,6 +244,7 @@ mod tests {
         };
 
         assert_eq!(error.backtrace().status(), BacktraceStatus::Captured);
+        assert!(error.to_string().contains("\n\nBacktrace:\n"));
     }
 
     #[test]

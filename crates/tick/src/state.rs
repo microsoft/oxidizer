@@ -463,6 +463,24 @@ mod tests {
     }
 
     #[test]
+    fn timer_waker_batches_wake_every_due_timer_and_return_the_next_deadline() {
+        let storage = SystemClockStorage::new_shared();
+        let now = Instant::now();
+        let due_wakes: Vec<_> = (0..10).map(|_| std::sync::Arc::new(CountingWake(AtomicUsize::new(0)))).collect();
+        let later_wake = std::sync::Arc::new(CountingWake(AtomicUsize::new(0)));
+        let later = now + std::time::Duration::from_secs(1);
+
+        for wake in &due_wakes {
+            _ = storage.register_timer(now, Waker::from(std::sync::Arc::clone(wake)));
+        }
+        _ = storage.register_timer(later, Waker::from(std::sync::Arc::clone(&later_wake)));
+
+        assert_eq!(storage.try_advance_timers(now), Some(later));
+        assert!(due_wakes.iter().all(|wake| wake.0.load(Ordering::Relaxed) == 1));
+        assert_eq!(later_wake.0.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn displaced_wakers_are_dropped_after_releasing_system_timer_lock() {
         let storage = SystemClockStorage::new_shared();
         let clock = crate::Clock::new(ClockState::System(SystemClockState::new(storage.clone())));

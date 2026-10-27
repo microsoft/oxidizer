@@ -332,6 +332,37 @@ fn periodic_timer_fires_at_its_exact_controlled_deadline() {
 }
 
 #[test]
+fn periodic_timer_replaces_the_waker_without_restarting_the_period() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let mut timer = Timer::new(&clock, Duration::from_millis(10));
+    let first_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let second_wakes = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let first_waker = Waker::from(Arc::clone(&first_wakes));
+    let second_waker = Waker::from(Arc::clone(&second_wakes));
+    let mut first_context = Context::from_waker(&first_waker);
+    let mut second_context = Context::from_waker(&second_waker);
+
+    {
+        let mut first = std::pin::pin!(timer.next());
+        assert!(first.as_mut().poll(&mut first_context).is_pending());
+    }
+
+    control.advance(Duration::from_millis(4));
+    let mut second = std::pin::pin!(timer.next());
+    assert!(second.as_mut().poll(&mut second_context).is_pending());
+
+    control.advance(Duration::from_millis(6));
+
+    assert_eq!(first_wakes.0.load(Ordering::Relaxed), 0);
+    assert_eq!(second_wakes.0.load(Ordering::Relaxed), 1);
+    let Poll::Ready(tick) = second.as_mut().poll(&mut second_context) else {
+        panic!("the timer must keep its original deadline");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
+}
+
+#[test]
 fn zero_period_is_clamped_to_exactly_one_millisecond() {
     let control = ClockControl::new();
     let clock = control.to_clock();
