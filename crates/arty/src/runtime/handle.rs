@@ -250,6 +250,7 @@ mod tests {
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         )));
         let runtime = Runtime::with_dispatcher(dispatcher);
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
@@ -269,6 +270,7 @@ mod tests {
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         )));
         let runtime = Runtime::with_dispatcher(dispatcher.clone());
         dispatcher.stop_with_error(Error::new(std::io::Error::other("first runtime failure")));

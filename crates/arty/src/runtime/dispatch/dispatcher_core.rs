@@ -84,17 +84,7 @@ pub(crate) struct DispatcherCore {
 struct ContainedRuntimePanic;
 
 impl DispatcherCore {
-    #[cfg(test)]
     pub(crate) fn new(
-        wait_for_shutdown: ThreadWaiter,
-        worker_endpoints: NonEmpty<WorkerEndpoint>,
-        sink: observed::Sink,
-        shutdown: Shutdown,
-    ) -> Self {
-        Self::new_with_panic_policy(wait_for_shutdown, worker_endpoints, sink, shutdown, PanicPolicy::default())
-    }
-
-    pub(crate) fn new_with_panic_policy(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
@@ -379,6 +369,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(first_tx, &first), endpoint(second_tx, &second)]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
     }
 
@@ -395,6 +386,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
@@ -422,6 +414,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
@@ -444,6 +437,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         for _ in 0..4 {
@@ -464,6 +458,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         let index = dispatcher.worker_index(threads[1].id()).unwrap();
@@ -481,6 +476,7 @@ mod tests {
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         assert!(dispatcher.worker_index(threads[1].id()).is_none());
@@ -495,6 +491,7 @@ mod tests {
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         ));
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
@@ -513,6 +510,7 @@ mod tests {
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
         dispatcher.stop();
         let invoked = Arc::new(AtomicBool::new(false));
@@ -543,6 +541,7 @@ mod tests {
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
         dispatcher.stop_with_error(Error::worker_panicked());
 
@@ -571,6 +570,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         assert_eq!(drain_rx(&worker1_rx).len(), 0);
@@ -602,6 +602,7 @@ mod tests {
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
+            PanicPolicy::default(),
         );
 
         dispatcher.stop();

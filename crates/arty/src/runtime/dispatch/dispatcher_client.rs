@@ -62,6 +62,7 @@ impl DispatcherClient {
             nonempty::NonEmpty::new(endpoint),
             observed::Sink::noop(),
             shutdown,
+            crate::runtime::PanicPolicy::default(),
         )))
     }
 
@@ -175,8 +176,6 @@ impl Debug for DispatcherClient {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
-    use std::task::Waker;
-
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
     use performables::sync::channel;
@@ -202,6 +201,7 @@ mod tests {
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         )));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -240,6 +240,7 @@ mod tests {
             .unwrap(),
             Sink::noop(),
             Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -287,6 +288,7 @@ mod tests {
             .unwrap(),
             Sink::noop(),
             Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         ));
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -357,6 +359,7 @@ mod tests {
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
+            crate::runtime::PanicPolicy::default(),
         )));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)

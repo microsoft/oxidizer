@@ -126,7 +126,7 @@ fn build_with_processors(
     }
 
     let runtime_sink = sink.clone();
-    let dispatcher = Arc::new(DispatcherCore::new_with_panic_policy(
+    let dispatcher = Arc::new(DispatcherCore::new(
         ThreadWaiter::new(async_worker_join_handles),
         NonEmpty::from_vec(async_worker_command_txs)
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
@@ -396,6 +396,7 @@ mod tests {
             NonEmpty::new(endpoint),
             Sink::noop(),
             shutdown.clone(),
+            PanicPolicy::default(),
         )));
 
         report_worker_failure(&Err(Box::new("worker panic")), &dispatcher);
@@ -420,6 +421,7 @@ mod tests {
             NonEmpty::new(endpoint),
             Sink::noop(),
             shutdown.clone(),
+            PanicPolicy::default(),
         )));
 
         report_worker_failure(&Ok(()), &dispatcher);
