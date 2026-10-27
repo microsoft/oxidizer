@@ -139,6 +139,11 @@ impl<R: Send + 'static> Sender<R> {
     /// # Errors
     ///
     /// Returns a panic payload if notifying the result receiver panics.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured runtime-integration notifier panics. The task
+    /// panic result is published before the notifier runs.
     pub fn panicked(mut self, panic: TaskPanicPayload) -> Result<(), TaskPanicPayload> {
         let delivery = self.send(TaskResult::Panicked(panic));
         self.panic_notifier.wake_by_ref();

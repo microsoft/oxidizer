@@ -24,8 +24,7 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    pub(crate) fn new(core: Arc<DispatcherCore>) -> Self {
-        core.initialize_panic_notifier(Arc::downgrade(&core));
+    pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
     }
 
@@ -45,13 +44,13 @@ impl DispatcherClient {
                 shutdown.clone(),
             ),
         };
-        Self::new(Arc::new(DispatcherCore::new(
+        Self::new(DispatcherCore::new(
             crate::runtime::thread::waiter::ThreadWaiter::new(Vec::new()),
             nonempty::NonEmpty::new(endpoint),
             observed::Sink::noop(),
             shutdown,
             crate::runtime::PanicPolicy::default(),
-        )))
+        ))
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -180,13 +179,13 @@ mod tests {
             thread: test_threads(1).pop().unwrap(),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
-        let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let client = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        )));
+        ));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -206,7 +205,7 @@ mod tests {
         let threads = test_threads(2);
         let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
 
-        let dispatcher = Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
@@ -226,7 +225,7 @@ mod tests {
             Sink::noop(),
             Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        ));
+        );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
@@ -254,7 +253,7 @@ mod tests {
         let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), destination_shutdown.clone());
         destination_shutdown.begin(ShutdownCause::default());
 
-        let dispatcher = Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
@@ -274,7 +273,7 @@ mod tests {
             Sink::noop(),
             Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        ));
+        );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
@@ -339,13 +338,13 @@ mod tests {
             thread: threads[0].clone(),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        )));
+        ));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
     }

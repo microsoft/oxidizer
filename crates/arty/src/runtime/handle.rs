@@ -245,13 +245,13 @@ mod tests {
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::shutdown::Shutdown::default()),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        )));
+        ));
         let runtime = Runtime::with_dispatcher(dispatcher);
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
     }
@@ -265,13 +265,13 @@ mod tests {
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::shutdown::Shutdown::default()),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
             crate::runtime::PanicPolicy::default(),
-        )));
+        ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone());
         dispatcher.stop_with_error(Error::new(std::io::Error::other("first runtime failure")));
 

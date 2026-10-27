@@ -101,7 +101,7 @@ impl DispatcherCore {
         sink: observed::Sink,
         shutdown: Shutdown,
         panic_policy: PanicPolicy,
-    ) -> Self {
+    ) -> Arc<Self> {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -124,37 +124,33 @@ impl DispatcherCore {
             worker_endpoints.len(),
             "each runtime worker must have a distinct thread ID"
         );
-        Self {
-            wait_for_shutdown,
-            shutdown,
-            stopped_reported: AtomicBool::new(false),
-            worker_endpoints,
-            workers,
-            worker_indices,
-            next_async_worker_index: AtomicUsize::new(0),
-            sink,
-            remote_results: RemotePool::new(),
-            panic_shutdown_cause: panic_policy.starts_shutdown().then(ShutdownCause::panic),
-        }
+        let panic_shutdown_cause = panic_policy.starts_shutdown().then(ShutdownCause::panic);
+        Arc::new_cyclic(move |weak| {
+            let notifier = if panic_shutdown_cause.is_some() {
+                Waker::from(StdArc::new(PanicShutdownWake(weak.clone())))
+            } else {
+                Waker::noop().clone()
+            };
+            shutdown.initialize_panic_notifier(notifier);
+            Self {
+                wait_for_shutdown,
+                shutdown,
+                stopped_reported: AtomicBool::new(false),
+                worker_endpoints,
+                workers,
+                worker_indices,
+                next_async_worker_index: AtomicUsize::new(0),
+                sink,
+                remote_results: RemotePool::new(),
+                panic_shutdown_cause,
+            }
+        })
     }
 
     pub(crate) fn record_panic(&self) {
         if let Some(cause) = &self.panic_shutdown_cause {
             _ = self.stop_inner(cause.clone());
         }
-    }
-
-    pub(crate) const fn shuts_down_on_panic(&self) -> bool {
-        self.panic_shutdown_cause.is_some()
-    }
-
-    pub(crate) fn initialize_panic_notifier(&self, weak: Weak<Self>) {
-        let notifier = if self.shuts_down_on_panic() {
-            Waker::from(StdArc::new(PanicShutdownWake(weak)))
-        } else {
-            Waker::noop().clone()
-        };
-        self.shutdown.initialize_panic_notifier(notifier);
     }
 
     pub(crate) fn panic_notifier(&self) -> Waker {
@@ -512,13 +508,13 @@ mod tests {
     fn shutdown_state_is_shared_with_dispatcher_client() {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
-        let core = Arc::new(DispatcherCore::new(
+        let core = DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
             PanicPolicy::default(),
-        ));
+        );
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
 

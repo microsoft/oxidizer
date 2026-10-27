@@ -666,7 +666,6 @@ mod tests {
                 #[::core::prelude::v1::test]
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .workers(::arty::runtime::WorkersPolicy::exactly(1))
                         .monitor(::arty::runtime::MonitorPolicy::disabled())
                         .panic(::arty::runtime::PanicPolicy::#policy())
                         .build()

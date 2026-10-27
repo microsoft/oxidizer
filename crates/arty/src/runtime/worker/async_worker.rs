@@ -666,13 +666,13 @@ mod tests {
             thread: thread.clone(),
             blocking_worker: Arc::clone(&blocking_worker),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             sink.clone(),
             shutdown,
             crate::runtime::PanicPolicy::default(),
-        )));
+        ));
         let io_runtime = arty_io_host::IoRuntime::new(sink.clone());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));

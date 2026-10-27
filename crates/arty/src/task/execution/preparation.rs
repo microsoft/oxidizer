@@ -12,7 +12,6 @@ use observed::context::Transfer;
 use pin_project::pin_project;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
-use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::{Shutdown, ShutdownState};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -232,10 +231,6 @@ where
         shutdown,
     };
     (move || task.run(), JoinHandle::new(result_rx))
-}
-
-pub(crate) fn with_panic_notifier<R: Send + 'static>(dispatcher: &DispatcherClient, sender: RemoteSender<R>) -> RemoteSender<R> {
-    sender.with_panic_notifier(dispatcher.panic_notifier())
 }
 
 struct BlockingTask<F, R: Send + 'static> {
