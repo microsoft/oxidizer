@@ -127,3 +127,6 @@ cargo_semver_checks_version := "0.50.0"
 cargo_sort_version := "2.1.4"
 cargo_spellcheck_version := "0.15.7"
 cargo_udeps_version := "0.1.61"
+
+# Native benchmark tools. Keep this version equal to the workspace dependency.
+gungraun_runner_version := "0.19.4"
