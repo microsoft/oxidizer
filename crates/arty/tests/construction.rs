@@ -8,7 +8,7 @@
 
 use std::error::Error as StdError;
 
-use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
 
 #[test]
@@ -51,6 +51,16 @@ fn default_runtime_construction_uses_one_worker() {
                 assert_eq!(workers, vec![cx.thread()]);
             })
             .unwrap();
+        runtime.stop().unwrap();
+    }
+}
+
+#[test]
+fn explicit_panic_policies_preserve_runtime_construction() {
+    for policy in [PanicPolicy::shutdown(), PanicPolicy::ignore()] {
+        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).panic(policy).build().unwrap();
+
+        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();
     }
 }
