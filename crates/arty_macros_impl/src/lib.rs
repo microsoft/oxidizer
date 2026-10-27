@@ -26,6 +26,8 @@ use syn::{Expr, Ident, ItemFn, Lit, parse_quote, parse2};
 struct Args {
     #[darling(default)]
     monitor: Option<MonitorSetting>,
+    #[darling(default)]
+    panic: Option<PanicSetting>,
     #[darling(default, with = "darling::util::parse_expr::preserve_str_literal", map = "Some")]
     workers: Option<Expr>,
 }
@@ -34,6 +36,12 @@ struct Args {
 enum MonitorSetting {
     Enabled,
     Disabled,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PanicSetting {
+    Shutdown,
+    Ignore,
 }
 
 impl FromMeta for MonitorSetting {
@@ -56,10 +64,30 @@ fn invalid_monitor_setting(expr: &Expr) -> darling::Error {
     darling::Error::custom("`monitor` must be the bare identifier `enabled` or `disabled`").with_span(expr)
 }
 
+impl FromMeta for PanicSetting {
+    fn from_expr(expr: &Expr) -> darling::Result<Self> {
+        let Expr::Path(path) = expr else {
+            return Err(invalid_panic_setting(expr));
+        };
+        let Some(ident) = path.path.get_ident() else {
+            return Err(invalid_panic_setting(expr));
+        };
+        match ident.to_string().as_str() {
+            "shutdown" => Ok(Self::Shutdown),
+            "ignore" => Ok(Self::Ignore),
+            _ => Err(invalid_panic_setting(expr)),
+        }
+    }
+}
+
+fn invalid_panic_setting(expr: &Expr) -> darling::Error {
+    darling::Error::custom("`panic` must be the bare identifier `shutdown` or `ignore`").with_span(expr)
+}
+
 impl Args {
     fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
         let monitor = self.monitor.or_else(|| test.then_some(MonitorSetting::Disabled));
-        if self.workers.is_none() && clock.is_none() && monitor.is_none() {
+        if self.workers.is_none() && clock.is_none() && monitor.is_none() && self.panic.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
         let workers = self.workers.as_ref().map(|value| worker_policy(value, runtime_path)).transpose()?;
@@ -68,8 +96,14 @@ impl Args {
             MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::enabled())),
             MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
         });
+        let panic = self.panic.map(|panic| match panic {
+            PanicSetting::Shutdown => {
+                quote!(.panic(#runtime_path::runtime::PanicPolicy::shutdown()))
+            }
+            PanicSetting::Ignore => quote!(.panic(#runtime_path::runtime::PanicPolicy::ignore())),
+        });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
-        Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #clock .build()))
+        Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
     }
 }
 
@@ -591,6 +625,66 @@ mod tests {
     }
 
     #[test]
+    fn main_panic_settings_are_forwarded_exactly() {
+        for policy in [quote!(shutdown), quote!(ignore)] {
+            let expansion = main(
+                quote!(panic = #policy),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            );
+            let expected = quote! {
+                fn run() {
+                    let __arty_runtime = ::arty::runtime::Runtime::builder()
+                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .build()
+                        .expect("failed to create the runtime for the entry point");
+                    let __arty_result = __arty_runtime
+                        .scheduler()
+                        .block_on(async move |cx: Builtins| {});
+                    let __arty_shutdown = __arty_runtime.stop();
+                    __arty_result
+                        .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                        .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+                }
+            };
+
+            assert_eq!(expansion.to_string(), expected.to_string(), "panic = {policy}");
+        }
+    }
+
+    #[test]
+    fn test_panic_settings_are_forwarded_exactly() {
+        for policy in [quote!(shutdown), quote!(ignore)] {
+            let expansion = test(
+                quote!(panic = #policy),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            );
+            let expected = quote! {
+                #[::core::prelude::v1::test]
+                fn run() {
+                    let __arty_runtime = ::arty::runtime::Runtime::builder()
+                        .monitor(::arty::runtime::MonitorPolicy::disabled())
+                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .build()
+                        .expect("failed to create the runtime for the entry point");
+                    let __arty_result = __arty_runtime
+                        .scheduler()
+                        .block_on(async move |cx: Builtins| {});
+                    let __arty_shutdown = __arty_runtime.stop();
+                    __arty_result
+                        .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                        .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+                }
+            };
+
+            assert_eq!(expansion.to_string(), expected.to_string(), "panic = {policy}");
+        }
+    }
+
+    #[test]
     fn monitor_composes_independently_of_argument_order() {
         for expand in [main, test] {
             let input = quote! {
@@ -600,6 +694,19 @@ mod tests {
             let monitor_first = expand(quote!(monitor = disabled, workers = 2), input);
 
             assert_eq!(workers_first.to_string(), monitor_first.to_string());
+        }
+    }
+
+    #[test]
+    fn panic_composes_with_other_settings_independently_of_argument_order() {
+        for expand in [main, test] {
+            let input = quote! {
+                async fn run(cx: Builtins) {}
+            };
+            let panic_last = expand(quote!(workers = 2, monitor = disabled, panic = ignore), input.clone());
+            let panic_first = expand(quote!(panic = ignore, monitor = disabled, workers = 2), input);
+
+            assert_eq!(panic_last.to_string(), panic_first.to_string());
         }
     }
 
@@ -712,6 +819,48 @@ mod tests {
         for expand in [main, test] {
             let expansion = expand(
                 quote!(monitor = enabled, monitor = disabled),
+                quote! {
+                    async fn run(cx: Builtins) {}
+                },
+            )
+            .to_string();
+
+            assert_eq!(expansion, expected);
+        }
+    }
+
+    #[test]
+    fn invalid_panic_settings_report_errors() {
+        let expected = quote!(::core::compile_error! { "`panic` must be the bare identifier `shutdown` or `ignore`" }).to_string();
+        for panic in [
+            quote!(true),
+            quote!(false),
+            quote!("shutdown"),
+            quote!("ignore"),
+            quote!(continue),
+            quote!(PanicPolicy::shutdown()),
+            quote!(::shutdown),
+        ] {
+            for expand in [main, test] {
+                let expansion = expand(
+                    quote!(panic = #panic),
+                    quote! {
+                        async fn run(cx: Builtins) {}
+                    },
+                )
+                .to_string();
+
+                assert_eq!(expansion, expected, "panic = {panic}");
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_panic_settings_report_errors() {
+        let expected = quote!(::core::compile_error! { "Duplicate field `panic`" }).to_string();
+        for expand in [main, test] {
+            let expansion = expand(
+                quote!(panic = shutdown, panic = ignore),
                 quote! {
                     async fn run(cx: Builtins) {}
                 },

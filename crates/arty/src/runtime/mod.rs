@@ -19,6 +19,10 @@
 //! pending tasks and waits for blocking callbacks that have already started;
 //! keeping a scheduler does not keep the runtime running.
 //!
+//! [`PanicPolicy`] selects the intended response to a contained task panic.
+//! This release stores the policy in runtime configuration but does not yet
+//! change panic behavior. A follow-up change will enforce the selected policy.
+//!
 //! # Examples
 //!
 //! Let the entry-point attribute manage the runtime's lifetime:
@@ -53,7 +57,7 @@ mod workers;
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+pub use config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]
