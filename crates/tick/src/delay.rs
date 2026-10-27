@@ -109,7 +109,7 @@ impl Future for Delay {
             None if this.duration == Duration::MAX => Poll::Pending,
             None if this.duration == Duration::ZERO => Poll::Ready(()),
             None => this.register_timer(cx.waker()),
-            Some(key) if key.tick() <= this.clock.timer_instant() || !this.clock.contains_timer(key) => {
+            Some(key) if key.tick() <= this.clock.timer_instant() || this.clock.timer_was_consumed_by_driver(key) => {
                 this.current_timer = None;
                 this.current_waker = None;
 

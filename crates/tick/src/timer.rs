@@ -149,7 +149,7 @@ impl Timer {
 
         if let Some(key) = self.current {
             let observed_at = self.clock.timer_instant();
-            if key.tick() <= observed_at || !self.clock.contains_timer(key) {
+            if key.tick() <= observed_at || self.clock.timer_was_consumed_by_driver(key) {
                 // Reset the timer. It will be registered again on the next poll.
                 self.current = None;
                 self.current_waker = None;
