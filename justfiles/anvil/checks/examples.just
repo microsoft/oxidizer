@@ -6,8 +6,7 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Repository overrides: build each selected example before its execution timeout
-# and use the repository's Callgrind setup for native prerequisites.
+# Repository override: build each selected example before its execution timeout.
 #
 # Affected tier.
 
@@ -139,15 +138,8 @@ anvil-examples package="" example="" timeout="30": anvil-examples-validate-prere
 
 # Install prerequisites for the `anvil-examples` recipe.
 [private]
-[script("pwsh", "-NoProfile")]
 anvil-examples-setup installer="install": anvil-toolchain-stable-install
-    $ErrorActionPreference = 'Stop'
-    $stableArgs = {{_anvil_stable_toolchain_args}}
-    & (Join-Path "{{justfile_directory()}}" 'scripts' 'install-callgrind-tools.ps1') -Installer '{{installer}}' -CargoArguments $stableArgs
 
 # Validate prerequisites for the `anvil-examples` recipe.
 [private]
-[script("pwsh", "-NoProfile")]
 anvil-examples-validate-prereqs: anvil-tool-rustc-validate-prereqs
-    $ErrorActionPreference = 'Stop'
-    & (Join-Path "{{justfile_directory()}}" 'scripts' 'install-callgrind-tools.ps1') -ValidateOnly
