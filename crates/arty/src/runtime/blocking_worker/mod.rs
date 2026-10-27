@@ -3,7 +3,7 @@
 
 //! Blocking-task admission and blocking-pool execution.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
@@ -28,6 +28,11 @@ const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution becau
 type BlockingJob = Box<dyn FnOnce() + Send + 'static>;
 
 thread_local! {
+    // Set by blocking-pool bootstrap before user thread-local values can be
+    // initialized. It stays set until thread exit so user thread-local
+    // destructors retain the no-blocking shutdown guard.
+    static BLOCKING_THREAD: Cell<bool> = const { Cell::new(false) };
+
     static CURRENT_POOL: RefCell<Option<Arc<()>>> = const { RefCell::new(None) };
 }
 
@@ -101,6 +106,7 @@ impl JoinableThreadPool {
             let worker = thread::Builder::new()
                 .name("arty-blocking".to_string())
                 .spawn(move || {
+                    mark_current_blocking_thread();
                     worker_threads.lock().push(thread::current().id());
                     while let Ok(job) = receiver.recv() {
                         active_count.fetch_add(1, Ordering::SeqCst);
@@ -253,7 +259,14 @@ pub(crate) fn is_current_blocking_pool(pool: &Arc<()>) -> bool {
 }
 
 pub(crate) fn is_current_blocking_thread() -> bool {
-    CURRENT_POOL.with_borrow(Option::is_some)
+    BLOCKING_THREAD.get() || CURRENT_POOL.with_borrow(Option::is_some)
+}
+
+fn mark_current_blocking_thread() {
+    assert!(
+        !BLOCKING_THREAD.replace(true),
+        "blocking-pool bootstrap marked this thread more than once"
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -432,6 +445,7 @@ pub(super) mod blocking_worker_tests {
 
     use crate::runtime::blocking_worker::{
         BlockingJob, BlockingPool, BlockingTaskScope, BlockingWorker, CURRENT_POOL, JoinableThreadPool, is_current_blocking_pool,
+        is_current_blocking_thread, mark_current_blocking_thread,
     };
     use crate::runtime::shutdown::{Shutdown, ShutdownState};
 
@@ -480,6 +494,21 @@ pub(super) mod blocking_worker_tests {
         let _scope = BlockingTaskScope::enter(Arc::clone(&current));
         assert!(is_current_blocking_pool(&current));
         assert!(!is_current_blocking_pool(&other));
+    }
+
+    #[test]
+    fn blocking_thread_marker_survives_task_scope_cleanup() {
+        thread::spawn(|| {
+            mark_current_blocking_thread();
+            {
+                let _scope = BlockingTaskScope::enter(Arc::new(()));
+                assert!(is_current_blocking_thread());
+            }
+
+            assert!(is_current_blocking_thread());
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]

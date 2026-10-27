@@ -506,6 +506,55 @@ fn foreign_blocking_callback_drop_returns_before_target_work_finishes() {
 }
 
 #[test]
+fn foreign_owner_drop_in_blocking_thread_local_teardown_does_not_block_that_thread() {
+    let target = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let target_control = target.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
+    let (callback_started, callback_ready) = mpsc::sync_channel(1);
+    let (release_callback, callback_gate) = mpsc::sync_channel(1);
+    target_control
+        .on_shutdown(move || {
+            callback_started.send(()).unwrap();
+            callback_gate.recv().unwrap();
+        })
+        .unwrap();
+
+    let caller = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+        .build()
+        .unwrap();
+    let (owner_dropped, owner_drop_observed) = mpsc::sync_channel(1);
+    caller
+        .scheduler()
+        .spawn_blocking(move || {
+            THREAD_LOCAL_RUNTIME.with(|owner| {
+                assert!(
+                    owner
+                        .replace(Some(ThreadLocalRuntime {
+                            runtime: Some(target),
+                            dropped: owner_dropped,
+                        }))
+                        .is_none()
+                );
+            });
+        })
+        .join()
+        .unwrap();
+    let (stopped, stop_observed) = mpsc::sync_channel(1);
+    let stopping = std::thread::spawn(move || {
+        stopped.send(caller.stop()).unwrap();
+    });
+
+    callback_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    let stop_result = stop_observed.recv_timeout(TEST_TIMEOUT);
+    release_callback.send(()).unwrap();
+
+    stop_result.unwrap().unwrap();
+    owner_drop_observed.recv_timeout(TEST_TIMEOUT).unwrap();
+    stopping.join().unwrap();
+}
+
+#[test]
 fn thread_local_owner_drop_waits_for_every_worker_before_callback() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
