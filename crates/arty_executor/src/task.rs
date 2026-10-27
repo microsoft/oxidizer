@@ -383,6 +383,7 @@ where
                     discard_task_panic_payload(disposal);
                 }
                 self.options.report_panicked(&self.sink, self.poll_count.get());
+                self.options.notify_panic_result_published();
             }
             TerminalOutcome::Cancelled(cause) => {
                 if future_panic.is_some() {

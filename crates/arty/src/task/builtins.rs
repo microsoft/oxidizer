@@ -3,6 +3,8 @@
 
 //! Worker services and thread-aware relocation.
 
+use std::task::Waker;
+
 use observed::Sink;
 #[cfg(debug_assertions)]
 use observed::emit;
@@ -64,6 +66,7 @@ struct BuiltinsInner {
     clock: Clock,
     io: Io,
     sink: Sink,
+    panic_result_hook: Waker,
 }
 
 impl Builtins {
@@ -249,6 +252,7 @@ impl ThreadAware for Builtins {
 
 impl Builtins {
     pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
+        let panic_result_hook = dispatcher.panic_result_hook();
         Self {
             inner: Arc::new(BuiltinsInner {
                 scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
@@ -257,12 +261,17 @@ impl Builtins {
                 clock,
                 io,
                 sink,
+                panic_result_hook,
             }),
         }
     }
 
     pub(crate) fn dispatcher(&self) -> &DispatcherClient {
         &self.inner.scheduler.dispatcher
+    }
+
+    pub(crate) fn panic_result_hook(&self) -> Waker {
+        self.inner.panic_result_hook.clone()
     }
 }
 

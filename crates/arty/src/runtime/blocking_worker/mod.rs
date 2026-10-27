@@ -18,6 +18,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
+use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::execution::prepare_blocking;
@@ -185,15 +186,24 @@ impl BlockingWorker {
     }
 
     /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
+    #[cfg(test)]
     pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_blocking_with_completion(body, || {})
+        self.spawn_blocking_with_completion(None, body, || {})
     }
 
-    fn spawn_blocking_with_completion<F, R, C>(&self, body: F, completion: C) -> JoinHandle<R>
+    pub(crate) fn spawn_blocking_with_dispatcher<F, R>(&self, dispatcher: DispatcherClient, body: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_blocking_with_completion(Some(dispatcher), body, || {})
+    }
+
+    fn spawn_blocking_with_completion<F, R, C>(&self, panic_dispatcher: Option<DispatcherClient>, body: F, completion: C) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -202,7 +212,7 @@ impl BlockingWorker {
         let identity = Arc::clone(&self.pool.identity);
         let pool = self.pool.clone();
         let runtime_shutdown = self.runtime_shutdown.clone();
-        let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), body);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, runtime_shutdown.clone(), panic_dispatcher, body);
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -972,7 +982,7 @@ pub(super) mod blocking_worker_tests {
                 drop(worker.spawn_blocking(|| {}));
             }
             let (completed_tx, completed_rx) = channel();
-            drop(worker.spawn_blocking_with_completion(|| {}, move || completed_tx.send(()).unwrap()));
+            drop(worker.spawn_blocking_with_completion(None, || {}, move || completed_tx.send(()).unwrap()));
             release_tx.send(());
             completed_rx.recv_timeout(TEST_TIMEOUT).unwrap();
             assert!(

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Builtins, JoinHandle};
@@ -36,7 +36,7 @@ fn runtime() -> Runtime {
 }
 
 #[cfg(feature = "macros")]
-#[arty::test(workers = 1)]
+#[arty::test(workers = 1, panic = ignore)]
 async fn async_and_blocking_panics_are_join_errors(cx: Builtins) {
     let scheduler = cx.scheduler();
     let handles: [JoinHandle<()>; 3] = [
@@ -369,7 +369,7 @@ fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
 
 #[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
-    let runtime = runtime();
+    let runtime = runtime_builder().panic(PanicPolicy::ignore()).build().unwrap();
     assert!(
         runtime
             .scheduler()

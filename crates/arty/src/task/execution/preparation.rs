@@ -12,6 +12,7 @@ use observed::context::Transfer;
 use pin_project::pin_project;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
+use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::{Shutdown, ShutdownState};
 use crate::task::Builtins;
 use crate::task::join::JoinHandle;
@@ -202,11 +203,12 @@ where
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
+        let panic_result_hook = cx.panic_result_hook();
         let inner = DeferredTask::new(future_factory, cx);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
-        let options = TaskOptions::observed(parent_task_enrichment, placement);
+        let options = TaskOptions::observed(parent_task_enrichment, placement).panic_result_hook(panic_result_hook);
         tasks.add_with_remote_result(inner, options, result_tx.into_sender());
     });
     (future_factory, JoinHandle::new(result_rx))
@@ -215,6 +217,7 @@ where
 pub(crate) fn prepare_blocking<F, R>(
     result_pool: &RemotePool,
     shutdown: Shutdown,
+    panic_dispatcher: Option<DispatcherClient>,
     body: F,
 ) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
 where
@@ -225,6 +228,7 @@ where
     let task = BlockingTask {
         pending: Some((body, result_tx)),
         shutdown,
+        panic_dispatcher,
     };
     (move || task.run(), JoinHandle::new(result_rx))
 }
@@ -232,6 +236,7 @@ where
 struct BlockingTask<F, R: Send + 'static> {
     pending: Option<(F, RemoteSender<R>)>,
     shutdown: Shutdown,
+    panic_dispatcher: Option<DispatcherClient>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -241,12 +246,20 @@ where
 {
     fn run(mut self) {
         let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
-        let delivery = match catch_unwind(AssertUnwindSafe(body)) {
-            Ok(result) => result_tx.completed(result),
-            Err(panic) => result_tx.panicked(panic),
-        };
-        if let Err(panic) = delivery {
-            discard_task_panic_payload(panic);
+        match catch_unwind(AssertUnwindSafe(body)) {
+            Ok(result) => {
+                if let Err(panic) = result_tx.completed(result) {
+                    discard_task_panic_payload(panic);
+                }
+            }
+            Err(task_panic) => {
+                if let Err(delivery_panic) = result_tx.panicked(task_panic) {
+                    discard_task_panic_payload(delivery_panic);
+                }
+                if let Some(dispatcher) = &self.panic_dispatcher {
+                    dispatcher.record_panic();
+                }
+            }
         }
     }
 }
@@ -400,7 +413,7 @@ mod tests {
     #[test]
     fn blocking_task_delivers_its_result() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), || 42);
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || 42);
         task();
 
         assert_eq!(block_on(handle).unwrap(), 42);
@@ -409,7 +422,7 @@ mod tests {
     #[test]
     fn blocking_panic_is_delivered_to_joiner() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), || panic!("blocking task"));
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || panic!("blocking task"));
         task();
 
         assert!(block_on(handle).unwrap_err().is_panic());
@@ -441,7 +454,7 @@ mod tests {
         let result_pool = RemotePool::new();
         let shutdown = Shutdown::default();
         shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
-        let (task, handle) = prepare_blocking(&result_pool, shutdown, || 42);
+        let (task, handle) = prepare_blocking(&result_pool, shutdown, None, || 42);
         drop(task);
         let mut handle = pin!(handle);
         let mut context = Context::from_waker(Waker::noop());
@@ -485,7 +498,7 @@ mod tests {
 
         let capture = PanicOnDrop;
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), move || drop(capture));
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, move || drop(capture));
         catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
         assert!(block_on(handle).unwrap_err().is_shutdown());
     }
@@ -493,7 +506,7 @@ mod tests {
     #[test]
     fn discarded_blocking_task_contains_join_waker_panic() {
         let result_pool = RemotePool::new();
-        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), || 42);
+        let (task, handle) = prepare_blocking(&result_pool, Shutdown::default(), None, || 42);
         let mut handle = pin!(handle);
         let waker = Waker::from(Arc::new(PanicWake));
         assert!(handle.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());

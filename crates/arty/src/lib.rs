@@ -116,6 +116,8 @@
 //!   local non-`Send` work, and blocking pools.
 //! - [Configuration](crate::documentation::configuration) explains worker counts,
 //!   blocking-pool policies, clocks, and telemetry sinks.
+//! - [Panic policy](crate::documentation::panics) explains contained panic
+//!   boundaries, shutdown behavior, and the explicit ignore policy.
 //! - [Shutdown](crate::documentation::shutdown) explains runtime ownership,
 //!   task cancellation, and what stopping the workers waits for.
 //! - [Thread awareness](crate::documentation::thread_awareness) explains
@@ -168,6 +170,8 @@ use arty_io_core as _;
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
 ///   policy. The default is `enabled`.
+/// - `panic = shutdown` or `panic = ignore` selects the runtime panic policy.
+///   The default is `shutdown`.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
@@ -216,6 +220,25 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
+/// Keep the runtime available after a contained panic:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(panic = ignore)]
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+///     assert!(
+///         cx.scheduler()
+///             .spawn(async |_| panic!("contained"))
+///             .await
+///             .unwrap_err()
+///             .is_panic()
+///     );
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+///     Ok(())
+/// }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
 /// Set the async worker count:
 ///
 /// ```
@@ -243,11 +266,11 @@ pub use arty_macros::main;
 /// and `#[ignore]` are preserved. An ignored test starts no runtime unless
 /// the test harness runs it.
 ///
-/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// and `monitor` options also apply. By default, a test uses one worker and
-/// selects the disabled monitoring policy. This keeps future monitor activation
-/// out of ordinary tests. A test that exercises monitoring must opt in with
-/// `monitor = enabled`.
+/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
+/// `monitor`, and `panic` options also apply. By default, a test uses one worker,
+/// selects the disabled monitoring policy, and uses the shutdown panic policy.
+/// This keeps future monitor activation out of ordinary tests. A test that
+/// exercises monitoring must opt in with `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -301,6 +324,17 @@ pub use arty_macros::main;
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
 /// async fn monitored(_cx: arty::task::Builtins) {}
+/// ```
+///
+/// Keep the test runtime available after a contained child-task panic:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(panic = ignore)]
+/// async fn contained_panic(cx: arty::task::Builtins) {
+///     assert!(cx.scheduler().spawn(async |_| panic!("contained")).await.unwrap_err().is_panic());
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+/// }
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

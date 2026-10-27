@@ -7,6 +7,7 @@
 //!
 //! - [Scheduling](scheduling): create tasks, share local state, and receive results.
 //! - [Configuration](configuration): choose workers, blocking pools, and services.
+//! - [Panic policy](panics): choose shutdown or continued operation after a contained panic.
 //! - [Shutdown](shutdown): stop the runtime, cancel pending tasks, and wait for workers.
 //! - [Thread awareness](thread_awareness): preserve or change a worker association.
 //! - [Time](time): use delays and timeouts, and control time in tests.
@@ -16,6 +17,7 @@
 //! public API available to applications.
 
 pub mod configuration;
+pub mod panics;
 pub mod scheduling;
 pub mod shutdown;
 pub mod telemetry;

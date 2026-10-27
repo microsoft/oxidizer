@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::task::Waker;
+
 use observed::Sink;
 use observed::context::Transfer;
 
@@ -33,6 +35,7 @@ pub enum TaskPlacement {
 pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,
+    panic_result_hook: Option<Waker>,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -56,7 +59,11 @@ impl TaskOptions {
     /// Creates options with the specified placement metadata.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
-        Self { context: None, placement }
+        Self {
+            context: None,
+            placement,
+            panic_result_hook: None,
+        }
     }
 
     /// Creates options that apply the captured observed `context` throughout the task lifecycle.
@@ -65,7 +72,20 @@ impl TaskOptions {
         Self {
             context: Some(context),
             placement,
+            panic_result_hook: None,
         }
+    }
+
+    /// Adds an internal runtime hook for a captured task panic.
+    ///
+    /// The executor wakes this hook only after it publishes the remote panic
+    /// result and emits the existing task-panic telemetry. The hook must not
+    /// panic. Applications should use `arty` instead of this integration API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn panic_result_hook(mut self, hook: Waker) -> Self {
+        self.panic_result_hook = Some(hook);
+        self
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
@@ -96,6 +116,12 @@ impl TaskOptions {
             self.with_context(|| telemetry::report_panicked(sink, polls));
         }
     }
+
+    pub(crate) fn notify_panic_result_published(&self) {
+        if let Some(hook) = &self.panic_result_hook {
+            hook.wake_by_ref();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +144,7 @@ mod tests {
 
         assert!(options.context.is_some());
         assert_eq!(options.placement, TaskPlacement::SameThread);
+        assert!(options.panic_result_hook.is_none());
     }
 
     #[test]
@@ -126,5 +153,6 @@ mod tests {
 
         assert!(options.context.is_none());
         assert_eq!(options.placement, TaskPlacement::SpecificThread);
+        assert!(options.panic_result_hook.is_none());
     }
 }

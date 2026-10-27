@@ -18,6 +18,8 @@
 //! The `monitor = enabled` and `monitor = disabled` arguments select the
 //! monitoring policy. `#[arty::main]` defaults to enabled. `#[arty::test]`
 //! defaults to disabled so future monitor activation stays out of ordinary tests.
+//! The `panic = shutdown` and `panic = ignore` arguments select the runtime
+//! panic policy. Both attributes default to shutdown.
 //!
 //! The application-facing references are
 //! [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html) and

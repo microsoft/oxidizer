@@ -20,6 +20,9 @@ use performables::sync::mutex::Mutex;
 /// This is separate from an error returned by the task's own code. Joining a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
 /// Receiving a panic error does not resume unwinding or repair application state.
+/// By default, a contained panic also starts coordinated runtime shutdown.
+/// [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) keeps the
+/// runtime available while preserving this panic classification.
 /// With `panic = "abort"`, a task panic aborts the process instead.
 ///
 /// If a runtime failure caused shutdown, [`Error::source`] returns that

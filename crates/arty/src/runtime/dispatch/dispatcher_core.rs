@@ -15,6 +15,7 @@ use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::config::PanicPolicy;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
@@ -75,14 +76,30 @@ pub(crate) struct DispatcherCore {
     sink: observed::Sink,
 
     remote_results: RemotePool,
+    panic_shutdown_cause: Option<ShutdownCause>,
 }
 
+#[ohno::error]
+#[display("a contained runtime operation panicked")]
+struct ContainedRuntimePanic;
+
 impl DispatcherCore {
+    #[cfg(test)]
     pub(crate) fn new(
         wait_for_shutdown: ThreadWaiter,
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown: Shutdown,
+    ) -> Self {
+        Self::new_with_panic_policy(wait_for_shutdown, worker_endpoints, sink, shutdown, PanicPolicy::default())
+    }
+
+    pub(crate) fn new_with_panic_policy(
+        wait_for_shutdown: ThreadWaiter,
+        worker_endpoints: NonEmpty<WorkerEndpoint>,
+        sink: observed::Sink,
+        shutdown: Shutdown,
+        panic_policy: PanicPolicy,
     ) -> Self {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -116,6 +133,15 @@ impl DispatcherCore {
             next_async_worker_index: AtomicUsize::new(0),
             sink,
             remote_results: RemotePool::new(),
+            panic_shutdown_cause: panic_policy
+                .starts_shutdown()
+                .then(|| ShutdownError::new(ContainedRuntimePanic::new()).into()),
+        }
+    }
+
+    pub(crate) fn record_panic(&self) {
+        if let Some(cause) = &self.panic_shutdown_cause {
+            _ = self.stop_inner(cause.clone());
         }
     }
 
