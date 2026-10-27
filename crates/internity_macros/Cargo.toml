@@ -3,7 +3,7 @@
 
 [package]
 name = "internity_macros"
-version = "0.3.1"
+version = "0.3.0"
 description = "Procedural macros for the internity crate."
 readme = "README.md"
 keywords = ["intern", "interner", "serde", "macro", "derive"]

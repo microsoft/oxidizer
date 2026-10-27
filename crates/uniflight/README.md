@@ -139,20 +139,20 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_4UF3EWQQjkbkYVYNK5rhqsbJxdEypQl1Y4bWzGNWNVA68hhZIOCbHBlcmZvcm1hYmxlc2UwLjMuMYJsdGhyZWFkX2F3YXJlZjAuMTIuMoJpdW5pZmxpZ2h0ZTAuOC4x
- [__link0]: https://docs.rs/uniflight/0.8.1/uniflight/struct.Merger.html
- [__link1]: https://docs.rs/uniflight/0.8.1/uniflight/?search=Merger::execute
- [__link10]: https://docs.rs/uniflight/0.8.1/uniflight/struct.LeaderPanicked.html
- [__link11]: https://docs.rs/uniflight/0.8.1/uniflight/?search=LeaderPanicked::message
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_4UF3EWQQjkbkYVYNK5rhqsbJxdEypQl1Y4bWzGNWNVA68hhZIOCbHBlcmZvcm1hYmxlc2UwLjMuMIJsdGhyZWFkX2F3YXJlZjAuMTIuMYJpdW5pZmxpZ2h0ZTAuOC4w
+ [__link0]: https://docs.rs/uniflight/0.8.0/uniflight/struct.Merger.html
+ [__link1]: https://docs.rs/uniflight/0.8.0/uniflight/?search=Merger::execute
+ [__link10]: https://docs.rs/uniflight/0.8.0/uniflight/struct.LeaderPanicked.html
+ [__link11]: https://docs.rs/uniflight/0.8.0/uniflight/?search=LeaderPanicked::message
  [__link12]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link13]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
  [__link14]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
- [__link15]: https://docs.rs/uniflight/0.8.1/uniflight/struct.Merger.html
+ [__link15]: https://docs.rs/uniflight/0.8.0/uniflight/struct.Merger.html
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
- [__link3]: https://docs.rs/performables/0.3.1/performables/?search=arc::Strategy
- [__link4]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerProcess
- [__link5]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerNuma
- [__link6]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerThread
- [__link7]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerThread
- [__link8]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerNuma
- [__link9]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
+ [__link3]: https://docs.rs/performables/0.3.0/performables/?search=arc::Strategy
+ [__link4]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerProcess
+ [__link5]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerNuma
+ [__link6]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerThread
+ [__link7]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerThread
+ [__link8]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerNuma
+ [__link9]: https://docs.rs/thread_aware/0.12.1/thread_aware/?search=ThreadAware
