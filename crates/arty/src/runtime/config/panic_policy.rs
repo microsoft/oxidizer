@@ -40,7 +40,9 @@ impl PanicPolicy {
     /// Creates a policy that contains the panic and keeps the runtime running.
     ///
     /// The panicking task or blocking callback still fails through its join
-    /// handle.
+    /// handle. Arty isolates most task panics from runtime internals, but it
+    /// cannot repair user state. If user code is not panic-safe, this policy
+    /// can leave shared user state corrupted.
     #[must_use]
     pub const fn ignore() -> Self {
         Self { shutdown: false }

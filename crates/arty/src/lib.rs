@@ -116,8 +116,6 @@
 //!   local non-`Send` work, and blocking pools.
 //! - [Configuration](crate::documentation::configuration) explains worker counts,
 //!   blocking-pool policies, clocks, and telemetry sinks.
-//! - [Panic policy](crate::documentation::panics) explains contained panic
-//!   boundaries, shutdown behavior, and the explicit ignore policy.
 //! - [Shutdown](crate::documentation::shutdown) explains runtime ownership,
 //!   task cancellation, and what stopping the workers waits for.
 //! - [Thread awareness](crate::documentation::thread_awareness) explains

@@ -20,7 +20,7 @@
 //! [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic)
 //! with [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) to keep the
 //! runtime available. The failed join still reports a panic. See the
-//! [panic guide](crate::documentation::panics) for the exact boundaries.
+//! [`runtime`](crate::runtime) module for the exact boundaries.
 //!
 //! # Async workers
 //!

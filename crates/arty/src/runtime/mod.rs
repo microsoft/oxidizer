@@ -19,6 +19,12 @@
 //! pending tasks and waits for blocking callbacks that have already started;
 //! keeping a scheduler does not keep the runtime running.
 //!
+//! By default, the first unhandled panic from a user task or blocking callback
+//! starts coordinated runtime shutdown. Use [`PanicPolicy::ignore`] to keep the
+//! runtime running. The failed join still reports the panic. Arty applies this
+//! policy only while it creates or polls a task, or runs a blocking callback.
+//! It does not guarantee recovery from other panic sources.
+//!
 //! # Examples
 //!
 //! Let the entry-point attribute manage the runtime's lifetime:

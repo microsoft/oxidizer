@@ -219,11 +219,11 @@ where
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         // Factory invocation belongs inside the same panic boundary as polling.
         let (future_factory, parent_task_enrichment) = future_factory.into_parts();
-        let options = TaskOptions::observed(parent_task_enrichment, placement);
         let inner = DeferredTask::new(future_factory, cx);
 
         // The executor join handle is not used - the task delivers its result through the
         // channel above, which unlike the executor's join handle can cross thread boundaries.
+        let options = TaskOptions::observed(parent_task_enrichment, placement);
         tasks.add_with_remote_result(inner, options, result_tx.into_sender());
     });
     (future_factory, JoinHandle::new(result_rx))
