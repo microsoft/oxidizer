@@ -167,7 +167,6 @@ impl RefUnwindSafe for RequestHandle {}
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::{Arc, Mutex};
 
@@ -175,6 +174,7 @@ mod tests {
 
     use super::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
     use crate::bindings::{BindingsFacade, MockBindings};
+    use crate::mocks::raw_handle;
 
     // This asserts the test-build enum, including its MockBindings variant.
     assert_impl_all!(BindingsFacade: UnwindSafe, RefUnwindSafe);
@@ -220,9 +220,5 @@ mod tests {
 
         assert_eq!(session.raw(), raw);
         assert!(matches!(session.bindings(), BindingsFacade::Mock(_)));
-    }
-
-    fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).unwrap()
     }
 }
