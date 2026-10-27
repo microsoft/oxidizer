@@ -85,13 +85,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn header_is_printed_once() {
+    fn default_header_starts_unprinted() {
         let header = ResourceHeader::default();
+
+        assert!(!header.emitted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn header_is_printed_once() {
+        let header = ResourceHeader {
+            resource: Resource::builder_empty().build(),
+            emitted: AtomicBool::new(false),
+        };
+
         let mut output = Vec::new();
 
         header.print_once(&mut output as &mut (dyn Write + Send)).unwrap();
 
-        assert!(!output.is_empty());
+        assert_eq!(output.as_slice(), b"<Resource: >\n");
 
         output.clear();
 
