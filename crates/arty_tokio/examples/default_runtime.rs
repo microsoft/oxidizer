@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Uses the shared Tokio runtime from an Arty application.
+//! Starts the default Tokio runtime and submits a Tokio task from Arty.
 
 use arty::task::Builtins;
 use arty_tokio::TokioHandle;

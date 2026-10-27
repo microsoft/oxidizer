@@ -3,7 +3,7 @@
 
 [package]
 name = "arty_tokio"
-description = "Tokio compatibility for tasks running on the Arty runtime."
+description = "Lets Arty tasks use Tokio-based libraries."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime", "tokio"]
@@ -46,6 +46,9 @@ name = "default_runtime"
 
 [[example]]
 name = "external_runtime"
+
+[[example]]
+name = "tokio_library"
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -210,7 +210,7 @@ pub(crate) async fn initialize_all_workers(cx: &Builtins, tokio: TokioHandle) ->
 }
 
 async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwner) -> Result<(), InitError> {
-    let workers: Vec<Thread> = cx.operations().workers().into_iter().cloned().collect();
+    let workers: Vec<Thread> = cx.control().workers().into_iter().cloned().collect();
     let (transaction, phase_changed) = Transaction::new(runtime);
     let mut installers = workers
         .iter()
