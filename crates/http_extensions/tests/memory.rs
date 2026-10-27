@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 //! Public body-building behavior with caller-owned memory providers.
+//!
+//! Explicit reservations use different ordinary sizes to distinguish access paths, not pool boundaries.
 
 use std::sync::{Arc, Mutex};
 
@@ -19,14 +21,6 @@ struct ObservedMemory {
     generation: usize,
     relocated: bool,
     extra_capacity: usize,
-}
-
-/// Distinguishes allocations made by the original, cloned, and relocated providers.
-#[derive(Debug, PartialEq, Eq)]
-struct Reservation {
-    bytes: usize,
-    generation: usize,
-    relocated: bool,
 }
 
 impl Clone for ObservedMemory {
@@ -58,6 +52,15 @@ impl Memory for ObservedMemory {
     }
 }
 
+/// Distinguishes allocations made by the original, cloned, and relocated providers.
+#[derive(Debug, PartialEq, Eq)]
+struct Reservation {
+    bytes: usize,
+    generation: usize,
+    relocated: bool,
+}
+
+/// Separates provider cloning and relocation from allocations through the original builder.
 #[test]
 fn bodies_keep_the_provider_clone_and_relocation_behavior() {
     let reservations = Arc::new(Mutex::new(Vec::new()));
@@ -112,6 +115,7 @@ fn bodies_keep_the_provider_clone_and_relocation_behavior() {
     );
 }
 
+/// Makes sure that provider capacity does not become body data.
 #[test]
 fn body_lengths_do_not_include_extra_provider_capacity() {
     // Exact reservations and a deliberately oversized block exercise both provider choices.
@@ -136,24 +140,4 @@ fn body_lengths_do_not_include_extra_provider_capacity() {
             [7, 7]
         );
     }
-}
-
-#[cfg(feature = "json")]
-#[test]
-fn json_uses_the_supplied_memory_provider() {
-    let reservations = Arc::new(Mutex::new(Vec::new()));
-    let builder = HttpBodyBuilder::new(
-        OpaqueMemory::new(ObservedMemory {
-            reservations: Arc::clone(&reservations),
-            generation: 0,
-            relocated: false,
-            extra_capacity: 0,
-        }),
-        &Clock::new_frozen(),
-    );
-
-    let body = builder.json(&["caller", "memory"]).unwrap();
-
-    assert_eq!(BytesView::try_from(body).unwrap(), br#"["caller","memory"]"#);
-    assert!(!reservations.lock().unwrap().is_empty());
 }

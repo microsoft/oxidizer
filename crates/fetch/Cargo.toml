@@ -203,6 +203,7 @@ tokio = { workspace = true, features = [
     "rt",
     "net",
 ] }
+tower-service = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

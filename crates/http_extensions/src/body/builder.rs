@@ -408,10 +408,12 @@ impl AsRef<Clock> for HttpBodyBuilder {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use std::time::Duration;
 
     use bytes::Bytes;
+    use bytesbuf::mem::CallbackMemory;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::channel::mpsc;
     use futures::executor::block_on;
@@ -419,6 +421,7 @@ mod tests {
     use ohno::Labeled as _;
     use serde::Serialize;
     use static_assertions::assert_impl_all;
+    use thread_aware::unaware;
     use tick::ClockControl;
 
     use super::*;
@@ -705,6 +708,22 @@ mod tests {
     }
 
     // ── JSON body creation ───────────────────────────────────────────────
+
+    /// Observes JSON allocations through the selected provider in ordinary test builds.
+    #[test]
+    fn json_uses_the_supplied_memory_provider() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
+            reservations.lock().unwrap().push(min_bytes);
+            TransparentMemory::new().reserve(min_bytes)
+        });
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(memory), &Clock::new_frozen());
+
+        let body = builder.json(&["caller", "memory"]).unwrap();
+
+        assert_eq!(BytesView::try_from(body).unwrap(), br#"["caller","memory"]"#);
+        assert!(!reservations.lock().unwrap().is_empty());
+    }
 
     #[test]
     #[cfg_attr(

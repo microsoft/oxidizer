@@ -12,5 +12,5 @@ The provider can return more capacity than requested without changing the body's
 Streaming bodies keep their configured buffer limits and timeouts.
 
 Cloning a builder clones its provider.
-Thread-aware relocation forwards to the provider.
+[Relocation](https://docs.rs/thread_aware/latest/thread_aware/#theory-of-operation) notifies the provider on its destination thread.
 Each provider controls whether its clones share state.

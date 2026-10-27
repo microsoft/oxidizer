@@ -2,14 +2,14 @@
 // Licensed under the MIT License.
 
 //! Memory-provider propagation through the public custom-transport API.
+//!
+//! Explicit reservations use different ordinary sizes to distinguish access paths, not pool boundaries.
 
 use std::sync::{Arc, Mutex};
 
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
-#[cfg(all(feature = "tokio", feature = "rustls"))]
-use fetch::tokio::TokioDeps;
 use fetch::{HttpBodyBuilder, HttpClient, HttpRequest, HttpResponse};
 use futures::executor::block_on;
 use http_extensions::HttpBodyOptions;
@@ -26,14 +26,6 @@ struct ObservedMemory {
     relocated: bool,
 }
 
-/// Identifies the configured provider instance that serves each allocation.
-#[derive(Debug)]
-struct Reservation {
-    bytes: usize,
-    generation: usize,
-    relocated: bool,
-}
-
 impl Clone for ObservedMemory {
     fn clone(&self) -> Self {
         Self {
@@ -42,6 +34,14 @@ impl Clone for ObservedMemory {
             relocated: self.relocated,
         }
     }
+}
+
+/// Identifies the configured provider instance that serves each allocation.
+#[derive(Debug)]
+struct Reservation {
+    bytes: usize,
+    generation: usize,
+    relocated: bool,
 }
 
 impl ThreadAware for ObservedMemory {
@@ -105,6 +105,7 @@ fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, opt
     .build()
 }
 
+/// Observes request, response, and client allocations under both transport isolation models.
 #[test]
 fn custom_memory_reaches_requests_responses_and_client_memory() {
     for isolation in [Isolation::Shared, Isolation::Isolated] {
@@ -122,6 +123,9 @@ fn custom_memory_reaches_requests_responses_and_client_memory() {
     }
 }
 
+/// Separates client-provider relocation from isolated-handler reconstruction.
+///
+/// Shared handlers retain their existing context.
 #[test]
 fn relocating_a_client_clone_reaches_its_provider() {
     for isolation in [Isolation::Shared, Isolation::Isolated] {
@@ -150,6 +154,7 @@ fn relocating_a_client_clone_reaches_its_provider() {
     }
 }
 
+/// Makes sure that a custom provider does not bypass the response buffer limit.
 #[test]
 fn custom_memory_preserves_response_buffer_limits() {
     let reservations = Arc::new(Mutex::new(Vec::new()));
@@ -162,29 +167,6 @@ fn custom_memory_preserves_response_buffer_limits() {
     assert_eq!(
         reservations.lock().unwrap().iter().map(|entry| entry.bytes).collect::<Vec<_>>(),
         [15, 6, 7]
-    );
-}
-
-#[cfg(all(feature = "tokio", feature = "rustls"))]
-#[test]
-fn tokio_dependencies_preserve_caller_selected_memory() {
-    let reservations = Arc::new(Mutex::new(Vec::new()));
-    let client = HttpClient::builder_tokio(TokioDeps {
-        clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(ObservedMemory {
-            reservations: Arc::clone(&reservations),
-            generation: 0,
-            relocated: false,
-        }),
-    })
-    .minimal_pipeline()
-    .build();
-
-    assert!(client.reserve(29).capacity() >= 29);
-    assert!(client.memory().reserve(31).capacity() >= 31);
-    assert_eq!(
-        reservations.lock().unwrap().iter().map(|entry| entry.bytes).collect::<Vec<_>>(),
-        [29, 31]
     );
 }
 

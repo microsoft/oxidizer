@@ -11,7 +11,7 @@ These convenience defaults do not restrict clients built with explicit dependenc
 The bundled Hyper transport also accepts a custom body builder.
 
 Cloning client dependencies clones their provider.
-Thread-aware relocation forwards to that provider.
+[Relocation](https://docs.rs/thread_aware/latest/thread_aware/#theory-of-operation) notifies the provider on its destination thread.
 The provider decides whether its clones share state.
 Transport isolation controls whether a thread gets a new handler or shares an existing handler.
 Memory selection does not change response buffer limits, timeouts, cancellation, or connection management.

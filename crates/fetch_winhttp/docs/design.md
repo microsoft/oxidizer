@@ -91,7 +91,7 @@ The transport uses this provider for body construction, response reads, and writ
 Request bodies can also contain buffers from other providers.
 
 Cloning dependencies clones the supplied provider.
-Thread-aware relocation forwards to that provider.
+[Relocation](https://docs.rs/thread_aware/latest/thread_aware/#theory-of-operation) notifies the provider on its destination thread.
 The provider decides whether its clones share state.
 Read and write bounds do not depend on the provider's block sizes.
 

@@ -722,6 +722,7 @@ mod tests {
         harness.finish();
     }
 
+    /// Exercises partial contiguous capacity and reuse through the selected provider.
     #[test]
     fn a_custom_provider_can_supply_a_short_first_region_and_keep_spare_capacity() {
         let requests = Arc::new(Mutex::new(Vec::new()));

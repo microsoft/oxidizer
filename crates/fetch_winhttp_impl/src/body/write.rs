@@ -685,6 +685,7 @@ mod tests {
         assert_eq!(remaining, b"cdef");
     }
 
+    /// Observes writer allocations through both public memory traits.
     #[test]
     fn the_writer_reserves_from_the_transport_memory_provider() {
         // `bytesbuf_io::Write` requires both memory traits so a caller can
@@ -698,6 +699,7 @@ mod tests {
         }));
         let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), memory);
 
+        // Different ordinary requests distinguish the access paths, not pool boundaries.
         assert!(writer.reserve(64).capacity() >= 64);
         assert!(writer.memory().reserve(128).capacity() >= 128);
         assert_eq!(*requests.lock().unwrap(), [64, 128]);

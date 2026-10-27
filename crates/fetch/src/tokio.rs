@@ -343,14 +343,38 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
-    use thread_aware::Relocator;
+    use thread_aware::{Relocator, unaware};
     use tick::Clock;
 
     use super::TokioDeps;
     use crate::pipeline::Pipeline;
     use crate::{HttpClient, HttpResponseBuilder};
+
+    /// Observes client allocations through the Tokio dependency conversion in ordinary test builds.
+    #[test]
+    fn tokio_dependencies_preserve_caller_selected_memory() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
+            reservations.lock().unwrap().push(min_bytes);
+            GlobalPool::new().reserve(min_bytes)
+        });
+        let client = HttpClient::builder_tokio(TokioDeps {
+            clock: Clock::new_frozen(),
+            memory: OpaqueMemory::new(memory),
+        })
+        .minimal_pipeline()
+        .build();
+
+        // Different ordinary requests distinguish the access paths, not pool boundaries.
+        assert!(client.reserve(29).capacity() >= 29);
+        assert!(client.memory().reserve(31).capacity() >= 31);
+        assert_eq!(*reservations.lock().unwrap(), [29, 31]);
+    }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]

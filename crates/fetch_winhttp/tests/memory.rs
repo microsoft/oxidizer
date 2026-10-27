@@ -11,6 +11,7 @@ use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
 use tick::Clock;
 
+/// Makes sure that the facade preserves the selected provider when clients are cloned.
 #[test]
 fn client_and_clone_use_the_supplied_provider() {
     // Extra capacity distinguishes this provider from a global-pool reservation for a small request.
