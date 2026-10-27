@@ -356,6 +356,7 @@ name = "arty_tokio"
 version = "0.1.0"
 dependencies = [
  "arty",
+ "derive_more",
  "futures",
  "ohno",
  "performables",

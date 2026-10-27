@@ -51,7 +51,9 @@ struct InitErrorInner;
 ///
 /// The display message describes the failure. [`Error::source`] retains the
 /// private underlying cause for diagnostics.
+#[derive(derive_more::Debug)]
 pub struct InitError {
+    #[debug(ignore)]
     inner: InitErrorInner,
 }
 
@@ -78,12 +80,6 @@ impl_from_condition!(
     InstallerPanicError,
     InitializationAbortedError,
 );
-
-impl fmt::Debug for InitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
-    }
-}
 
 impl fmt::Display for InitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -130,6 +126,7 @@ mod tests {
 
     use super::*;
 
+    // These private error classifications cannot be created through the public API.
     fn has_source<T>(error: &InitError) -> bool
     where
         T: std::error::Error + 'static,

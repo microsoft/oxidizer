@@ -80,7 +80,7 @@ use arty::task::Builtins;
 use tokio::runtime::Builder;
 
 let tokio = Builder::new_multi_thread().enable_all().build()?;
-arty_tokio::init(&cx, tokio.handle().clone()).await?;
+arty_tokio::init(&cx, tokio.handle()).await?;
 let value = tokio::spawn(async { 42 })
     .await
     .expect("Tokio task must complete");
@@ -117,6 +117,9 @@ This crate does not support:
   with [`tokio::spawn`][__link16];
 * Tokio context during final Arty timer or worker teardown callbacks.
 
+The `tokio_drivers` example uses a timer and a loopback TCP connection:
+`cargo run -p arty_tokio --example tokio_drivers`.
+
 ## Shutdown
 
 Installer tasks stay parked until Arty stops. Arty drops each installer on
@@ -131,7 +134,7 @@ shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbOS9Jw_H3N2gbTHPdSqUzyS4b1J-hoXs5FiUbZ_JLO_jS2bRhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_mu4cCS57rIbveDnnWDfAVMbA3c8GOlQT9sbTchK_ev24SBhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
  [__link0]: https://crates.io/crates/arty/0.5.0
  [__link1]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link10]: https://docs.rs/tokio/1.53.3/tokio/?search=spawn

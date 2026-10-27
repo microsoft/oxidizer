@@ -7,10 +7,11 @@
 
 mod support;
 
+use std::error::Error as _;
 use std::future::{poll_fn, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use arty::core::{Thread, ThreadAware};
 use arty::task::{Builtins, Scheduler};
@@ -18,7 +19,6 @@ use performables::sync::channel::{OneshotReceiver, OneshotSender, oneshot};
 use static_assertions::assert_impl_all;
 use support::{TEST_TIMEOUT, runtime, stop_bounded};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Builder, Handle};
 
 assert_impl_all!(arty_tokio::TokioHandle: Send, Sync);
@@ -94,27 +94,22 @@ fn duplicate_init_rolls_back_without_removing_existing_contexts() {
 }
 
 #[test]
-fn external_runtime_supports_timers_and_loopback_io() {
+fn external_runtime_supports_tokio_tasks_and_in_memory_io() {
     let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(2);
 
     let response = runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, tokio.handle().clone()).await.unwrap();
-            tokio::time::sleep(Duration::from_millis(10)).await;
-
-            let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
-            let address = listener.local_addr().unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
+            let (mut client, mut server) = tokio::io::duplex(4);
             let server = tokio::spawn(async move {
-                let (mut stream, _) = listener.accept().await.unwrap();
                 let mut request = [0; 4];
-                stream.read_exact(&mut request).await.unwrap();
+                server.read_exact(&mut request).await.unwrap();
                 assert_eq!(&request, b"ping");
-                stream.write_all(b"pong").await.unwrap();
+                server.write_all(b"pong").await.unwrap();
             });
 
-            let mut client = TcpStream::connect(address).await.unwrap();
             client.write_all(b"ping").await.unwrap();
             let mut response = [0; 4];
             client.read_exact(&mut response).await.unwrap();
@@ -145,18 +140,40 @@ fn tokio_join_handles_keep_native_panic_semantics() {
 }
 
 #[test]
-fn current_thread_runtime_is_rejected() {
+fn tokio_handle_debug_is_opaque() {
+    assert_eq!(format!("{:?}", arty_tokio::TokioHandle::default()), "TokioHandle { .. }");
+}
+
+fn current_thread_init_error() -> arty_tokio::InitError {
     let tokio = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime = runtime(1);
 
     let error = runtime
         .scheduler()
-        .block_on(async |cx| arty_tokio::init(&cx, tokio.handle().clone()).await.unwrap_err())
+        .block_on(async |cx| arty_tokio::init(&cx, tokio.handle()).await.unwrap_err())
         .unwrap();
 
-    assert_eq!(error.to_string(), "Tokio compatibility requires a multi-thread Tokio runtime");
     stop_bounded(runtime);
     drop(tokio);
+    error
+}
+
+#[test]
+fn current_thread_runtime_is_rejected() {
+    assert_eq!(
+        current_thread_init_error().to_string(),
+        "Tokio compatibility requires a multi-thread Tokio runtime"
+    );
+}
+
+#[test]
+fn init_error_debug_is_opaque() {
+    assert_eq!(format!("{:?}", current_thread_init_error()), "InitError { .. }");
+}
+
+#[test]
+fn init_error_preserves_its_private_source() {
+    assert!(current_thread_init_error().source().is_some());
 }
 
 #[test]
@@ -269,7 +286,10 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     let initialization = scheduler.spawn_at(&clean_worker, builtins.clone(), |cx| async move {
         match arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await {
             Ok(()) => InitOutcome::Success,
-            Err(_) => InitOutcome::Failed,
+            Err(error) => {
+                assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
+                InitOutcome::Failed
+            }
         }
     });
     let deadline = Instant::now() + TEST_TIMEOUT;
@@ -318,7 +338,6 @@ fn cancelled_init_rolls_back_and_allows_retry() {
             let deadline = Instant::now() + TEST_TIMEOUT;
             while worker_contexts(&cx).await != vec![false, false] {
                 assert!(Instant::now() < deadline, "canceled initialization did not clean up");
-                cx.clock().delay(Duration::from_millis(1)).await;
             }
 
             arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();

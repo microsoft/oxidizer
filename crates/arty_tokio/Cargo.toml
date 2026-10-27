@@ -30,6 +30,7 @@ default = []
 
 [dependencies]
 arty = { workspace = true, features = ["rt"] }
+derive_more = { workspace = true, features = ["debug"] }
 ohno = { workspace = true }
 performables = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt-multi-thread", "time"] }
@@ -49,6 +50,9 @@ name = "external_runtime"
 
 [[example]]
 name = "tokio_library"
+
+[[example]]
+name = "tokio_drivers"
 
 # >>> anvil-managed: anvil-lints
 [lints]

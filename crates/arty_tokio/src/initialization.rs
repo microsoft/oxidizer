@@ -313,6 +313,8 @@ mod tests {
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+    // The public lifecycle regression is in tests/lifecycle.rs. This unit test
+    // injects the private owner-drop seam, which the public API cannot provide.
     #[test]
     fn arty_shutdown_waits_for_runtime_owner_destructor() {
         let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();

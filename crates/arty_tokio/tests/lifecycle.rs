@@ -83,7 +83,7 @@ fn external_runtime_is_not_retained_when_it_shuts_down_first() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, tokio.handle().clone()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
         })
         .unwrap();
 
@@ -111,7 +111,7 @@ fn cross_runtime_ownership_cycle_is_broken_during_shutdown() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, tokio.handle().clone()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
             let never_completes = cx.scheduler().spawn(async |_| pending::<()>().await);
             drop(tokio::spawn(async move {
                 started.send(()).unwrap();

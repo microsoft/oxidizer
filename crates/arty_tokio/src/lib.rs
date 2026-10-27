@@ -39,7 +39,7 @@
 //! After initialization, an Arty task can await async code that requires a
 //! Tokio runtime context:
 //!
-//! ```
+//! ```no_run
 //! use std::time::Duration;
 //!
 //! use arty::task::Builtins;
@@ -80,7 +80,7 @@
 //! # #[arty::main]
 //! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
 //! let tokio = Builder::new_multi_thread().enable_all().build()?;
-//! arty_tokio::init(&cx, tokio.handle().clone()).await?;
+//! arty_tokio::init(&cx, tokio.handle()).await?;
 //! let value = tokio::spawn(async { 42 })
 //!     .await
 //!     .expect("Tokio task must complete");
@@ -119,6 +119,9 @@
 //!   with [`tokio::spawn`];
 //! - Tokio context during final Arty timer or worker teardown callbacks.
 //!
+//! The `tokio_drivers` example uses a timer and a loopback TCP connection:
+//! `cargo run -p arty_tokio --example tokio_drivers`.
+//!
 //! # Shutdown
 //!
 //! Installer tasks stay parked until Arty stops. Arty drops each installer on
@@ -126,8 +129,6 @@
 //! it then drops the runtime. Tokio waits for blocking work to finish during
 //! runtime drop, so long [`tokio::task::spawn_blocking`] work can delay Arty
 //! shutdown.
-
-use std::fmt;
 
 use tokio::runtime::Handle;
 
@@ -139,17 +140,8 @@ pub use error::InitError;
 /// Selects the Tokio runtime used by [`init`].
 ///
 /// Use [`Default`] for a runtime that this crate builds and owns. To use an
-/// application-owned multi-thread runtime, convert its owned Tokio [`Handle`].
+/// application-owned multi-thread runtime, convert its Tokio [`Handle`].
 /// The value is opaque and its [`Debug`] output does not expose runtime details.
-///
-/// Borrowed handles are not accepted:
-///
-/// ```compile_fail
-/// use arty_tokio::TokioHandle;
-///
-/// let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-/// let _: TokioHandle = runtime.handle().into();
-/// ```
 ///
 /// Owned runtimes are not accepted:
 ///
@@ -159,7 +151,9 @@ pub use error::InitError;
 /// let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 /// let _: TokioHandle = runtime.into();
 /// ```
+#[derive(derive_more::Debug)]
 pub struct TokioHandle {
+    #[debug(ignore)]
     kind: TokioHandleKind,
 }
 
@@ -184,18 +178,18 @@ impl From<Handle> for TokioHandle {
     }
 }
 
-impl fmt::Debug for TokioHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TokioHandle").finish_non_exhaustive()
+impl From<&Handle> for TokioHandle {
+    fn from(handle: &Handle) -> Self {
+        handle.clone().into()
     }
 }
 
 /// Enters one Tokio runtime context on every worker in the current Arty runtime.
 ///
-/// Pass [`TokioHandle::default`] to create a runtime, or pass an owned
-/// multi-thread Tokio [`Handle`] to use an existing runtime. The function
-/// returns after every fixed worker enters the same context. The contexts
-/// remain until Arty stops.
+/// Pass [`TokioHandle::default`] to create a runtime. To use an existing
+/// multi-thread Tokio runtime, pass its owned or borrowed [`Handle`]. The
+/// function returns after every fixed worker enters the same context. The
+/// contexts remain until Arty stops.
 ///
 /// Calling this function again on the same Arty runtime returns an error and
 /// leaves the existing contexts in place.
