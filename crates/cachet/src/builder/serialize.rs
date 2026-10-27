@@ -27,8 +27,8 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet::Cache;
     /// use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+    /// use cachet::Cache;
     /// use tick::Clock;
     ///
     /// let clock = Clock::new_tokio();

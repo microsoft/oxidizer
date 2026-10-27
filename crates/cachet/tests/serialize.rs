@@ -8,9 +8,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use bytesbuf::BytesBuf;
-use bytesbuf::BytesView;
 use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
+use bytesbuf::{BytesBuf, BytesView};
 use cachet::{Cache, CacheOp, CacheTier, MockCache};
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
@@ -30,6 +29,9 @@ impl ThreadAware for CountingMemoryData {
 
 /// Increments the reservation counter before the provider reserves the requested memory.
 fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
+    // SeqCst makes every increment and assertion load share one global order.
+    // The test only needs the final observed total, but this ordering is conservative
+    // and keeps that total independent of scheduling order.
     data.reservations.fetch_add(1, Ordering::SeqCst);
     data.inner.reserve(min_bytes)
 }

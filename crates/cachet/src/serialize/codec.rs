@@ -93,7 +93,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for Post
 }
 
 fn encode<T: Serialize + Send + Sync>(value: &T, memory: &OpaqueMemory) -> Result<BytesView, Error> {
-    let mut writer = BytesBuf::new().into_writer(memory.clone());
+    let mut writer = BytesBuf::new().into_writer(memory);
     writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
     postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
     Ok(writer.into_inner().peek())
@@ -116,8 +116,13 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use bytesbuf::mem::{CallbackMemory, GlobalPool};
+    use thread_aware::{Thread, ThreadAware};
+
     use super::*;
-    use bytesbuf::mem::GlobalPool;
 
     /// A type whose Serialize impl always fails, used to test the encode error path.
     struct FailSerialize;
@@ -126,6 +131,32 @@ mod tests {
         fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
             Err(serde::ser::Error::custom("intentional failure"))
         }
+    }
+
+    #[derive(Clone, Debug)]
+    struct CountingMemoryData {
+        inner: GlobalPool,
+        reservations: Arc<AtomicUsize>,
+    }
+
+    impl ThreadAware for CountingMemoryData {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            self.inner.relocate(source, destination);
+        }
+    }
+
+    fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
+        data.reservations.fetch_add(1, Ordering::SeqCst);
+        data.inner.reserve(min_bytes)
+    }
+
+    fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>) {
+        let reservations = Arc::new(AtomicUsize::new(0));
+        let data = CountingMemoryData {
+            inner: GlobalPool::new(),
+            reservations: Arc::clone(&reservations),
+        };
+        (OpaqueMemory::new(CallbackMemory::new(data, count_reserve)), reservations)
     }
 
     #[test]
@@ -180,6 +211,32 @@ mod tests {
         assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
         let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn encoder_uses_supplied_memory_provider() {
+        let (memory, reservations) = counting_memory();
+        let encoder = PostcardEncoder::new(memory);
+
+        _ = encoder.encode(&42u32).expect("encode should succeed");
+
+        assert!(
+            reservations.load(Ordering::SeqCst) > 0,
+            "encoder should reserve bytes from its supplied memory provider"
+        );
+    }
+
+    #[test]
+    fn codec_uses_supplied_memory_provider() {
+        let (memory, reservations) = counting_memory();
+        let codec = PostcardCodec::new(memory);
+
+        _ = codec.encode(&42u32).expect("encode should succeed");
+
+        assert!(
+            reservations.load(Ordering::SeqCst) > 0,
+            "codec should reserve bytes from its supplied memory provider"
+        );
     }
 
     #[test]

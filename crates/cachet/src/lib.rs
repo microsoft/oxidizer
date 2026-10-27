@@ -205,12 +205,13 @@
 //! deserialized on the way back. Pass the memory provider that serialized bytes must use.
 //!
 //! ```ignore
+//! use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 //! use cachet::{Cache, FallbackPromotionPolicy};
 //! use tick::Clock;
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let memory = bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new());
+//! let memory = OpaqueMemory::new(GlobalPool::new());
 //! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
 //!
 //! let cache = Cache::builder::<String, String>(clock)
