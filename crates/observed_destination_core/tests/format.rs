@@ -272,7 +272,24 @@ fn timestamp_conversion_saturates_below_minimum() {
 
     let formatted = Rfc3339Nanos::from(timestamp).to_string();
 
-    assert_eq!(formatted, "-009999-01-02T01:59:59.000000000Z");
+    assert_eq!(formatted, "0000-01-01T00:00:00.000000000Z");
+}
+
+// Windows SystemTime cannot represent dates before 1601.
+#[cfg(not(windows))]
+#[test]
+fn timestamp_conversion_clamps_to_rfc3339_minimum() {
+    let minimum = SystemTime::UNIX_EPOCH - Duration::from_secs(62_167_219_200);
+    // These dates all convert to Jiff timestamps, including the negative year.
+    for (timestamp, expected) in [
+        (minimum - Duration::from_nanos(1), "0000-01-01T00:00:00.000000000Z"),
+        (minimum, "0000-01-01T00:00:00.000000000Z"),
+        (minimum + Duration::from_nanos(1), "0000-01-01T00:00:00.000000001Z"),
+    ] {
+        let formatted = Rfc3339Nanos::from(timestamp).to_string();
+
+        assert_eq!(formatted, expected);
+    }
 }
 
 #[test]

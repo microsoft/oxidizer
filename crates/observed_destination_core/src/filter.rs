@@ -12,6 +12,8 @@ use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord};
 /// A log-level (severity) filtering processor that wraps another [`LogProcessor`].
 ///
 /// Records with severity below the configured threshold are dropped.
+/// Records without a severity are treated as [`Severity::Fatal`] for this comparison.
+/// A `None` threshold or shutdown disables all logging, including records without a severity.
 pub struct SeverityFilter<T: LogProcessor> {
     severity: Option<Severity>,
     inner: T,

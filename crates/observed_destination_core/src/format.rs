@@ -142,7 +142,8 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 /// Renders a [`SystemTime`] as a fixed-width, nanosecond-precision RFC 3339 UTC
 /// timestamp (e.g. `1970-01-01T00:00:10.000000000Z`).
 ///
-/// Times outside the supported range use the nearest supported boundary.
+/// Times before `0000-01-01T00:00:00Z` use that boundary.
+/// Times above the supported range use the maximum supported timestamp.
 ///
 /// # Examples
 ///
@@ -165,6 +166,9 @@ fn io_err(e: std::io::Error) -> OTelSdkError {
 #[derive(Debug)]
 pub struct Rfc3339Nanos(SystemTime);
 
+// 0000-01-01T00:00:00Z is the earliest RFC 3339 timestamp.
+const MIN_RFC3339_TIMESTAMP: Timestamp = Timestamp::constant(-62_167_219_200, 0);
+
 impl From<SystemTime> for Rfc3339Nanos {
     fn from(ts: SystemTime) -> Self {
         Self(ts)
@@ -173,7 +177,9 @@ impl From<SystemTime> for Rfc3339Nanos {
 
 impl fmt::Display for Rfc3339Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ts = Timestamp::try_from(self.0).unwrap_or_else(|_| timestamp_boundary(self.0));
+        let ts = Timestamp::try_from(self.0)
+            .unwrap_or_else(|_| timestamp_boundary(self.0))
+            .max(MIN_RFC3339_TIMESTAMP);
         // Jiff's default Display omits trailing fractional zeros.
         // The explicit precision keeps nine fractional digits.
         write!(f, "{ts:.9}")
