@@ -23,6 +23,20 @@ pub async fn main_with_monitoring_disabled(cx: Builtins) -> Result<(), arty::tas
     Ok(())
 }
 
+/// Compile-pass fixture for the explicit shutdown panic policy.
+#[arty::main(panic = shutdown)]
+pub async fn main_with_panic_shutdown(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// Compile-pass fixture for the ignore panic policy with other options.
+#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+pub async fn main_with_panic_ignore(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
 #[test]
 async fn simple_main(cx: Builtins) {
     println!("Hello, world!");
@@ -45,6 +59,12 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
         .unwrap();
     Ok(())
 }
+
+#[test(panic = shutdown)]
+async fn explicit_shutdown_policy_compiles(_cx: Builtins) {}
+
+#[test(panic = ignore)]
+async fn ignore_policy_compiles(_cx: Builtins) {}
 
 #[test]
 async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {

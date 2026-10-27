@@ -15,6 +15,13 @@
 //! `performables` and runtime monitoring. This stage only provides configuration
 //! plumbing. It does not start a monitor, instrument tasks, or emit new telemetry.
 //!
+//! The panic policy defaults to
+//! [`PanicPolicy::shutdown`](crate::runtime::PanicPolicy::shutdown). Use
+//! [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic) with
+//! [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) to select the
+//! other policy. This release stores the selected value but does not yet change
+//! panic behavior. A follow-up change will enforce it.
+//!
 //! # Async workers
 //!
 //! [`WorkersPolicy`](crate::runtime::WorkersPolicy) selects the worker count
