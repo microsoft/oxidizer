@@ -12,9 +12,7 @@ use crate::{DataClass, Redactor};
 /// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;
 
-/// A redactor that replaces text with a non-cryptographic `xxH3` hash for correlation.
-///
-/// Do not rely on this redactor to keep the original values confidential.
+/// A redactor that replaces text with an `xxH3` hash for correlation.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"
