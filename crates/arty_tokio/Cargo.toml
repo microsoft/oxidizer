@@ -16,6 +16,12 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio"
 
+# Tokio's enabled I/O drivers call operating-system APIs that Miri cannot
+# interpret. Native tests, coverage, cargo careful, and Tokio's own Miri suite
+# retain the relevant behavior and unsafe-code coverage.
+[package.metadata.anvil.miri]
+exclude = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["arty::task::builtins::Builtins", "tokio::runtime::handle::Handle"]
 
