@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for per-thread client relocation.
+//! Integration tests for moving a client between threads.
 
 use std::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -38,9 +38,8 @@ async fn not_isolated_on_tokio() {
             let builder = builder.clone().with_numa_node(numa_node);
             std::thread::spawn(move || {
                 let thread = builder.build(std::thread::current().id());
-                // All coordinate-owning threads reach this point before any relocation. Their
-                // simultaneously live IDs are therefore distinct and remain live while each
-                // relocation executes on its owning thread.
+                // Every owning thread reaches this point before relocation. Its live ID stays
+                // distinct while relocation runs on that thread.
                 barrier.wait();
                 client.relocate(None, &thread);
             })
@@ -61,11 +60,11 @@ async fn tokio_client_relocated_ensure_works() {
     let url = server.uri() + "/hello-world";
     let client = HttpClient::builder_tokio(TokioDeps::default()).insecure_allow_http().build();
 
-    // Use the client on tokio
+    // Use the client on Tokio.
     let text = client.get(url.clone()).fetch_text().await.unwrap().into_body();
     assert_eq!(text, "Hello World!");
 
-    // relocate the client and use it on worker threads
+    // Move the client to worker threads.
     let builder = ThreadBuilder::default();
     let handles = (0..4)
         .map(|numa_node| {
@@ -83,7 +82,7 @@ async fn tokio_client_relocated_ensure_works() {
         .collect::<Vec<_>>();
     _ = join_all(handles).await;
 
-    // Use the client on tokio again
+    // Use the client on Tokio again.
     let text = client.get(url.clone()).fetch_text().await.unwrap().into_body();
     assert_eq!(text, "Hello World!");
 }

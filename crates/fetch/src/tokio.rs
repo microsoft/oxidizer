@@ -3,11 +3,11 @@
 
 //! Tokio-runtime entry points for [`HttpClient`].
 //!
-//! This module groups the Tokio runtime dependencies ([`crate::tokio::TokioDeps`]), the
-//! transport-specific tuning knobs ([`crate::tokio::TokioTransportOptions`]), and the factory methods that produce HTTP clients
-//! backed by the Tokio runtime and the
-//! [`fetch_hyper`] transport. They are gated behind the `tokio` feature combined with a
-//! TLS backend (`rustls` and/or `native-tls`).
+//! [`TokioDeps`][crate::tokio::TokioDeps] contains runtime dependencies.
+//! [`TokioTransportOptions`][crate::tokio::TokioTransportOptions] contains transport-specific
+//! options. The factory methods create clients that use Tokio and [`fetch_hyper`].
+//!
+//! These APIs require the `tokio` feature and at least one TLS backend: `rustls` or `native-tls`.
 
 use anyspawn::Spawner;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
@@ -30,10 +30,9 @@ use crate::handlers::TransportHandler;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
-/// Configuration dependencies for Tokio runtime HTTP operations.
+/// Dependencies for HTTP operations on Tokio.
 ///
-/// Contains the necessary dependencies for HTTP client operations in a Tokio
-/// environment, including clock access and memory management.
+/// It contains the clock and memory provider.
 ///
 /// Set `memory` to select the provider for HTTP body allocations.
 /// Cloning dependencies clones that provider, and relocation forwards to it.
@@ -63,10 +62,10 @@ impl TokioDeps {
     }
 }
 
-/// Tuning knobs specific to the Tokio transport.
+/// Options specific to the Tokio transport.
 ///
-/// These settings configure how the bundled transport dials `TCP` sockets. They are not part
-/// of [`TransportOptions`] because transports that do not own sockets cannot honor them.
+/// These options control the `TCP` sockets that the bundled transport opens. They are separate
+/// from [`TransportOptions`] because a transport that does not own sockets cannot apply them.
 ///
 /// Pass an instance to [`HttpClient::builder_tokio_with_options`] to apply it.
 ///
@@ -85,12 +84,12 @@ impl TokioDeps {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct TokioTransportOptions {
-    /// Socket-level tuning requested for every outbound `TCP` connection.
+    /// Socket options for each outbound `TCP` connection.
     pub socket: SocketOptions,
 }
 
 impl TokioTransportOptions {
-    /// Sets the socket-level tuning requested for every outbound `TCP` connection.
+    /// Sets the socket options for each outbound `TCP` connection.
     ///
     /// # Examples
     ///
@@ -109,13 +108,10 @@ impl TokioTransportOptions {
 }
 
 impl HttpClient {
-    /// Creates a new HTTP client builder for the Tokio runtime.
+    /// Creates an HTTP client builder for Tokio.
     ///
-    /// This factory method provides a builder specifically configured for Tokio.
-    /// Use this when working with Tokio-based applications.
-    ///
-    /// Transport-specific tuning is left at its defaults; use
-    /// [`builder_tokio_with_options`][Self::builder_tokio_with_options] to supply
+    /// This method uses the default transport-specific options. Use
+    /// [`builder_tokio_with_options`][Self::builder_tokio_with_options] to pass
     /// [`TokioTransportOptions`].
     ///
     /// Available only when compiled with the `tokio` feature and a TLS backend
@@ -124,10 +120,9 @@ impl HttpClient {
         Self::builder_tokio_with_options(deps, TokioTransportOptions::default())
     }
 
-    /// Creates a new HTTP client builder for the Tokio runtime with transport-specific tuning.
+    /// Creates an HTTP client builder for Tokio with transport-specific options.
     ///
-    /// Identical to [`builder_tokio`][Self::builder_tokio], except that `options` carries the
-    /// knobs only this transport can honor. Everything expressible on every transport stays on
+    /// `options` contains settings that only this transport can apply. Shared settings remain on
     /// [`HttpClientBuilder`].
     ///
     /// Available only when compiled with the `tokio` feature and a TLS backend
@@ -150,11 +145,10 @@ impl HttpClient {
         create_tokio_builder(deps.into(), move |cx| TransportHandler(build_tokio_handler(cx, &options).into()))
     }
 
-    /// Creates a new HTTP client for the Tokio runtime.
+    /// Creates an HTTP client for Tokio.
     ///
-    /// This method creates a fully configured HTTP client instance with the default
-    /// configuration. Use [`builder_tokio`][Self::builder_tokio] if you want to customize the
-    /// client (e.g. supply a custom [`TokioDeps`]) before creating it.
+    /// This method uses the default configuration. Use [`builder_tokio`][Self::builder_tokio] to
+    /// change the configuration or pass custom [`TokioDeps`].
     ///
     /// Available only when compiled with the `tokio` feature and a TLS backend
     /// (`rustls` and/or `native-tls`).
@@ -187,15 +181,14 @@ fn create_tokio_builder(
 
 /// Plain-TCP connector for the Tokio transport.
 ///
-/// Opens a TCP stream to the request authority. TLS is layered on top by the transport.
+/// Opens a TCP stream to the request authority. The transport adds TLS.
 ///
-/// The actual dialing is delegated to hyper's own [`HttpConnector`], which implements name
-/// resolution and RFC 6555 address-family fallback when a host has both IPv4 and IPv6
-/// addresses. The fallback family starts after the connector's delay while the preferred
-/// family remains pending, or immediately after the preferred family fails. This type only
-/// translates [`BaseUri`] into an [`http::Uri`] and [`SocketOptions`] into hyper's setters.
+/// [`HttpConnector`] performs name resolution and RFC 6555 address-family fallback for hosts with
+/// IPv4 and IPv6 addresses. It starts the fallback family after its delay, or immediately after the
+/// preferred family fails. This type converts [`BaseUri`] into [`http::Uri`] and applies
+/// [`SocketOptions`] through hyper.
 ///
-/// Socket tuning is best-effort: hyper logs rejected settings without failing the connection.
+/// Hyper logs rejected socket options but does not fail the connection.
 #[derive(Clone, Debug)]
 struct TokioConnector {
     connector: HttpConnector,
@@ -206,9 +199,8 @@ impl TokioConnector {
     fn new(options: SocketOptions) -> Self {
         let mut connector = HttpConnector::new();
 
-        // TLS is layered on top of this connector by the transport, so `https` targets reach
-        // us with their original scheme and `enforce_http(true)` would reject every one of
-        // them. The scheme is instead checked explicitly in `execute`.
+        // The transport adds TLS after this connector. HTTPS targets retain their scheme, so
+        // enforce_http(true) rejects them. execute validates the scheme instead.
         connector.enforce_http(false);
 
         if let Some(no_delay) = options.no_delay {
@@ -218,9 +210,7 @@ impl TokioConnector {
         connector.set_send_buffer_size(options.send_buffer_size.map(widen_socket_buffer_size));
         connector.set_recv_buffer_size(options.receive_buffer_size.map(widen_socket_buffer_size));
 
-        // The connect budget is deliberately left unset: `ClientConnector` wraps this
-        // whole future in `connect_timeout`, so resolution and every connect attempt
-        // already share one deadline.
+        // ClientConnector applies one connect_timeout to resolution and all connection attempts.
 
         Self { connector }
     }
@@ -230,25 +220,22 @@ impl layered::Service<BaseUri> for TokioConnector {
     type Out = Result<TokioIo<::tokio::net::TcpStream>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
-        // `RequestFilter::HttpAndHttps` admits any scheme, and `enforce_http(false)` disables
-        // hyper's own check, so this is the only guard stopping a `ftp://` target from being
-        // dialed and then spoken HTTP to.
+        // RequestFilter::HttpAndHttps admits any scheme. Because enforce_http(false) disables the
+        // hyper guard, this guard rejects FTP before dialing.
         let scheme = input.origin().scheme();
         if scheme != &Scheme::HTTP && scheme != &Scheme::HTTPS {
             return Err(HttpError::other(
-                format!("the connector does not support the '{scheme}' scheme; only http and https are supported"),
+                format!("the connector supports only http and https, not '{scheme}'"),
                 RecoveryInfo::never(),
                 LABEL_SCHEME_NOT_ALLOWED,
             ));
         }
 
-        // hyper derives the port from the scheme when the authority omits it. Resolving the
-        // port here instead keeps `templated_uri`'s behavior as the single source of truth.
+        // Resolve the port through templated_uri instead of the hyper scheme defaults.
         let port = input.try_effective_port()?;
         let uri = http::Uri::from(input.with_port(port));
 
-        // `HttpConnector` is a `tower` service, so it needs `&mut self`. Cloning is cheap:
-        // the configuration sits behind an `Arc` and the resolver is stateless.
+        // HttpConnector needs &mut self. Its clone shares configuration and has no resolver state.
         let mut connector = self.connector.clone();
 
         std::future::poll_fn(|cx| connector.poll_ready(cx))
@@ -267,13 +254,12 @@ fn widen_socket_buffer_size(size: u32) -> usize {
 
 /// Converts a connector failure into an [`HttpError`].
 ///
-/// hyper's connect error carries only a static summary message, so the underlying
-/// [`std::io::Error`] is recovered from the source chain first. That keeps the error label and
-/// the retry classification identical to a directly propagated I/O failure, which the transport
-/// relies on to decide whether a connection attempt may be retried.
+/// A hyper connect error contains only a static summary. This function reads the underlying
+/// [`std::io::Error`] from the source chain. The resulting label and retry classification then
+/// match a directly propagated I/O error.
 ///
-/// This is generic rather than taking hyper's error type because that type is not publicly
-/// nameable; it is only ever instantiated with it.
+/// This function is generic because hyper does not expose a name for its error type. It is called
+/// only with that type.
 fn map_connect_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> HttpError {
     let kind = io_error_kind(&error);
     std::io::Error::new(kind, error).into()
@@ -281,10 +267,9 @@ fn map_connect_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> 
 
 /// Finds the [`std::io::ErrorKind`] of the first [`std::io::Error`] in `error`'s source chain.
 ///
-/// Falls back to [`std::io::ErrorKind::Other`], which [`RecoveryInfo`] classifies as never
-/// recoverable. Every hyper connect error without an I/O cause reports a malformed target
-/// (missing scheme, missing host), which is permanent, so suppressing retries is the correct
-/// classification rather than merely the safe one.
+/// If the chain has no I/O error, returns [`std::io::ErrorKind::Other`].
+/// [`RecoveryInfo`] classifies it as never recoverable. A hyper connect error without an I/O cause
+/// reports a permanent malformed target, such as a missing scheme or host.
 fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::ErrorKind {
     loop {
         if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
@@ -309,12 +294,10 @@ fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOpt
         .build(tls_backend)
 }
 
-/// Materializes the client's [`TlsOptions`] into a concrete [`TlsBackend`].
+/// Builds a [`TlsBackend`] from the client [`TlsOptions`].
 ///
-/// When the `rustls` feature is enabled, rustls is wired up with the aws-lc-rs
-/// crypto provider and the platform certificate verifier (the OS trust store),
-/// and rustls becomes the default backend. When only `native-tls` is enabled it
-/// becomes the default backend instead.
+/// With `rustls`, the backend uses aws-lc-rs and the platform trust store. rustls is the default.
+/// If only `native-tls` is enabled, native TLS is the default.
 fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend {
     let mut builder = TlsBackendBuilder::new();
     if !options.supported_http_versions.is_empty() {
@@ -323,13 +306,13 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 
     #[cfg(any(feature = "rustls", test))]
     {
-        // aws-lc-rs is the default crypto provider when rustls is enabled.
+        // rustls uses aws-lc-rs by default.
         let provider = std::sync::Arc::new(::rustls::crypto::aws_lc_rs::default_provider());
         let verifier = std::sync::Arc::new(
             rustls_platform_verifier::Verifier::new(std::sync::Arc::clone(&provider))
                 .expect("the platform certificate verifier must initialize with the aws-lc-rs crypto provider"),
         );
-        // `configure_rustls` auto-promotes rustls to the default backend.
+        // configure_rustls makes rustls the default backend.
         builder = builder.configure_rustls(provider, verifier);
     }
 
@@ -338,10 +321,8 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
         builder = builder.defaults_to_native_tls();
     }
 
-    // `build_backend` is fallible (invalid client identity material, missing
-    // backend configuration), but `build()` on the transport is infallible. Any
-    // failure here reflects a misconfigured `TlsOptions` supplied by the caller,
-    // which is a programming error surfaced eagerly at client construction.
+    // Transport build is infallible, so invalid TlsOptions are a programming error reported
+    // during client construction.
     builder
         .build_backend(tls)
         .expect("TLS backend construction must succeed for the configured TlsOptions")
@@ -453,8 +434,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn new_tokio_uses_default_deps() {
-        // `new_tokio` builds the client from `TokioDeps::default()`, exercising the default
-        // dependency wiring (including `Clock::new_tokio`) and the standard pipeline.
+        // new_tokio uses TokioDeps::default, Clock::new_tokio, and the standard pipeline.
         let client = HttpClient::new_tokio();
 
         assert!(client.pipeline().is_standard());
@@ -469,14 +449,14 @@ mod tests {
             .custom_pipeline(|_root, _ctx| FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).build()))
             .build();
 
-        // Verify the client works before relocation.
+        // Send a request before relocation.
         let response = client.get("https://example.com").fetch().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // Relocate the client to a different thread coordinate.
+        // Move the client to another thread coordinate.
         _ = Relocator::between_threads().source(false).relocate(&mut client);
 
-        // Verify the relocated client still serves requests correctly.
+        // Send a request after relocation.
         let response = client.get("https://example.com/after-relocation").fetch().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -488,15 +468,12 @@ mod tests {
 
         use crate::tls::TlsOptions;
 
-        // An empty `supported_http_versions` means "no preference", so
-        // `build_tls_backend` must leave the builder's own default versions in place.
-        // It must NOT forward the empty list to `TlsBackendBuilder::supported_http_versions`,
-        // which panics on an empty slice. The `!is_empty()` guard is what prevents that
-        // panic; without it, materializing the backend here panics.
+        // An empty supported_http_versions list means no preference. Do not pass it to
+        // TlsBackendBuilder::supported_http_versions because that method panics on an empty slice.
         let mut options = TransportOptions::default();
         options.supported_http_versions = Vec::new();
 
-        // Must not panic: the empty list has to be skipped, not forwarded.
+        // Skip the empty list.
         let _backend = super::build_tls_backend(&options, TlsOptions::default());
     }
 
@@ -579,9 +556,8 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
 
-        // TLS is layered on top of this connector by the transport, so `https` targets arrive
-        // with their original scheme and must still be dialed as plain TCP. This is the only
-        // reason `enforce_http(false)` is set; flipping it back would break every HTTPS request.
+        // The transport adds TLS after this connector. HTTPS targets retain their scheme but this
+        // connector must open plain TCP. Therefore, enforce_http(false) is required.
         let stream = connect_to(SocketOptions::default(), &format!("https://127.0.0.1:{port}")).await?;
 
         assert_eq!(stream.peer_addr()?.port(), port);
@@ -594,10 +570,9 @@ mod tests {
         use ohno::Labeled as _;
         use seatbelt::{Recovery as _, RecoveryKind};
 
-        // `RequestFilter::HttpAndHttps` admits any scheme and `enforce_http(false)` disables
-        // hyper's own check, so without the explicit guard an `ftp://` target would be dialed
-        // and then spoken HTTP to. The port is given explicitly so that the request is rejected
-        // by the scheme guard rather than incidentally by the missing-default-port check.
+        // RequestFilter::HttpAndHttps admits any scheme and enforce_http(false) disables the hyper
+        // check. The explicit guard rejects FTP before dialing. The explicit port makes the scheme
+        // guard, not default-port resolution, reject the request.
         let error = connect_to(fetch_options::SocketOptions::default(), "ftp://127.0.0.1:21")
             .await
             .expect_err("the connector rejects every non-HTTP scheme before dialing");
@@ -616,9 +591,8 @@ mod tests {
     async fn connector_surfaces_connect_failure_as_recoverable_io_error() -> http_extensions::Result<()> {
         use seatbelt::{Recovery as _, RecoveryInfo};
 
-        // Binding then dropping the listener yields a port nothing is listening on, so the
-        // connect fails. The port could in principle be re-bound by another process before the
-        // connect, but the window is a few microseconds inside one test.
+        // Drop the listener so the connection fails. Another process can bind the port during the
+        // short interval before the connection, but that interval is only a few microseconds.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
         drop(listener);

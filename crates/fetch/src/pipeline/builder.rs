@@ -208,7 +208,7 @@ mod tests {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
         let pipeline = PipelineBuilder::Minimal.build(dispatch, test_context());
 
-        // The debug accessor is only valid for custom pipelines; a minimal pipeline must panic.
+        // The debug accessor is valid only for custom pipelines. A minimal pipeline must panic.
         let _ = pipeline.debug_string();
     }
 

@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to customize the HTTP client pipeline.
+//! Replaces the standard HTTP client pipeline.
 //!
-//! It uses the fake handler because the customization APIs are identical compared to a real
-//! client, and it allows the example to run without the network access.
+//! The fake handler uses the same pipeline APIs as a network transport and requires no network
+//! access.
 
 use std::time::Duration;
 
@@ -18,11 +18,9 @@ use seatbelt::timeout::Timeout;
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
-        // Use custom pipeline rather than the default one.
-        // Here we add a timeout layer that wraps the dispatch handler.
+        // Add a timeout layer around the dispatch handler.
         //
-        // Because the fake builder is used, the dispatch handler transparently returns a
-        // fake 200 OK response.
+        // The fake dispatch handler returns 200 OK.
         .custom_pipeline(move |dispatch, context| {
             let stack = (
                 Timeout::layer("my_timeout", context.resilience_context())

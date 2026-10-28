@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to use the HTTP client with multiple REST endpoints
-//! and templated URIs for more complex API interactions with multiple target paths.
+//! Uses templated URIs for a REST client with several endpoints.
 
 use fetch::fake::FakeDeps;
 use fetch::{BaseUri, HttpClient};
@@ -89,14 +88,14 @@ mod api {
         }
     }
 
-    // See http_client_telemetry.rs example for cases where URIs have classified components.
+    // See http_client_telemetry.rs for classified URI components.
     #[templated(template = "/api/v1/crates/{crate_name}", unredacted)]
     #[derive(Clone)]
     struct CrateUrl {
         crate_name: EscapedString,
     }
 
-    // See http_client_telemetry.rs example for cases where URIs have classified components.
+    // See http_client_telemetry.rs for classified URI components.
     #[templated(template = "/api/v1/crates{?q}", unredacted)]
     #[derive(Clone)]
     struct CrateSearchUrl {

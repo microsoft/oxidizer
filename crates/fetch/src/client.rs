@@ -21,14 +21,13 @@ use tick::{Clock, FutureExt as TimeoutExt};
 use crate::pipeline::Pipeline;
 use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 
-/// A runtime-agnostic HTTP client for sending HTTP requests.
+/// Sends HTTP requests through a configurable transport.
 ///
-/// `HttpClient` provides a high-level, fluent API for common HTTP operations over a
-/// configurable transport. It runs on the Tokio runtime by default, but any runtime
-/// and transport can be plugged in (see the [`custom`](crate::custom) module).
+/// The bundled transport runs on Tokio. The [`custom`](crate::custom) module supports other
+/// runtimes and transports.
 ///
-/// > **Tip**: Cloning the client is cheap and results in instances that share the underlying connection
-/// > pool and configuration.
+/// > **Note**: Clones share configuration. Connection-pool sharing depends on the transport
+/// > [`Isolation`](crate::custom::Isolation) mode.
 ///
 /// # Examples
 ///
@@ -36,7 +35,7 @@ use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 /// # use http::header::USER_AGENT;
 /// # use fetch::HttpClient;
 /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-/// // Make a GET request
+/// // Send a GET request.
 /// let response = client
 ///     .get("https://example.com")
 ///     .header(USER_AGENT, "MyApp/1.0")
@@ -48,8 +47,7 @@ use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 /// # }
 /// ```
 ///
-/// See [crate-level][`crate`] documentation for more details on available configuration options
-/// and advanced usage scenarios.
+/// See the [crate documentation][crate] for configuration and usage.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpClient {
     pipeline: HttpClientPipeline,
@@ -62,13 +60,9 @@ pub struct HttpClient {
 impl HttpClient {
     /// Creates a request builder with the specified method and URI.
     ///
-    /// This is the most flexible way to build requests. For common HTTP methods like
-    /// GET or POST, you can use the dedicated helper methods instead.
+    /// Use the dedicated methods for common methods such as GET and POST.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Method`] and [`Uri`] instances is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse parsed [`Method`] and [`Uri`] values to avoid repeated parsing.
     ///
     /// # Examples
     ///
@@ -76,14 +70,13 @@ impl HttpClient {
     /// # use http::header::USER_AGENT;
     /// use fetch::{HttpClient, Uri};
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Using strings (convenient but with parsing overhead)
+    /// // Parse the method and URI for this request.
     /// let response = client
     ///     .request("GET", "https://example.com/api")
     ///     .fetch()
     ///     .await?;
     ///
-    /// // Using pre-parsed values (more efficient) and additional customization
-    /// // before fetching the response.
+    /// // Reuse parsed values and add a header.
     /// let method = http::Method::GET;
     /// let uri = "https://example.com/api".parse::<Uri>()?;
     /// let response = client
@@ -105,29 +98,26 @@ impl HttpClient {
 
     /// Creates a GET request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::GET, uri)`.
+    /// This is a shortcut for `request(Method::GET, uri)`.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
     /// ```
     /// # use fetch::{HttpClient, HttpResponse, Response};
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Basic GET request
+    /// // Send a GET request.
     /// let response: HttpResponse = client.get("https://example.com").fetch().await?;
     ///
-    /// // GET with additional customization
+    /// // Add a header to a GET request.
     /// let response: HttpResponse = client
     ///     .get("https://api.example.com/users")
     ///     .header("X-API-Key", "my-key")
     ///     .fetch()
     ///     .await?;
     ///
-    /// // Get response as text
+    /// // Return a response with a text body.
     /// let body: Response<String> = client.get("https://example.com").fetch_text().await?;
     /// # Ok(())
     /// # }
@@ -138,12 +128,9 @@ impl HttpClient {
 
     /// Creates a POST request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::POST, uri)`.
+    /// This is a shortcut for `request(Method::POST, uri)`.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
@@ -152,10 +139,10 @@ impl HttpClient {
     /// # use fetch::HttpClient;
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// // Simple POST without a body
+    /// // Send a POST request without a body.
     /// let response = client.post("https://api.example.com/users").fetch().await?;
     ///
-    /// // POST with text body and additional customization
+    /// // Send a POST request with a text body and a header.
     /// let response = client
     ///     .post("https://api.example.com/users")
     ///     .header(USER_AGENT, "MyApp/1.0")
@@ -171,19 +158,16 @@ impl HttpClient {
 
     /// Creates a DELETE request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::DELETE, uri)`.
+    /// This is a shortcut for `request(Method::DELETE, uri)`.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
     /// ```
     /// # use fetch::HttpClient;
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Delete a resource
+    /// // Delete a resource.
     /// let response = client
     ///     .delete("https://api.example.com/users/123")
     ///     .header("Authorization", "Bearer token")
@@ -198,21 +182,17 @@ impl HttpClient {
 
     /// Creates a HEAD request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::HEAD, uri)`. HEAD requests are
-    /// similar to GET but return only headers without a body, useful for checking if a
-    /// resource exists or has been modified.
+    /// This is a shortcut for `request(Method::HEAD, uri)`. A HEAD response contains headers
+    /// without a body.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
     /// ```
     /// # use fetch::HttpClient;
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Check if a resource exists without downloading it
+    /// // Request headers without downloading the body.
     /// let response = client
     ///     .head("https://example.com/large-file.zip")
     ///     .fetch()
@@ -226,12 +206,9 @@ impl HttpClient {
 
     /// Creates a PUT request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::PUT, uri)`.
+    /// This is a shortcut for `request(Method::PUT, uri)`.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
@@ -240,10 +217,10 @@ impl HttpClient {
     /// # use fetch::HttpClient;
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// // Simple PUT without a body
+    /// // Send a PUT request without a body.
     /// let response = client.put("https://api.example.com/users").fetch().await?;
     ///
-    /// // PUT with text body and additional customization
+    /// // Send a PUT request with a text body and a header.
     /// let response = client
     ///     .put("https://api.example.com/users")
     ///     .header(USER_AGENT, "MyApp/1.0")
@@ -259,14 +236,9 @@ impl HttpClient {
 
     /// Creates a PATCH request to the specified URI.
     ///
-    /// This is a convenient shortcut for `request(Method::PATCH, uri)`. PATCH requests are used
-    /// for partial updates to resources, modifying only the specified fields rather than
-    /// replacing the entire resource.
+    /// This is a shortcut for `request(Method::PATCH, uri)`. PATCH updates part of a resource.
     ///
-    /// # Performance tip
-    ///
-    /// While you can provide a string for the URI, using a pre-created [`Uri`]
-    /// instance is more efficient as it avoids parsing overhead.
+    /// > **Note**: Reuse a parsed [`Uri`] to avoid repeated parsing.
     ///
     /// # Examples
     ///
@@ -274,7 +246,7 @@ impl HttpClient {
     /// # use http::header::USER_AGENT;
     /// # use fetch::HttpClient;
     /// # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Partially update a resource with JSON payload
+    /// // Update part of a resource.
     /// let response = client
     ///     .patch("https://api.example.com/users/123")
     ///     .header(USER_AGENT, "MyApp/1.0")
@@ -299,8 +271,8 @@ impl HttpClient {
 
     /// Returns a new `HttpClient` that uses the given base URI for all requests.
     ///
-    /// The new client shares this client's pipeline and configuration; only the
-    /// base URI differs. The original client is left unchanged.
+    /// The new client shares this client's pipeline and configuration. Only the base URI differs.
+    /// The original client does not change.
     #[must_use]
     pub fn with_base_uri(&self, base_uri: BaseUri) -> Self {
         Self {
@@ -348,9 +320,8 @@ impl Service<HttpRequest> for HttpClient {
             .get::<ResponseTimeout>()
             .map_or_else(|| Duration::MAX, ResponseTimeout::duration);
 
-        // Make the router available to downstream layers (retry, hedging) via request
-        // extensions so they can re-resolve the URI against an alternative endpoint on each
-        // attempt. Attaching router only make sense if it can provide alternative endpoints.
+        // Store the router in request extensions so retries and hedges can resolve an alternative
+        // endpoint for each later attempt. A router without alternatives does not need this path.
         if self.router.has_alternatives() {
             input.extensions_mut().insert(self.router.clone());
         }
@@ -404,7 +375,7 @@ mod tests {
         let future = client.get("http://example.com").fetch();
         let size = size_of_val(&future);
 
-        // last verified future size 784
+        // The last measured future size was 784 bytes.
         assert!(size < 2000, "future size is too large, size: {size}");
 
         println!("size of future: {size}");
@@ -419,7 +390,7 @@ mod tests {
 
         assert_eq!(
             err.message(),
-            "unable to communicate with 'http://example.com', because the 'http' scheme is not allowed by this HTTP client"
+            "cannot send a request to 'http://example.com' because this HTTP client does not allow the 'http' scheme"
         );
         assert_eq!(collect_error_labels(&err), "scheme_not_allowed");
     }
@@ -478,9 +449,8 @@ mod tests {
             .router(Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail))
             .build();
 
-        // The request targets a different absolute base URI than the router's fixed base URI.
-        // With a `Fail` conflict policy the router rejects resolution in `execute`, short-circuiting
-        // before the request ever reaches the pipeline.
+        // The request and router use different absolute base URIs. The `Fail` policy rejects the
+        // request before it reaches the pipeline.
         let err = client.get("https://existing.example.com/items").fetch().await.unwrap_err();
 
         assert_eq!(collect_error_labels(&err), "uri_conflict");
@@ -491,14 +461,14 @@ mod tests {
     async fn test_request_handler_implementation() {
         let client = HttpClient::new_fake(StatusCode::ACCEPTED);
 
-        // Create a test request
+        // Create a request.
         let request = Request::builder()
             .method(http::Method::GET)
             .uri("https://example.com")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        // Test the RequestHandler implementation
+        // Execute the request through the RequestHandler implementation.
         let response = client.execute(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
@@ -549,7 +519,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::IM_A_TEAPOT);
     }
 
-    // Test error handling with invalid URIs
+    // Test an invalid URI.
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_invalid_uri_handling() {
@@ -561,7 +531,7 @@ mod tests {
         assert_eq!(collect_error_labels(&error), "uri_invalid");
         assert!(
             error.to_string().starts_with("invalid uri character"),
-            "Unexpected error message: {error}"
+            "error message did not describe the invalid URI: {error}"
         );
     }
 

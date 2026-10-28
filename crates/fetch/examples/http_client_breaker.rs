@@ -3,15 +3,12 @@
 
 //! Demonstrates the HTTP circuit breaker with per-origin isolation.
 //!
-//! This example uses a fake handler that returns 500 Internal Server Error for
-//! requests to `https://failing.example.com` and 200 OK for requests to
-//! `https://healthy.example.com`.
+//! A fake handler returns 500 Internal Server Error for `https://failing.example.com` and 200 OK
+//! for `https://healthy.example.com`.
 //!
-//! 1. We send many requests to the failing host to trip its circuit breaker.
-//! 2. Once the breaker is open, requests to the failing host are rejected
-//!    immediately with a "circuit breaker open" error.
-//! 3. Requests to the healthy host continue to succeed, demonstrating that
-//!    breaker state is tracked per-origin (scheme + authority).
+//! 1. Requests to the failing host open its circuit breaker.
+//! 2. The open breaker rejects another request before it reaches the handler.
+//! 3. A request to the healthy host succeeds because breaker state is per origin.
 
 use std::time::Duration;
 
@@ -25,7 +22,7 @@ const HEALTHY_HOST: &str = "https://healthy.example.com";
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // Fake handler: 500 for the failing host, 200 for everything else.
+    // Return 500 for the failing host and 200 for other hosts.
     let fake_handler = FakeHandler::from_fn(|req| {
         let status = if req.uri().host() == Some("failing.example.com") {
             StatusCode::INTERNAL_SERVER_ERROR
@@ -39,9 +36,9 @@ async fn main() -> Result<(), ohno::AppError> {
     let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
         .standard_pipeline(|pipeline, _| {
             pipeline
-                // Disable retries so we can observe the breaker directly.
+                // Disable retries to observe the breaker directly.
                 .retry(|retry| retry.max_retry_attempts(0))
-                // Lower thresholds so the breaker trips quickly in this demo.
+                // Use low thresholds so the breaker opens after this short request sequence.
                 .breaker(|breaker| {
                     breaker
                         .min_throughput(5)
@@ -52,23 +49,22 @@ async fn main() -> Result<(), ohno::AppError> {
         .build();
 
     // ---------------------------------------------------------------
-    // Step 1: Send requests to the failing host to trip the breaker.
+    // Step 1: Open the breaker for the failing host.
     // ---------------------------------------------------------------
-    println!("--- Sending requests to {FAILING_HOST} (expect 500s) ---");
+    println!("--- Sending requests to {FAILING_HOST}: 500 responses, then breaker errors ---");
 
     for i in 1..=10 {
         let result = client.get(FAILING_HOST).fetch().await;
         match result {
             Ok(resp) => println!("  request {i}: {}", resp.status()),
-            Err(e) => println!("  request {i}: error — {}", e.message()),
+            Err(e) => println!("  request {i}: error: {}", e.message()),
         }
     }
 
     // ---------------------------------------------------------------
-    // Step 2: The breaker should now be open — next request is rejected
-    //         immediately without reaching the handler.
+    // Step 2: Send a request that the open breaker rejects before the handler.
     // ---------------------------------------------------------------
-    println!("\n--- Breaker should be open for {FAILING_HOST} ---");
+    println!("\n--- Breaker is open for {FAILING_HOST} ---");
 
     let result = client.get(FAILING_HOST).fetch().await;
     match result {
@@ -77,10 +73,9 @@ async fn main() -> Result<(), ohno::AppError> {
     }
 
     // ---------------------------------------------------------------
-    // Step 3: Requests to the healthy host still succeed — the breaker
-    //         for a different origin is independent.
+    // Step 3: Send a request to the healthy origin.
     // ---------------------------------------------------------------
-    println!("\n--- Sending request to {HEALTHY_HOST} (should succeed) ---");
+    println!("\n--- Sending request to {HEALTHY_HOST} ---");
 
     let response = client.get(HEALTHY_HOST).fetch().await?;
     println!("  response: {}", response.status());
@@ -88,10 +83,10 @@ async fn main() -> Result<(), ohno::AppError> {
     assert_eq!(
         response.status(),
         StatusCode::OK,
-        "healthy host should not be affected by the failing host's breaker"
+        "the failing host breaker must not affect the healthy host"
     );
 
-    println!("\nDone — circuit breaker isolation between origins is working.");
+    println!("\nCircuit breaker isolation between origins works.");
 
     Ok(())
 }

@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Telemetry types for enriching `fetch` metrics and inspecting connections.
+//! Types for custom `fetch` metric attributes and connection diagnostics.
 //!
-//! [`TelemetryAttributes`][crate::telemetry::TelemetryAttributes] lets you attach custom
-//! [`KeyValue`][opentelemetry::KeyValue] attributes to a
-//! request so they are merged into the metrics recorded for it.
-//! [`ConnectionInfo`][crate::telemetry::ConnectionInfo] reports details about the connection that
-//! served a response.
+//! Attach [`TelemetryAttributes`][crate::telemetry::TelemetryAttributes] to a request to add custom
+//! [`KeyValue`][opentelemetry::KeyValue] values to its metrics.
+//! [`ConnectionInfo`][crate::telemetry::ConnectionInfo] describes the connection that served a
+//! response.
 //!
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::documentation::telemetry).
@@ -17,9 +16,10 @@ use std::fmt;
 
 /// Diagnostic information about the connection that served an HTTP response.
 ///
-/// Re-exported from [`fetch_options`]. Attached as a response extension by real
-/// network connections (not by [`FakeHandler`](crate::fake::FakeHandler));
-/// retrieve via `response.extensions().get::<ConnectionInfo>()`.
+/// Re-exported from [`fetch_options`]. The bundled Hyper transport adds it as a response extension.
+/// A custom transport must add it if it supports this diagnostic.
+/// [`FakeHandler`](crate::fake::FakeHandler) does not add it. Read it through
+/// `response.extensions().get::<ConnectionInfo>()`.
 pub use fetch_options::ConnectionInfo;
 use http::Version;
 use http::uri::Scheme;
@@ -38,13 +38,12 @@ pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 /// Instrumentation-scope attribute identifying the name of a client instance.
 pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
 
-/// Fits the built-in HTTP attributes in the common case; larger custom sets spill to the heap.
+/// Built-in HTTP attributes fit inline. Larger custom sets use the heap.
 const TELEMETRY_ATTRIBUTES_INLINE_CAPACITY: usize = 9;
 
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
-/// Attach these to a request (via its extensions) to merge custom dimensions
-/// into the metrics recorded for that request.
+/// Attach this type to request extensions to add attributes to request metrics.
 #[derive(Debug, Clone, Default)]
 pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; TELEMETRY_ATTRIBUTES_INLINE_CAPACITY]>);
 
@@ -81,12 +80,9 @@ impl Extend<KeyValue> for TelemetryAttributes {
 
 /// How a client's `fetch` metrics are metered.
 ///
-/// Holds the scope-defining properties (runtime, transport, client name) and an
-/// optional custom meter [provider][MeterProvider]; when no provider is set, the
-/// global meter provider is used. The [`InstrumentationScope`] is only
-/// materialized when the [`Meter`] is created (see the `From<Metering>` impl
-/// for [`Meter`]), so the client name can still be updated after the provider
-/// has been chosen.
+/// Stores the runtime, transport, client name, and optional [provider][MeterProvider]. It uses the
+/// global meter provider if no custom provider is set. It creates the [`InstrumentationScope`] with
+/// the [`Meter`], so the client name can change after provider selection.
 #[derive(Clone)]
 pub(crate) struct Metering {
     provider: Option<Arc<dyn MeterProvider + Send + Sync>>,
@@ -119,9 +115,7 @@ impl Metering {
 
     /// Records against the given custom meter provider instead of the global one.
     ///
-    /// The scope is only materialized when the meter is created, so a client
-    /// name set either before or after this call is reflected in the eventual
-    /// meter.
+    /// The meter scope uses a client name set before or after this call.
     pub(crate) fn with_provider<P>(mut self, provider: P) -> Self
     where
         P: MeterProvider + Send + Sync + 'static,
@@ -137,7 +131,7 @@ impl Metering {
         self
     }
 
-    /// Returns whether a custom meter provider has been configured.
+    /// Returns `true` if the client uses a custom meter provider.
     #[cfg(test)]
     pub(crate) fn has_custom_provider(&self) -> bool {
         self.provider.is_some()
@@ -154,9 +148,7 @@ impl From<Metering> for Meter {
     }
 }
 
-/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime`,
-/// `fetch.transport`, and `http.client.name` attributes, attached to every
-/// metric a client records.
+/// Builds the client scope with `fetch.runtime`, `fetch.transport`, and `http.client.name`.
 fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
         .with_attributes([
@@ -167,8 +159,8 @@ fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>, client_n
         .build()
 }
 
-/// Builds the attribute-less `fetch` instrumentation scope used by the
-/// standalone [`MetricsLayer`](crate::handlers::Metrics), which has no transport.
+/// Builds the scope for a standalone [`MetricsLayer`](crate::handlers::Metrics), which has no
+/// transport attributes.
 pub(crate) fn base_scope() -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME).build()
 }

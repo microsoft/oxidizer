@@ -1,21 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// An async function `In → Out` that processes inputs.
+/// An async operation from `In` to `Out`.
 ///
-/// This trait is the foundation for building composable services.
-/// Implement it directly for custom services, or use [`Execute`][crate::Execute]
-/// to wrap closures.
+/// Implement this trait for a custom service. Use [`Execute`][crate::Execute] to wrap a
+/// function or closure.
 ///
-/// See the [crate documentation][crate] for usage examples and layer composition.
+/// See the [crate documentation][crate] for examples and layer composition.
 pub trait Service<In>: Send + Sync {
-    /// The output type returned by this service.
+    /// The service output.
     type Out;
 
-    /// Processes the input and returns the output.
+    /// Processes an input and returns an output.
     ///
-    /// The returned future must be [`Send`] for compatibility with multi-threaded
-    /// async runtimes.
+    /// The returned future must implement [`Send`] for use on multithreaded async runtimes.
     ///
     /// # Examples
     ///
@@ -66,7 +64,7 @@ mod tests {
 
     use super::*;
 
-    // A simple service that echoes the input.
+    // This service returns its input.
     struct EchoService;
 
     impl Service<String> for EchoService {

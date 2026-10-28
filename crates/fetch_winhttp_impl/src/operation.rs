@@ -28,8 +28,9 @@
 
 use std::fmt;
 use std::mem::ManuallyDrop;
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::ptr::{NonNull, with_exposed_provenance_mut};
+use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
@@ -86,6 +87,8 @@ impl ContextInstallation {
         let Self { request, context } = self;
         let context = plurality::Box::into_raw(context);
         let mut raw_owner = RawContextOwner::new(context);
+        #[cfg(test)]
+        crate::mocks::record_context(context.as_ptr());
         let context_value = context.as_ptr().expose_provenance();
         let option_value = context_bytes(context_value);
 
@@ -155,6 +158,9 @@ impl Drop for RawContextOwner {
         let Some(context) = self.context.take() else {
             return;
         };
+
+        #[cfg(test)]
+        crate::mocks::forget_context(context.as_ptr());
 
         // SAFETY: plurality::Box::from_raw requires the exact pointer returned
         // by into_raw, the same allocator type, and exactly one reconstruction.
@@ -292,7 +298,7 @@ impl RequestGuard {
             receiver: ManuallyDrop::new(receiver),
             receiver_live: true,
             request: Some(request),
-            context: self.context_value(),
+            context: AssertUnwindSafe(SendContextPtr { pointer: self.context }),
             request_slot: &mut self.request,
         }
     }
@@ -309,6 +315,17 @@ impl RequestGuard {
 unsafe impl Send for RequestGuard {}
 
 #[derive(Debug)]
+struct SendContextPtr {
+    pointer: NonNull<RequestContext>,
+}
+
+// SAFETY: This module uses the pointer only for shared access to
+// RequestContext, which is Sync. Moving the wrapper does not access or reclaim
+// the allocation. Dereferencing remains unsafe and requires a live context
+// without exclusive references.
+unsafe impl Send for SendContextPtr {}
+
+#[derive(Debug)]
 /// Owns one request handle while awaiting its callback completion.
 ///
 /// Moving the request handle into this future is the safe-code proof that one
@@ -321,7 +338,8 @@ pub(crate) struct OperationFuture<'guard> {
     receiver: ManuallyDrop<RawReceiver<CompletionResult>>,
     receiver_live: bool,
     request: Option<RequestHandle>,
-    context: usize,
+    // Shared observation reads only atomic cold-connect state, even after an unwind.
+    context: AssertUnwindSafe<SendContextPtr>,
     request_slot: &'guard mut Option<RequestHandle>,
 }
 
@@ -370,17 +388,14 @@ impl OperationFuture<'_> {
             .request
             .as_ref()
             .expect("cold-connect state is available only while an operation is pending");
-        let context = NonNull::new(with_exposed_provenance_mut::<RequestContext>(self.context))
-            .expect("OperationFuture retains the non-null installed request context");
         // SAFETY: NonNull::as_ref requires an aligned, dereferenceable pointer
         // to an initialized value that stays live and free of exclusive
-        // references for the borrow. The address round-trips the exposed
-        // provenance of the installed context, so it carries provenance for
-        // that allocation and is aligned and initialized; the request handle
-        // checked above is still open, so the reclaiming HANDLE_CLOSING
-        // notification cannot have run. No exclusive reference to an installed
-        // context exists, and the borrow ends with this statement.
-        unsafe { context.as_ref() }.cold_connect_state()
+        // references for the borrow. The pointer is the into_raw pointer of
+        // the installed context, so it is aligned and initialized; the request
+        // handle checked above is still open, so the reclaiming HANDLE_CLOSING
+        // notification cannot have run. No exclusive reference to an
+        // installed context exists, and the borrow ends with this statement.
+        unsafe { self.context.0.pointer.as_ref() }.cold_connect_state()
     }
 }
 
@@ -408,25 +423,30 @@ impl Drop for OperationFuture<'_> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::cell::UnsafeCell;
+    use std::mem::MaybeUninit;
+    use std::num::NonZero;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
     use std::pin::pin;
     use std::ptr::NonNull;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
     use std::task::{Context, Poll, Wake, Waker};
     use std::thread;
 
-    use bytesbuf::BytesView;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, GlobalPool};
+    use bytesbuf::{BytesBuf, BytesView};
+    use events_once::RawReceiver;
+    use performables::arc::Arc as PerformableArc;
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard};
-    use crate::context::{CompletionResult, OperationBuffer, OperationKind};
+    use super::{ContextInstallation, ContextPool, OperationFuture, RawContextOwner, RequestGuard, SendContextPtr};
+    use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind, RequestContext};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
     use crate::mocks::{
@@ -443,12 +463,107 @@ mod tests {
     assert_not_impl_any!(RawContextOwner: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: Sync);
+    assert_impl_all!(SendContextPtr: Send, std::fmt::Debug);
+    assert_not_impl_any!(SendContextPtr: Sync);
+    assert_impl_all!(RawReceiver<CompletionResult>: Send);
     assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
     // The future mutably borrows the request-handle slot.
     assert_not_impl_any!(OperationFuture<'static>: UnwindSafe);
     // Shared observation after an unwind cannot mutate the borrowed slot or receiver.
     assert_impl_all!(OperationFuture<'static>: RefUnwindSafe);
     assert_not_impl_any!(OperationFuture<'static>: Sync);
+
+    struct TrackedBlock {
+        capacity: UnsafeCell<[MaybeUninit<u8>; 8]>,
+        releases: PerformableArc<AtomicUsize>,
+    }
+
+    // SAFETY: Only the owning Block and its derived byte spans access capacity,
+    // enforcing exclusive writes and shared immutable reads. The vtable only
+    // adjusts atomic Arc counts; destruction runs after the last span is gone.
+    unsafe impl Sync for TrackedBlock {}
+
+    impl Drop for TrackedBlock {
+        fn drop(&mut self) {
+            self.releases.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // SAFETY: Each BlockRef owns one strong reference to the same process-wide
+    // Arc allocation. Clone and drop adjust its atomic count without accessing
+    // capacity, which remains live until the last BlockRef releases it.
+    unsafe impl BlockRefDynamic for TrackedBlock {
+        type State = Self;
+
+        fn clone(state_ptr: NonNull<Self>) -> NonNull<Self> {
+            // SAFETY: The vtable receives the live into_raw pointer belonging
+            // to an existing BlockRef, which keeps the strong count nonzero.
+            unsafe {
+                PerformableArc::increment_strong_count(state_ptr.as_ptr());
+            }
+            state_ptr
+        }
+
+        fn drop(state_ptr: NonNull<Self>) {
+            // SAFETY: This BlockRef owns exactly one strong reference, from
+            // into_raw or a vtable clone, and releases it exactly once.
+            unsafe {
+                PerformableArc::decrement_strong_count(state_ptr.as_ptr());
+            }
+        }
+    }
+
+    const TRACKED_BLOCK_VTABLE: BlockRefVTable<TrackedBlock> = BlockRefVTable::from_trait();
+
+    fn tracked_operation_buffer(kind: OperationKind) -> (OperationBuffer, PerformableArc<AtomicUsize>, usize) {
+        let releases = PerformableArc::new(AtomicUsize::new(0));
+        let allocation = PerformableArc::new(TrackedBlock {
+            capacity: UnsafeCell::new([MaybeUninit::new(0); 8]),
+            releases: PerformableArc::clone(&releases),
+        });
+        let capacity = NonNull::new(allocation.capacity.get().cast::<MaybeUninit<u8>>()).unwrap();
+        let address = capacity.as_ptr().addr();
+        let state = NonNull::new(PerformableArc::into_raw(allocation).cast_mut()).unwrap();
+        // SAFETY: into_raw transfers the sole strong reference to this
+        // BlockRef. Its vtable preserves the allocation until the final drop.
+        let reference = unsafe { BlockRef::new(state, &TRACKED_BLOCK_VTABLE) };
+        // SAFETY: The allocation is stable, contains eight writable bytes,
+        // and has no capacity owner other than this Block and its future spans.
+        let block = unsafe { Block::new(capacity, NonZero::new(8).unwrap(), reference) };
+        let mut buffer = BytesBuf::from_blocks([block]);
+        let buffer = match kind {
+            OperationKind::Read => OperationBuffer::read(buffer, address, 8),
+            OperationKind::Write => {
+                buffer.put_byte_repeated(b'x', 8);
+                OperationBuffer::write(buffer.consume_all(), 8)
+            }
+            _ => unreachable!("these tests retain only read and write buffers"),
+        };
+
+        (buffer, releases, address)
+    }
+
+    /// # Safety
+    ///
+    /// The caller must supply the pointer returned by `installed`, keep its
+    /// context live, and prevent overlapping callbacks, exclusive context
+    /// borrows, and final reclamation until this delivery returns.
+    unsafe fn complete_tracked_operation(context: *mut RequestContext, kind: OperationKind, address: usize) {
+        let mut written = 8_u32;
+        let (info, len) = match kind {
+            // READ_COMPLETE compares the address without dereferencing it.
+            OperationKind::Read => (std::ptr::without_provenance_mut(address), 8),
+            OperationKind::Write => ((&raw mut written).cast(), status_info_len::<u32>()),
+            _ => unreachable!("these tests complete only read and write operations"),
+        };
+        // SAFETY: The caller supplies the context lifetime and non-overlap
+        // guarantees. The read payload names the actual retained capacity and
+        // is not dereferenced; the write payload is an initialized local that
+        // remains valid and unmodified throughout this synchronous call.
+        unsafe {
+            complete(context, kind.callback_status(), info, len);
+        }
+    }
 
     #[test]
     fn context_option_failure_returns_context_and_closes_each_handle_once() {
@@ -470,6 +585,10 @@ mod tests {
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 0);
+        assert!(
+            std::panic::catch_unwind(|| context_pointer(closes.context.load(Ordering::SeqCst))).is_err(),
+            "failed installation must not retain a reclaimed context pointer"
+        );
 
         drop(session);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
@@ -513,13 +632,83 @@ mod tests {
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
+        assert!(
+            std::panic::catch_unwind(|| context_pointer(closes.context.load(Ordering::SeqCst))).is_err(),
+            "HANDLE_CLOSING must remove the retained context pointer"
+        );
+    }
+
+    // Strict-provenance Miri cannot model the integer callback ABI.
+    #[cfg(not(miri_strict_provenance))]
+    #[test]
+    fn callback_uses_captured_installed_context_value() {
+        let (guard, context, contexts, session, closes) = installed();
+        let installed_value = closes.context.load(Ordering::SeqCst);
+        assert_eq!(installed_value, context.addr());
+        assert_eq!(guard.cold_connect_state(), ColdConnectState::Unobserved);
+
+        // SAFETY: The captured value is the address installation exposed and
+        // passed through WINHTTP_OPTION_CONTEXT_VALUE. The guard still owns the
+        // open request handle, so the context is live. This notification has no
+        // payload, runs alone on this thread, and overlaps no exclusive borrow.
+        // Only finish below delivers the final HANDLE_CLOSING notification.
+        unsafe {
+            crate::callback::status_callback(
+                std::ptr::null_mut(),
+                installed_value,
+                WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                std::ptr::null_mut(),
+                0,
+            );
+        }
+
+        assert_eq!(guard.cold_connect_state(), ColdConnectState::Connecting);
+
+        // SAFETY: The callback above returned without reclaiming the context.
+        // No notification or exclusive borrow is outstanding, and consuming the
+        // guard prevents access after this final reclamation.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
+    fn pending_future_observes_context_and_cancels_on_another_thread() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        // SAFETY: installed returned the recorded, live context, and finish
+        // below is its only reclamation. This notification carries no payload,
+        // runs on this thread before submission, and overlaps no notification
+        // or exclusive borrow of the context.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        }
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+
+        thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    assert_eq!(future.cold_connect_state(), ColdConnectState::Connecting);
+                    drop(future);
+                })
+                .join()
+                .unwrap();
+        });
+        assert!(guard.request_handle_taken());
+        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+
+        // SAFETY: the context remains installed, and joining the cancellation
+        // thread above leaves no notification or exclusive borrow outstanding.
+        // Consuming the guard prevents any use after this final reclamation.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
     fn inline_completion_before_submit_returns_is_observed() {
         let (mut guard, context, contexts, session, closes) = installed();
         let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
-            assert_eq!(context_value, context.expose_provenance());
+            assert_eq!(context_value, context.addr());
             assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
             // SAFETY: complete requires an installed, not-yet-reclaimed
             // context, a payload matching the notification, no overlapping
@@ -573,9 +762,8 @@ mod tests {
                 // SAFETY: complete requires an installed, not-yet-reclaimed
                 // context, a payload matching the notification, no overlapping
                 // notification, no outstanding exclusive borrow, and no use of
-                // the context after the reclaiming notification. The value
-                // handed to the submission closure round-trips the provenance
-                // the guard exposed for the installed context, which only
+                // the context after the reclaiming notification. The harness
+                // retained the installed context pointer, which only
                 // `finish` below reclaims, and the test joins this thread
                 // before that; a headers-available completion carries no
                 // payload; this is the only notification in flight; and a
@@ -745,6 +933,73 @@ mod tests {
         // obligation forbidding later use of it.
         unsafe {
             finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
+    fn dropping_an_unpolled_completed_future_releases_read_and_write_buffers() {
+        for kind in [OperationKind::Read, OperationKind::Write] {
+            let (mut guard, context, contexts, session, closes) = installed();
+            let (buffer, releases, address) = tracked_operation_buffer(kind);
+            let future = guard.submit(kind, buffer, |_, _| Ok(()));
+            // SAFETY: installed supplied the live context pointer. The future
+            // keeps the request open, and this synchronous delivery overlaps
+            // no callback, exclusive context borrow, or final reclamation.
+            unsafe {
+                complete_tracked_operation(context, kind, address);
+            }
+            assert_eq!(releases.load(Ordering::SeqCst), 0, "{kind:?}");
+            assert_eq!(contexts.lock().unwrap().len(), 1);
+            drop(future);
+            assert_eq!(releases.load(Ordering::SeqCst), 1, "{kind:?}");
+
+            assert!(guard.request_handle_taken());
+            assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+            assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
+            assert_eq!(closes.session.load(Ordering::SeqCst), 0);
+            assert_eq!(contexts.lock().unwrap().len(), 1);
+            // SAFETY: The synchronous completion returned, the context remains
+            // installed with no exclusive borrow, and consuming the guard
+            // prevents access after this sole final reclamation.
+            unsafe {
+                finish(guard, context, &contexts, session, &closes);
+            }
+            assert_eq!(releases.load(Ordering::SeqCst), 1, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_cancelled_future_retains_read_and_write_buffers_until_completion() {
+        for kind in [OperationKind::Read, OperationKind::Write] {
+            let (mut guard, context, contexts, session, closes) = installed();
+            let (buffer, releases, address) = tracked_operation_buffer(kind);
+            let future = guard.submit(kind, buffer, |_, _| Ok(()));
+            drop(future);
+            assert_eq!(releases.load(Ordering::SeqCst), 0, "{kind:?}");
+            assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+            assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
+            assert_eq!(closes.session.load(Ordering::SeqCst), 0);
+            assert_eq!(contexts.lock().unwrap().len(), 1);
+
+            // SAFETY: installed supplied the pointer, and cancellation leaves
+            // its context live until finish below. This synchronous delivery
+            // overlaps no callback, exclusive context borrow, or reclamation.
+            unsafe {
+                complete_tracked_operation(context, kind, address);
+            }
+            assert_eq!(releases.load(Ordering::SeqCst), 1, "{kind:?}");
+
+            assert!(guard.request_handle_taken());
+            assert_eq!(contexts.lock().unwrap().len(), 1);
+            assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
+            assert_eq!(closes.session.load(Ordering::SeqCst), 0);
+            // SAFETY: The synchronous completion returned, the context remains
+            // installed with no exclusive borrow, and consuming the guard
+            // prevents access after this sole final reclamation.
+            unsafe {
+                finish(guard, context, &contexts, session, &closes);
+            }
+            assert_eq!(releases.load(Ordering::SeqCst), 1, "{kind:?}");
         }
     }
 

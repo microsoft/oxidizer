@@ -9,6 +9,11 @@ updates:
     timezone: "UTC"
   commit-message:
     prefix: "chore: "
+  groups:
+    gungraun:
+      patterns:
+        - "gungraun"
+        - "gungraun-runner"
   ignore:
     # ignore minor updates for tokio as they are semver compatible
     - dependency-name: "tokio"

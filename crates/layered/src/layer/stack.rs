@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Builds a service from a tuple of layers and a root service.
+/// Builds a service from a tuple of layers and one root service.
 ///
-/// Automatically implemented for tuples of layers with a service at the end,
-/// supporting up to 16 elements. Layers apply outer to inner.
+/// The last tuple element is the root service. The earlier elements are layers,
+/// from outermost to innermost. A tuple can contain up to 16 layers.
 pub trait Stack {
-    /// The type of service produced by this builder.
+    /// The service type that the stack produces.
     type Service;
 
-    /// Builds the composed service with all layers applied.
+    /// Applies all layers and returns the composed service.
     fn into_service(self) -> Self::Service;
 }
