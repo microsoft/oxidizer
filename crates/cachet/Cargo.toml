@@ -125,7 +125,7 @@ required-features = ["test-util"]
 [[bench]]
 name = "cachet_serialization"
 harness = false
-required-features = ["serialize"]
+required-features = ["memory", "serialize"]
 
 [[test]]
 name = "eviction"
