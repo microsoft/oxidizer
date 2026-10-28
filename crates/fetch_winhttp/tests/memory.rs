@@ -5,7 +5,7 @@
 
 #![cfg(windows)]
 
-use bytesbuf::mem::{CallbackMemory, GlobalPool, Memory as _, OpaqueMemory};
+use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
