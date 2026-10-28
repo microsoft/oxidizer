@@ -78,9 +78,16 @@
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime registers each context, then clones and relocates it to async workers as they first
-//! retrieve it. [`DriverOptions`] supplies the assigned role. Driver creation completes all local
-//! setup before the worker-local host returns its context.
+//! The runtime registers each concrete context type once. When an async worker first retrieves a context,
+//! the runtime clones it, calls [`ThreadAware::relocate`](thread_aware_core::ThreadAware::relocate),
+//! then calls [`IoContext::driver`]. The relocation destination and [`DriverOptions::thread`]
+//! identify the same worker. [`DriverOptions`] also supplies the assigned role.
+//!
+//! The runtime calls `driver` at most once per registration and async worker, not once per clone.
+//! Application-facing operations require successful initialization. Implementations can reject
+//! duplicate driver creation and operations on contexts without that initialization.
+//! Clones of initialized contexts remain usable without another driver call.
+//! Later relocation remains optional under [`ThreadAware`](thread_aware_core::ThreadAware).
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
 //! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
